@@ -8,10 +8,15 @@ void kernel_main(void)
     /* Initialize terminal interface */
 	terminal_initialize();
  
-    for( int i = 1; i <= 255; i++ )
+    printf("All char test:\n");
+
+    for( int i = 32; i <= 255; i++ )
     {
         str[0] = i;
-        if( str[0] != '\n' )
-            terminal_writestring(str);
+            printf("%s",str);
     }
+
+    printf("\nBackspace test:\n");
+
+    printf("fail\b\b\b\bpass\n");
 }

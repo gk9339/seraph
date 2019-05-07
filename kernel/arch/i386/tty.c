@@ -46,14 +46,31 @@ void terminal_putentryat(unsigned char c, uint8_t color, size_t x, size_t y)
 void terminal_putchar(char c) 
 {
 	unsigned char uc = c;
-	terminal_putentryat(uc, terminal_color, terminal_column, terminal_row);
-
-    if (++terminal_column == VGA_WIDTH) 
+	if( uc == '\n' )
     {
-		terminal_column = 0;
-		if (++terminal_row == VGA_HEIGHT)
-			terminal_row = 0;
-	}
+        terminal_column = 0;
+        if( ++terminal_row == VGA_HEIGHT )
+            terminal_row = 0;
+    }else if( uc == '\b' )
+    {
+        if( terminal_column == 0 )
+        {
+            terminal_column = VGA_WIDTH - 1;
+            if( terminal_row == 0 )
+                terminal_row = VGA_HEIGHT - 1;
+        }else
+            terminal_column--;
+    }else if( uc > 31 )
+    {
+        terminal_putentryat(uc, terminal_color, terminal_column, terminal_row);
+    
+        if (++terminal_column == VGA_WIDTH) 
+        {
+	    	terminal_column = 0;
+    		if (++terminal_row == VGA_HEIGHT)
+		    	terminal_row = 0;
+        }
+    }
 }
 
 void terminal_write(const char* data, size_t size) 

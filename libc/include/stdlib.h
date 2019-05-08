@@ -4,6 +4,6 @@
 #include <sys/cdefs.h>
 
 __attribute__((__noreturn__))
-void abort(void);
+void abort( void );
 
 #endif

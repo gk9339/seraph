@@ -62,6 +62,8 @@ $(ARCHDIR)/crtn.o \
 all: seraph.kernel
 
 seraph.kernel: $(OBJS) $(ARCHDIR)/linker.ld
+	rm -f kernel/symtab.S && touch kernel/symtab.S
+	$(CC) -MD -c kernel/symtab.S -o kernel/symtab.o
 	$(CC) -T $(ARCHDIR)/linker.ld -o $@ $(CFLAGS) $(LINK_LIST)
 	grub-file --is-x86-multiboot seraph.kernel
 	$(NM) seraph.kernel -g | ./mksym.py > kernel/symtab.S

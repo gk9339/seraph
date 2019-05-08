@@ -9,11 +9,13 @@ SECTIONS
     /* The kernel will live at 3GB + 1MB in the virtual address space,
      * which will be mapped to 1MB in the physical address space. */
     . = 0xC0100000;
-    
+    phys = .;
+
     /* Add a symbol that indicates the start of the kernel */
     _kernel_start = .;
 	.text ALIGN (4K) : AT (ADDR (.text) - 0xC0000000)
 	{
+        code = .;
 		*(.multiboot)
 		*(.text)
 	}
@@ -27,12 +29,17 @@ SECTIONS
 	/* Read-write data (initialized) */
 	.data ALIGN (4K) : AT (ADDR (.data) - 0xC0000000)
 	{
+        data = .;
 		*(.data)
+        *(.symbols)
+        PROVIDE(kernel_symbols_start = .);
+        PROVIDE(kernel_symbols_end = .);
 	}
 	
     /* Read-write data (uninitialized) and stack */
 	.bss ALIGN (4K) : AT (ADDR (.bss) - 0xC0000000)
 	{
+        bss = .;
 		*(COMMON)
 		*(.bss)
 		*(.bootstrap_stack)

@@ -30,10 +30,15 @@ LIBS:=$(LIBS) $(KERNEL_ARCH_LIBS)
 KERNEL_OBJS=\
 $(KERNEL_ARCH_OBJS) \
 kernel/kernel.o \
-kernel/memory/gdt.o \
+kernel/cpu/gdt.o \
+kernel/cpu/idt.o \
+kernel/cpu/isr.o \
+kernel/sys/symtab.o \
 kernel/gdt.o \
 kernel/idt.o \
+kernel/isr.o \
 kernel/tss.o \
+kernel/symtab.o \
 
 OBJS=\
 $(ARCHDIR)/crti.o \

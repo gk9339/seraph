@@ -1,10 +1,22 @@
 .section .symbols
 
+.extern bss
+.type bss, @function
+
+.extern code
+.type code, @function
+
+.extern data
+.type data, @function
+
 .extern __dso_handle
 .type __dso_handle, @function
 
 .extern __DTOR_END__
 .type __DTOR_END__, @function
+
+.extern fault_handler
+.type fault_handler, @function
 
 .extern _fini
 .type _fini, @function
@@ -30,6 +42,114 @@
 .extern _init
 .type _init, @function
 
+.extern _isr0
+.type _isr0, @function
+
+.extern _isr1
+.type _isr1, @function
+
+.extern _isr10
+.type _isr10, @function
+
+.extern _isr11
+.type _isr11, @function
+
+.extern _isr12
+.type _isr12, @function
+
+.extern _isr127
+.type _isr127, @function
+
+.extern _isr13
+.type _isr13, @function
+
+.extern _isr14
+.type _isr14, @function
+
+.extern _isr15
+.type _isr15, @function
+
+.extern _isr16
+.type _isr16, @function
+
+.extern _isr17
+.type _isr17, @function
+
+.extern _isr18
+.type _isr18, @function
+
+.extern _isr19
+.type _isr19, @function
+
+.extern _isr2
+.type _isr2, @function
+
+.extern _isr20
+.type _isr20, @function
+
+.extern _isr21
+.type _isr21, @function
+
+.extern _isr22
+.type _isr22, @function
+
+.extern _isr23
+.type _isr23, @function
+
+.extern _isr24
+.type _isr24, @function
+
+.extern _isr25
+.type _isr25, @function
+
+.extern _isr26
+.type _isr26, @function
+
+.extern _isr27
+.type _isr27, @function
+
+.extern _isr28
+.type _isr28, @function
+
+.extern _isr29
+.type _isr29, @function
+
+.extern _isr3
+.type _isr3, @function
+
+.extern _isr30
+.type _isr30, @function
+
+.extern _isr31
+.type _isr31, @function
+
+.extern _isr4
+.type _isr4, @function
+
+.extern _isr5
+.type _isr5, @function
+
+.extern _isr6
+.type _isr6, @function
+
+.extern _isr7
+.type _isr7, @function
+
+.extern _isr8
+.type _isr8, @function
+
+.extern _isr9
+.type _isr9, @function
+
+.extern isr_initialize
+.type isr_initialize, @function
+
+.extern isr_install_handler
+.type isr_install_handler, @function
+
+.extern isr_uninstall_handler
+.type isr_uninstall_handler, @function
+
 .extern _kernel_end
 .type _kernel_end, @function
 
@@ -39,11 +159,20 @@
 .extern _kernel_start
 .type _kernel_start, @function
 
+.extern kernel_symbols_end
+.type kernel_symbols_end, @function
+
+.extern kernel_symbols_start
+.type kernel_symbols_start, @function
+
 .extern kpanic
 .type kpanic, @function
 
 .extern memset
 .type memset, @function
+
+.extern phys
+.type phys, @function
 
 .extern printf
 .type printf, @function
@@ -54,11 +183,20 @@
 .extern set_kernel_stack
 .type set_kernel_stack, @function
 
+.extern sprintf
+.type sprintf, @function
+
 .extern _start
 .type _start, @function
 
+.extern strcmp
+.type strcmp, @function
+
 .extern strlen
 .type strlen, @function
+
+.extern symbol_find
+.type symbol_find, @function
 
 .extern terminal_initialize
 .type terminal_initialize, @function
@@ -87,11 +225,23 @@
 .global kernel_symbols_start
 kernel_symbols_start:
 
+.long bss
+.asciz "bss"
+
+.long code
+.asciz "code"
+
+.long data
+.asciz "data"
+
 .long __dso_handle
 .asciz "__dso_handle"
 
 .long __DTOR_END__
 .asciz "__DTOR_END__"
+
+.long fault_handler
+.asciz "fault_handler"
 
 .long _fini
 .asciz "_fini"
@@ -117,6 +267,114 @@ kernel_symbols_start:
 .long _init
 .asciz "_init"
 
+.long _isr0
+.asciz "_isr0"
+
+.long _isr1
+.asciz "_isr1"
+
+.long _isr10
+.asciz "_isr10"
+
+.long _isr11
+.asciz "_isr11"
+
+.long _isr12
+.asciz "_isr12"
+
+.long _isr127
+.asciz "_isr127"
+
+.long _isr13
+.asciz "_isr13"
+
+.long _isr14
+.asciz "_isr14"
+
+.long _isr15
+.asciz "_isr15"
+
+.long _isr16
+.asciz "_isr16"
+
+.long _isr17
+.asciz "_isr17"
+
+.long _isr18
+.asciz "_isr18"
+
+.long _isr19
+.asciz "_isr19"
+
+.long _isr2
+.asciz "_isr2"
+
+.long _isr20
+.asciz "_isr20"
+
+.long _isr21
+.asciz "_isr21"
+
+.long _isr22
+.asciz "_isr22"
+
+.long _isr23
+.asciz "_isr23"
+
+.long _isr24
+.asciz "_isr24"
+
+.long _isr25
+.asciz "_isr25"
+
+.long _isr26
+.asciz "_isr26"
+
+.long _isr27
+.asciz "_isr27"
+
+.long _isr28
+.asciz "_isr28"
+
+.long _isr29
+.asciz "_isr29"
+
+.long _isr3
+.asciz "_isr3"
+
+.long _isr30
+.asciz "_isr30"
+
+.long _isr31
+.asciz "_isr31"
+
+.long _isr4
+.asciz "_isr4"
+
+.long _isr5
+.asciz "_isr5"
+
+.long _isr6
+.asciz "_isr6"
+
+.long _isr7
+.asciz "_isr7"
+
+.long _isr8
+.asciz "_isr8"
+
+.long _isr9
+.asciz "_isr9"
+
+.long isr_initialize
+.asciz "isr_initialize"
+
+.long isr_install_handler
+.asciz "isr_install_handler"
+
+.long isr_uninstall_handler
+.asciz "isr_uninstall_handler"
+
 .long _kernel_end
 .asciz "_kernel_end"
 
@@ -126,11 +384,20 @@ kernel_symbols_start:
 .long _kernel_start
 .asciz "_kernel_start"
 
+.long kernel_symbols_end
+.asciz "kernel_symbols_end"
+
+.long kernel_symbols_start
+.asciz "kernel_symbols_start"
+
 .long kpanic
 .asciz "kpanic"
 
 .long memset
 .asciz "memset"
+
+.long phys
+.asciz "phys"
 
 .long printf
 .asciz "printf"
@@ -141,11 +408,20 @@ kernel_symbols_start:
 .long set_kernel_stack
 .asciz "set_kernel_stack"
 
+.long sprintf
+.asciz "sprintf"
+
 .long _start
 .asciz "_start"
 
+.long strcmp
+.asciz "strcmp"
+
 .long strlen
 .asciz "strlen"
+
+.long symbol_find
+.asciz "symbol_find"
 
 .long terminal_initialize
 .asciz "terminal_initialize"

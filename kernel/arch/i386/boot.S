@@ -32,6 +32,18 @@ boot_page_table1:
 .global _start
 .type _start, @function
 _start:
+	jmp multiboot_entry
+
+multiboot_header:
+	.long MAGIC
+	.long FLAGS
+	.long CHECKSUM
+	.long 0
+	.long 1024
+	.long 768
+	.long 32
+
+multiboot_entry:
 	# Physical address of boot_page_table1
 	movl $(boot_page_table1 - 0xC0000000), %edi
 
@@ -103,6 +115,12 @@ _start:
 	# Set up the stack
 	mov $stack_top, %esp
 
+	movl $multiboot_header, %ebx
+
+	# Push the pointer to the multiboot struct and magic value
+	pushl %ebx
+	pushl %eax
+
 	# Enter the high-level kernel
 	call kernel_main
 
@@ -110,4 +128,3 @@ _start:
 	cli
 1:	hlt
 	jmp 1b
-

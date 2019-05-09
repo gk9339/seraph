@@ -1,13 +1,16 @@
 #include <stdio.h>
 
 #include <kernel/kernel.h>
+#include <kernel/multiboot.h>
 #include <kernel/tty.h>
 #include <kernel/gdt.h>
 #include <kernel/idt.h>
 #include <kernel/isr.h>
 
-void kernel_main(void) 
+void kernel_main( unsigned long magic, unsigned long addr ) 
 {
+    multiboot_info_t* mbi;
+
     /* CPU Initialization */
     gdt_initialize();
     idt_initialize();
@@ -16,6 +19,12 @@ void kernel_main(void)
     /* Initialize terminal interface */
 	terminal_initialize();
  
+    if( magic != MULTIBOOT_BOOTLOADER_MAGIC )
+    {
+        KPANIC("INVALID MAGIC NUMBER", NULL);
+    }
+    mbi = (multiboot_info_t*)addr;
+
     printf("All char test:\n");
 
 	char str[1];
@@ -24,10 +33,6 @@ void kernel_main(void)
         str[0] = i;
             printf("%s",str);
     }
-
-    printf("\nBackspace test:\n");
-
-    printf("fail\b\b\b\bpass\n");
 }
 
 void kpanic( char* error_message, const char* file, int line, struct regs* regs )

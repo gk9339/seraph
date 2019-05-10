@@ -1,37 +1,76 @@
 #ifndef _KERNEL_MULTIBOOT_H
 #define _KERNEL_MULTIBOOT_H
 
-#define MULTIBOOT_SEARCH        8192
-#define MULTIBOOT_HEADER_ALIGN  4
+/* How many bytes from the start of the file we search for the header. */
+#define MULTIBOOT_SEARCH                        8192
+#define MULTIBOOT_HEADER_ALIGN                  4
 
-#define MULTIBOOT_HEADER_MAGIC 0x1BADB002
-#define MULTIBOOT_BOOTLOADER_MAGIC 0x2BADB002
+/* The magic field should contain this. */
+#define MULTIBOOT_HEADER_MAGIC                  0x1BADB002
 
-#define MULTIBOOT_MOD_ALIGN 0x00001000
-#define MULTIBOOT_INFO_ALIGN 0x00000004
+/* This should be in %eax. */
+#define MULTIBOOT_BOOTLOADER_MAGIC              0x2BADB002
 
-#define MULTIBOOT_PAGE_ALIGN 0x00000001
-#define MULTIBOOT_MEMORY_INFO 0x00000002
-#define MULTIBOOT_VIDEO_MODE 0x00000004
+/* Alignment of multiboot modules. */
+#define MULTIBOOT_MOD_ALIGN                     0x00001000
 
-#define MULTIBOOT_INFO_MEMORY 0x00000001
-#define MULTIBOOT_INFO_BOOTDEV 0x00000002
-#define MULTIBOOT_INFO_CMDLINE 0x00000004
-#define MULTIBOOT_INFO_MODS 0x00000008
+/* Alignment of the multiboot info structure. */
+#define MULTIBOOT_INFO_ALIGN                    0x00000004
 
-#define MULTIBOOT_INFO_ABOUT_SYMS 0x00000010
-#define MULTIBOOT_INFO_ELF_SHDR 0x00000020
-#define MULTIBOOT_INFO_MEM_MAP 0x00000040
-#define MULTIBOOT_INFO_DRIVE_INFO 0x00000080
-#define MULTIBOOT_INFO_CONFIG_TABLE 0x00000100
-#define MULTIBOOT_INFO_BOOT_LOADER_NAME 0x00000200
-#define MULTIBOOT_INFO_APM_TABLE 0x00000400
+/* Flags set in the 'flags' member of the multiboot header. */
 
-#define MULTIBOOT_INFO_VBE_INFO 0x00000800
-#define MULTIBOOT_INFO_FRAMEBUFFER_INFO 0x00001000
+/* Align all boot modules on i386 page (4KB) boundaries. */
+#define MULTIBOOT_PAGE_ALIGN                    1 << 0
+
+/* Must pass memory information to OS. */
+#define MULTIBOOT_MEMORY_INFO                   1 << 1
+
+/* Must pass video information to OS. */
+#define MULTIBOOT_VIDEO_MODE                    1 << 2
+
+/* This flag indicates the use of the address fields in the header. */
+#define MULTIBOOT_AOUT_KLUDGE                   0x00010000
+
+/* Flags to be set in the 'flags' member of the multiboot info structure. */
+
+/* is there basic lower/upper memory information? */
+#define MULTIBOOT_INFO_MEMORY                   0x00000001
+/* is there a boot device set? */
+#define MULTIBOOT_INFO_BOOTDEV                  0x00000002
+/* is the command-line defined? */
+#define MULTIBOOT_INFO_CMDLINE                  0x00000004
+/* are there modules to do something with? */
+#define MULTIBOOT_INFO_MODS                     0x00000008
+
+/* These next two are mutually exclusive */
+
+/* is there a symbol table loaded? */
+#define MULTIBOOT_INFO_AOUT_SYMS                0x00000010
+/* is there an ELF section header table? */
+#define MULTIBOOT_INFO_ELF_SHDR                 0X00000020
+
+/* is there a full memory map? */
+#define MULTIBOOT_INFO_MEM_MAP                  0x00000040
+
+/* Is there drive info? */
+#define MULTIBOOT_INFO_DRIVE_INFO               0x00000080
+
+/* Is there a config table? */
+#define MULTIBOOT_INFO_CONFIG_TABLE             0x00000100
+
+/* Is there a boot loader name? */
+#define MULTIBOOT_INFO_BOOT_LOADER_NAME         0x00000200
+
+/* Is there a APM table? */
+#define MULTIBOOT_INFO_APM_TABLE                0x00000400
+
+/* Is there video information? */
+#define MULTIBOOT_INFO_VBE_INFO                 0x00000800
+#define MULTIBOOT_INFO_FRAMEBUFFER_INFO         0x00001000
 
 #ifndef _ASM_FILE
 #include <kernel/types.h>
+
 struct multiboot_header
 {
     uint32_t magic;
@@ -40,29 +79,37 @@ struct multiboot_header
 
     uint32_t checksum;
 
+    uint32_t header_addr;
+    uint32_t load_addr;
+    uint32_t load_end_addr;
+    uint32_t bss_end_addr;
+    uint32_t entry_addr;
+
     uint32_t mode_type;
     uint32_t width;
     uint32_t height;
     uint32_t depth;
 };
 
-typedef struct multiboot_aout_symbol_table
+struct multiboot_aout_symbol_table
 {
-    uint32_t tabsize;
-    uint32_t strsize;
-    uint32_t addr;
-    uint32_t reserved;
-} multiboot_aout_symbol_table_t;
+  uint32_t tabsize;
+  uint32_t strsize;
+  uint32_t addr;
+  uint32_t reserved;
+};
+typedef struct multiboot_aout_symbol_table multiboot_aout_symbol_table_t;
 
-typedef struct multiboot_elf_section_header_table
+struct multiboot_elf_section_header_table
 {
     uint32_t num;
     uint32_t size;
     uint32_t addr;
     uint32_t shndx;
-} multiboot_elf_section_header_table_t;
+};
+typedef struct multiboot_elf_section_header_table multiboot_elf_section_header_table_t;
 
-typedef struct multiboot_info
+struct multiboot_info
 {
     uint32_t flags;
 
@@ -72,6 +119,9 @@ typedef struct multiboot_info
     uint32_t boot_device;
 
     uint32_t cmdline;
+
+    uint32_t mods_count;
+    uint32_t mods_addr;
 
     union
     {
@@ -125,7 +175,8 @@ typedef struct multiboot_info
             uint8_t framebuffer_blue_mask_size;
         };
     };
-} multiboot_info_t;
+};
+typedef struct multiboot_info multiboot_info_t;
 
 struct multiboot_color
 {
@@ -134,7 +185,7 @@ struct multiboot_color
     uint8_t blue;
 };
 
-typedef struct multiboot_mmap_entry
+struct multiboot_mmap_entry
 {
     uint32_t size;
     uint64_t addr;
@@ -145,17 +196,19 @@ typedef struct multiboot_mmap_entry
 #define MULTIBOOT_MEMORY_NVS 4
 #define MULTIBOOT_MEMORY_BADRAM 5
     uint32_t type;
-} __attribute__((packed)) multiboot_memory_map_t;
+} __attribute__((packed));
+typedef struct multiboot_mmap_entry multiboot_memory_map_t;
 
-typedef struct multiboot_mod_list
+struct multiboot_mod_list
 {
     uint32_t mod_start;
-    uint32_t mode_end;
+    uint32_t mod_end;
 
     uint32_t cmdline;
 
     uint32_t pad;
-} multiboot_module_t;
+};
+typedef struct multiboot_mod_list multiboot_module_t;
 
 struct multiboot_apm_info
 {

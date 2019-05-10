@@ -171,9 +171,6 @@
 .extern memset
 .type memset, @function
 
-.extern phys
-.type phys, @function
-
 .extern printf
 .type printf, @function
 
@@ -395,9 +392,6 @@ kernel_symbols_start:
 
 .long memset
 .asciz "memset"
-
-.long phys
-.asciz "phys"
 
 .long printf
 .asciz "printf"

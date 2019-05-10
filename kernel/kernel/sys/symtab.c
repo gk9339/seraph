@@ -1,7 +1,7 @@
 #include <kernel/symtab.h>
 
-char kernel_symbols_start[];
-char kernel_symbols_end[];
+extern char kernel_symbols_start[];
+extern char kernel_symbols_end[];
 
 typedef struct
 {

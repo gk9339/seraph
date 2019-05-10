@@ -33,10 +33,12 @@ kernel/kernel.o \
 kernel/cpu/gdt.o \
 kernel/cpu/idt.o \
 kernel/cpu/isr.o \
+kernel/cpu/irq.o \
 kernel/sys/symtab.o \
 kernel/gdt.o \
 kernel/idt.o \
 kernel/isr.o \
+kernel/irq.o \
 kernel/tss.o \
 kernel/symtab.o \
 

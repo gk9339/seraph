@@ -6,6 +6,7 @@
 #include <kernel/gdt.h>
 #include <kernel/idt.h>
 #include <kernel/isr.h>
+#include <kernel/irq.h>
 
 #define CHECK_FLAG(flags,bit) ((flags)&(1<<(bit)))
 
@@ -17,10 +18,11 @@ void kernel_main( unsigned long magic, unsigned long addr )
     gdt_initialize();
     idt_initialize();
     isr_initialize();
+    irq_initialize();
 
     /* Initialize terminal interface */
-	terminal_initialize();
- 
+    terminal_initialize();
+
     if( magic != MULTIBOOT_BOOTLOADER_MAGIC )
     {
         KPANIC("INVALID MAGIC NUMBER", NULL);

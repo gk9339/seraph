@@ -1,12 +1,10 @@
 #ifndef _KERNEL_IRQ_H
 #define _KERNEL_IRQ_H
 
+#define SYSCALL_VECTOR 0x7F
+
 #include <stddef.h>
-#include <stdio.h>
 #include <kernel/types.h>
-#include <kernel/kernel.h>
-#include <kernel/idt.h>
-#include <kernel/serial.h>
 
 void int_disable( void );
 void int_resume( void );

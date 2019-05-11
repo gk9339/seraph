@@ -5,6 +5,7 @@
 
 #include <kernel/tty.h>
 #include <kernel/multiboot.h>
+#include <kernel/serial.h>
 
 #include "vga.h"
 
@@ -32,6 +33,10 @@ void terminal_initialize( void )
 			terminal_buffer[index] = vga_entry(' ', terminal_color);
 		}
 	}
+
+    /* Disable cursor */
+    outportb(0x3D4, 0x0A);
+    outportb(0x3D5, 0x20);
 }
 
 void terminal_setcolor( uint8_t color ) 

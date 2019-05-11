@@ -1,6 +1,10 @@
+#include <stdio.h>
+
 #include <kernel/isr.h>
 #include <kernel/idt.h>
-#include <stdio.h>
+#include <kernel/irq.h>
+#include <kernel/kernel.h>
+#include <kernel/symbols.h>
 
 #define ISR_COUNT 32
 

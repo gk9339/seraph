@@ -2,11 +2,11 @@
 
 #include <kernel/kernel.h>
 #include <kernel/multiboot.h>
-#include <kernel/tty.h>
 #include <kernel/gdt.h>
 #include <kernel/idt.h>
 #include <kernel/isr.h>
 #include <kernel/irq.h>
+#include <kernel/tty.h>
 #include <kernel/keyboard.h>
 
 #define CHECK_FLAG(flags,bit) ((flags)&(1<<(bit)))

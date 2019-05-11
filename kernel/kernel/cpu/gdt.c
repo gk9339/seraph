@@ -1,3 +1,5 @@
+#include <string.h>
+
 #include <kernel/gdt.h>
 #include <kernel/tss.h>
 

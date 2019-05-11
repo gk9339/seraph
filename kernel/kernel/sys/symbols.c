@@ -1,4 +1,8 @@
+#include <stddef.h>
+#include <string.h>
+
 #include <kernel/symbols.h>
+#include <kernel/types.h>
 
 extern char kernel_symbols_start[];
 extern char kernel_symbols_end[];

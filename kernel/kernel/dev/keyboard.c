@@ -1,7 +1,9 @@
+#include <stdio.h>
+
 #include <kernel/keyboard.h>
+#include <kernel/serial.h>
 #include <kernel/types.h>
 #include <kernel/irq.h>
-#include <stdio.h>
 
 static int keyboard_handler( struct regs *r )
 {

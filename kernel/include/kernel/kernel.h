@@ -6,8 +6,6 @@
 #define asm __asm__
 #define volatile __volatile__
 
-#define SYSCALL_VECTOR 0x7F
-
 #define PAUSE { asm volatile ("hlt"); };
 
 #define KPANIC(mesg, regs) kpanic(mesg, __FILE__, __LINE__, regs);

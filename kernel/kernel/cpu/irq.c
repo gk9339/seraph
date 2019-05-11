@@ -1,4 +1,9 @@
+#include <stdio.h>
+#include <string.h>
+
 #include <kernel/irq.h>
+#include <kernel/idt.h>
+#include <kernel/serial.h>
 #include <kernel/symbols.h>
 
 /* Programmable interrupt controller */

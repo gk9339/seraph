@@ -36,7 +36,7 @@ void isr_initialize( void )
 
     for( int i = 0; i < ISR_COUNT + 1; i++ )
     {
-        idt_set_gate(isrs[i].index, isrs[i].stub, 0x08, 0x8E);
+        idt_set_gate(isrs[i].index, isrs[i].stub, 0x01, 0x8E);
     }
 }
 
@@ -79,6 +79,7 @@ static const char* exception_messages[32] =
 void fault_handler( struct regs* r )
 {
     irq_handler_t handler = isr_routines[r->int_no];
+    printf("%s\n", exception_messages[r->int_no]);
     if(handler)
     {
         handler(r);

@@ -15,33 +15,103 @@ static bool print( const char* data, size_t length )
     return true;
 }
 
-static bool hexprint( unsigned long i, size_t length )
+static bool sprint( char* s, const char* data, size_t length )
+{
+    for( size_t i = 0; i < length; i++ )
+        s[i]=data[i];
+
+    return true;
+}
+
+static bool hexsprint( char* s, unsigned long data, size_t length )
 {
     char str[length+1];
-    char* s;
+    char* i;
     int t;
-    unsigned long u = i;
+    unsigned long u = data;
 
-    if( i == 0 )
+    if( data == 0 )
     {
         str[0] = '0';
         str[1] = '\0';
-        return print(str, strlen(str));
+        if( s != NULL )
+        {
+            return sprint(s, str, strlen(str));
+        }else
+        {
+            return print(str, strlen(str));
+        }
     }
 
-    s = str + length;
-    *s = '\0';
+    i = str + length;
+    *i = '\0';
     
     while(u)
     {
         t = u % 16;
         if( t >= 10 )
             t += 'A' - '0' - 10;
-        *--s = t + '0';
+        *--i = t + '0';
         u /= 16;
     }
 
-    return print(str, strlen(str));
+    if( s != NULL )
+    {
+        return sprint(s, str, strlen(str));
+    }else
+    {
+        return print(str, strlen(str));
+    }
+    
+}
+
+static bool hexprint( unsigned long data, size_t length )
+{
+    return hexsprint(NULL, data, length);
+}
+
+static bool decsprint( char* s,  unsigned long data, size_t length )
+{
+    char str[length+1];
+    char* i;
+    int t;
+    unsigned long u = data;
+
+    if( data == 0 )
+    {
+        str[0] = '0';
+        str[1] = '\0';
+        if( s != NULL )
+        {
+            return sprint(s, str, strlen(str));
+        }else
+        {
+            return print(str, strlen(str));
+        }
+    }
+
+    i = str + length;
+    *i = '\0';
+    
+    while(u)
+    {
+        t = u % 10;
+        *--i = t + '0';
+        u /= 10;
+    }
+
+    if( s != NULL )
+    {
+        return sprint(s, str, strlen(str));
+    }else
+    {
+        return print(str, strlen(str));
+    }
+}
+
+static bool decprint( unsigned long data, size_t length )
+{
+    return decsprint(NULL, data, length);
 }
 
 static size_t hexlen( unsigned long hex )
@@ -57,12 +127,17 @@ static size_t hexlen( unsigned long hex )
     return len;
 }
 
-static bool sprint( char*s, const char* data, size_t length )
+static size_t declen( unsigned long dec )
 {
-    for( size_t i = 0; i < length; i++ )
-        s[i]=data[i];
+    size_t len = 0;
 
-    return true;
+    while( dec!= 0 )
+    {
+        len++;
+        dec /= 10;
+    }
+
+    return len;
 }
 
 int printf( const char* restrict format, ... ) 
@@ -135,6 +210,19 @@ int printf( const char* restrict format, ... )
 			if (!hexprint(hex, len))
 				return -1;
 			written += len;
+		}else if( *format == 'd' )
+        {
+			format++;
+			unsigned long dec = va_arg(parameters, unsigned long);
+			size_t len = declen(dec);
+			if (maxrem < len) 
+            {
+				// TODO: Set errno to EOVERFLOW.
+				return -1;
+			}
+			if (!decprint(dec, len))
+				return -1;
+			written += len;
 		}else 
         {
 			format = format_begun_at;
@@ -193,6 +281,22 @@ int sprintf( char* s, const char* restrict format, ... )
 			const char* str = va_arg(parameters, const char*);
 			size_t len = strlen(str);
 			if (!sprint(s + written, str, len))
+				return -1;
+			written += len;
+		}else if( *format == 'x' )
+        {
+			format++;
+			unsigned long hex = va_arg(parameters, unsigned long);
+			size_t len = hexlen(hex);
+			if (!hexsprint(s + written, hex, len))
+				return -1;
+			written += len;
+		}else if( *format == 'd' )
+        {
+			format++;
+			unsigned long dec = va_arg(parameters, unsigned long);
+			size_t len = declen(dec);
+			if (!decsprint(s + written, dec, len))
 				return -1;
 			written += len;
 		}else 

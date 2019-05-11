@@ -1,4 +1,4 @@
-#include <kernel/symtab.h>
+#include <kernel/symbols.h>
 
 extern char kernel_symbols_start[];
 extern char kernel_symbols_end[];

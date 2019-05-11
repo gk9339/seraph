@@ -31,5 +31,3 @@ for name in lines:
 
 print(".global kernel_symbols_end")
 print("kernel_symbols_end:")
-
-

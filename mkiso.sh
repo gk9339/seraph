@@ -16,5 +16,3 @@ menuentry "seraph" {
 }
 EOF
 grub-mkrescue -o seraph.iso isodir
-
-qemu-system-$(./target-triplet-to-arch.sh $HOST) -cdrom seraph.iso

@@ -34,13 +34,14 @@ kernel/cpu/gdt.o \
 kernel/cpu/idt.o \
 kernel/cpu/isr.o \
 kernel/cpu/irq.o \
-kernel/sys/symtab.o \
+kernel/dev/keyboard.o \
+kernel/sys/symbols.o \
 kernel/gdt.o \
 kernel/idt.o \
 kernel/isr.o \
 kernel/irq.o \
 kernel/tss.o \
-kernel/symtab.o \
+kernel/symbols.o \
 
 OBJS=\
 $(ARCHDIR)/crti.o \
@@ -64,12 +65,12 @@ $(ARCHDIR)/crtn.o \
 all: seraph.kernel
 
 seraph.kernel: $(OBJS) $(ARCHDIR)/linker.ld
-	rm -f kernel/symtab.S && touch kernel/symtab.S
-	$(CC) -MD -c kernel/symtab.S -o kernel/symtab.o
+	rm -f kernel/symbols.S && touch kernel/symbols.S
+	$(CC) -MD -c kernel/symbols.S -o kernel/symbols.o
 	$(CC) -T $(ARCHDIR)/linker.ld -o $@ $(CFLAGS) $(LINK_LIST)
 	grub-file --is-x86-multiboot seraph.kernel
-	$(NM) seraph.kernel -g | ./mksym.py > kernel/symtab.S
-	$(CC) -MD -c kernel/symtab.S -o kernel/symtab.o
+	$(NM) seraph.kernel -g | ./symbols.py > kernel/symbols.S
+	$(CC) -MD -c kernel/symbols.S -o kernel/symbols.o
 	$(CC) -T $(ARCHDIR)/linker.ld -o $@ $(CFLAGS) $(LINK_LIST)
 
 $(ARCHDIR)/crtbegin.o $(ARCHDIR)/crtend.o:

@@ -7,6 +7,7 @@
 #include <kernel/idt.h>
 #include <kernel/isr.h>
 #include <kernel/irq.h>
+#include <kernel/keyboard.h>
 
 #define CHECK_FLAG(flags,bit) ((flags)&(1<<(bit)))
 
@@ -122,6 +123,13 @@ void kernel_main( unsigned long magic, unsigned long addr )
                     (unsigned)mmap->type);
         }
     }
+
+    keyboard_install();
+    
+    while(1)
+    {
+
+    }
 }
 
 void kpanic( char* error_message, const char* file, int line, struct regs* regs )
@@ -132,12 +140,12 @@ void kpanic( char* error_message, const char* file, int line, struct regs* regs 
     if(regs)
     {
         printf("\nREGISTERS:");
-        printf("eax=0x%d ebx=0x%d\n", regs->eax, regs->ebx);
-        printf("ecx=0x%d edx=0x%d\n", regs->ecx, regs->edx);
-        printf("esp=0x%d ebp=0x%d\n", regs->esp, regs->ebp);
-        printf("ERRCD: 0x%d", regs->err_code);
-        printf("EFLAGSL 0x%d", regs->eflags);
-        printf("User ESP: 0x%d", regs->useresp);
-        printf("eip=0x%d", regs->eip);
+        printf("eax=0x%x ebx=0x%x\n", regs->eax, regs->ebx);
+        printf("ecx=0x%x edx=0x%x\n", regs->ecx, regs->edx);
+        printf("esp=0x%x ebp=0x%x\n", regs->esp, regs->ebp);
+        printf("ERRCD: 0x%x", regs->err_code);
+        printf("EFLAGSL 0x%x", regs->eflags);
+        printf("User ESP: 0x%x", regs->useresp);
+        printf("eip=0x%x", regs->eip);
     }
 }

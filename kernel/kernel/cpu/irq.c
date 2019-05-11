@@ -1,4 +1,5 @@
 #include <kernel/irq.h>
+#include <kernel/symbols.h>
 
 /* Programmable interrupt controller */
 #define PIC1 0x20
@@ -137,6 +138,7 @@ static void irq_setup_gates( void )
 void irq_initialize( void )
 {
     char buffer[16];
+    memset(&buffer, '\0', sizeof(buffer));
     for( int i = 0; i < IRQ_CHAIN_SIZE; i++ )
     {
         sprintf(buffer, "_irq%d", i);
@@ -145,14 +147,8 @@ void irq_initialize( void )
     irq_remap();
     irq_setup_gates();
 
-    if(!args_present("noelcr"))
-    {
-#if 0
-        outportb(0x4D0, 0x00);
-#endif
-        uint8_t val = inportb(0x4D1);
-        outportb(0x4D1, val | ( 1 << ( 10 - 8 )) | ( 1 << ( 11 - 8 )));
-    }
+    uint8_t val = inportb(0x4D1);
+    outportb(0x4D1, val | ( 1 << ( 10 - 8 )) | ( 1 << ( 11 - 8 )));
 }
 
 void irq_ack( size_t irq_no )

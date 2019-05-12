@@ -6,6 +6,7 @@
 #include <kernel/idt.h>
 #include <kernel/isr.h>
 #include <kernel/irq.h>
+#include <kernel/mem.h>
 #include <kernel/tty.h>
 #include <kernel/keyboard.h>
 
@@ -18,118 +19,54 @@ void kernel_main( unsigned long magic, unsigned long addr )
     /* CPU Initialization */
     gdt_initialize();
     idt_initialize();
-    isr_initialize();
-    irq_initialize();
 
-    /* Initialize terminal interface */
+    /* Terminal Initialization */
     terminal_initialize();
 
+    /* Multiboot check */
     if( magic != MULTIBOOT_BOOTLOADER_MAGIC )
     {
         KPANIC("INVALID MAGIC NUMBER", NULL);
     }
     mbi = (multiboot_info_t*)addr;
-
-    printf("All char test:\n");
-
-	char str[1];
-    for( int i = 32; i <= 255; i++ )
-    {
-        str[0] = i;
-            printf("%s",str);
-    }
     
-    printf("\n\nflags = 0x%x\n", (unsigned)mbi->flags);
-
-    if( CHECK_FLAG(mbi->flags, 0) )
+    /* Memory Initialization */
+    if( !CHECK_FLAG(mbi->flags, 0) ) /* mem_upper/mem_lower  */
     {
-        printf("mem_lower = 0x%x, mem_upper = 0x%x\n", 
-                (unsigned)mbi->mem_lower, (unsigned)mbi->mem_upper);
+        KPANIC("Missing MEM flag in multiboot header", NULL)
     }
+    paging_install(mbi->mem_lower + mbi->mem_upper);
 
-    if( CHECK_FLAG(mbi->flags, 1) )
+    if( CHECK_FLAG(mbi->flags, 6) ) /* mmap */
     {
-        printf("boot_device = 0x%x\n", (unsigned)mbi->boot_device);
-    }
-
-    if( CHECK_FLAG(mbi->flags, 2) )
-    {
-        printf("cmdline = %s\n", (char*)mbi->cmdline);
-    }
-
-    if( CHECK_FLAG(mbi->flags, 3) )
-    {
-        multiboot_module_t* mod;
-        int i;
-
-        printf("mods_count = %x, mods_addr = 0x%x\n",
-                (int)mbi->mods_count, (int)mbi->mods_addr);
-        for( i = 0, mod = (multiboot_module_t*)mbi->mods_addr;
-                i < mbi->mods_count; i++ )
+        printf("Parsing memory map.\n");
+        multiboot_memory_map_t* mmap = (void*)mbi->mmap_addr;
+        while( (uintptr_t)mmap < mbi->mmap_addr + mbi->mmap_length )
         {
-            printf("mod_start = 0x%x, mod_end = 0x%x, cmdline = %s\n",
-                    (unsigned)mod->mod_start,
-                    (unsigned)mod->mod_end,
-                    (char*)mod->cmdline);
+            if(mmap->type == 2)
+            {
+                for( unsigned long int i = 0; i < mmap->len; i+= 0x1000 )
+                {
+                    if( mmap->addr + i > 0xFFFFFFFF ) break;
+                    printf("Marking 0x%x\n", (uint32_t)mmap->addr + i);
+                    paging_mark_system((mmap->addr + i) & 0xFFFFF000);
+                }
+            }
+            mmap = (multiboot_memory_map_t*)((uintptr_t)mmap + mmap->size + sizeof(uintptr_t));
         }
     }
+    paging_finalize();
 
-    if( CHECK_FLAG (mbi->flags, 4) && CHECK_FLAG (mbi->flags, 5) )
-    {
-        printf ("Both bits 4 and 5 are set.\n");
-        return;
-    }
+    heap_install();
 
-    /* Is the symbol table of a.out valid? */
-    if( CHECK_FLAG (mbi->flags, 4) )
-    {
-        multiboot_aout_symbol_table_t *multiboot_aout_sym = &(mbi->u.aout_sym);
+    /* Interrupts Initialization */
+    isr_initialize();
+    irq_initialize();
 
-        printf ("multiboot_aout_symbol_table: tabsize = 0x%0x, "
-                "strsize = 0x%x, addr = 0x%x\n",
-                (unsigned) multiboot_aout_sym->tabsize,
-                (unsigned) multiboot_aout_sym->strsize,
-                (unsigned) multiboot_aout_sym->addr);
-    }
-
-    /* Is the section header table of ELF valid? */
-    if( CHECK_FLAG (mbi->flags, 5) )
-    {
-        multiboot_elf_section_header_table_t *multiboot_elf_sec = &(mbi->u.elf_sec);
-
-        printf ("multiboot_elf_sec: num = %x, size = 0x%x,"
-                " addr = 0x%x, shndx = 0x%x\n",
-                (unsigned) multiboot_elf_sec->num, (unsigned) multiboot_elf_sec->size,
-                (unsigned) multiboot_elf_sec->addr, (unsigned) multiboot_elf_sec->shndx);
-    }
-
-    if( CHECK_FLAG(mbi->flags, 6) )
-    {
-        multiboot_memory_map_t* mmap;
-
-        printf("mmap_addr = 0x%x, mmap_length = 0x%x\n",
-                (unsigned)mbi->mmap_addr, (unsigned)mbi->mmap_length);
-        for(mmap = (multiboot_memory_map_t*)mbi->mmap_addr;
-                (unsigned long)mmap < mbi->mmap_addr + mbi->mmap_length;
-                mmap = (multiboot_memory_map_t*)((unsigned long)mmap + 
-                    mmap->size + sizeof(mmap->size)))
-        {
-            printf("size = 0x%x, base_addr = 0x%x %x, length = 0x%x %x, type = 0x%x\n",
-                    (unsigned)mmap->size,
-                    (unsigned)(mmap->addr >>32),
-                    (unsigned)(mmap->addr & 0xffffffff),
-                    (unsigned)(mmap->len >> 32),
-                    (unsigned)(mmap->len & 0xffffffff),
-                    (unsigned)mmap->type);
-        }
-    }
-
+    /* Test keyboard handler */
     keyboard_install();
-    
-    while(1)
-    {
 
-    }
+    while(1){}
 }
 
 void kpanic( char* error_message, const char* file, int line, struct regs* regs )
@@ -143,9 +80,12 @@ void kpanic( char* error_message, const char* file, int line, struct regs* regs 
         printf("eax=0x%x ebx=0x%x\n", regs->eax, regs->ebx);
         printf("ecx=0x%x edx=0x%x\n", regs->ecx, regs->edx);
         printf("esp=0x%x ebp=0x%x\n", regs->esp, regs->ebp);
-        printf("ERRCD: 0x%x", regs->err_code);
-        printf("EFLAGSL 0x%x", regs->eflags);
-        printf("User ESP: 0x%x", regs->useresp);
-        printf("eip=0x%x", regs->eip);
+        printf("ERRCD: 0x%x ", regs->err_code);
+        printf("EFLAGS: 0x%x\n", regs->eflags);
+        printf("User ESP: 0x%x ", regs->useresp);
+        printf("eip=0x%x\n", regs->eip);
     }
+
+    int_disable();
+    STOP
 }

@@ -20,13 +20,13 @@
 /* Flags set in the 'flags' member of the multiboot header. */
 
 /* Align all boot modules on i386 page (4KB) boundaries. */
-#define MULTIBOOT_PAGE_ALIGN                    1 << 0
+#define MULTIBOOT_PAGE_ALIGN                    0x00000001
 
 /* Must pass memory information to OS. */
-#define MULTIBOOT_MEMORY_INFO                   1 << 1
+#define MULTIBOOT_MEMORY_INFO                   0x00000002
 
 /* Must pass video information to OS. */
-#define MULTIBOOT_VIDEO_MODE                    1 << 2
+#define MULTIBOOT_VIDEO_MODE                    0x00000004
 
 /* This flag indicates the use of the address fields in the header. */
 #define MULTIBOOT_AOUT_KLUDGE                   0x00010000

@@ -2,7 +2,6 @@
 
 #include <kernel/keyboard.h>
 #include <kernel/serial.h>
-#include <kernel/types.h>
 #include <kernel/irq.h>
 
 static int keyboard_handler( struct regs *r )
@@ -13,7 +12,7 @@ static int keyboard_handler( struct regs *r )
         scancode = inportb(KEY_DEVICE);
         printf("%c", convert_scancode(scancode));
     }
-
+    
     irq_ack(KEY_IRQ);
     return 1;
 }

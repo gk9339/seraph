@@ -2,12 +2,12 @@
 #include <kernel/multiboot.h>
 
 # Declare constants for the multiboot header.
-.set ALIGN,    MULTIBOOT_PAGE_ALIGN # align loaded modules on page boundaries
-.set MEMINFO,  MULTIBOOT_MEMORY_INFO  # provide memory map
-.set VIDEO,    MULTIBOOT_VIDEO_MODE # provide video mode
-.set FLAGS,    ALIGN | MEMINFO | VIDEO  # Multiboot 'flag' field
-.set MAGIC,    0x1BADB002       # 'magic number' lets bootloader find the header
-.set CHECKSUM, -(MAGIC + FLAGS) # checksum of above, to prove we are multiboot
+.set ALIGN,    MULTIBOOT_PAGE_ALIGN 	# align loaded modules on page boundaries
+.set MEMINFO,  MULTIBOOT_MEMORY_INFO 	# provide memory map
+.set VIDEO,    MULTIBOOT_VIDEO_MODE 	# provide video mode
+.set FLAGS,    ALIGN | MEMINFO | VIDEO 	# Multiboot 'flag' field
+.set MAGIC,    0x1BADB002       		# 'magic number' lets bootloader find the header
+.set CHECKSUM, -(MAGIC + FLAGS) 		# checksum of above, to prove we are multiboot
 
 # Declare a header as in the Multiboot Standard.
 .section .multiboot
@@ -15,11 +15,11 @@
 .long MAGIC
 .long FLAGS
 .long CHECKSUM
-.long 0, 0, 0, 0, 0
-.long 1
-.long 1024
-.long 768
-.long 32
+.long 0, 0, 0, 0, 0 # Only used in aout, set 0 for elf
+.long 1    # Video mode
+.long 1024 # Width
+.long 768  # Height
+.long 32   # Depth
 
 # Allocate the initial stack
 .section .kernel_stack, "aw", @nobits

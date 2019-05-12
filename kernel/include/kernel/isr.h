@@ -2,6 +2,7 @@
 #define _KERNEL_ISR_H
 
 #include <stddef.h>
+
 #include <kernel/types.h>
 
 void isr_initialize( void );

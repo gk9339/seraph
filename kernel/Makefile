@@ -35,12 +35,15 @@ kernel/cpu/idt.o \
 kernel/cpu/isr.o \
 kernel/cpu/irq.o \
 kernel/dev/keyboard.o \
+kernel/mem/mem.o \
 kernel/sys/symbols.o \
+kernel/spinlock.o \
 kernel/gdt.o \
 kernel/idt.o \
 kernel/isr.o \
 kernel/irq.o \
 kernel/tss.o \
+kernel/mem.o \
 kernel/symbols.o \
 
 OBJS=\

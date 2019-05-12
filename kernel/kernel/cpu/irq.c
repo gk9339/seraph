@@ -1,10 +1,10 @@
-#include <stdio.h>
 #include <string.h>
+#include <stdio.h>
 
 #include <kernel/irq.h>
-#include <kernel/idt.h>
-#include <kernel/serial.h>
 #include <kernel/symbols.h>
+#include <kernel/serial.h>
+#include <kernel/idt.h>
 
 /* Programmable interrupt controller */
 #define PIC1 0x20

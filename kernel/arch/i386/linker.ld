@@ -45,5 +45,10 @@ SECTIONS
 	}
 	/* Add a symbol that indicates the end address of the kernel. */
 	_kernel_end = .;
-
+	
+    /DISCARD/ :
+	{
+		*(.comment)
+		*(.note.gnu.build-id)
+    }
 }

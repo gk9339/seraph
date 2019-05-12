@@ -360,9 +360,6 @@
 .extern paging_mark_system
 .type paging_mark_system, @function
 
-.extern phys
-.type phys, @function
-
 .extern placement_pointer
 .type placement_pointer, @function
 
@@ -821,9 +818,6 @@ kernel_symbols_start:
 
 .long paging_mark_system
 .asciz "paging_mark_system"
-
-.long phys
-.asciz "phys"
 
 .long placement_pointer
 .asciz "placement_pointer"

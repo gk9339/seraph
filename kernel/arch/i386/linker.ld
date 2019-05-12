@@ -9,6 +9,7 @@ SECTIONS
     /* The kernel will live at 3GB + 1MB in the virtual address space,
      * which will be mapped to 1MB in the physical address space. */
     . = 1M;
+    phys = .;
 
     /* Add a symbol that indicates the start of the kernel */
     _kernel_start = .;

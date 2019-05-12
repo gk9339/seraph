@@ -37,6 +37,7 @@ kernel/cpu/irq.o \
 kernel/dev/keyboard.o \
 kernel/mem/mem.o \
 kernel/sys/symbols.o \
+kernel/sys/task.o \
 kernel/spinlock.o \
 kernel/gdt.o \
 kernel/idt.o \

@@ -471,6 +471,67 @@ page_directory_t* clone_directory( page_directory_t* src )
     return dir;
 }
 
+void release_directory( page_directory_t* dir )
+{
+    dir->ref_count--;
+
+    if(dir->ref_count < 1)
+    {
+        uint32_t i;
+        for( int i = 0; i < 1024; ++i )
+        {
+            if( !dir->tables[i] || (uintptr_t)dir->tables[i] == (uintptr_t)0xFFFFFFFF )
+            {
+                continue;
+            }
+            if( kernel_directory->tables[i] != dir->tables[i] )
+            {
+                if( i * 0x1000 * 1024 < SHM_START )
+                {
+                    for( uint32_t j = 0; j < 1024; ++j )
+                    {
+                        if( dir->tables[i]->pages[j].frame )
+                        {
+                            free_frame(&(dir->tables[i]->pages[j]));
+                        }
+                    }
+                }
+                free(dir->tables[i]);
+            }
+        }
+        free(dir);
+    }
+}
+
+void release_directory_for_exec( page_directory_t* dir )
+{
+    uint32_t i;
+
+    for( i = 0; i < 1024; ++i )
+    {
+        if( !dir->tables[i] || (uintptr_t)dir->tables[i] == (uintptr_t)0xFFFFFFFF )
+        {
+            continue;
+        }
+        if( kernel_directory->tables[i] != dir->tables[i] )
+        {
+            if( i * 0x1000 * 1024 < USER_STACK_BOTTOM )
+            {
+                for( uint32_t j = 0; j < 1024; ++j )
+                {
+                    if( dir->tables[i]->pages[j].frame )
+                    {
+                        free_frame(&(dir->tables[i]->pages[j]));
+                    }
+                }
+                dir->physical_tables[i] = 0;
+                free(dir->tables[i]);
+                dir->tables[i] = 0;
+            }
+        }
+    }
+}
+
 page_table_t* clone_table( page_table_t* src, uintptr_t* physAddr )
 {
     page_table_t* table = (page_table_t*)kvmalloc_p(sizeof(page_table_t), physAddr);

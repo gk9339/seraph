@@ -1,4 +1,5 @@
 #include <kernel/spinlock.h>
+#include <kernel/task.h>
 
 static inline int arch_atomic_swap( volatile int* x, int v )
 {

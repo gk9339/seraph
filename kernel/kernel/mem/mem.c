@@ -1,5 +1,6 @@
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 
 #include <kernel/mem.h>
 #include <kernel/kernel.h>
@@ -13,8 +14,8 @@
 #define INDEX_FROM_BIT(b) (b / 0x20)
 #define OFFSET_FROM_BIT(b) (b % 0x20)
 
-uintptr_t placement_pointer = &_kernel_end;
-uintptr_t heap_end = NULL;
+uintptr_t placement_pointer = (uintptr_t)&_kernel_end;
+uintptr_t heap_end = (uintptr_t)NULL;
 uintptr_t kernel_heap_alloc_point = KERNEL_HEAP_INIT;
 
 static spin_lock_t frame_alloc_lock = { 0 };
@@ -396,6 +397,7 @@ void page_fault( struct regs* r )
 {
     ASSUME(r != NULL);
     uint32_t faulting_address;
+    char debug_str[64];
     asm volatile(
             "mov %%cr2, %0":"=r"(faulting_address)
             );
@@ -406,7 +408,8 @@ void page_fault( struct regs* r )
     int reserved = r->err_code & 0x8 ?1:0;
     int id = r->err_code & 0x10 ?1:0;
 
-    KPANIC("SEGFAULT", r);
+    sprintf(debug_str, "Segmentation Fault:(p:%d, rw:%d, user:%d, reserved:%d, id:%d)",
+            present, rw, user, reserved, id);
 }
 
 void heap_install( void )
@@ -477,8 +480,7 @@ void release_directory( page_directory_t* dir )
 
     if(dir->ref_count < 1)
     {
-        uint32_t i;
-        for( int i = 0; i < 1024; ++i )
+        for( uint32_t i = 0; i < 1024; ++i )
         {
             if( !dir->tables[i] || (uintptr_t)dir->tables[i] == (uintptr_t)0xFFFFFFFF )
             {

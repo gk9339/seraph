@@ -372,6 +372,9 @@
 .extern putchar
 .type putchar, @function
 
+.extern read_eip
+.type read_eip, @function
+
 .extern realloc
 .type realloc, @function
 
@@ -410,6 +413,9 @@
 
 .extern strcmp
 .type strcmp, @function
+
+.extern strcpy
+.type strcpy, @function
 
 .extern strlen
 .type strlen, @function
@@ -828,6 +834,9 @@ kernel_symbols_start:
 .long putchar
 .asciz "putchar"
 
+.long read_eip
+.asciz "read_eip"
+
 .long realloc
 .asciz "realloc"
 
@@ -866,6 +875,9 @@ kernel_symbols_start:
 
 .long strcmp
 .asciz "strcmp"
+
+.long strcpy
+.asciz "strcpy"
 
 .long strlen
 .asciz "strlen"

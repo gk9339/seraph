@@ -45,6 +45,7 @@ kernel/isr.o \
 kernel/irq.o \
 kernel/tss.o \
 kernel/mem.o \
+kernel/task.o \
 kernel/symbols.o \
 
 OBJS=\

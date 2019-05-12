@@ -1,6 +1,8 @@
 #ifndef _KERNEL_SERIAL_H
 #define _KERNEL_SERIAL_H
 
+#include <string.h>
+
 #define _inline inline __attribute__((always_inline))
 
 static _inline unsigned short inports( unsigned short _port )
@@ -42,6 +44,19 @@ static _inline void outportb( unsigned short _port, unsigned char _data )
 static _inline void inportsm( unsigned short port, unsigned char* data, unsigned long size )
 {
     asm volatile("rep insw" : "+D"(data), "+c"(size):"d"(port):"memory");
+}
+
+static _inline void debug_log( char* str )
+{
+    for( size_t i = 0; i < strlen(str); i++ )
+    {
+        while( (inportb(0x3F8 + 5) & 0x20) == 0 );
+        outportb(0x3F8, str[i]);
+    }
+    while( (inportb(0x3F8 + 5) & 0x20) == 0 );
+    outportb(0x3F8, '\r');
+    while( (inportb(0x3F8 + 5) & 0x20) == 0 );
+    outportb(0x3F8, '\n');
 }
 
 #endif

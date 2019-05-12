@@ -1,7 +1,10 @@
+#include <stdlib.h>
+#include <string.h>
 #include <stdio.h>
 
 #include <kernel/kernel.h>
 #include <kernel/multiboot.h>
+#include <kernel/serial.h>
 #include <kernel/gdt.h>
 #include <kernel/idt.h>
 #include <kernel/isr.h>
@@ -14,6 +17,7 @@
 
 void kernel_main( unsigned long magic, unsigned long addr ) 
 {
+    char debug_str[256];
     multiboot_info_t* mbi;
 
     /* CPU Initialization */
@@ -39,7 +43,7 @@ void kernel_main( unsigned long magic, unsigned long addr )
 
     if( CHECK_FLAG(mbi->flags, 6) ) /* mmap */
     {
-        printf("Parsing memory map.\n");
+        debug_log("Parsing memory map.");
         multiboot_memory_map_t* mmap = (void*)mbi->mmap_addr;
         while( (uintptr_t)mmap < mbi->mmap_addr + mbi->mmap_length )
         {
@@ -48,7 +52,8 @@ void kernel_main( unsigned long magic, unsigned long addr )
                 for( unsigned long int i = 0; i < mmap->len; i+= 0x1000 )
                 {
                     if( mmap->addr + i > 0xFFFFFFFF ) break;
-                    printf("Marking 0x%x\n", (uint32_t)mmap->addr + i);
+                    sprintf(debug_str, "Marking 0x%x", (uint32_t)mmap->addr + i);
+                    debug_log(debug_str);
                     paging_mark_system((mmap->addr + i) & 0xFFFFF000);
                 }
             }
@@ -65,6 +70,12 @@ void kernel_main( unsigned long magic, unsigned long addr )
 
     /* Test keyboard handler */
     keyboard_install();
+
+    char* str = malloc(5*sizeof(char));
+    strcpy(str, "test");
+    printf("%s\n", str);
+
+    free(str);
 
     while(1){}
 }

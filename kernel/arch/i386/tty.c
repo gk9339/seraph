@@ -62,7 +62,7 @@ void terminal_putchar( char c )
         if( ++terminal_row == VGA_HEIGHT )
             terminal_row = 0;
         /* Clear new rows */
-        for( int i = 0; i < VGA_WIDTH; i++ )
+        for( size_t i = 0; i < VGA_WIDTH; i++ )
         {
             terminal_putentryat(' ', terminal_color, i, terminal_row);
         }

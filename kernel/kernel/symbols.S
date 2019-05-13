@@ -411,9 +411,6 @@
 .extern strcmp
 .type strcmp, @function
 
-.extern strcpy
-.type strcpy, @function
-
 .extern strlen
 .type strlen, @function
 
@@ -869,9 +866,6 @@ kernel_symbols_start:
 
 .long strcmp
 .asciz "strcmp"
-
-.long strcpy
-.asciz "strcpy"
 
 .long strlen
 .asciz "strlen"

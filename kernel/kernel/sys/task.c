@@ -12,13 +12,13 @@ uint32_t next_pid = 0;
 
 page_directory_t* kernel_directory;
 page_directory_t* current_directory;
-/*
+
 extern char* default_name;
 uintptr_t frozen_stack = 0;
 
 void tasking_initialize( void )
 {
-    IRQ_OFF;
+    int_disable();
 
     initialize_process_tree();
     current_process = spawn_init();
@@ -28,12 +28,12 @@ void tasking_initialize( void )
 
     frozen_stack = (uintptr_t)valloc(KERNEL_STACK_SIZE);
 
-    IRQ_RES;
+    int_resume();
 }
 
 uint32_t fork( void )
 {
-    IRQ_OFF;
+    int_disable();
 
     uintptr_t esp, ebp;
 
@@ -66,7 +66,7 @@ uint32_t fork( void )
 
     make_process_ready(new_proc);
 
-    IRQ_RES;
+    int_resume();
 
     return new_proc->id;
 }
@@ -75,7 +75,7 @@ uint32_t clone( uintptr_t new_stack, uintptr_t thread_func, uintptr_t arg )
 {
     uintptr_t esp, ebp;
 
-    IRQ_OFF;
+    int_disable();
 
     current_process->syscall_registers->eax = 0;
 
@@ -121,11 +121,11 @@ uint32_t clone( uintptr_t new_stack, uintptr_t thread_func, uintptr_t arg )
 
     make_process_ready(new_proc);
 
-    IRQ_RES;
+    int_resume();
 
     return new_proc->id;
 }
-*/
+
 void switch_task( uint8_t reschedule )
 {
     if( !current_process )

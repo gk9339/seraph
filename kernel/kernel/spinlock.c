@@ -1,6 +1,7 @@
 #include <kernel/spinlock.h>
 #include <kernel/task.h>
 
+/* Atomic operation to swap *x and v */
 static inline int arch_atomic_swap( volatile int* x, int v )
 {
     asm(
@@ -9,6 +10,7 @@ static inline int arch_atomic_swap( volatile int* x, int v )
     return v;
 }
 
+/* Atomic operation to store the value of x in *p */
 static inline void arch_atomic_store( volatile int* p, int x )
 {
     asm(
@@ -16,6 +18,7 @@ static inline void arch_atomic_store( volatile int* p, int x )
        );
 }
 
+/* Atomic operation to increment *x */
 static inline void arch_atomic_inc( volatile int* x )
 {
     asm(
@@ -23,6 +26,7 @@ static inline void arch_atomic_inc( volatile int* x )
        );
 }
 
+/* Atomic operation to decrement *x */
 static inline void arch_atomic_dec( volatile int* x )
 {
     asm(
@@ -30,6 +34,7 @@ static inline void arch_atomic_dec( volatile int* x )
        );
 }
 
+/* switch task while waiting for lock */
 void spin_wait( volatile int* addr, volatile int* waiters )
 {
     if( waiters )

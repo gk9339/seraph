@@ -91,6 +91,3 @@ isr_common:
 
 	# pop CS, EIP, EFLAGS, SS and ESP
 	iret
-
-
-

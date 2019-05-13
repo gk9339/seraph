@@ -17,14 +17,17 @@
 
 void kernel_main( unsigned long magic, unsigned long addr ) 
 {
+    debug_log("Start kernel_main");
     char debug_str[256];
     multiboot_info_t* mbi;
 
     /* CPU Initialization */
+    debug_log("GDT / IDT initialization");
     gdt_initialize();
     idt_initialize();
 
     /* Terminal Initialization */
+    debug_log("Terminal initialization");
     terminal_initialize();
 
     /* Multiboot check */
@@ -60,22 +63,19 @@ void kernel_main( unsigned long magic, unsigned long addr )
             mmap = (multiboot_memory_map_t*)((uintptr_t)mmap + mmap->size + sizeof(uintptr_t));
         }
     }
+    debug_log("Finalize paging / heap install");
     paging_finalize();
 
     heap_install();
 
     /* Interrupts Initialization */
+    debug_log("Interrupts initialization");
     isr_initialize();
     irq_initialize();
 
     /* Test keyboard handler */
+    debug_log("Install keyboard handler");
     keyboard_install();
-
-    char* str = malloc(5*sizeof(char));
-    strcpy(str, "test");
-    printf("%s\n", str);
-
-    free(str);
 
     while(1){}
 }

@@ -12,6 +12,7 @@ typedef unsigned int status_t;
 
 #define USER_ROOT_UID (user_t)0
 
+/* Unix waitpit() options */
 enum wait_option
 {
     WCONTINUED,
@@ -19,6 +20,7 @@ enum wait_option
     WUNTRACED
 };
 
+/* x86 task */
 typedef struct thread
 {
     uintptr_t esp; /* Stack pointer */
@@ -46,6 +48,23 @@ typedef struct image
     volatile int lock[2];
 } image_t;
 
+/* Resizable descriptor table */
+typedef struct descriptor_table
+{
+    fs_node_t** entries;
+    uint64_t* offsets;
+    int* modes;
+    size_t length;
+    size_t capacity;
+    size_t refs;
+} fd_table_t;
+
+typedef struct signal_table
+{
+    uintptr_t functions[NUMSIGNALS+1];
+} sig_table_t;
+
+/* Portable process struct*/
 typedef struct process
 {
     pid_t id;
@@ -53,8 +72,83 @@ typedef struct process
     char* description;
     user_t user;
     int mask;
+
+    char** cmdline;
+
+    pid_t group;
+    pid_t job;
+    pid_t session;
+
+    thread_t thread;
+    tree_node_t* tree_entry;
+    image_t image;
+    fs_node_t* wd_node;
+    char* wd_name;
+    fd_table_t* fds;
+    status_t status;
+    sig_table_t signals;
+    uint8_t finished;
+    uint8_t started;
+    uint8_t running;
+    struct regs* syscall_registers;
+    list_t* wait_queue;
+    list_t* shm_mappings;
+    list_t* signal_queue;
+    thread_t signal_state;
+    char* signal_kstack;
+    node_t sched_node;
+    node_t sleep_node;
+    node_t* timed_sleep_node;
+    uint8_t is_daemon;
+    volatile uint8_t sleep_interrupted;
+    list_t* node_waits;
+    int awoken_index;
+    node_t* timeout_node;
+    struct timeval start;
+    uint8_t suspended;
 } process_t;
 
+typedef struct
+{
+    unsigned long end_tick;
+    unsigned long end_subtick;
+    process_t* process;
+    int is_fswait;
+} sleeper_t;
+
+void initialize_process_tree( void );
+process_t* spawn_process( volatile process_t* parent, int reuse_fds );
+process_t* spawn_init( void );
+process_t* spawn_kidle( void );
+void set_process_environment( process_t* proc, page_directory_t* dir );
+void make_process_ready( process_t* proc );
+uint8_t process_available( void );
+process_t* next_ready_process( void );
+uint32_t process_append_fd( process_t* proc, fs_node_t* node );
+process_t* process_from_pid( pid_t pid );
+void delete_process( process_t* proc );
+process_t* process_get_parent( process_t* proc );
+uint32_t process_move_fd( process_t* proc, int src, int dest );
+int process_is_ready( process_t* proc );
+
+void wakeup_sleepers( unsigned long seconds, unsigned long subseconds );
+void sleep_until( process_t* process, unsigned long seconds, unsigned long subseconds );
+
 extern volatile process_t* current_process;
+extern process_t* kernel_idle_task;
+extern list_t* process_tree;
+
+int process_wait_nodes( process_t* proc, fs_node_t* nodes[], int timeout );
+int process_alert_node( process_t* proc, void* value );
+int process_awaken_from_fswait( process_t* proc, int index );
+
+typedef void (*daemon_t)( void*, char* );
+int create_kernel_daemon( daemon_t daemon, char* name, void* argp );
+
+void cleanup_process( process_t* proc, int retval );
+void reap_process( process_t* proc );
+int waitpid( int pid, int* status, int options );
+
+int is_valid_process( process_t* proc );
 
 #endif

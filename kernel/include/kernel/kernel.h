@@ -14,6 +14,7 @@
 #define STOP while(1){PAUSE};
 
 extern void* _kernel_start;
+extern void* code;
 extern void* _kernel_end;
 
 void kpanic(char* error_message, const char* file, int line, struct regs* regs);

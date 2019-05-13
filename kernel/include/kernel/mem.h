@@ -4,9 +4,12 @@
 #include <stddef.h>
 
 #include <kernel/types.h>
+#include <sys/types.h>
 
 #define USER_STACK_BOTTOM 0xAFF00000
 #define USER_STACK_TOP 0xB0000000
+
+extern uintptr_t heap_end;
 
 typedef struct page
 {

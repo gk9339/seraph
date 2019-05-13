@@ -1,7 +1,7 @@
 #ifndef _TIME_H
 #define _TIME_H
 
-#include <kernel/types.h>
+#include <sys/types.h>
 
 struct timeval
 {

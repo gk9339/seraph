@@ -69,7 +69,7 @@
 #define MULTIBOOT_INFO_FRAMEBUFFER_INFO         0x00001000
 
 #ifndef _ASM_FILE
-#include <kernel/types.h>
+#include <sys/types.h>
 
 struct multiboot_header
 {

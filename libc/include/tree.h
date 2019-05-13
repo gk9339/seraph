@@ -3,7 +3,7 @@
 
 #include <list.h>
 
-#include <kernel/types.h>
+#include <sys/types.h>
 
 typedef struct tree_node
 {

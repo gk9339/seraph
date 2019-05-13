@@ -2,7 +2,7 @@
 #define _KERNEL_SIGNAL_H
 
 #include <kernel/kernel.h>
-#include <kernel/types.h>
+#include <sys/types.h>
 #include <kernel/process.h>
 
 typedef struct

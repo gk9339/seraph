@@ -1,7 +1,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
-
 #include <kernel/kernel.h>
 #include <kernel/multiboot.h>
 #include <kernel/serial.h>
@@ -12,6 +11,7 @@
 #include <kernel/mem.h>
 #include <kernel/tty.h>
 #include <kernel/keyboard.h>
+#include <sys/types.h>
 
 #define CHECK_FLAG(flags,bit) ((flags)&(1<<(bit)))
 

@@ -4,7 +4,6 @@
 #define SYSCALL_VECTOR 0x7F
 
 #include <stddef.h>
-
 #include <kernel/types.h>
 
 void int_disable( void );

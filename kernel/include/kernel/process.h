@@ -6,9 +6,8 @@
 #include <kernel/fs.h>
 #include <tree.h>
 #include <time.h>
-
-#define NUMSIGNALS 38
-#define NSIG NUMSIGNALS
+#include <sys/types.h>
+#include <sys/signals.h>
 
 #define SIGNAL_RETURN 0x1523A6AA
 #define THREAD_RETURN 0x260913A3

@@ -1,7 +1,7 @@
 #ifndef _KERNEL_TASK_H
 #define _KERNEL_TASK_H
 
-#include <kernel/types.h>
+#include <sys/types.h>
 
 uintptr_t read_eip( void );
 void kexit( int retval );

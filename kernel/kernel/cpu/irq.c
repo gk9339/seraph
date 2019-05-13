@@ -5,6 +5,7 @@
 #include <kernel/symbols.h>
 #include <kernel/serial.h>
 #include <kernel/idt.h>
+#include <sys/types.h>
 
 /* Programmable interrupt controller */
 #define PIC1 0x20

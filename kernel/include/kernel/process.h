@@ -3,6 +3,15 @@
 
 #include <kernel/types.h>
 #include <kernel/mem.h>
+#include <kernel/fs.h>
+#include <tree.h>
+#include <time.h>
+
+#define NUMSIGNALS 38
+#define NSIG NUMSIGNALS
+
+#define SIGNAL_RETURN 0x1523A6AA
+#define THREAD_RETURN 0x260913A3
 
 #define KERNEL_STACK_SIZE 0x8000
 
@@ -12,7 +21,7 @@ typedef unsigned int status_t;
 
 #define USER_ROOT_UID (user_t)0
 
-/* Unix waitpit() options */
+/* Unix waitpid() options */
 enum wait_option
 {
     WCONTINUED,

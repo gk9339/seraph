@@ -4,9 +4,12 @@
 
 #include <kernel/mem.h>
 #include <kernel/kernel.h>
+#include <kernel/serial.h>
 #include <kernel/spinlock.h>
+#include <kernel/process.h>
 #include <kernel/isr.h>
 #include <kernel/shm.h>
+#include <kernel/task.h>
 
 #define KERNEL_HEAP_INIT 0x00800000
 #define KERNEL_HEAP_END 0x20000000
@@ -397,10 +400,19 @@ void page_fault( struct regs* r )
 {
     ASSUME(r != NULL);
     uint32_t faulting_address;
-    char debug_str[64];
+    char debug_str[128];
     asm volatile(
             "mov %%cr2, %0":"=r"(faulting_address)
             );
+
+    if( r->eip == SIGNAL_RETURN )
+    {
+        return_from_signal_handler();
+    }else if( r->eip == THREAD_RETURN )
+    {
+        debug_log("Returned from thread.");
+        kexit(0);
+    }
 
     int present = !(r->err_code & 0x1)?1:0;
     int rw = r->err_code & 0x2 ?1:0;
@@ -408,8 +420,11 @@ void page_fault( struct regs* r )
     int reserved = r->err_code & 0x8 ?1:0;
     int id = r->err_code & 0x10 ?1:0;
 
-    sprintf(debug_str, "Segmentation Fault:(p:%d, rw:%d, user:%d, reserved:%d, id:%d)",
-            present, rw, user, reserved, id);
+    sprintf(debug_str, 
+    "Segmentation Fault:(p:%d, rw:%d, user:%d, reserved:%d, id:%d) at 0x%x eip: 0x%x pid = %d, %d [%s]",
+            present, rw, user, reserved, id, faulting_address, r->eip, current_process->id, 
+            current_process->group, current_process->name);
+    debug_log(debug_str);
 }
 
 void heap_install( void )

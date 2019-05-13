@@ -6,3 +6,14 @@
 read_eip:
 	mov (%esp), %eax
 	ret
+
+.global return_to_userspace
+.type return_to_userspace, @function
+return_to_userspace:
+    pop %gs
+    pop %fs
+    pop %es
+    pop %ds
+    popa
+    add $8, %esp
+    iret

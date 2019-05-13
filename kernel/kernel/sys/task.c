@@ -1,3 +1,6 @@
+#include <stdlib.h>
+#include <string.h>
+
 #include <kernel/task.h>
 #include <kernel/process.h>
 #include <kernel/mem.h>
@@ -60,7 +63,7 @@ uint32_t fork( void )
     new_proc->thread.esp = esp;
     new_proc->thread.ebp = ebp;
 
-    new_proc->is_tasklet = parent->is_tasklet;
+    new_proc->is_daemon = parent->is_daemon;
 
     new_proc->thread.eip = (uintptr_t)&return_to_userspace;
 
@@ -87,7 +90,7 @@ uint32_t clone( uintptr_t new_stack, uintptr_t thread_func, uintptr_t arg )
     directory->ref_count++;
 
     struct regs r;
-    memcpy(&r, current_registers, sizeof(struct regs));
+    memcpy(&r, current_process->syscall_registers, sizeof(struct regs));
     new_proc->syscall_registers = &r;
 
     esp = new_proc->image.stack;
@@ -115,7 +118,7 @@ uint32_t clone( uintptr_t new_stack, uintptr_t thread_func, uintptr_t arg )
     new_proc->thread.esp = esp;
     new_proc->thread.ebp = ebp;
 
-    new_proc->is_tasklet = parent->is_tasklet;
+    new_proc->is_daemon = parent->is_daemon;
 
     new_proc->thread.eip = (uintptr_t)&return_to_userspace;
 

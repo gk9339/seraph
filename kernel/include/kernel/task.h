@@ -17,5 +17,6 @@ uint32_t getpid( void );
 void enter_user_jump( uintptr_t location, int argc, char** argv, uintptr_t stack );
 
 extern uintptr_t initial_esp;
+extern void return_to_userspace( void );
 
 #endif

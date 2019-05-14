@@ -10,6 +10,7 @@
 #include <kernel/isr.h>
 #include <kernel/shm.h>
 #include <kernel/task.h>
+#include <kernel/signal.h>
 
 #define KERNEL_HEAP_INIT 0x00800000
 #define KERNEL_HEAP_END 0x20000000

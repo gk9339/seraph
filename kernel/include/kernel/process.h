@@ -79,6 +79,7 @@ typedef struct process
     char* name;
     char* description;
     user_t user;
+    user_t real_user;
     int mask;
 
     char** cmdline;
@@ -137,6 +138,8 @@ process_t* process_from_pid( pid_t pid );
 void delete_process( process_t* proc );
 process_t* process_get_parent( process_t* proc );
 uint32_t process_move_fd( process_t* proc, int src, int dest );
+int wakeup_queue( list_t* queue );
+int wakeup_queue_interrupted( list_t* queue );
 int process_is_ready( process_t* proc );
 
 void wakeup_sleepers( unsigned long seconds, unsigned long subseconds );
@@ -144,7 +147,7 @@ void sleep_until( process_t* process, unsigned long seconds, unsigned long subse
 
 extern volatile process_t* current_process;
 extern process_t* kernel_idle_task;
-extern list_t* process_tree;
+extern tree_t* process_tree;
 
 int process_wait_nodes( process_t* proc, fs_node_t* nodes[], int timeout );
 int process_alert_node( process_t* proc, void* value );

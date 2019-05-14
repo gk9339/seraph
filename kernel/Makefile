@@ -34,10 +34,11 @@ kernel/cpu/gdt.o \
 kernel/cpu/idt.o \
 kernel/cpu/isr.o \
 kernel/cpu/irq.o \
-kernel/dev/keyboard.o \
+kernel/io/keyboard.o \
 kernel/mem/mem.o \
 kernel/sys/symbols.o \
 kernel/sys/task.o \
+kernel/sys/process.o \
 kernel/spinlock.o \
 kernel/gdt.o \
 kernel/idt.o \

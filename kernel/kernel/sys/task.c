@@ -228,7 +228,7 @@ void switch_task( uint8_t reschedule )
     current_process->thread.ebp = ebp;
     current_process->running = 0;
 
-    switch_fpu;
+    switch_fpu();
 
     if( reschedule && current_process != kernel_idle_task )
     {

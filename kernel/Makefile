@@ -34,6 +34,9 @@ kernel/cpu/gdt.o \
 kernel/cpu/idt.o \
 kernel/cpu/isr.o \
 kernel/cpu/irq.o \
+kernel/dev/cmos.o \
+kernel/dev/timer.o \
+kernel/dev/fpu.o \
 kernel/io/keyboard.o \
 kernel/mem/mem.o \
 kernel/sys/symbols.o \
@@ -48,6 +51,7 @@ kernel/tss.o \
 kernel/mem.o \
 kernel/task.o \
 kernel/symbols.o \
+kernel/bitset.o \
 
 OBJS=\
 $(ARCHDIR)/crti.o \

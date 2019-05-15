@@ -41,6 +41,7 @@ string/memset.o \
 string/strlen.o \
 string/strcmp.o \
 string/strcpy.o \
+string/strdup.o \
 list/list.o \
 tree/tree.o \
 

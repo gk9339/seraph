@@ -2,4 +2,4 @@
 set -e
 . ./mkiso.sh
 
-qemu-system-$(./target-triplet-to-arch.sh $HOST) -cdrom seraph.iso
+qemu-system-$(./sh/target-triplet-to-arch.sh $HOST) -cdrom seraph.iso

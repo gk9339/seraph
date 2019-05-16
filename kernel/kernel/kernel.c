@@ -12,14 +12,19 @@
 #include <kernel/tty.h>
 #include <kernel/keyboard.h>
 #include <sys/types.h>
+#include <kernel/args.h>
 
 #define CHECK_FLAG(flags,bit) ((flags)&(1<<(bit)))
 
-void kernel_main( unsigned long magic, unsigned long addr ) 
+uintptr_t initial_esp = 0;
+
+void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp ) 
 {
     debug_log("Start kernel_main");
     char debug_str[256];
     multiboot_info_t* mbi;
+    initial_esp = esp;
+    extern char* cmdline;
 
     /* CPU Initialization */
     debug_log("GDT / IDT initialization");
@@ -65,6 +70,16 @@ void kernel_main( unsigned long magic, unsigned long addr )
     }
     debug_log("Finalize paging / heap install");
     paging_finalize();
+
+    {
+        char cmdline_[1024];
+
+        size_t len = strlen((char*)mbi->cmdline);
+        memmove(cmdline_, (char*)mbi->cmdline, len + 1);
+
+        cmdline = (char*)malloc(len + 1);
+        memcpy(cmdline, cmdline_, len + 1);
+    }
 
     heap_install();
 

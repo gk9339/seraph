@@ -18,6 +18,8 @@ typedef signed int pid_t;
 typedef unsigned int user_t;
 typedef unsigned int status_t;
 
+extern list_t* process_list;
+
 #define USER_ROOT_UID (user_t)0
 
 /* Unix waitpid() options */

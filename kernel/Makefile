@@ -42,6 +42,7 @@ kernel/mem/mem.o \
 kernel/sys/symbols.o \
 kernel/sys/task.o \
 kernel/sys/process.o \
+kernel/sys/signal.o \
 kernel/spinlock.o \
 kernel/gdt.o \
 kernel/idt.o \
@@ -52,6 +53,7 @@ kernel/mem.o \
 kernel/task.o \
 kernel/symbols.o \
 kernel/bitset.o \
+kernel/args.o \
 
 OBJS=\
 $(ARCHDIR)/crti.o \

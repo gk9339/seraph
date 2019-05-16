@@ -826,7 +826,7 @@ int process_wait_nodes( process_t* process, fs_node_t* nodes[], int timeout )
     return process->awoken_index;
 }
 
-int process_awoken_from_fswait( process_t* process, int index )
+int process_awaken_from_fswait( process_t* process, int index )
 {
     process->awoken_index = index;
     list_free(process->node_waits);

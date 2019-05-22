@@ -39,6 +39,7 @@ kernel/dev/timer.o \
 kernel/dev/fpu.o \
 kernel/io/keyboard.o \
 kernel/mem/mem.o \
+kernel/mem/shm.o \
 kernel/sys/symbols.o \
 kernel/sys/task.o \
 kernel/sys/process.o \
@@ -46,6 +47,7 @@ kernel/sys/signal.o \
 kernel/spinlock.o \
 kernel/bitset.o \
 kernel/args.o \
+kernel/fs.o \
 
 OBJS=\
 $(ARCHDIR)/crti.o \

@@ -14,4 +14,7 @@ int strcmp( const char*, const char* );
 char* strcpy( char* restrict, const char* restrict );
 char* strdup( const char* );
 
+char* strtok( char*, const char* );
+char* strtok_r( char*, const char*, char** );
+
 #endif

@@ -1,8 +1,11 @@
 #ifndef _KERNEL_FS_H
 #define _KERNEL_FS_H
 
-#define PATH_SEPERATOR '/'
-#define PATH_SEPERATOR_STRING "/"
+#include <sys/types.h>
+#include <stddef.h>
+
+#define PATH_SEPARATOR '/'
+#define PATH_SEPARATOR_STRING "/"
 #define PATH_UP ".."
 #define PATH_DOT "."
 

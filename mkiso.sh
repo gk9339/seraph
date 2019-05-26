@@ -12,7 +12,7 @@ set timeout=0
 set default=0
 
 menuentry "seraph" {
-	multiboot /boot/seraph.kernel
+	multiboot /boot/seraph.kernel root=/dev/ram0 root_type=tar
 }
 EOF
 grub-mkrescue -o seraph.iso isodir

@@ -37,7 +37,7 @@ typedef struct
 void* shm_obtain( char * path, size_t * size );
 int shm_release( char * path );
 
-void shm_install( void );
+void shm_initialize( void );
 void shm_release_all( process_t * proc );
 
 #endif

@@ -2,7 +2,7 @@ DEFAULT_HOST!=../sh/default-host.sh
 HOST?=DEFAULT_HOST
 HOSTARCH!=../sh/target-triplet-to-arch.sh $(HOST)
 
-CFLAGS?=-O2 -g
+CFLAGS?=-O0 -g
 CPPFLAGS?=
 LDFLAGS?=
 LIBS?=
@@ -38,6 +38,8 @@ kernel/dev/cmos.o \
 kernel/dev/timer.o \
 kernel/dev/fpu.o \
 kernel/io/keyboard.o \
+kernel/io/tarfs.o \
+kernel/io/ext2.o \
 kernel/mem/mem.o \
 kernel/mem/shm.o \
 kernel/sys/symbols.o \
@@ -45,9 +47,11 @@ kernel/sys/task.o \
 kernel/sys/process.o \
 kernel/sys/signal.o \
 kernel/spinlock.o \
+kernel/symbols.o \
 kernel/bitset.o \
 kernel/args.o \
 kernel/fs.o \
+kernel/elf.o \
 
 OBJS=\
 $(ARCHDIR)/crti.o \

@@ -3,6 +3,15 @@
 .extern alloc_frame
 .type alloc_frame, @function
 
+.extern args_parse
+.type args_parse, @function
+
+.extern args_present
+.type args_present, @function
+
+.extern args_value
+.type args_value, @function
+
 .extern bitset_clear
 .type bitset_clear, @function
 
@@ -114,11 +123,26 @@
 .extern enter_signal_handler
 .type enter_signal_handler, @function
 
-.extern enter_user_jmp
-.type enter_user_jmp, @function
+.extern enter_user_jump
+.type enter_user_jump, @function
 
 .extern enter_userspace
 .type enter_userspace, @function
+
+.extern exec
+.type exec, @function
+
+.extern exec_elf
+.type exec_elf, @function
+
+.extern exec_shebang
+.type exec_shebang, @function
+
+.extern ext2_fs_mount
+.type ext2_fs_mount, @function
+
+.extern ext2_initialize
+.type ext2_initialize, @function
 
 .extern fault_handler
 .type fault_handler, @function
@@ -137,6 +161,9 @@
 
 .extern fix_signal_stacks
 .type fix_signal_stacks, @function
+
+.extern fmts
+.type fmts, @function
 
 .extern fork
 .type fork, @function
@@ -483,6 +510,9 @@
 .extern is_valid_process
 .type is_valid_process, @function
 
+.extern kernel_args_table
+.type kernel_args_table, @function
+
 .extern kernel_directory
 .type kernel_directory, @function
 
@@ -605,6 +635,9 @@
 
 .extern memcpy
 .type memcpy, @function
+
+.extern memmove
+.type memmove, @function
 
 .extern memort_total
 .type memort_total, @function
@@ -876,6 +909,15 @@
 .extern symlink_fs
 .type symlink_fs, @function
 
+.extern system
+.type system, @function
+
+.extern tarfs_initialize
+.type tarfs_initialize, @function
+
+.extern tar_mount
+.type tar_mount, @function
+
 .extern task_exit
 .type task_exit, @function
 
@@ -1035,6 +1077,15 @@ kernel_symbols_start:
 .long alloc_frame
 .asciz "alloc_frame"
 
+.long args_parse
+.asciz "args_parse"
+
+.long args_present
+.asciz "args_present"
+
+.long args_value
+.asciz "args_value"
+
 .long bitset_clear
 .asciz "bitset_clear"
 
@@ -1146,11 +1197,26 @@ kernel_symbols_start:
 .long enter_signal_handler
 .asciz "enter_signal_handler"
 
-.long enter_user_jmp
-.asciz "enter_user_jmp"
+.long enter_user_jump
+.asciz "enter_user_jump"
 
 .long enter_userspace
 .asciz "enter_userspace"
+
+.long exec
+.asciz "exec"
+
+.long exec_elf
+.asciz "exec_elf"
+
+.long exec_shebang
+.asciz "exec_shebang"
+
+.long ext2_fs_mount
+.asciz "ext2_fs_mount"
+
+.long ext2_initialize
+.asciz "ext2_initialize"
 
 .long fault_handler
 .asciz "fault_handler"
@@ -1169,6 +1235,9 @@ kernel_symbols_start:
 
 .long fix_signal_stacks
 .asciz "fix_signal_stacks"
+
+.long fmts
+.asciz "fmts"
 
 .long fork
 .asciz "fork"
@@ -1515,6 +1584,9 @@ kernel_symbols_start:
 .long is_valid_process
 .asciz "is_valid_process"
 
+.long kernel_args_table
+.asciz "kernel_args_table"
+
 .long kernel_directory
 .asciz "kernel_directory"
 
@@ -1637,6 +1709,9 @@ kernel_symbols_start:
 
 .long memcpy
 .asciz "memcpy"
+
+.long memmove
+.asciz "memmove"
 
 .long memort_total
 .asciz "memort_total"
@@ -1907,6 +1982,15 @@ kernel_symbols_start:
 
 .long symlink_fs
 .asciz "symlink_fs"
+
+.long system
+.asciz "system"
+
+.long tarfs_initialize
+.asciz "tarfs_initialize"
+
+.long tar_mount
+.asciz "tar_mount"
 
 .long task_exit
 .asciz "task_exit"

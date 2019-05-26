@@ -366,7 +366,7 @@ void invalidate_page_tables( void )
             );
 }
 
-void invalitate_tables_at( uintptr_t addr )
+void invalidate_tables_at( uintptr_t addr )
 {
     asm volatile(
             "movl %0, %%eax\n"

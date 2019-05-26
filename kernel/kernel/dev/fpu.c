@@ -16,30 +16,16 @@ void set_fpu_cw( const uint16_t cw )
 
 void enable_fpu( void )
 {
-    asm volatile(
-        "clts"
-        );
-    size_t t;
-    asm volatile(
-        "mov %%cr0, %0"
-        :"=r"(t)
-        );
-    t &= ~(1 << 2);
-    t |= (1 << 2);
-    asm volatile(
-        "mov %0, %%cr0"
-        ::"r"(t)
-    );
-    
-    asm volatile(
-        "mov %%cr4, %0"
-        :"=r"(t)
-        );
-    t |= 3 << 9;
-    asm volatile(
-        "mov %0, %%cr4"
-        ::"r"(t)
-        );
+    asm volatile ("clts");
+	size_t t;
+	asm volatile ("mov %%cr0, %0" : "=r"(t));
+	t &= ~(1 << 2);
+	t |= (1 << 1);
+	asm volatile ("mov %0, %%cr0" :: "r"(t));
+
+	asm volatile ("mov %%cr4, %0" : "=r"(t));
+	t |= 3 << 9;
+    asm volatile ("mov %0, %%cr4" :: "r"(t));
 }
 
 void disable_fpu( void )
@@ -76,9 +62,7 @@ void save_fpu( process_t* proc )
 
 void init_fpu( void )
 {
-    asm volatile(
-        "fninit"
-        );
+    asm volatile("fninit");
 }
 
 void invalid_op( struct regs* r )

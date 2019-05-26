@@ -2,7 +2,7 @@ DEFAULT_HOST!=../sh/default-host.sh
 HOST?=DEFAULT_HOST
 HOSTARCH!=../sh/target-triplet-to-arch.sh $(HOST)
 
-CFLAGS?=-O2 -g
+CFLAGS?=-O3 -g
 CPPFLAGS?=
 LDFLAGS?=
 LIBS?=
@@ -42,8 +42,11 @@ string/strlen.o \
 string/strcmp.o \
 string/strcpy.o \
 string/strdup.o \
+string/strtok.o \
+string/strchr.o \
 list/list.o \
 tree/tree.o \
+hashtable/hashtable.o \
 
 HOSTEDOBJS=\
 $(ARCH_HOSTEDOBJS) \

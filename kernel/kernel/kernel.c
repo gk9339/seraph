@@ -24,7 +24,6 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
     char debug_str[256];
     multiboot_info_t* mbi;
     initial_esp = esp;
-    extern char* cmdline;
 
     /* CPU Initialization */
     debug_log("GDT / IDT initialization");
@@ -34,6 +33,8 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
     /* Terminal Initialization */
     debug_log("Terminal initialization");
     terminal_initialize();
+
+    printf("Booting...\n");
 
     /* Multiboot check */
     if( magic != MULTIBOOT_BOOTLOADER_MAGIC )
@@ -71,16 +72,6 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
     debug_log("Finalize paging / heap install");
     paging_finalize();
 
-    {
-        char cmdline_[1024];
-
-        size_t len = strlen((char*)mbi->cmdline);
-        memmove(cmdline_, (char*)mbi->cmdline, len + 1);
-
-        cmdline = (char*)malloc(len + 1);
-        memcpy(cmdline, cmdline_, len + 1);
-    }
-
     heap_install();
 
     /* Interrupts Initialization */
@@ -88,10 +79,16 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
     isr_initialize();
     irq_initialize();
 
+    vfs_initialize();
+    tasking_initialize();
+/*    timer_initialize();
+    fpu_initialize();
+    shm_initialize();
+*/
     /* Test keyboard handler */
-    debug_log("Install keyboard handler");
+/*    debug_log("Install keyboard handler");
     keyboard_install();
-
+*/
     while(1){}
 }
 

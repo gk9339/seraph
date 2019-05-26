@@ -57,8 +57,10 @@ void paging_mark_system( uint64_t addr );
 void switch_page_directory( page_directory_t* new );
 void invalidate_page_tables( void );
 void invalidate_pages_at( uintptr_t addr );
+void invalidate_tables_at( uintptr_t addr );
 page_t* get_page( uintptr_t address, int make, page_directory_t* dir );
 void page_fault( struct regs* r );
+void alloc_frame( page_t*, int, int );
 void dma_frame( page_t* page, int, int, uintptr_t );
 
 void heap_install( void );

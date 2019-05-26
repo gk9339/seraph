@@ -1,8 +1,11 @@
 #ifndef _KERNEL_SHM_H
 #define _KERNEL_SHM_H
 
+#include <sys/types.h>
+#include <kernel/process.h>
+
 #define SHM_START 0xB0000000
-#define SHM_PATH_SEPERATOR "."
+#define SHM_PATH_SEPARATOR "."
 
 struct shm_node;
 

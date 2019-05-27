@@ -28,6 +28,11 @@ uint32_t first_n_frames(int n);
 uint32_t* frames;
 uint32_t nframes;
 
+void kmalloc_startat( uintptr_t address )
+{
+    placement_pointer = address;
+}
+
 uintptr_t kmalloc_real( size_t size, int align, uintptr_t* phys )
 {
     if( heap_end )
@@ -244,7 +249,7 @@ uintptr_t memort_total( void )
     return nframes * 4;
 }
 
-void paging_install( uint32_t memsize )
+void paging_initialize( uint32_t memsize )
 {
     nframes = memsize / 4;
     frames = (uint32_t*)kmalloc(INDEX_FROM_BIT(nframes * 8));
@@ -293,7 +298,7 @@ void paging_finalize( void )
     /* Mapping VGA text-mode */
     for( uintptr_t j = 0xb8000; j < 0xc0000; j += 0x1000 )
     {
-        dma_frame(get_page(j, 0, kernel_directory), 1, 0, j);
+        dma_frame(get_page(j, 0, kernel_directory), 0, 1, j);
     }
 
     isr_install_handler(14, page_fault);

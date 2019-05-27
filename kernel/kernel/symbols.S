@@ -552,6 +552,9 @@
 .extern kmalloc_real
 .type kmalloc_real, @function
 
+.extern kmalloc_startat
+.type kmalloc_startat, @function
+
 .extern kopen
 .type kopen, @function
 
@@ -678,8 +681,8 @@
 .extern paging_finalize
 .type paging_finalize, @function
 
-.extern paging_install
-.type paging_install, @function
+.extern paging_initialize
+.type paging_initialize, @function
 
 .extern paging_mark_system
 .type paging_mark_system, @function
@@ -1641,6 +1644,9 @@ kernel_symbols_start:
 .long kmalloc_real
 .asciz "kmalloc_real"
 
+.long kmalloc_startat
+.asciz "kmalloc_startat"
+
 .long kopen
 .asciz "kopen"
 
@@ -1767,8 +1773,8 @@ kernel_symbols_start:
 .long paging_finalize
 .asciz "paging_finalize"
 
-.long paging_install
-.asciz "paging_install"
+.long paging_initialize
+.asciz "paging_initialize"
 
 .long paging_mark_system
 .asciz "paging_mark_system"

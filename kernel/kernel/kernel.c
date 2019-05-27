@@ -34,6 +34,8 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
     char debug_str[256];
     multiboot_info_t* mbi;
     initial_esp = esp;
+    uint32_t mboot_mods_count = 0;
+    multiboot_module_t* mboot_mods = NULL;
     extern char* cmdline;
 
     /* CPU Initialization */
@@ -44,8 +46,48 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
     /* Terminal Initialization */
     debug_log("Terminal initialization");
     terminal_initialize();
-
-    printf("Booting...\n");
+    
+	uintptr_t last_mod = (uintptr_t)&_kernel_end;
+	if( CHECK_FLAG(mbi->flags, 5) )
+    {
+		sprintf(debug_str, "There %s %d module%s starting at 0x%x.", mbi->mods_count == 1 ? "is" : "are", mbi->mods_count, mbi->mods_count == 1 ? "" : "s", mbi->mods_addr);
+        debug_log(debug_str);
+		sprintf(debug_str, "Current kernel heap start point would be 0x%x.", &_kernel_end);
+        debug_log(debug_str);
+		if( mbi->mods_count > 0 )
+        {
+			uint32_t i;
+			mboot_mods = (multiboot_module_t *)mbi->mods_addr;
+			mboot_mods_count = mbi->mods_count;
+			for( i = 0; i < mbi->mods_count; ++i )
+            {
+				multiboot_module_t* mod = &mboot_mods[i];
+				uint32_t module_start = mod->mod_start;
+				uint32_t module_end   = mod->mod_end;
+				if( (uintptr_t)mod + sizeof(multiboot_module_t) > last_mod )
+                {
+					/* Just in case some silly person put this *behind* the modules... */
+					last_mod = (uintptr_t)mod + sizeof(multiboot_module_t);
+					sprintf(debug_str, "moving forward to 0x%x", last_mod);
+                    debug_log(debug_str);
+				}
+				sprintf(debug_str, "Module %d is at 0x%x:0x%x", i, module_start, module_end);
+                debug_log(debug_str);
+				if( last_mod < module_end )
+                {
+					last_mod = module_end;
+				}
+			}
+			sprintf(debug_str, "Moving kernel heap start to 0x%x", last_mod);
+            debug_log(debug_str);
+		}
+	}
+	if( (uintptr_t)mbi > last_mod )
+    {
+		last_mod = (uintptr_t)mbi + sizeof(multiboot_info_t);
+    }
+    while(last_mod & 0x7FF) last_mod++;
+    kmalloc_startat(last_mod);
 
     /* Multiboot check */
     if( magic != MULTIBOOT_BOOTLOADER_MAGIC )
@@ -59,7 +101,7 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
     {
         KPANIC("Missing MEM flag in multiboot header", NULL)
     }
-    paging_install(mbi->mem_lower + mbi->mem_upper);
+    paging_initialize(mbi->mem_lower + mbi->mem_upper);
 
     if( CHECK_FLAG(mbi->flags, 6) ) /* mmap */
     {

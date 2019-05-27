@@ -99,6 +99,7 @@ void free( void* ptr )
     // TODO: userland free()
 #endif
     }
+    spin_unlock(mem_lock);
 }
 
 #if defined(__is_libk)

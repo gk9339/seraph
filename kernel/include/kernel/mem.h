@@ -39,6 +39,7 @@ typedef struct page_directory
     uint32_t ref_count;
 } page_directory_t;
 
+void kmalloc_startat( uintptr_t address );
 uintptr_t kmalloc_real( size_t size, int align, uintptr_t* phys );
 uintptr_t kmalloc( size_t size );
 uintptr_t kvmalloc( size_t size );
@@ -50,7 +51,7 @@ extern page_directory_t* current_directory;
 
 extern uintptr_t placement_pointer;
 
-void paging_install( uint32_t memsize );
+void paging_initialize( uint32_t memsize );
 void paging_prestart( void );
 void paging_finalize( void );
 void paging_mark_system( uint64_t addr );

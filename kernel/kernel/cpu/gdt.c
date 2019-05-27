@@ -3,6 +3,11 @@
 #include <kernel/gdt.h>
 #include <kernel/tss.h>
 
+void gdt_flush( uintptr_t );
+static void write_tss( int32_t num, uint16_t ss0, uint32_t esp0 );
+
+#define ENTRY(X)(gdt.entries[(X)])
+
 typedef struct
 {
     uint16_t limit_low;     /* Limits */
@@ -25,10 +30,6 @@ static struct {
     tss_entry_t tss;
 } gdt __attribute__((used));
 
-void gdt_flush( uintptr_t );
-
-#define ENTRY(X)(gdt.entries[(X)])
-
 void gdt_set_gate( uint8_t num, uint64_t base, uint64_t limit, uint8_t access, uint8_t gran )
 {
     /* Base address */
@@ -46,8 +47,6 @@ void gdt_set_gate( uint8_t num, uint64_t base, uint64_t limit, uint8_t access, u
     /* Access flags */
     ENTRY(num).access = access;
 }
-
-static void write_tss( int32_t num, uint16_t ss0, uint32_t esp0 );
 
 void gdt_initialize( void )
 {

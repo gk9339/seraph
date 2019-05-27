@@ -738,6 +738,9 @@
 .extern putchar
 .type putchar, @function
 
+.extern ramdisk_mount
+.type ramdisk_mount, @function
+
 .extern read_cmos
 .type read_cmos, @function
 
@@ -1829,6 +1832,9 @@ kernel_symbols_start:
 
 .long putchar
 .asciz "putchar"
+
+.long ramdisk_mount
+.asciz "ramdisk_mount"
 
 .long read_cmos
 .asciz "read_cmos"

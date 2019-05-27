@@ -40,6 +40,7 @@ kernel/dev/fpu.o \
 kernel/io/keyboard.o \
 kernel/io/tarfs.o \
 kernel/io/ext2.o \
+kernel/io/ramdisk.o \
 kernel/mem/mem.o \
 kernel/mem/shm.o \
 kernel/sys/symbols.o \

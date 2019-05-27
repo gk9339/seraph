@@ -13,6 +13,7 @@ set default=0
 
 menuentry "seraph" {
 	multiboot /boot/seraph.kernel root=/dev/ram0 root_type=tar
+    module /boot/seraph.initrd
 }
 EOF
 grub-mkrescue -o seraph.iso isodir

@@ -1,8 +1,8 @@
 #!/bin/sh
 set -e
 
-SYSTEM_HEADER_PROJECTS="libc kernel"
-PROJECTS="libc kernel"
+SYSTEM_HEADER_PROJECTS="libc kernel bin"
+PROJECTS="libc kernel bin"
 
 export MAKE=${MAKE:-make}
 export HOST=${HOST:-$(./sh/default-host.sh)}

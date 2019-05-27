@@ -633,6 +633,12 @@
 .extern map_vfs_directory
 .type map_vfs_directory, @function
 
+.extern memchr
+.type memchr, @function
+
+.extern memcmp
+.type memcmp, @function
+
 .extern memcpy
 .type memcpy, @function
 
@@ -858,6 +864,9 @@
 .extern _start
 .type _start, @function
 
+.extern strcat
+.type strcat, @function
+
 .extern strchr
 .type strchr, @function
 
@@ -879,11 +888,17 @@
 .extern strlen
 .type strlen, @function
 
+.extern strncat
+.type strncat, @function
+
 .extern strpbrk
 .type strpbrk, @function
 
 .extern strspn
 .type strspn, @function
+
+.extern strstr
+.type strstr, @function
 
 .extern strtok
 .type strtok, @function
@@ -1707,6 +1722,12 @@ kernel_symbols_start:
 .long map_vfs_directory
 .asciz "map_vfs_directory"
 
+.long memchr
+.asciz "memchr"
+
+.long memcmp
+.asciz "memcmp"
+
 .long memcpy
 .asciz "memcpy"
 
@@ -1932,6 +1953,9 @@ kernel_symbols_start:
 .long _start
 .asciz "_start"
 
+.long strcat
+.asciz "strcat"
+
 .long strchr
 .asciz "strchr"
 
@@ -1953,11 +1977,17 @@ kernel_symbols_start:
 .long strlen
 .asciz "strlen"
 
+.long strncat
+.asciz "strncat"
+
 .long strpbrk
 .asciz "strpbrk"
 
 .long strspn
 .asciz "strspn"
+
+.long strstr
+.asciz "strstr"
 
 .long strtok
 .asciz "strtok"

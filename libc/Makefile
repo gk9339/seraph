@@ -2,7 +2,7 @@ DEFAULT_HOST!=../sh/default-host.sh
 HOST?=DEFAULT_HOST
 HOSTARCH!=../sh/target-triplet-to-arch.sh $(HOST)
 
-CFLAGS?=-O0 -g
+CFLAGS?=-O3 -g
 CPPFLAGS?=
 LDFLAGS?=
 LIBS?=
@@ -44,6 +44,9 @@ string/strcpy.o \
 string/strdup.o \
 string/strtok.o \
 string/strchr.o \
+string/strstr.o \
+string/memchr.o \
+string/strcat.o \
 list/list.o \
 tree/tree.o \
 hashtable/hashtable.o \

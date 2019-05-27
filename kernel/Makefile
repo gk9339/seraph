@@ -2,7 +2,7 @@ DEFAULT_HOST!=../sh/default-host.sh
 HOST?=DEFAULT_HOST
 HOSTARCH!=../sh/target-triplet-to-arch.sh $(HOST)
 
-CFLAGS?=-O0 -g
+CFLAGS?=-O3 -g
 CPPFLAGS?=
 LDFLAGS?=
 LIBS?=
@@ -47,7 +47,6 @@ kernel/sys/task.o \
 kernel/sys/process.o \
 kernel/sys/signal.o \
 kernel/spinlock.o \
-kernel/symbols.o \
 kernel/bitset.o \
 kernel/args.o \
 kernel/fs.o \
@@ -75,13 +74,11 @@ $(ARCHDIR)/crtn.o \
 all: seraph.kernel
 
 seraph.kernel: $(OBJS) $(ARCHDIR)/linker.ld
-	rm -f kernel/symbols.S && touch kernel/symbols.S
-	$(CC) -MD -c kernel/symbols.S -o kernel/symbols.o
 	$(CC) -T $(ARCHDIR)/linker.ld -o $@ $(CFLAGS) $(LINK_LIST)
-	grub-file --is-x86-multiboot seraph.kernel
 	$(NM) seraph.kernel -g | ./symbols.py > kernel/symbols.S
 	$(CC) -MD -c kernel/symbols.S -o kernel/symbols.o
-	$(CC) -T $(ARCHDIR)/linker.ld -o $@ $(CFLAGS) $(LINK_LIST)
+	$(CC) -T $(ARCHDIR)/linker.ld -o $@ $(CFLAGS) $(LINK_LIST) kernel/symbols.o
+	grub-file --is-x86-multiboot seraph.kernel
 
 $(ARCHDIR)/crtbegin.o $(ARCHDIR)/crtend.o:
 	OBJ=`$(CC) $(CFLAGS) $(LDFLAGS) -print-file-name=$(@F)` && cp "$$OBJ" $@

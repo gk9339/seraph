@@ -2,7 +2,7 @@ DEFAULT_HOST!=../sh/default-host.sh
 HOST?=DEFAULT_HOST
 HOSTARCH!=../sh/target-triplet-to-arch.sh $(HOST)
 
-CFLAGS?=-O3 -g
+CFLAGS?=-O0 -g
 CPPFLAGS?=
 LDFLAGS?=
 LIBS?=
@@ -53,6 +53,9 @@ hashtable/hashtable.o \
 
 HOSTEDOBJS=\
 $(ARCH_HOSTEDOBJS) \
+unistd/stub.o \
+stdio/stub.o \
+stdlib/stub.o \
 
 OBJS=\
 $(FREEOBJS) \
@@ -60,13 +63,17 @@ $(HOSTEDOBJS) \
 
 LIBK_OBJS=$(FREEOBJS:.o=.libk.o)
 
-#BINARIES=libc.a libk.a # Not ready for libc yet.
-BINARIES=libk.a
+BINARIES=libc.a libk.a
+
+CRTS=\
+crt0.o \
+crti.o \
+crtn.o \
 
 .PHONY: all clean install install-headers install-libs
 .SUFFIXES: .o .libk.o .c .S
 
-all: $(BINARIES)
+all: $(BINARIES) $(CRTS)
 
 libc.a: $(OBJS)
 	$(AR) rcs $@ $(OBJS)
@@ -86,8 +93,12 @@ libk.a: $(LIBK_OBJS)
 .S.libk.o:
 	$(CC) -MD -c $< -o $@ $(LIBK_CFLAGS) $(LIBK_CPPFLAGS)
 
+crt%.o: crt%.S
+	$(AS) $< -o $@
+
 clean:
 	rm -f $(BINARIES) *.a
+	rm -f $(CRTS) *.o
 	rm -f $(OBJS) $(LIBK_OBJS) *.o */*.o */*/*.o
 	rm -f $(OBJS:.o=.d) $(LIBK_OBJS:.o=.d) *.d */*.d */*/*.d
 
@@ -97,9 +108,10 @@ install-headers:
 	mkdir -p $(DESTDIR)$(INCLUDEDIR)
 	cp -R --preserve=timestamps include/. $(DESTDIR)$(INCLUDEDIR)/.
 
-install-libs: $(BINARIES)
+install-libs: $(BINARIES) $(CRTS)
 	mkdir -p $(DESTDIR)$(LIBDIR)
 	cp $(BINARIES) $(DESTDIR)$(LIBDIR)
+	cp $(CRTS) $(DESTDIR)$(LIBDIR)
 
 -include $(OBJS:.o=.d)
 -include $(LIBK_OBJS:.o=.d)

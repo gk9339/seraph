@@ -46,10 +46,11 @@ static _inline void inportsm( unsigned short port, unsigned char* data, unsigned
     asm volatile("rep insw" : "+D"(data), "+c"(size):"d"(port):"memory");
 }
 
-static _inline void debug_log( char* str )
+static _inline void debug_log( const char* str )
 {
     for( size_t i = 0; i < strlen(str); i++ )
     {
+        if( str[i] == '\0' ) break;
         while( (inportb(0x3F8 + 5) & 0x20) == 0 );
         outportb(0x3F8, str[i]);
     }

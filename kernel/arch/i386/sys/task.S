@@ -26,7 +26,7 @@ enter_userspace:
     mov %esp, %ebp
     mov 0xC(%ebp), %edx
     mov %edx, %esp
-    pushl MAGIC
+    pushl $MAGIC
 
     # Segment selector
     mov $0x23, %ax

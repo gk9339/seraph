@@ -130,6 +130,7 @@ static size_t hexlen( unsigned long hex )
 static size_t declen( unsigned long dec )
 {
     size_t len = 0;
+    if( dec == 0 ) return 1;
 
     while( dec!= 0 )
     {
@@ -311,6 +312,8 @@ int sprintf( char* s, const char* restrict format, ... )
 	}
     
     va_end(parameters);
+
+    *(s + written) = '\0';
 
     return written;
 }

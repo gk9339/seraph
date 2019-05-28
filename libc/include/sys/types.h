@@ -10,6 +10,7 @@ typedef signed long int32_t;
 typedef signed char int8_t;
 typedef unsigned long uintptr_t;
 
+typedef int pid_t;
 typedef int gid_t;
 typedef int uid_t;
 typedef int dev_t;
@@ -24,6 +25,5 @@ typedef long time_t;
 
 typedef unsigned long useconds_t;
 typedef long suseconds_t;
-typedef int pid_t;
 
 #endif

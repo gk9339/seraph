@@ -33,11 +33,10 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
 {
     debug_log("Start kernel_main");
     char debug_str[256];
-    multiboot_info_t* mbi;
-    initial_esp = esp;
-    uint32_t mboot_mods_count = 0;
-    multiboot_module_t* mboot_mods = NULL;
     extern char* cmdline;
+    uint32_t mboot_mods_count = 0;
+    multiboot_info_t* mbi;
+    multiboot_module_t* mboot_mods = NULL;
 
     /* CPU Initialization */
     debug_log("GDT / IDT initialization");
@@ -48,12 +47,20 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
     debug_log("Terminal initialization");
     terminal_initialize();
     
+    /* Multiboot check */
+    if( magic != MULTIBOOT_BOOTLOADER_MAGIC )
+    {
+        KPANIC("INVALID MAGIC NUMBER", NULL);
+    }
+    mbi = (multiboot_info_t*)addr;
+    initial_esp = esp;
+    
     uintptr_t last_mod = (uintptr_t)&_kernel_end;
     if( CHECK_FLAG(mbi->flags, 5) ) /* mods */
     {
-        sprintf(debug_str, "There %s %d module%s starting at 0x%x.", mbi->mods_count == 1 ? "is" : "are", mbi->mods_count, mbi->mods_count == 1 ? "" : "s", mbi->mods_addr);
+        sprintf(debug_str, "There %s %d module%s starting at 0x%x", mbi->mods_count == 1 ? "is" : "are", mbi->mods_count, mbi->mods_count == 1 ? "" : "s", mbi->mods_addr);
         debug_log(debug_str);
-        sprintf(debug_str, "Current kernel heap start point would be 0x%x.", &_kernel_end);
+        sprintf(debug_str, "Current kernel heap start point would be 0x%x", &_kernel_end);
         debug_log(debug_str);
         if( mbi->mods_count > 0 )
         {
@@ -90,12 +97,6 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
     while(last_mod & 0x7FF) last_mod++;
     kmalloc_startat(last_mod);
 
-    /* Multiboot check */
-    if( magic != MULTIBOOT_BOOTLOADER_MAGIC )
-    {
-        KPANIC("INVALID MAGIC NUMBER", NULL);
-    }
-    mbi = (multiboot_info_t*)addr;
     
     /* Memory Initialization */
     if( !CHECK_FLAG(mbi->flags, 0) ) /* mem_upper/mem_lower  */
@@ -163,7 +164,6 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
 
     debug_log("Initialize fs types");
     tarfs_initialize();
-    ext2_initialize();
 
     /* Load modules from bootloader */
     if( CHECK_FLAG(mbi->flags, 5) ) /* mods */
@@ -200,10 +200,15 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
         KPANIC("No root option given", NULL)
     }
 
+    char* boot_exec = "bin/init";
+    char* boot_arg = NULL;
     char* argv[] =
     {
-        "init"
+        boot_exec,
+        boot_arg,
+        NULL
     };
+
     int argc = 0;
     while( argv[argc] )
     {
@@ -211,9 +216,8 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
     }
 
     system(argv[0], argc, argv, NULL);
-
-    debug_log("INIT FAILED");
-    KPANIC("INIT FAILED", NULL)
+    
+    KPANIC("INIT FAILED", NULL);
 }
 
 void kpanic( char* error_message, const char* file, int line, struct regs* regs )

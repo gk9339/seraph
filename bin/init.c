@@ -1,8 +1,8 @@
-#include <stdio.h>
-
 int main( int argc, char** argv )
 {
-    printf("hello.");
+    asm volatile("cli");
 
     while(1){}
+
+    return 1;
 }

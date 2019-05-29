@@ -17,9 +17,9 @@
 .long CHECKSUM
 .long 0, 0, 0, 0, 0 # Only used in aout, set 0 for elf
 .long 1    # Video mode
-.long 1024 # Width
-.long 768  # Height
-.long 32   # Depth
+.long 1280 # Width
+.long 720  # Height
+.long 32  # Depth
 
 # Allocate the initial stack
 .section .kernel_stack, "aw", @nobits

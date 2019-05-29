@@ -1,9 +1,8 @@
-DEFAULT_HOST!=../sh/default-host.sh
+DEFAULT_HOST!=../script/default-host.sh
 HOST?=DEFAULT_HOST
-HOSTARCH!=../sh/target-triplet-to-arch.sh $(HOST)
+HOSTARCH!=../script/target-triplet-to-arch.sh $(HOST)
 
 CFLAGS?=-O0 -g
-CPPFLAGS?=
 LDFLAGS?=
 LIBS?=
 
@@ -13,8 +12,7 @@ EXEC_PREFIX?=$(PREFIX)
 BINDIR?=$(EXEC_PREFIX)/bin
 INCLUDEDIR?=$(PREFIX)/include
 
-CFLAGS:=$(CFLAGS) -Wall -Wextra
-CPPFLAGS:=$(CPPFLAGS) -Iinclude
+CFLAGS:=$(CFLAGS) -Wall -Wextra -Iinclude
 LDFLAGS:=$(LDFLAGS)
 LIBS:=$(LIBS) -nostdlib -lk -lgcc
 

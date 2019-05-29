@@ -111,12 +111,6 @@
 .extern dma_frame
 .type dma_frame, @function
 
-.extern __dso_handle
-.type __dso_handle, @function
-
-.extern __DTOR_END__
-.type __DTOR_END__, @function
-
 .extern enable_fpu
 .type enable_fpu, @function
 
@@ -987,9 +981,6 @@
 .extern timer_ticks
 .type timer_ticks, @function
 
-.extern __TMC_END__
-.type __TMC_END__, @function
-
 .extern tree_break_off
 .type tree_break_off, @function
 
@@ -1205,12 +1196,6 @@ kernel_symbols_start:
 
 .long dma_frame
 .asciz "dma_frame"
-
-.long __dso_handle
-.asciz "__dso_handle"
-
-.long __DTOR_END__
-.asciz "__DTOR_END__"
 
 .long enable_fpu
 .asciz "enable_fpu"
@@ -2081,9 +2066,6 @@ kernel_symbols_start:
 
 .long timer_ticks
 .asciz "timer_ticks"
-
-.long __TMC_END__
-.asciz "__TMC_END__"
 
 .long tree_break_off
 .asciz "tree_break_off"

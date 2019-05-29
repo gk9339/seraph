@@ -1,0 +1,98 @@
+diff --git a/bfd/config.bfd b/bfd/config.bfd
+index 0e1ddb65..163c6770 100644
+--- a/bfd/config.bfd
++++ b/bfd/config.bfd
+@@ -719,6 +719,10 @@ case "${targ}" in
+     want64=true
+     ;;
+ #endif
++  i[3-7]86-*-seraph*)
++    targ_defvec=i386_elf32_vec
++    targ_selvecs=
++    ;;
+   i[3-7]86-*-lynxos*)
+     targ_defvec=i386_elf32_vec
+     targ_selvecs="iamcu_elf32_vec i386_coff_lynx_vec i386_aout_lynx_vec"
+diff --git a/config.sub b/config.sub
+index 75bb6a31..a5c5e336 100755
+--- a/config.sub
++++ b/config.sub
+@@ -1363,7 +1363,7 @@ case $os in
+ 	     | powermax* | dnix* | nx6 | nx7 | sei* | dragonfly* \
+ 	     | skyos* | haiku* | rdos* | toppers* | drops* | es* \
+ 	     | onefs* | tirtos* | phoenix* | fuchsia* | redox* | bme* \
+-	     | midnightbsd* | amdhsa* | unleashed* | emscripten*)
++	     | midnightbsd* | amdhsa* | unleashed* | emscripten* | seraph*)
+ 	# Remember, each alternative MUST END IN *, to match a version number.
+ 		;;
+ 	qnx*)
+diff --git a/gas/configure.tgt b/gas/configure.tgt
+index 616d2113..f8843509 100644
+--- a/gas/configure.tgt
++++ b/gas/configure.tgt
+@@ -121,6 +121,7 @@ esac
+ generic_target=${cpu_type}-$vendor-$os
+ # Note: This table is alpha-sorted, please try to keep it that way.
+ case ${generic_target} in
++  i386-*-seraph*)           fmt=elf;;
+   aarch64*-*-elf*)			fmt=elf;;
+   aarch64*-*-fuchsia*)			fmt=elf;;
+   aarch64*-*-linux*)			fmt=elf em=linux
+diff --git a/ld/Makefile.am b/ld/Makefile.am
+index c2c798b4..f47909af 100644
+--- a/ld/Makefile.am
++++ b/ld/Makefile.am
+@@ -283,6 +283,7 @@ ALL_EMULATION_SOURCES = \
+ 	eelf32xstormy16.c \
+ 	eelf32xtensa.c \
+ 	eelf_i386.c \
++    eelf_i386_seraph.c \
+ 	eelf_i386_be.c \
+ 	eelf_i386_chaos.c \
+ 	eelf_i386_fbsd.c \
+@@ -1289,6 +1290,10 @@ eelf32xtensa.c: $(srcdir)/emulparams/elf32xtensa.sh $(ELF_DEPS) \
+ eelf_i386.c: $(srcdir)/emulparams/elf_i386.sh \
+   $(ELF_X86_DEPS) $(srcdir)/scripttempl/elf.sc ${GEN_DEPENDS}
+ 
++eelf_i386_seraph/c: $(srcdir)/emulparams/elf_i386_seraph.sh \
++  $(ELF_DEPS) $(srcdir)/scripttempl/elf.sc ${GEN_DEPENDS}
++	${GENSCRIPTS} elf_i386_seraph "$(tdir_elf_i386_seraph)"
++
+ eelf_i386_be.c: $(srcdir)/emulparams/elf_i386_be.sh \
+   $(ELF_DEPS) $(srcdir)/scripttempl/elf.sc ${GEN_DEPENDS}
+ 
+diff --git a/ld/configure.tgt b/ld/configure.tgt
+index beba17ef..c847e2f2 100644
+--- a/ld/configure.tgt
++++ b/ld/configure.tgt
+@@ -45,6 +45,9 @@ targ64_extra_libpath=
+ # architecture variants should be kept together even if their names
+ # break the alpha sorting.
+ case "${targ}" in
++i[3-7]86-*-seraph*)
++            targ_emul=elf_i386_seraph
++            targ_extra_emuls=elf_i386 ;;
+ aarch64_be-*-elf)	targ_emul=aarch64elfb
+ 			targ_extra_emuls="aarch64elf aarch64elf32 aarch64elf32b armelfb armelf" ;;
+ aarch64-*-elf | aarch64-*-rtems*)
+@@ -782,6 +785,10 @@ esac
+ NATIVE_LIB_DIRS='/usr/local/lib /lib /usr/lib'
+ case "${target}" in
+ 
++*-*-seraph*)
++  NATIVE_LIB_DIRS='/lib'
++  ;;
++
+ *-*-dragonfly*)
+   NATIVE_LIB_DIRS='/lib /usr/lib /usr/pkg/lib /usr/local/lib'
+   ;;
+diff --git a/ld/emulparams/elf_i386_seraph.sh b/ld/emulparams/elf_i386_seraph.sh
+new file mode 100644
+index 00000000..1369b907
+--- /dev/null
++++ b/ld/emulparams/elf_i386_seraph.sh
+@@ -0,0 +1,4 @@
++. ${srcdir}/emulparams/elf_i386.sh
++GENERATE_SHLIB_SCRIPT=yes
++GENERATE_PIE_SCRIPT=yes
++TEXT_START_ADDR=0x40000000

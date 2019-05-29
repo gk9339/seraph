@@ -30,7 +30,7 @@ pushd tarballs
     if [ ! -e "gcc-8.3.0.tar.gz" ]; then
         wget "https://ftp.gnu.org/gnu/gcc/gcc-8.3.0/gcc-8.3.0.tar.gz"
     fi
-    
+
     if [ ! -d "binutils-2.32" ]; then
         tar -xf "binutils-2.32.tar.gz"
         pushd "binutils-2.32"
@@ -45,6 +45,9 @@ pushd tarballs
         tar -xf "gcc-8.3.0.tar.gz"
         pushd "gcc-8.3.0"
             patch -p1 < $DIR/toolchain-patches/gcc.patch
+            pushd "libstdc++-v3"
+                automake-1.11
+            popd
         popd
     fi
 popd

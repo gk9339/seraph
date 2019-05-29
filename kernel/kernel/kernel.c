@@ -33,7 +33,6 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
 {
     debug_log("Start kernel_main");
     char debug_str[256];
-    extern char* cmdline;
     uint32_t mboot_mods_count = 0;
     multiboot_info_t* mbi;
     multiboot_module_t* mboot_mods = NULL;
@@ -127,16 +126,16 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
     debug_log("Finalize paging / heap install");
     paging_finalize();
     
-    char cmdline_[1024];
+    char cmdline[1024];
     if( CHECK_FLAG(mbi->flags, 2) ) /* cmdline */
     {
         size_t len = strlen((char*)mbi->cmdline);
-        memmove(cmdline_, (char*)mbi->cmdline, len + 1);
+        memmove(cmdline, (char*)mbi->cmdline, len + 1);
     }
 
     heap_install();
 
-    args_parse(cmdline_);
+    args_parse(cmdline);
 
     /* Interrupts Initialization */
     debug_log("Interrupts initialization");

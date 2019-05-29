@@ -12,9 +12,9 @@ EXEC_PREFIX?=$(PREFIX)
 BINDIR?=$(EXEC_PREFIX)/bin
 INCLUDEDIR?=$(PREFIX)/include
 
-CFLAGS:=$(CFLAGS) -Wall -Wextra -Iinclude
+CFLAGS:=$(CFLAGS) -Wall -Wextra
 LDFLAGS:=$(LDFLAGS)
-LIBS:=$(LIBS) -nostdlib -lk -lgcc
+LIBS:=$(LIBS) -lc -lgcc
 
 OBJS=\
 init.o \
@@ -28,15 +28,21 @@ init \
 all: $(OBJS) $(EXECS)
 
 .c.o:
+	$(CC) -MD -c $< -o $@ -std=gnu11 $(CFLAGS)
 
 $(EXECS): $(OBJS)
+	$(CC) -static $< -o $@ $(CFLAGS) $(LIBS)
 
 clean:
+	rm -f $(EXECS)
+	rm -f $(OBJS) *.d
 
 install: install-headers install-bin
 
 install-headers:
 
-install-bin:
+install-bin: $(EXECS)
+	mkdir -p $(DESTDIR)$(BINDIR)
+	cp $(EXECS) $(DESTDIR)$(BINDIR)
 
 -include $(OBJS:.o=.d)

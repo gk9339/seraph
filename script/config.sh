@@ -6,11 +6,12 @@ PROJECTS="libc kernel bin"
 
 export MAKE=${MAKE:-make}
 export HOST=${HOST:-$(./script/default-host.sh)}
+export TOOLCHAIN="$(pwd)/toolchain/bin/"
 
-export AR=${HOST}-ar
-export AS=${HOST}-as
-export CC=${HOST}-gcc
-export NM=${HOST}-nm
+export AR=${TOOLCHAIN}${HOST}-ar
+export AS=${TOOLCHAIN}${HOST}-as
+export CC=${TOOLCHAIN}${HOST}-gcc
+export NM=${TOOLCHAIN}${HOST}-nm
 
 export PREFIX=/
 export EXEC_PREFIX=$PREFIX

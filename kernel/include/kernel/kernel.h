@@ -18,7 +18,6 @@
 #define STOP while(1){PAUSE};
 
 extern void* _kernel_start;
-extern void* code;
 extern void* _kernel_end;
 extern uintptr_t initial_esp;
 

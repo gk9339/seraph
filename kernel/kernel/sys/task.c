@@ -250,9 +250,9 @@ void switch_next( void )
     ebp = current_process->thread.ebp;
     unswitch_fpu();
 
-    if( (eip < (uintptr_t)&code) || (eip > (uintptr_t)heap_end) )
+    if( (eip < (uintptr_t)&_kernel_start) || (eip > (uintptr_t)heap_end) )
     {
-        sprintf(debug, "Skipping broken process %d (eip = 0x%x <0x%x or >0x%x)", current_process->id, eip, &code, &_kernel_end);
+        sprintf(debug, "Skipping broken process %d (eip = 0x%x <0x%x or >0x%x)", current_process->id, eip, &_kernel_start, &_kernel_end);
         debug_log(debug);
         switch_next();
     }

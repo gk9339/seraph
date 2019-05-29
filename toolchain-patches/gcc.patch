@@ -93,24 +93,24 @@ index 7af8e02..1990a9f 100644
  	tm_file="${tm_file} dbxelf.h elfos.h newlib-stdint.h"
  	tm_file="${tm_file} aarch64/aarch64-elf.h aarch64/aarch64-elf-raw.h"
 diff --git a/libgcc/config.host b/libgcc/config.host
-index 11b4aca..d7e853a 100644
+index 11b4aca..8279114 100644
 --- a/libgcc/config.host
 +++ b/libgcc/config.host
-@@ -202,6 +202,10 @@ esac
+@@ -333,6 +333,10 @@ i[34567]86-*-cygwin* | x86_64-*-cygwin*)
+ esac
  
- # Common parts for widely ported systems.
  case ${host} in
 +i[3-7]86-*-seraph*)
-+  extra_parts="$extra_parts crti.o crtn.o"
-+  tmake_file="$tmake_file i386/t-crtstuff t-crtstuff-pic t-libgcc-pic"
-+  ;;
- *-*-darwin*)
-   asm_hidden_op=.private_extern
-   tmake_file="$tmake_file t-darwin ${cpu_type}/t-darwin t-libgcc-pic t-slibgcc-darwin"
++	extra_parts="$extra_parts crti.o crtn.o"
++    tmake_file="$tmake_file i386/t-crtstuff t-crtstuff-pic t-libgcc-pic"
++    ;;
+ aarch64*-*-elf | aarch64*-*-rtems*)
+ 	extra_parts="$extra_parts crtbegin.o crtend.o crti.o crtn.o"
+ 	extra_parts="$extra_parts crtfastmath.o"
 diff --git a/override.m4 b/override.m4
 index b5ce654..d3e815b 100644
---- a/override.m4
-+++ b/override.m4
+--- a/config/override.m4
++++ b/config/override.m4
 @@ -29,7 +29,7 @@ m4_copy_force([_AC_PREREQ], [AC_PREREQ])
  
  dnl Ensure exactly this Autoconf version is used
@@ -122,8 +122,8 @@ index b5ce654..d3e815b 100644
  dnl This allows to update the tree in steps (for testing)
 diff --git a/crossconfig.m4 b/crossconfig.m4
 index cb6e3af..e1f5689 100644
---- a/crossconfig.m4
-+++ b/crossconfig.m4
+--- a/libstdc++-v3/crossconfig.m4
++++ b/libstdc++-v3/crossconfig.m4
 @@ -5,6 +5,12 @@ dnl
  AC_DEFUN([GLIBCXX_CROSSCONFIG],[
  # Base decisions on target environment.

@@ -2,6 +2,7 @@
 #define _KERNEL_SERIAL_H
 
 #include <string.h>
+#include <stdarg.h>
 
 #define _inline inline __attribute__((always_inline))
 
@@ -59,5 +60,7 @@ static _inline void debug_log( const char* str )
     while( (inportb(0x3F8 + 5) & 0x20) == 0 );
     outportb(0x3F8, '\n');
 }
+
+void debug_logf( char* str, const char* format, ... );
 
 #endif

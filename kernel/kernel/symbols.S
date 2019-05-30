@@ -87,6 +87,9 @@
 .extern current_process
 .type current_process, @function
 
+.extern debug_logf
+.type debug_logf, @function
+
 .extern default_name
 .type default_name, @function
 
@@ -1056,6 +1059,9 @@
 .extern vfs_register
 .type vfs_register, @function
 
+.extern vsprintf
+.type vsprintf, @function
+
 .extern waitpid
 .type waitpid, @function
 
@@ -1160,6 +1166,9 @@ kernel_symbols_start:
 
 .long current_process
 .asciz "current_process"
+
+.long debug_logf
+.asciz "debug_logf"
 
 .long default_name
 .asciz "default_name"
@@ -2129,6 +2138,9 @@ kernel_symbols_start:
 
 .long vfs_register
 .asciz "vfs_register"
+
+.long vsprintf
+.asciz "vsprintf"
 
 .long waitpid
 .asciz "waitpid"

@@ -33,6 +33,7 @@ kernel/io/keyboard.o \
 kernel/io/tarfs.o \
 kernel/io/ext2.o \
 kernel/io/ramdisk.o \
+kernel/io/serial.o \
 kernel/mem/mem.o \
 kernel/mem/shm.o \
 kernel/sys/symbols.o \

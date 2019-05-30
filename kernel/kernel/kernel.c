@@ -57,10 +57,8 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
     uintptr_t last_mod = (uintptr_t)&_kernel_end;
     if( CHECK_FLAG(mbi->flags, 5) ) /* mods */
     {
-        sprintf(debug_str, "There %s %d module%s starting at 0x%x", mbi->mods_count == 1 ? "is" : "are", mbi->mods_count, mbi->mods_count == 1 ? "" : "s", mbi->mods_addr);
-        debug_log(debug_str);
-        sprintf(debug_str, "Current kernel heap start point would be 0x%x", &_kernel_end);
-        debug_log(debug_str);
+        debug_logf(debug_str, "There %s %d module%s starting at 0x%x", mbi->mods_count == 1 ? "is" : "are", mbi->mods_count, mbi->mods_count == 1 ? "" : "s", mbi->mods_addr);
+        debug_logf(debug_str, "Current kernel heap start point would be 0x%x", &_kernel_end);
         if( mbi->mods_count > 0 )
         {
             uint32_t i;
@@ -75,18 +73,15 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
                 {
                     /* Just in case some silly person put this *behind* the modules... */
                     last_mod = (uintptr_t)mod + sizeof(multiboot_module_t);
-                    sprintf(debug_str, "moving forward to 0x%x", last_mod);
-                    debug_log(debug_str);
+                    debug_logf(debug_str, "moving forward to 0x%x", last_mod);
                 }
-                sprintf(debug_str, "Module %d is at 0x%x:0x%x", i, module_start, module_end);
-                debug_log(debug_str);
+                debug_logf(debug_str, "Module %d is at 0x%x:0x%x", i, module_start, module_end);
                 if( last_mod < module_end )
                 {
                     last_mod = module_end;
                 }
             }
-            sprintf(debug_str, "Moving kernel heap start to 0x%x", last_mod);
-            debug_log(debug_str);
+            debug_logf(debug_str, "Moving kernel heap start to 0x%x", last_mod);
         }
     }
     if( (uintptr_t)mbi > last_mod )
@@ -115,8 +110,7 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
                 for( unsigned long int i = 0; i < mmap->len; i+= 0x1000 )
                 {
                     if( mmap->addr + i > 0xFFFFFFFF ) break;
-                    sprintf(debug_str, "Marking 0x%x", (uint32_t)mmap->addr + i);
-                    debug_log(debug_str);
+                    debug_logf(debug_str, "Marking 0x%x", (uint32_t)mmap->addr + i);
                     paging_mark_system((mmap->addr + i) & 0xFFFFF000);
                 }
             }
@@ -167,8 +161,7 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
     /* Load modules from bootloader */
     if( CHECK_FLAG(mbi->flags, 5) ) /* mods */
     {
-        sprintf(debug_str, "%d modules to load", mboot_mods_count);
-        debug_log(debug_str);
+        debug_logf(debug_str, "%d modules to load", mboot_mods_count);
         for( unsigned int i = 0; i < mbi->mods_count; ++i )
         {
             multiboot_module_t* mod = &mboot_mods[i];
@@ -176,8 +169,7 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
             uint32_t module_end = mod->mod_end;
             size_t   module_size = module_end - module_start;
 
-            sprintf(debug_str, "Loading ramdisk: 0x%x:0x%x", module_start, module_end);
-            debug_log(debug_str);
+            debug_logf(debug_str, "Loading ramdisk: 0x%x:0x%x", module_start, module_end);
             ramdisk_mount(module_start, module_size);
         }
     }
@@ -192,7 +184,6 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
         {
             root_type = args_value("root_type");
         }
-        debug_log(root_type);
         vfs_mount_type(root_type, args_value("root"), "/");
     }else
     {

@@ -31,6 +31,7 @@ int printf( const char* __restrict, ... );
 int putchar( int );
 int puts( const char* );
 int sprintf( char* buf, const char* __restrict, ... );
+int vsprintf( char* buf, const char* __restrict, va_list args );
 
 int fprintf( FILE*, const char*, ... );
 int vfprintf( FILE*, const char*, va_list );

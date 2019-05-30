@@ -244,11 +244,8 @@ int printf( const char* restrict format, ... )
 	return written;
 }
 
-int sprintf( char* s, const char* restrict format, ... )
+int vsprintf( char* s, const char* restrict format, va_list parameters )
 {
-    va_list parameters;
-    va_start(parameters, format);
-
     int written = 0;
 
 	while (*format != '\0') 
@@ -311,9 +308,18 @@ int sprintf( char* s, const char* restrict format, ... )
 		}
 	}
     
-    va_end(parameters);
 
     *(s + written) = '\0';
+
+    return written;
+}
+
+int sprintf( char* buf, const char* restrict format, ... )
+{
+    va_list parameters;
+    va_start(parameters, format);
+    int written = vsprintf(buf, format, parameters);
+    va_end(parameters);
 
     return written;
 }

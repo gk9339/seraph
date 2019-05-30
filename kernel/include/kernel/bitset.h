@@ -14,7 +14,6 @@ void bitset_free(bitset_t *set);
 void bitset_set(bitset_t *set, size_t bit);
 void bitset_clear(bitset_t *set, size_t bit);
 int bitset_test(bitset_t *set, size_t bit);
-/* Find first unset bit */
-int bitset_ffub(bitset_t *set);
+int bitset_ffub(bitset_t *set); /* Find first unset bit */
 
 #endif

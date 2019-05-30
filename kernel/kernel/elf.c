@@ -7,17 +7,17 @@
 #include <errno.h>
 #include <kernel/irq.h>
 
-typedef int (*exec_func)(char * path, fs_node_t * file, int argc, char ** argv, char ** env, int interp);
+typedef int (*exec_func)(char* path, fs_node_t* file, int argc, char** argv, char** env, int interp);
 
 typedef struct 
 {
 	exec_func func;
 	unsigned char bytes[4];
 	unsigned int  match;
-	char * name;
+	char* name;
 }exec_def_t;
 
-int exec_elf( char * path, fs_node_t * file, int argc, char ** argv, char ** env, int interp )
+int exec_elf( char* path, fs_node_t* file, int argc, char** argv, char** env, int interp )
 {
 	Elf32_Header header;
 
@@ -47,18 +47,19 @@ int exec_elf( char * path, fs_node_t * file, int argc, char ** argv, char ** env
 			close_fs(file);
 
 			unsigned int nargc = argc + 3;
-			char * args[nargc+1];
+			char* args[nargc+1];
 			args[0] = "ld.so";
 			args[1] = "-e";
 			args[2] = strdup(current_process->name);
 			int j = 3;
-			for (int i = 0; i < argc; ++i, ++j) {
+			for( int i = 0; i < argc; i++, j++ )
+            {
 				args[j] = argv[i];
 			}
 			args[j] = NULL;
 
-			fs_node_t * file = kopen("/lib/ld.so",0);
-			if (!file) return -1;
+			fs_node_t* file = kopen("/lib/ld.so",0);
+			if( !file ) return -1;
 
 			return exec_elf(NULL, file, nargc, args, env, 1);
 		}
@@ -71,7 +72,7 @@ int exec_elf( char * path, fs_node_t * file, int argc, char ** argv, char ** env
 	for( uintptr_t x = 0; x < (uint32_t)header.e_phentsize * header.e_phnum; x += header.e_phentsize )
     {
 		Elf32_Phdr phdr;
-		read_fs(file, header.e_phoff + x, sizeof(Elf32_Phdr), (uint8_t *)&phdr);
+		read_fs(file, header.e_phoff + x, sizeof(Elf32_Phdr), (uint8_t*)&phdr);
 		if( phdr.p_type == PT_LOAD )
         {
 			if( phdr.p_vaddr < base_addr ) 
@@ -95,7 +96,7 @@ int exec_elf( char * path, fs_node_t * file, int argc, char ** argv, char ** env
 	for( uintptr_t x = 0; x < (uint32_t)header.e_phentsize * header.e_phnum; x += header.e_phentsize )
     { 
 		Elf32_Phdr phdr;
-		read_fs(file, header.e_phoff + x, sizeof(Elf32_Phdr), (uint8_t *)&phdr);
+		read_fs(file, header.e_phoff + x, sizeof(Elf32_Phdr), (uint8_t*)&phdr);
 		if( phdr.p_type == PT_LOAD )
         {
 			/* TODO: These virtual address bounds should be in a header somewhere */
@@ -113,7 +114,7 @@ int exec_elf( char * path, fs_node_t * file, int argc, char ** argv, char ** env
 			size_t r = phdr.p_filesz;
 			while( r < phdr.p_memsz )
             {
-				*(char *)(phdr.p_vaddr + r) = 0;
+				*(char*)(phdr.p_vaddr + r) = 0;
 				r++;
 			}
 		}
@@ -129,7 +130,7 @@ int exec_elf( char * path, fs_node_t * file, int argc, char ** argv, char ** env
 
 	/* Collect arguments */
 	int envc = 0;
-	for( envc = 0; env[envc] != NULL; ++envc );
+	for( envc = 0; env[envc] != NULL; envc++ );
 
 	/* Format auxv */
 	Elf32_auxv auxv[] = 
@@ -138,21 +139,21 @@ int exec_elf( char * path, fs_node_t * file, int argc, char ** argv, char ** env
 		{0, 0}
 	};
 	int auxvc = 0;
-	for( auxvc = 0; auxv[auxvc].id != 0; ++auxvc );
+	for( auxvc = 0; auxv[auxvc].id != 0; auxvc++ );
 	auxvc++;
 
 	uintptr_t heap = current_process->image.entry + current_process->image.size;
-	while (heap & 0xFFF) heap++;
+	while( heap & 0xFFF ) heap++;
 	alloc_frame(get_page(heap, 1, current_directory), 0, 1);
 	invalidate_tables_at(heap);
-	char ** argv_ = (char **)heap;
-	heap += sizeof(char *) * (argc + 1);
-	char ** env_ = (char **)heap;
-	heap += sizeof(char *) * (envc + 1);
-	void * auxv_ptr = (void *)heap;
+	char** argv_ = (char**)heap;
+	heap += sizeof(char*) * (argc + 1);
+	char** env_ = (char**)heap;
+	heap += sizeof(char*) * (envc + 1);
+	void* auxv_ptr = (void*)heap;
 	heap += sizeof(Elf32_auxv) * (auxvc);
 
-	for( int i = 0; i < argc; ++i )
+	for( int i = 0; i < argc; i++ )
     {
 		size_t size = strlen(argv[i]) * sizeof(char) + 1;
 		for( uintptr_t x = heap; x < heap + size + 0x1000; x += 0x1000 )
@@ -160,14 +161,14 @@ int exec_elf( char * path, fs_node_t * file, int argc, char ** argv, char ** env
 			alloc_frame(get_page(x, 1, current_directory), 0, 1);
 		}
 		invalidate_tables_at(heap);
-		argv_[i] = (char *)heap;
-		memcpy((void *)heap, argv[i], size);
+		argv_[i] = (char*)heap;
+		memcpy((void*)heap, argv[i], size);
 		heap += size;
 	}
 	/* Don't forget the NULL at the end of that... */
 	argv_[argc] = 0;
 
-	for( int i = 0; i < envc; ++i )
+	for( int i = 0; i < envc; i++ )
     {
 		size_t size = strlen(env[i]) * sizeof(char) + 1;
 		for( uintptr_t x = heap; x < heap + size + 0x1000; x += 0x1000 )
@@ -175,8 +176,8 @@ int exec_elf( char * path, fs_node_t * file, int argc, char ** argv, char ** env
 			alloc_frame(get_page(x, 1, current_directory), 0, 1);
 		}
 		invalidate_tables_at(heap);
-		env_[i] = (char *)heap;
-		memcpy((void *)heap, env[i], size);
+		env_[i] = (char*)heap;
+		memcpy((void*)heap, env[i], size);
 		heap += size;
 	}
 	env_[envc] = 0;
@@ -192,7 +193,7 @@ int exec_elf( char * path, fs_node_t * file, int argc, char ** argv, char ** env
 	current_process->image.start = entry;
 
 	/* Close all fds >= 3 */
-	for( unsigned int i = 3; i < current_process->fds->length; ++i )
+	for( unsigned int i = 3; i < current_process->fds->length; i++ )
     {
 		if( current_process->fds->entries[i] )
         {
@@ -208,15 +209,15 @@ int exec_elf( char * path, fs_node_t * file, int argc, char ** argv, char ** env
 	return -1;
 }
 
-int exec_shebang( char * path, fs_node_t * file, int argc, char ** argv, char ** env, int interp )
+int exec_shebang( char* path, fs_node_t* file, int argc, char** argv, char** env, int interp )
 {
 	/* Read MAX_LINE... */
 	char tmp[100];
 	read_fs(file, 0, 100, (unsigned char *)tmp); close_fs(file);
-	char * cmd = (char *)&tmp[2];
-	if (*cmd == ' ') cmd++; /* Handle a leading space */
-	char * space_or_linefeed = strpbrk(cmd, " \n");
-	char * arg = NULL;
+	char* cmd = (char *)&tmp[2];
+	if( *cmd == ' ' ) cmd++; /* Handle a leading space */
+	char* space_or_linefeed = strpbrk(cmd, " \n");
+	char* arg = NULL;
 
 	if( !space_or_linefeed )
     {
@@ -241,14 +242,14 @@ int exec_shebang( char * path, fs_node_t * file, int argc, char ** argv, char **
 	memcpy(script, path, strlen(path)+1);
 
 	unsigned int nargc = argc + (arg ? 2 : 1);
-	char * args[nargc + 2];
+	char* args[nargc + 2];
 	args[0] = cmd;
 	args[1] = arg ? arg : script;
 	args[2] = arg ? script : NULL;
 	args[3] = NULL;
 
 	int j = arg ? 3 : 2;
-	for( int i = 1; i < argc; ++i, ++j )
+	for( int i = 1; i < argc; i++, j++ )
     {
 		args[j] = argv[i];
 	}
@@ -293,6 +294,7 @@ int system( char* path, int argc, char** argv, char** envin )
 
     exec(path, argc, argv_, envin? envin:env);
     kexit(-1);
+
     return -1;
 }
 

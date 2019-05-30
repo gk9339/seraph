@@ -19,6 +19,6 @@ int send_signal( pid_t proc, uint32_t signal, int force );
 int group_end_signal( int group, uint32_t signal, int force_root );
 
 void return_from_signal_handler( void );
-void fix_signal_stacks( void  ) ;
+void fix_signal_stacks( void ) ;
 
 #endif

@@ -33,9 +33,6 @@
 .extern boot_time
 .type boot_time, @function
 
-.extern bss
-.type bss, @function
-
 .extern calloc
 .type calloc, @function
 
@@ -69,14 +66,8 @@
 .extern close_fs
 .type close_fs, @function
 
-.extern cmdline
-.type cmdline, @function
-
 .extern cmos_dump
 .type cmos_dump, @function
-
-.extern code
-.type code, @function
 
 .extern convert_scancode
 .type convert_scancode, @function
@@ -95,9 +86,6 @@
 
 .extern current_process
 .type current_process, @function
-
-.extern data
-.type data, @function
 
 .extern default_name
 .type default_name, @function
@@ -1119,9 +1107,6 @@ kernel_symbols_start:
 .long boot_time
 .asciz "boot_time"
 
-.long bss
-.asciz "bss"
-
 .long calloc
 .asciz "calloc"
 
@@ -1155,14 +1140,8 @@ kernel_symbols_start:
 .long close_fs
 .asciz "close_fs"
 
-.long cmdline
-.asciz "cmdline"
-
 .long cmos_dump
 .asciz "cmos_dump"
-
-.long code
-.asciz "code"
 
 .long convert_scancode
 .asciz "convert_scancode"
@@ -1181,9 +1160,6 @@ kernel_symbols_start:
 
 .long current_process
 .asciz "current_process"
-
-.long data
-.asciz "data"
 
 .long default_name
 .asciz "default_name"

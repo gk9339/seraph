@@ -14,13 +14,13 @@
 
 #define KERNEL_STACK_SIZE 0x8000
 
+#define USER_ROOT_UID (user_t)0
+
 typedef signed int pid_t;
 typedef unsigned int user_t;
 typedef unsigned int status_t;
 
 extern list_t* process_list;
-
-#define USER_ROOT_UID (user_t)0
 
 /* Unix waitpid() options */
 enum wait_option
@@ -48,7 +48,7 @@ typedef struct thread
 typedef struct image
 {
     size_t size;
-    uintptr_t entry;
+    uintptr_t entry; /* Entry point */
     uintptr_t heap;
     uintptr_t heap_actual;
     uintptr_t stack;
@@ -77,34 +77,34 @@ typedef struct signal_table
 /* Portable process struct*/
 typedef struct process
 {
-    pid_t id;
-    char* name;
-    char* description;
-    user_t user;
-    user_t real_user;
-    int mask;
+    pid_t id;           /* Process ID */
+    char* name;         /* Process name */
+    char* description;  /* Process description */
+    user_t user;        /* Effective User */
+    user_t real_user;   /* Real user ID */
+    int mask;           /* umask */
 
     char** cmdline;
 
-    pid_t group;
-    pid_t job;
-    pid_t session;
+    pid_t group;    /* Thread group */
+    pid_t job;      /* Job group */
+    pid_t session;  /* Session group */
 
-    thread_t thread;
-    tree_node_t* tree_entry;
-    image_t image;
-    fs_node_t* wd_node;
-    char* wd_name;
-    fd_table_t* fds;
-    status_t status;
-    sig_table_t signals;
-    uint8_t finished;
-    uint8_t started;
-    uint8_t running;
-    struct regs* syscall_registers;
-    list_t* wait_queue;
-    list_t* shm_mappings;
-    list_t* signal_queue;
+    thread_t thread;            /* Task information */
+    tree_node_t* tree_entry;    /* Process tree entry */
+    image_t image;              /* Memory image information */
+    fs_node_t* wd_node;         /* Working directory pointer */
+    char* wd_name;              /* Working directory name */
+    fd_table_t* fds;            /* File descriptor table */
+    status_t status;            /* Process status */
+    sig_table_t signals;        /* Signal handlers */
+    uint8_t finished;           /* Process finished */
+    uint8_t started;            /* Process started */
+    uint8_t running;            /* Process running */
+    struct regs* syscall_registers; /* Registers at interrupt */
+    list_t* wait_queue;         /* Processes waiting on this process */
+    list_t* shm_mappings;       /* Shared memory mappings */
+    list_t* signal_queue;       /* Queued signals */
     thread_t signal_state;
     char* signal_kstack;
     node_t sched_node;

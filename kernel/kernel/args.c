@@ -4,7 +4,6 @@
 #include <kernel/args.h>
 #include <hashtable.h>
 #include <kernel/serial.h>
-char* cmdline = NULL;
 
 hashtable_t* kernel_args_table = NULL;
 

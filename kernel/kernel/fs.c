@@ -65,6 +65,7 @@ int has_permission( fs_node_t* node, int permission_bit )
 {
     if( !node ) return 0;
 
+    /* Even root needs exec */
     if( current_process->user == 0 && permission_bit != 01 )
     {
         return 1;

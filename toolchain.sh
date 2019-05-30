@@ -53,12 +53,11 @@ pushd tarballs
     fi
 popd
 
-mkdir -p local
 mkdir -p binutils-build
 mkdir -p gcc-build
 
 unset PKG_CONFIG_LIBDIR
-set -x
+
 pushd binutils-build
     $DIR/toolchain/tarballs/binutils-2.32/configure --target=$TARGET --prefix=$PREFIX --with-sysroot=$SYSROOT --disable-werror || exit 1
     make -j4

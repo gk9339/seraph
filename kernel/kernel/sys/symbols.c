@@ -13,7 +13,7 @@ typedef struct
     char name[];
 } kernel_symbol_t;
 
-void(* symbol_find(const char* name))(void)
+void (*symbol_find(const char* name))(void)
 {
     kernel_symbol_t* k = (kernel_symbol_t*)&kernel_symbols_start;
 

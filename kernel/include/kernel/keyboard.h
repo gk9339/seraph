@@ -7,8 +7,6 @@
 #define KEY_PENDING 0x64
 #define KEY_IRQ 1
 
-static uint8_t kb_status;
-
 int keyboard_install( void );
 char convert_scancode( unsigned char );
 

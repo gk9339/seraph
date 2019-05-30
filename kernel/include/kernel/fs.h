@@ -106,8 +106,8 @@ typedef struct fs_node
 
 struct dirent
 {
-    uint32_t ino;
-    char name[256];
+    uint32_t ino;   /* Inode */
+    char name[256]; /* Directory name */
 };
 
 struct stat

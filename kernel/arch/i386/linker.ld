@@ -14,7 +14,6 @@ SECTIONS
     _kernel_start = .;
 	.text BLOCK(4K) : ALIGN (4K)
 	{
-        code = .;
 		*(.multiboot)
 		*(.text)
 	}
@@ -28,7 +27,6 @@ SECTIONS
 	/* Read-write data (initialized) */
 	.data BLOCK(4K) : ALIGN (4K)
 	{
-        data = .;
 		*(.data)
         *(.symbols)
         PROVIDE(kernel_symbols_start = .);
@@ -38,7 +36,6 @@ SECTIONS
     /* Read-write data (uninitialized) and stack */
 	.bss BLOCK(4K) : ALIGN (4K)
 	{
-        bss = .;
 		*(COMMON)
 		*(.bss)
 		*(.kernel_stack)
@@ -49,6 +46,7 @@ SECTIONS
     /DISCARD/ :
 	{
 		*(.comment)
+        *(.eh_frame)
 		*(.note.gnu.build-id)
     }
 }

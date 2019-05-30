@@ -1,4 +1,4 @@
 *.d
 *.kernel
 *.o
-kernel/kernel/symbols.S
+symbols.S

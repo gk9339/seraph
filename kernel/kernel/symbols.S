@@ -1,5 +1,5 @@
 .section .symbols
-
+a
 .extern alloc_frame
 .type alloc_frame, @function
 

@@ -46,7 +46,8 @@ pushd tarballs
         pushd "gcc-8.3.0"
             patch -p1 < $DIR/toolchain-patches/gcc.patch
             pushd "libstdc++-v3"
-                automake-1.11
+                aclocal-1.15
+                automake-1.15
             popd
         popd
     fi

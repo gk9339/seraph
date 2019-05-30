@@ -1,7 +1,17 @@
 # seraph
 
 # Build requirements
-https://wiki.osdev.org/GCC_Cross-Compiler
+`automake-1.15`
+`gcc g++`
+`Make`
+`Bison`
+`Flex`
+`GMP`
+`MPC`
+`MPFR`
+`Texinfo`
+`GRUB2`
+`xorriso/libisoburn`
 
 # Build
 `./build.sh` - Build all parts of the project

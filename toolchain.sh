@@ -12,13 +12,10 @@ unset PREFIX
 unset CFLAGS
 unset SYSROOT
 
-DIR="$( pwd )"
-
 TARGET=i686-seraph
-PREFIX="$DIR/toolchain"
-SYSROOT="$DIR/sysroot"
+PREFIX=$TOOLCHAIN
 
-mkdir -p $PREFIX
+mkdir -p "$PREFIX"
 cd "$PREFIX"
 
 mkdir -p tarballs

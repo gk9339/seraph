@@ -78,30 +78,41 @@ uint32_t secs_of_month( int months, int year )
         {
     	case 11:
     		days += 30;
+            __attribute__((fallthrough));
     	case 10:
     		days += 31;
+            __attribute__((fallthrough));
     	case 9:
     		days += 30;
+            __attribute__((fallthrough));
     	case 8:
     		days += 31;
+            __attribute__((fallthrough));
     	case 7:
     		days += 31;
+            __attribute__((fallthrough));
     	case 6:
     		days += 30;
+            __attribute__((fallthrough));
     	case 5:
     		days += 31;
+            __attribute__((fallthrough));
     	case 4:
     		days += 30;
+            __attribute__((fallthrough));
     	case 3:
     		days += 31;
+            __attribute__((fallthrough));
     	case 2:
     		days += 28;
     		if( (year % 4 == 0) && ((year % 100 != 0) || (year % 400 == 0)) ) 
             {
     			days++;
     		}
+            __attribute__((fallthrough));
     	case 1:
     		days += 31;
+            __attribute__((fallthrough));
     	default:
     		break;
     }
@@ -141,10 +152,10 @@ uint32_t read_cmos( void )
     return time;
 }
 
-int gettimeofday( struct timeval* t, void* z )
+int gettimeofday( struct timeval* tv, void* tz __attribute__((unused)) )
 {
-    t->tv_sec = boot_time + timer_ticks + timer_drift;
-    t->tv_usec = timer_subticks * 1000;
+    tv->tv_sec = boot_time + timer_ticks + timer_drift;
+    tv->tv_usec = timer_subticks * 1000;
 
     return 0;
 }

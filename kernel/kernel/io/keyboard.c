@@ -4,7 +4,7 @@
 #include <kernel/serial.h>
 #include <kernel/irq.h>
 
-static int keyboard_handler( struct regs *r )
+static int keyboard_handler( struct regs *r __attribute__((unused)) )
 {
     unsigned char scancode;
     if(inportb(KEY_PENDING) & 0x01)

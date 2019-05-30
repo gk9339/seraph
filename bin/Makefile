@@ -9,7 +9,7 @@ INCLUDEDIR?=$(PREFIX)/include
 
 CFLAGS:=$(CFLAGS) -Wall -Wextra
 LDFLAGS:=$(LDFLAGS)
-LIBS:=$(LIBS) -lc -lgcc
+LIBS:=$(LIBS) -lc
 
 OBJS=\
 init.o \

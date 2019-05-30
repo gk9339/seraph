@@ -166,7 +166,7 @@ void tree_remove_reparent_root( tree_t* tree, tree_node_t* node )
     free(node);
 }
 
-void tree_break_off( tree_t* tree, tree_node_t* node )
+void tree_break_off( tree_t* tree __attribute__((unused)), tree_node_t* node )
 {
     tree_node_t* parent = node->parent;
     if( !parent ) return;

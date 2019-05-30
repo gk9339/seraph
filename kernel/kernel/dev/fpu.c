@@ -65,7 +65,7 @@ void init_fpu( void )
     asm volatile("fninit");
 }
 
-void invalid_op( struct regs* r )
+void invalid_op( struct regs* r __attribute__((unused)) )
 {
     enable_fpu();
     if( fpu_thread == current_process )

@@ -37,7 +37,7 @@ void timer_phase( int hz )
     outportb(PIT_A, (divisor >> 8) & PIT_MASK);
 }
 
-int timer_handler( struct regs* r )
+int timer_handler( struct regs* r __attribute__((unused)) )
 {
     if( ++timer_subticks == SUBTICKS_PER_TICK || (behind && ++timer_subticks == SUBTICKS_PER_TICK) )
     {

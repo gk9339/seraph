@@ -2,11 +2,6 @@ DEFAULT_HOST!=../script/default-host.sh
 HOST?=DEFAULT_HOST
 HOSTARCH!=../script/target-triplet-to-arch.sh $(HOST)
 
-CFLAGS?=-O0 -g
-LDFLAGS?=
-LIBS?=
-
-DESTDIR?=
 PREFIX?=/bin
 EXEC_PREFIX?=$(PREFIX)
 BINDIR?=$(EXEC_PREFIX)/bin

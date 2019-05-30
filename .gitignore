@@ -2,3 +2,4 @@
 isodir
 sysroot
 toolchain
+kernel/kernel/symsbols.S

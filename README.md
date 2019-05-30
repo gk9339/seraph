@@ -14,6 +14,8 @@
 `xorriso/libisoburn`
 
 # Build
+`./toolchain.sh` - Build the toolchain used for the rest of the build
+
 `./build.sh` - Build all parts of the project
 
 `./mkiso.sh` - Runs `./build.sh` then makes an iso image

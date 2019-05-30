@@ -2,4 +2,4 @@
 isodir
 sysroot
 toolchain
-kernel/kernel/symsbols.S
+kernel/kernel/symbols.S

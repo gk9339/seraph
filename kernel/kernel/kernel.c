@@ -212,9 +212,10 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
 
 void kpanic( char* error_message, const char* file, int line, struct regs* regs )
 {
+    terminal_clear();
     printf("PANIC: %s ", error_message);
     printf("File: %s ", file);
-    printf("Line: %x ", line);
+    printf("Line: %d ", line);
     if(regs)
     {
         printf("\nREGISTERS:");

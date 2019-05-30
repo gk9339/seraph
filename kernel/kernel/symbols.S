@@ -930,6 +930,9 @@
 .extern tasking_initialize
 .type tasking_initialize, @function
 
+.extern terminal_clear
+.type terminal_clear, @function
+
 .extern terminal_initialize
 .type terminal_initialize, @function
 
@@ -2009,6 +2012,9 @@ kernel_symbols_start:
 
 .long tasking_initialize
 .asciz "tasking_initialize"
+
+.long terminal_clear
+.asciz "terminal_clear"
 
 .long terminal_initialize
 .asciz "terminal_initialize"

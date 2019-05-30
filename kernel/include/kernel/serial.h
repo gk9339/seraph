@@ -1,6 +1,7 @@
 #ifndef _KERNEL_SERIAL_H
 #define _KERNEL_SERIAL_H
 
+#include <kernel/kernel.h>
 #include <string.h>
 #include <stdarg.h>
 

@@ -1,6 +1,6 @@
 int main( int argc, char** argv )
 {
-    while(1);
+    __asm__("cli"); // General Protection Fault
     
     return 1;
 }

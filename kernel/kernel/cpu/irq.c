@@ -2,6 +2,7 @@
 #include <stdio.h>
 
 #include <kernel/irq.h>
+#include <kernel/kernel.h>
 #include <kernel/symbols.h>
 #include <kernel/serial.h>
 #include <kernel/idt.h>

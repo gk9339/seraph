@@ -1,4 +1,5 @@
 #include <kernel/spinlock.h>
+#include <kernel/kernel.h>
 #include <kernel/task.h>
 
 /* Atomic operation to swap *x and v */

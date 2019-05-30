@@ -25,6 +25,15 @@ void terminal_initialize( void )
 	terminal_color = vga_entry_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
     terminal_buffer = VGA_MEMORY;
 
+    terminal_clear();
+
+    /* Disable cursor */
+    outportb(0x3D4, 0x0A);
+    outportb(0x3D5, 0x20);
+}
+
+void terminal_clear( void )
+{
     /* Clear screen */
     for (size_t y = 0; y < VGA_HEIGHT; y++) 
     {
@@ -34,10 +43,8 @@ void terminal_initialize( void )
 			terminal_buffer[index] = vga_entry(' ', terminal_color);
 		}
 	}
-
-    /* Disable cursor */
-    outportb(0x3D4, 0x0A);
-    outportb(0x3D5, 0x20);
+    terminal_row = 0;
+    terminal_column = 0;
 }
 
 void terminal_setcolor( uint8_t color ) 

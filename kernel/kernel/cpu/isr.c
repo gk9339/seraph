@@ -40,7 +40,7 @@ void isr_initialize( void )
 
     for( int i = 0; i < ISR_COUNT + 1; i++ )
     {
-        idt_set_gate(isrs[i].index, isrs[i].stub, 0x01, 0x8E);
+        idt_set_gate(isrs[i].index, isrs[i].stub, 0x08, 0x8E);
     }
 }
 

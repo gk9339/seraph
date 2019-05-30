@@ -50,17 +50,17 @@ static uint32_t write_ramdisk( fs_node_t* node, uint64_t offset, uint32_t size, 
     return size;
 }
 
-static void open_ramdisk( fs_node_t* node, unsigned int flags )
+static void open_ramdisk( fs_node_t* node __attribute__((unused)), unsigned int flags __attribute__((unused)) )
 {
     return;
 }
 
-static void close_ramdisk( fs_node_t* node )
+static void close_ramdisk( fs_node_t* node __attribute__((unused)) )
 {
     return;
 }
 
-static int ioctl_ramdisk( fs_node_t* node, int request, void* argp )
+static int ioctl_ramdisk( fs_node_t* node, int request, void* argp __attribute__((unused)) )
 {
     switch( request )
     {

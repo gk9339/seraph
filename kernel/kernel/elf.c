@@ -17,7 +17,7 @@ typedef struct
 	char* name;
 }exec_def_t;
 
-int exec_elf( char* path, fs_node_t* file, int argc, char** argv, char** env, int interp )
+int exec_elf( char* path __attribute__((unused)), fs_node_t* file, int argc, char** argv, char** env, int interp __attribute__((unused)) )
 {
 	Elf32_Header header;
 
@@ -209,7 +209,7 @@ int exec_elf( char* path, fs_node_t* file, int argc, char** argv, char** env, in
 	return -1;
 }
 
-int exec_shebang( char* path, fs_node_t* file, int argc, char** argv, char** env, int interp )
+int exec_shebang( char* path, fs_node_t* file, int argc, char** argv, char** env, int interp __attribute__((unused)) )
 {
 	/* Read MAX_LINE... */
 	char tmp[100];

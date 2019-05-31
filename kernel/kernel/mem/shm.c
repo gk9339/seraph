@@ -9,7 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-static spin_lock_t bsl;
+static spin_lock_t shm_lock;
 tree_t* shm_tree = NULL;
 
 void shm_initialize( void )
@@ -18,7 +18,7 @@ void shm_initialize( void )
     tree_set_root(shm_tree, NULL);
 }
 
-static shm_node_t* _get_node( char* shm_path, int create, tree_node_t* from )
+static shm_node_t* get_node_recursive( char* shm_path, int create, tree_node_t* from )
 {
     char *pch, *save;
     pch = strtok_r(shm_path, SHM_PATH_SEPARATOR, &save);
@@ -27,33 +27,33 @@ static shm_node_t* _get_node( char* shm_path, int create, tree_node_t* from )
     foreach(node, tnode->children)
     {
         tree_node_t* _node = (tree_node_t*)node->value;
-        shm_node_t* snode = (shm_node_t*)_node->value;
+        shm_node_t* shm_node = (shm_node_t*)_node->value;
 
-        if( !strcmp(snode->name, pch) )
+        if( !strcmp(shm_node->name, pch) )
         {
             if( *save == '\0' )
             {
-                return snode;
+                return shm_node;
             }
-            return _get_node(save, create, _node);
+            return get_node_recursive(save, create, _node);
         }
     }
 
     /* The next node in sequence was not found */
     if( create )
     {
-        shm_node_t* nsnode = malloc(sizeof(shm_node_t));
-        memcpy(nsnode->name, pch, strlen(pch) + 1);
-        nsnode->chunk = NULL;
+        shm_node_t* new_shm_node = malloc(sizeof(shm_node_t));
+        memcpy(new_shm_node->name, pch, strlen(pch) + 1);
+        new_shm_node->chunk = NULL;
 
-        tree_node_t* nnode = tree_node_insert_child(shm_tree, from, nsnode);
+        tree_node_t* nnode = tree_node_insert_child(shm_tree, from, new_shm_node);
 
         if( *save == '\0' )
         {
-            return nsnode;
+            return new_shm_node;
         }
 
-        return _get_node(save, create, nnode);
+        return get_node_recursive(save, create, nnode);
     }else
     {
         return NULL;
@@ -65,7 +65,7 @@ static shm_node_t* get_node( char* shm_path, int create )
     char* _path = malloc(strlen(shm_path) + 1);
     memcpy(_path, shm_path, strlen(shm_path) + 1);
 
-    shm_node_t* node = _get_node(_path, create, shm_tree->root);
+    shm_node_t* node = get_node_recursive(_path, create, shm_tree->root);
 
     free(_path);
     return node;
@@ -220,7 +220,7 @@ static size_t chunk_size( shm_chunk_t* chunk )
 
 void* shm_obtain( char* path, size_t* size )
 {
-    spin_lock(bsl);
+    spin_lock(shm_lock);
     process_t* proc = (process_t*)current_process;
 
     if( proc->group != 0 )
@@ -235,14 +235,14 @@ void* shm_obtain( char* path, size_t* size )
     {
         if( size == 0 )
         {
-            spin_unlock(bsl);
+            spin_unlock(shm_lock);
             return NULL;
         }
 
         chunk = create_chunk(node, *size);
         if( chunk == NULL )
         {
-            spin_unlock(bsl);
+            spin_unlock(shm_lock);
             return NULL;
         }
 
@@ -255,7 +255,7 @@ void* shm_obtain( char* path, size_t* size )
     void* vshm_start = map_in(chunk, proc);
     *size = chunk_size(chunk);
 
-    spin_unlock(bsl);
+    spin_unlock(shm_lock);
     invalidate_page_tables();
 
     return vshm_start;
@@ -263,7 +263,7 @@ void* shm_obtain( char* path, size_t* size )
 
 int shm_release( char* path )
 {
-    spin_lock(bsl);
+    spin_lock(shm_lock);
     process_t* proc = (process_t*)current_process;
 
     if( proc->group != 0 )
@@ -274,7 +274,7 @@ int shm_release( char* path )
     shm_node_t* _node = get_node(path, 0);
     if( !_node )
     {
-        spin_unlock(bsl);
+        spin_unlock(shm_lock);
         return 1;
     }
     shm_chunk_t* chunk = _node->chunk;
@@ -291,7 +291,7 @@ int shm_release( char* path )
     }
     if( node == NULL )
     {
-        spin_unlock(bsl);
+        spin_unlock(shm_lock);
         return 1;
     }
 
@@ -309,13 +309,13 @@ int shm_release( char* path )
     free(node);
     free(mapping);
 
-    spin_unlock(bsl);
+    spin_unlock(shm_lock);
     return 0;
 }
 
 void shm_release_all( process_t* proc )
 {
-    spin_lock(bsl);
+    spin_lock(shm_lock);
 
     node_t* node;
     while( (node = list_pop(proc->shm_mappings)) != NULL )
@@ -330,5 +330,5 @@ void shm_release_all( process_t* proc )
     proc->shm_mappings->head = proc->shm_mappings->tail = NULL;
     proc->shm_mappings->length = 0;
 
-    spin_unlock(bsl);
+    spin_unlock(shm_lock);
 }

@@ -1,31 +1,38 @@
 #include <string.h>
 #include <sys/types.h>
 
+/* concatenate two strings */
 char* strcat( char* dest, const char* src )
 {
     char* end = dest;
-	while( *end != '\0' )
+	
+    while( *end != '\0' )
     {
 		++end;
 	}
-	while( *src )
+	
+    while( *src )
     {
 		*end = *src;
 		end++;
 		src++;
 	}
-	*end = '\0';
+	
+    *end = '\0';
+
 	return dest;
 }
 
 char* strncat( char* dest, const char* src, size_t n )
 {
 	char* end = dest;
-	while( *end != '\0' )
+    size_t i = 0;
+	
+    while( *end != '\0' )
     {
 		++end;
 	}
-	size_t i = 0;
+	
 	while( *src && i < n )
     {
 		*end = *src;
@@ -33,6 +40,8 @@ char* strncat( char* dest, const char* src, size_t n )
 		src++;
 		i++;
 	}
-	*end = '\0';
-	return dest;
+	
+    *end = '\0';
+	
+    return dest;
 }

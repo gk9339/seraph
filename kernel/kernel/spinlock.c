@@ -6,7 +6,7 @@
 static inline int arch_atomic_swap( volatile int* x, int v )
 {
     asm(
-            "xchg %0, %1":"=r"(v), "=m"(*x):"0"(v):"memory"
+        "xchg %0, %1":"=r"(v), "=m"(*x):"0"(v):"memory"
         );
     return v;
 }
@@ -15,7 +15,7 @@ static inline int arch_atomic_swap( volatile int* x, int v )
 static inline void arch_atomic_store( volatile int* p, int x )
 {
     asm(
-            "movl %1, %0":"=m"(*p):"r"(x):"memory"
+        "movl %1, %0":"=m"(*p):"r"(x):"memory"
        );
 }
 
@@ -23,7 +23,7 @@ static inline void arch_atomic_store( volatile int* p, int x )
 static inline void arch_atomic_inc( volatile int* x )
 {
     asm(
-            "lock; incl %0":"=m"(*x):"m"(*x):"memory"
+        "lock; incl %0":"=m"(*x):"m"(*x):"memory"
        );
 }
 
@@ -31,7 +31,7 @@ static inline void arch_atomic_inc( volatile int* x )
 static inline void arch_atomic_dec( volatile int* x )
 {
     asm(
-            "lock; decl %0":"=m"(*x):"m"(*x):"memory"
+        "lock; decl %0":"=m"(*x):"m"(*x):"memory"
        );
 }
 

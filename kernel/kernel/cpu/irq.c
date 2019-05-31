@@ -26,14 +26,13 @@
 
 #define PIC_WAIT()\
     do{\
-        asm volatile("jmp 1f\n\t"   \
-                "1:\n\t"            \
-                "   jmp 2f\n\t"     \
-                "2:");\
+        asm volatile(               \
+                    "jmp 1f\n"      \
+                    "1:\n"          \
+                    "   jmp 2f\n"   \
+                    "2:"            \
+                    );              \
     }while(0)
-
-/* Interrupts */
-static volatile int sync_depth = 0;
 
 #define SYNC_CLI() asm volatile("cli");
 #define SYNC_STI() asm volatile("sti");
@@ -41,6 +40,9 @@ static volatile int sync_depth = 0;
 /* Interrupt requests */
 #define IRQ_CHAIN_SIZE 16
 #define IRQ_CHAIN_DEPTH 4
+
+/* Interrupts */
+static volatile int sync_depth = 0;
 
 static void(*irqs[IRQ_CHAIN_SIZE])(void);
 static irq_handler_chain_t irq_routines[IRQ_CHAIN_SIZE * IRQ_CHAIN_DEPTH] = {NULL};
@@ -50,12 +52,14 @@ void int_disable( void )
 {
     /* Check if enabled first */
     uint32_t flags;
-    asm volatile("pushf\n\t"
-            "pop %%eax\n\t"
-            "movl %%eax, %0\n\t"
-            :"=r"(flags)
-            :
-            :"%eax");
+    asm volatile(
+                "pushf\n"
+                "pop %%eax\n"
+                "movl %%eax, %0\n"
+                :"=r"(flags)
+                :
+                :"%eax"
+                );
 
     /* Disable interrupts */
     SYNC_CLI();
@@ -177,11 +181,10 @@ void irq_handler( struct regs* r )
             if( !handler ) break;
             if( handler(r) )
             {
-                goto done;
+                int_resume();
+                return;
             }
         }
         irq_ack(r->int_no - 32);
     }
-done:
-    int_resume();
 }

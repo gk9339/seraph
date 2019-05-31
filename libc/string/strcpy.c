@@ -7,6 +7,7 @@
 #define HIGHS (ONES * (UCHAR_MAX/2+1))
 #define HASZERO(X) (((X)-ONES) & ~(X) & HIGHS)
 
+/* copy a string */
 char* strcpy( char* restrict dest, const char* restrict src )
 {
     size_t* wd;
@@ -21,6 +22,7 @@ char* strcpy( char* restrict dest, const char* restrict src )
                 return dest;
             }
         }
+
         wd = (void*)dest;
         ws = (const void*)src;
         for(; !HASZERO(*ws); *wd++ = *ws++ );

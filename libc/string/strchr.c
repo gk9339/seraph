@@ -7,10 +7,11 @@
 #define HIGHS (ONES * (UCHAR_MAX/2+1))
 #define HASZERO(X) (((X)-ONES) & ~(X) & HIGHS)
 
+/* locate character in string */
 char* strchr( const char* s, int c )
 {
     char* r = strchrnul(s, c);
-    return *(unsigned char*)r == (unsigned char)c? r:0;
+    return *(unsigned char*)r == (unsigned char)c ? r : 0;
 }
 
 char* strchrnul( const char* s, int c )

@@ -4,31 +4,31 @@
 #define BITOP(A, B, OP) ((A)[(size_t)(B)/(8*sizeof *(A))] OP (size_t)1<<((size_t)(B)%(8*sizeof *(A))))
 #define MAX(A, B) ((A) > (B) ? (A) : (B))
 
-static char* strstr_2b( const unsigned char* h, const unsigned char* n )
+static char* strstr_2b( const unsigned char* haystack, const unsigned char* needle )
 {
-	uint16_t nw = n[0] << 8 | n[1];
-	uint16_t hw = h[0] << 8 | h[1];
-	for( h++; *h && hw != nw; hw = hw << 8 | *++h );
-	return *h ? (char *)h-1 : 0;
+	uint16_t nw = needle[0] << 8 | needle[1];
+	uint16_t hw = haystack[0] << 8 | haystack[1];
+	for( haystack++; *haystack && hw != nw; hw = hw << 8 | *haystack++ );
+	return *haystack ? (char *)haystack-1 : 0;
 }
 
-static char* strstr_3b( const unsigned char* h, const unsigned char* n )
+static char* strstr_3b( const unsigned char* haystack, const unsigned char* needle )
 {
-	uint32_t nw = n[0] << 24 | n[1] << 16 | n[2] << 8;
-	uint32_t hw = h[0] << 24 | h[1] << 16 | h[2] << 8;
-	for( h += 2; *h && hw != nw; hw = (hw|*++h) << 8 );
-	return *h ? (char *)h-2 : 0;
+	uint32_t nw = needle[0] << 24 | needle[1] << 16 | needle[2] << 8;
+	uint32_t hw = haystack[0] << 24 | haystack[1] << 16 | haystack[2] << 8;
+	for( haystack += 2; *haystack && hw != nw; hw = (hw|*haystack++) << 8 );
+	return *haystack ? (char *)haystack-2 : 0;
 }
 
-static char* strstr_4b( const unsigned char* h, const unsigned char* n )
+static char* strstr_4b( const unsigned char* haystack, const unsigned char* needle )
 {
-	uint32_t nw = n[0] << 24 | n[1] << 16 | n[2] << 8 | n[3];
-	uint32_t hw = h[0] << 24 | h[1] << 16 | h[2] << 8 | h[3];
-	for( h += 3; *h && hw != nw; hw = hw << 8 | *++h );
-	return *h ? (char *)h-3 : 0;
+	uint32_t nw = needle[0] << 24 | needle[1] << 16 | needle[2] << 8 | needle[3];
+	uint32_t hw = haystack[0] << 24 | haystack[1] << 16 | haystack[2] << 8 | haystack[3];
+	for( haystack += 3; *haystack && hw != nw; hw = hw << 8 | *haystack++ );
+	return *haystack ? (char *)haystack-3 : 0;
 }
 
-static char* strstr_twoway( const unsigned char* h, const unsigned char* n )
+static char* strstr_twoway( const unsigned char* haystack, const unsigned char* needle )
 {
 	size_t mem;
 	size_t mem0;
@@ -37,15 +37,15 @@ static char* strstr_twoway( const unsigned char* h, const unsigned char* n )
 	size_t l;
 
 	/* Computing length of needle and fill shift table */
-	for( l = 0; n[l] && h[l]; l++ )
+	for( l = 0; needle[l] && haystack[l]; l++ )
     {
-		BITOP(byteset, n[l], |=);
-		shift[n[l]] = l+1;
+		BITOP(byteset, needle[l], |=);
+		shift[needle[l]] = l+1;
 	}
 
-	if( n[l] )
+	if( needle[l] )
     {
-		return 0; /* hit the end of h */
+		return 0; /* hit the end of haystack */
 	}
 
 	/* Compute maximal suffix */
@@ -55,7 +55,7 @@ static char* strstr_twoway( const unsigned char* h, const unsigned char* n )
 	size_t p = 1;
 	while( jp+k<l )
     {
-		if( n[ip+k] == n[jp+k] )
+		if( needle[ip+k] == needle[jp+k] )
         {
 			if( k == p )
             {
@@ -65,7 +65,7 @@ static char* strstr_twoway( const unsigned char* h, const unsigned char* n )
             {
 				k++;
 			}
-		}else if( n[ip+k] > n[jp+k] )
+		}else if( needle[ip+k] > needle[jp+k] )
         {
 			jp += k;
 			k = 1;
@@ -85,7 +85,7 @@ static char* strstr_twoway( const unsigned char* h, const unsigned char* n )
 	k = p = 1;
 	while( jp+k<l )
     {
-		if( n[ip+k] == n[jp+k] )
+		if( needle[ip+k] == needle[jp+k] )
         {
 			if( k == p )
             {
@@ -95,7 +95,7 @@ static char* strstr_twoway( const unsigned char* h, const unsigned char* n )
             {
 				k++;
 			}
-		}else if( n[ip+k] < n[jp+k] )
+		}else if( needle[ip+k] < needle[jp+k] )
         {
 			jp += k;
 			k = 1;
@@ -115,7 +115,7 @@ static char* strstr_twoway( const unsigned char* h, const unsigned char* n )
 	}
 
 	/* Periodic needle? */
-	if( memcmp(n, n+p, ms+1) )
+	if( memcmp(needle, needle+p, ms+1) )
     {
 		mem0 = 0;
 		p = MAX(ms, l-ms-1) + 1;
@@ -126,13 +126,13 @@ static char* strstr_twoway( const unsigned char* h, const unsigned char* n )
 	mem = 0;
 
 	/* Initialize incremental end-of-haystack pointer */
-	const unsigned char * z = h;
+	const unsigned char * z = haystack;
 
 	/* Search loop */
 	for(;; )
     {
 		/* Update incremental end-of-haystack pointer */
-		if( (size_t)(z-h) < l )
+		if( (size_t)(z-haystack) < l )
         {
 			/* Fast estimate for MIN(l,63) */
 			size_t grow = l | 63;
@@ -140,7 +140,7 @@ static char* strstr_twoway( const unsigned char* h, const unsigned char* n )
 			if( z2 )
             {
 				z = z2;
-				if( (size_t)(z-h) < l )
+				if( (size_t)(z-haystack) < l )
                 {
 					return 0;
 				}
@@ -151,64 +151,65 @@ static char* strstr_twoway( const unsigned char* h, const unsigned char* n )
 		}
 
 		/* Check last byte first; advance by shift on mismatch */
-		if( BITOP(byteset, h[l-1], &) )
+		if( BITOP(byteset, haystack[l-1], &) )
         {
-			k = l-shift[h[l-1]];
+			k = l-shift[haystack[l-1]];
 			if( k )
             {
 				if( mem0 && mem && k < p ) k = l-p;
-				h += k;
+				haystack += k;
 				mem = 0;
 				continue;
 			}
 		}else
         {
-			h += l;
+			haystack += l;
 			mem = 0;
 			continue;
 		}
 
 		/* Compare right half */
-		for( k=MAX(ms+1,mem); n[k] && n[k] == h[k]; k++ );
-		if( n[k] )
+		for( k=MAX(ms+1,mem); needle[k] && needle[k] == haystack[k]; k++ );
+		if( needle[k] )
         {
-			h += k-ms;
+			haystack += k-ms;
 			mem = 0;
 			continue;
 		}
 		/* Compare left half */
-		for( k=ms+1; k>mem && n[k-1] == h[k-1]; k-- );
+		for( k=ms+1; k>mem && needle[k-1] == haystack[k-1]; k-- );
 		if( k <= mem )
         {
-			return (char*)h;
+			return (char*)haystack;
 		}
-		h += p;
+		haystack += p;
 		mem = mem0;
 	}
 }
 
-char* strstr( const char* h, const char* n )
+/* locate a substring */
+char* strstr( const char* haystack, const char* needle )
 {
 	/* Return immediately on empty needle */
-	if( !n[0] )
+	if( !needle[0] )
     {
-		return (char*)h;
+		return (char*)haystack;
 	}
 
 	/* Use faster algorithms for short needles */
-	h = strchr(h, *n);
-	if( !h || !n[1] )
+	haystack = strchr(haystack, *needle);
+	if( !haystack || !needle[1] )
     {
-		return (char*)h;
+		return (char*)haystack;
 	}
 
-	if( !h[1] )return 0;
-	if( !n[2] )return strstr_2b((void*)h, (void*)n);
-	if( !h[2] )return 0;
-	if( !n[3] )return strstr_3b((void*)h, (void*)n);
-	if( !h[3] )return 0;
-	if( !n[4] )return strstr_4b((void*)h, (void*)n);
+	if( !haystack[1] )return 0;
+	if( !needle[2] )return strstr_2b((void*)haystack, (void*)needle);
+	if( !haystack[2] )return 0;
+	if( !needle[3] )return strstr_3b((void*)haystack, (void*)needle);
+	if( !haystack[3] )return 0;
+	if( !needle[4] )return strstr_4b((void*)haystack, (void*)needle);
 
 	/* Two-way on large needles */
-	return strstr_twoway((void*)h, (void*)n);
+	return strstr_twoway((void*)haystack, (void*)needle);
 }

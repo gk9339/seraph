@@ -16,7 +16,7 @@ void enter_signal_handler( uintptr_t location, int signum, uintptr_t stack );
 void handle_signal( process_t* proc, signal_t* signal );
 
 int send_signal( pid_t proc, uint32_t signal, int force );
-int group_end_signal( int group, uint32_t signal, int force_root );
+int group_send_signal( int group, uint32_t signal, int force_root );
 
 void return_from_signal_handler( void );
 void fix_signal_stacks( void ) ;

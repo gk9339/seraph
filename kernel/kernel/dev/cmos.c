@@ -20,16 +20,16 @@ enum
     CMOS_YEAR = 9
 };
 
-void cmos_dump( uint16_t* values )
+static void cmos_dump( uint16_t* values )
 {
-    for( uint16_t i = 0; i < 128; i++ )
+    for( uint8_t i = 0; i < 128; i++ )
     {
         outportb(CMOS_ADDRESS, i);
         values[i] = inportb(CMOS_DATA);
     }
 }
 
-int is_update_in_progress( void )
+static int is_update_in_progress( void )
 {
     outportb(CMOS_ADDRESS, 0x0a);
     return inportb(CMOS_DATA) & 0x80;
@@ -40,11 +40,11 @@ void get_date( uint16_t* month, uint16_t* day )
     uint16_t values[128];
     cmos_dump(values);
 
-    *month = from_bcd(values[CMOS_MONTH]);
-    *day = from_bcd(values[CMOS_DAY]);
+    *month = (uint16_t)from_bcd(values[CMOS_MONTH]);
+    *day = (uint16_t)from_bcd(values[CMOS_DAY]);
 }
 
-uint32_t secs_of_years( int years )
+static uint32_t secs_of_years( int years )
 {
     uint32_t days = 0;
     years +=2000;
@@ -69,7 +69,7 @@ uint32_t secs_of_years( int years )
     return days * 86400;
 }
 
-uint32_t secs_of_month( int months, int year )
+static uint32_t secs_of_month( int months, int year )
 {
     year += 2000;
 

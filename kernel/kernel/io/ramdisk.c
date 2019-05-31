@@ -9,12 +9,12 @@
 
 static int last_device_number = 0;
 
-static uint32_t read_ramdisk( fs_node_t*, uint64_t, uint32_t, uint8_t* );
-static uint32_t write_ramdisk( fs_node_t*, uint64_t, uint32_t, uint8_t* );
+static uint32_t read_ramdisk( fs_node_t*, uint32_t, uint32_t, uint8_t* );
+static uint32_t write_ramdisk( fs_node_t*, uint32_t, uint32_t, uint8_t* );
 static void open_ramdisk( fs_node_t*, unsigned int );
 static void close_ramdisk( fs_node_t* );
 
-static uint32_t read_ramdisk( fs_node_t* node, uint64_t offset, uint32_t size, uint8_t* buffer )
+static uint32_t read_ramdisk( fs_node_t* node, uint32_t offset, uint32_t size, uint8_t* buffer )
 {
     if( offset > node->length )
     {
@@ -32,7 +32,7 @@ static uint32_t read_ramdisk( fs_node_t* node, uint64_t offset, uint32_t size, u
     return size;
 }
 
-static uint32_t write_ramdisk( fs_node_t* node, uint64_t offset, uint32_t size, uint8_t* buffer )
+static uint32_t write_ramdisk( fs_node_t* node, uint32_t offset, uint32_t size, uint8_t* buffer )
 {
     if( offset > node->length )
     {

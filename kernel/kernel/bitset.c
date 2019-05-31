@@ -40,7 +40,7 @@ void bitset_set( bitset_t* set, size_t bit )
     {
         bitset_resize( set, set->size << 1 );
     }
-    set->data[index] |= mask;
+    set->data[index] = (unsigned char)(set->data[index] | mask);
 }
 
 int bitset_ffub( bitset_t* set )
@@ -59,7 +59,7 @@ int bitset_ffub( bitset_t* set )
 void bitset_clear( bitset_t* set, size_t bit )
 {
     iom;
-    set->data[index] &= ~mask;
+    set->data[index] = (unsigned char)(set->data[index] & ~mask);
 }
 
 int bitset_test( bitset_t* set, size_t bit )

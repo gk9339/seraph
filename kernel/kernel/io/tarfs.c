@@ -1,3 +1,4 @@
+#include <kernel/tarfs.h>
 #include <kernel/fs.h>
 #include <kernel/kernel.h>
 #include <string.h>
@@ -180,7 +181,7 @@ static struct dirent * readdir_tar_root( fs_node_t*node, uint32_t index )
     return NULL;
 }
 
-static uint32_t read_tarfs( fs_node_t* node, uint64_t offset, uint32_t size, uint8_t * buffer )
+static uint32_t read_tarfs( fs_node_t* node, uint32_t offset, uint32_t size, uint8_t * buffer )
 {
     struct tarfs* self = node->device;
     struct ustar* file = malloc(sizeof(struct ustar));
@@ -468,7 +469,7 @@ static int tokenize( char* str, char* sep, char** buf )
     return argc;
 }
 
-fs_node_t* tar_mount( char* device, char* mount_path __attribute__((unused)) )
+static fs_node_t* tar_mount( char* device, char* mount_path __attribute__((unused)) )
 {
     char* arg = strdup(device);
     char* argv[10];

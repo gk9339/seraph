@@ -36,7 +36,7 @@ static inline void arch_atomic_dec( volatile int* x )
 }
 
 /* switch task while waiting for lock */
-void spin_wait( volatile int* addr, volatile int* waiters )
+static void spin_wait( volatile int* addr, volatile int* waiters )
 {
     if( waiters )
     {

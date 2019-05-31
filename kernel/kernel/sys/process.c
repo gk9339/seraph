@@ -253,7 +253,7 @@ process_t* spawn_kidle( void )
     return idle;
 }
 
-pid_t get_next_pid( void )
+static pid_t get_next_pid( void )
 {
     if( _next_pid > MAX_PID )
     {
@@ -269,7 +269,7 @@ pid_t get_next_pid( void )
     return pid;
 }
 
-void process_disown( process_t* proc )
+static void process_disown( process_t* proc )
 {
     tree_node_t* entry = proc->tree_entry;
 
@@ -375,7 +375,7 @@ process_t* spawn_process( volatile process_t* parent, int reuse_fds )
     return proc;
 }
 
-uint8_t process_compare( void* proc_v, void* pid_v )
+static uint8_t process_compare( void* proc_v, void* pid_v )
 {
     pid_t pid = (*(pid_t*)pid_v);
     process_t* proc = (process_t*)proc_v;
@@ -728,12 +728,12 @@ int waitpid( int pid, int* status, int options )
             {
                 *status = candidate->status;
             }
-            int pid = candidate->id;
+            int cpid = candidate->id;
             if( candidate->finished )
             {
                 reap_process(candidate);
             }
-            return pid;
+            return cpid;
         }else
         {
             if( options & WNOHANG )
@@ -813,7 +813,7 @@ int process_wait_nodes( process_t* process, fs_node_t* nodes[], int timeout )
         list_insert(((process_t*)process)->node_waits, proc);
         process->timeout_node = list_insert_after(sleep_queue, before, proc);
         spin_unlock(sleep_lock);
-        int resume();
+        int_resume();
     }else
     {
         process->timeout_node = NULL;

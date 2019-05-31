@@ -17,4 +17,6 @@ void irq_is_handler_free( size_t irq );
 void irq_gates( void );
 void irq_ack( size_t );
 
+char* get_irq_handler( int irq, int chain );
+
 #endif

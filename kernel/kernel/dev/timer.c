@@ -29,15 +29,15 @@ signed long _timer_drift = 0;
 
 static int behind = 0;
 
-void timer_phase( int hz )
+static void timer_phase( int hz )
 {
     int divisor = PIT_SCALE / hz;
     outportb(PIT_CONTROL, PIT_SET);
-    outportb(PIT_A, divisor & PIT_MASK);
-    outportb(PIT_A, (divisor >> 8) & PIT_MASK);
+    outportb(PIT_A, (unsigned char)divisor & PIT_MASK);
+    outportb(PIT_A, (unsigned char)(divisor >> 8) & PIT_MASK);
 }
 
-int timer_handler( struct regs* r __attribute__((unused)) )
+static int timer_handler( struct regs* r __attribute__((unused)) )
 {
     if( ++timer_subticks == SUBTICKS_PER_TICK || (behind && ++timer_subticks == SUBTICKS_PER_TICK) )
     {

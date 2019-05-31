@@ -51,7 +51,7 @@ static bool hexsprint( char* s, unsigned long data, size_t length )
         t = u % 16;
         if( t >= 10 )
             t += 'A' - '0' - 10;
-        *--i = t + '0';
+        *--i = (char)(t + '0');
         u /= 16;
     }
 
@@ -96,7 +96,7 @@ static bool decsprint( char* s,  unsigned long data, size_t length )
     while(u)
     {
         t = u % 10;
-        *--i = t + '0';
+        *--i = (char)(t + '0');
         u /= 10;
     }
 

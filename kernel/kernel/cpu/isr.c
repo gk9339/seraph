@@ -10,7 +10,7 @@
 
 static struct
 {
-    size_t index;
+    uint8_t index;
     void (*stub)(void);
 } isrs[32+1] __attribute__((used));
 
@@ -29,7 +29,7 @@ void isr_uninstall_handler( size_t isr )
 void isr_initialize( void )
 {
     char buffer[16];
-    for( int i = 0; i < ISR_COUNT; i++ )
+    for( uint8_t i = 0; i < ISR_COUNT; i++ )
     {
         sprintf(buffer, "_isr%d", i);
         isrs[i].index = i;
@@ -38,7 +38,7 @@ void isr_initialize( void )
     isrs[ISR_COUNT].index = SYSCALL_VECTOR;
     isrs[ISR_COUNT].stub = symbol_find("_isr127");
 
-    for( int i = 0; i < ISR_COUNT + 1; i++ )
+    for( uint8_t i = 0; i < ISR_COUNT + 1; i++ )
     {
         idt_set_gate(isrs[i].index, isrs[i].stub, 0x08, 0x8E);
     }

@@ -36,7 +36,7 @@ void tree_destroy( tree_t* tree )
     }
 }
 
-void tree_node_free( tree_node_t* node )
+static void tree_node_free( tree_node_t* node )
 {
     if( !node ) return;
     foreach(child, node->children)

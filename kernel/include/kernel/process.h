@@ -146,6 +146,7 @@ int process_is_ready( process_t* proc );
 
 void wakeup_sleepers( unsigned long seconds, unsigned long subseconds );
 void sleep_until( process_t* process, unsigned long seconds, unsigned long subseconds );
+int sleep_on( list_t* queue );
 
 extern volatile process_t* current_process;
 extern process_t* kernel_idle_task;

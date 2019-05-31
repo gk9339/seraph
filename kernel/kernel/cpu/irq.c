@@ -143,7 +143,7 @@ static void irq_remap( void )
 static void irq_setup_gates( void )
 {
     for( size_t i = 0; i < IRQ_CHAIN_SIZE; i++ )
-        idt_set_gate(32 + i, irqs[i], 0x08, 0x8E);
+        idt_set_gate((uint8_t)(32 + i), irqs[i], 0x08, 0x8E);
 }
 
 void irq_initialize( void )

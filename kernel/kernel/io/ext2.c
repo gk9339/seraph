@@ -2,7 +2,7 @@
 #include <kernel/fs.h>
 #include <kernel/kernel.h>
 
-fs_node_t* ext2_fs_mount( char* device, char* mount_path )
+static fs_node_t* ext2_fs_mount( char* device, char* mount_path )
 {
     (void)device, (void)mount_path;
     KPANIC("ext2 mount not implemented", NULL);

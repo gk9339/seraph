@@ -9,7 +9,6 @@ void get_date( uint16_t* month, uint16_t* day );
 extern uint32_t boot_time;
 extern uint32_t read_cmos( void );
 
-int gettimeofday( struct timeval* t, void* z );
 uint32_t now( void );
 
 #endif

@@ -215,7 +215,7 @@ void dma_frame( page_t* page, int is_kernel, int is_writable, uintptr_t address 
     set_frame(address);
 }
 
-void free_frame( page_t* page )
+static void free_frame( page_t* page )
 {
     uint32_t frame;
     if( !(frame = page->frame) )
@@ -228,7 +228,7 @@ void free_frame( page_t* page )
     }
 }
 
-uintptr_t memory_use( void )
+static uintptr_t memory_use( void )
 {
     uintptr_t ret = 0;
     uint32_t i, j;
@@ -244,7 +244,7 @@ uintptr_t memory_use( void )
     return ret * 4;
 }
 
-uintptr_t memort_total( void )
+static uintptr_t memory_total( void )
 {
     return nframes * 4;
 }
@@ -270,7 +270,7 @@ void paging_initialize( uint32_t memsize )
             );
 }
 
-void paging_mark_system( uint64_t addr )
+void paging_mark_system( uint32_t addr )
 {
     set_frame(addr);
 }
@@ -464,12 +464,12 @@ void* sbrk( uintptr_t increment )
 
 page_directory_t* clone_directory( page_directory_t* src )
 {
-    uintptr_t phys;
-    page_directory_t* dir = (page_directory_t*)kvmalloc_p(sizeof(page_directory_t), &phys);
+    uintptr_t dirphys;
+    page_directory_t* dir = (page_directory_t*)kvmalloc_p(sizeof(page_directory_t), &dirphys);
     memset(dir, 0, sizeof(page_directory_t));
     dir->ref_count = 1;
 
-    dir->physical_address = phys;
+    dir->physical_address = dirphys;
     uint32_t i;
     for( i = 0; i < 1024; ++i )
     {

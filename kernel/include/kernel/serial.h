@@ -54,7 +54,7 @@ static _inline void debug_log( const char* str )
     {
         if( str[i] == '\0' ) break;
         while( (inportb(0x3F8 + 5) & 0x20) == 0 );
-        outportb(0x3F8, str[i]);
+        outportb(0x3F8, (unsigned char)str[i]);
     }
     while( (inportb(0x3F8 + 5) & 0x20) == 0 );
     outportb(0x3F8, '\r');

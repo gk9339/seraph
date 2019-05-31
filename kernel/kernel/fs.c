@@ -123,7 +123,7 @@ int selectwait_fs( fs_node_t* node, void* process )
     return -EINVAL;
 }
 
-uint32_t read_fs( fs_node_t* node, uint64_t offset, uint32_t size, uint8_t* buffer )
+uint32_t read_fs( fs_node_t* node, uint32_t offset, uint32_t size, uint8_t* buffer )
 {
     if( !node ) return -ENOENT;
 
@@ -136,7 +136,7 @@ uint32_t read_fs( fs_node_t* node, uint64_t offset, uint32_t size, uint8_t* buff
     return -EINVAL;
 }
 
-uint32_t write_fs( fs_node_t* node, uint64_t offset, uint32_t size, uint8_t* buffer )
+uint32_t write_fs( fs_node_t* node, uint32_t offset, uint32_t size, uint8_t* buffer )
 {
     if( !node ) return -ENOENT;
 
@@ -790,7 +790,7 @@ void map_vfs_directory( char* c )
     }
 }
 
-fs_node_t* get_mount_point( char* path, unsigned int path_depth, char** outpath, unsigned int* outdepth )
+static fs_node_t* get_mount_point( char* path, unsigned int path_depth, char** outpath, unsigned int* outdepth )
 {
     size_t depth;
 
@@ -850,7 +850,7 @@ fs_node_t* get_mount_point( char* path, unsigned int path_depth, char** outpath,
     return last;
 }
 
-fs_node_t* kopen_recur( char* filename, uint32_t flags, uint32_t symlink_depth, char* relative_to )
+static fs_node_t* kopen_recur( char* filename, uint32_t flags, uint32_t symlink_depth, char* relative_to )
 {
     if (!filename) 
     {

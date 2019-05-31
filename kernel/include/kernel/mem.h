@@ -54,7 +54,7 @@ extern uintptr_t placement_pointer;
 void paging_initialize( uint32_t memsize );
 void paging_prestart( void );
 void paging_finalize( void );
-void paging_mark_system( uint64_t addr );
+void paging_mark_system( uint32_t addr );
 void switch_page_directory( page_directory_t* new );
 void invalidate_page_tables( void );
 void invalidate_pages_at( uintptr_t addr );

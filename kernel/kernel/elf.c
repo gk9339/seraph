@@ -58,10 +58,10 @@ int exec_elf( char* path __attribute__((unused)), fs_node_t* file, int argc, cha
 			}
 			args[j] = NULL;
 
-			fs_node_t* file = kopen("/lib/ld.so",0);
-			if( !file ) return -1;
+			fs_node_t* ldfile = kopen("/lib/ld.so",0);
+			if( !ldfile ) return -1;
 
-			return exec_elf(NULL, file, nargc, args, env, 1);
+			return exec_elf(NULL, ldfile, nargc, args, env, 1);
 		}
 	}
 

@@ -285,7 +285,7 @@ int send_signal( pid_t proc, uint32_t signal, int force_root )
     return 0;
 }
 
-int group_send_singal( int group, uint32_t signal, int force_root )
+int group_send_signal( int group, uint32_t signal, int force_root )
 {
     int kill_self = 0;
     int killed_something = 0;

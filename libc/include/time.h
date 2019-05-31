@@ -15,6 +15,6 @@ struct timezone
     int tz_dsttime;
 };
 
-int gettimeofday( struct timeval* p, void* z );
+int gettimeofday( struct timeval* tv, void* tz );
 
 #endif

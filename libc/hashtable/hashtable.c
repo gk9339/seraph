@@ -3,10 +3,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-unsigned int hashtable_string_hash(void * _key) 
+unsigned int hashtable_string_hash(void* _key) 
 {
     unsigned int hash = 0;
-    char * key = (char *)_key;
+    char* key = (char*)_key;
     int c;
     /* This is the so-called "sdbm" hash. It comes from a piece of
      * public domain code from a clone of ndbm. */
@@ -17,41 +17,41 @@ unsigned int hashtable_string_hash(void * _key)
     return hash;
 }
 
-int hashtable_string_comp(void * a, void * b) 
+int hashtable_string_comp(void* a, void* b) 
 {
     return !strcmp(a,b);
 }
 
-void * hashtable_string_dupe(void * key) 
+void* hashtable_string_dupe(void* key) 
 {
     return strdup(key);
 }
 
-unsigned int hashtable_int_hash(void * key) 
+static unsigned int hashtable_int_hash(void* key) 
 {
     return (unsigned int)key;
 }
 
-int hashtable_int_comp(void * a, void * b) 
+static int hashtable_int_comp(void* a, void* b) 
 {
     return (int)a == (int)b;
 }
 
-void * hashtable_int_dupe(void * key) 
+static void* hashtable_int_dupe(void* key) 
 {
     return key;
 }
 
-static void hashtable_int_free(void * ptr) 
+static void hashtable_int_free(void* ptr) 
 {
     (void)ptr;
     return;
 }
 
 
-hashtable_t * hashtable_create(int size) \
+hashtable_t* hashtable_create(int size) \
 {
-    hashtable_t * table = malloc(sizeof(hashtable_t));
+    hashtable_t* table = malloc(sizeof(hashtable_t));
 
     table->hash_func     = &hashtable_string_hash;
     table->hash_comp     = &hashtable_string_comp;
@@ -60,15 +60,15 @@ hashtable_t * hashtable_create(int size) \
     table->hash_val_free = &free;
 
     table->size = size;
-    table->entries = malloc(sizeof(hashtable_entry_t *) * size);
-    memset(table->entries, 0x00, sizeof(hashtable_entry_t *) * size);
+    table->entries = malloc(sizeof(hashtable_entry_t*) * size);
+    memset(table->entries, 0x00, sizeof(hashtable_entry_t*) * size);
 
     return table;
 }
 
-hashtable_t * hashtable_create_int(int size) 
+hashtable_t* hashtable_create_int(int size) 
 {
-    hashtable_t * table = malloc(sizeof(hashtable_t));
+    hashtable_t* table = malloc(sizeof(hashtable_t));
 
     table->hash_func     = &hashtable_int_hash;
     table->hash_comp     = &hashtable_int_comp;
@@ -77,20 +77,20 @@ hashtable_t * hashtable_create_int(int size)
     table->hash_val_free = &free;
 
     table->size = size;
-    table->entries = malloc(sizeof(hashtable_entry_t *) * size);
-    memset(table->entries, 0x00, sizeof(hashtable_entry_t *) * size);
+    table->entries = malloc(sizeof(hashtable_entry_t*) * size);
+    memset(table->entries, 0x00, sizeof(hashtable_entry_t*) * size);
 
     return table;
 }
 
-void * hashtable_set(hashtable_t * table, void * key, void * value) 
+void* hashtable_set(hashtable_t* table, void* key, void* value) 
 {
     unsigned int hash = table->hash_func(key) % table->size;
 
-    hashtable_entry_t * x = table->entries[hash];
+    hashtable_entry_t* x = table->entries[hash];
     if( !x ) 
     {
-        hashtable_entry_t * e = malloc(sizeof(hashtable_entry_t));
+        hashtable_entry_t* e = malloc(sizeof(hashtable_entry_t));
         e->key   = table->hash_key_dup(key);
         e->value = value;
         e->next = NULL;
@@ -98,11 +98,11 @@ void * hashtable_set(hashtable_t * table, void * key, void * value)
         return NULL;
     } else 
     {
-        hashtable_entry_t * p = NULL;
+        hashtable_entry_t* p = NULL;
         do {
             if( table->hash_comp(x->key, key) ) 
             {
-                void * out = x->value;
+                void* out = x->value;
                 x->value = value;
                 return out;
             } else 
@@ -111,7 +111,7 @@ void * hashtable_set(hashtable_t * table, void * key, void * value)
                 x = x->next;
             }
         }while( x );
-        hashtable_entry_t * e = malloc(sizeof(hashtable_entry_t));
+        hashtable_entry_t* e = malloc(sizeof(hashtable_entry_t));
         e->key   = table->hash_key_dup(key);
         e->value = value;
         e->next = NULL;
@@ -121,11 +121,11 @@ void * hashtable_set(hashtable_t * table, void * key, void * value)
     }
 }
 
-void * hashtable_get(hashtable_t * table, void * key) 
+void* hashtable_get(hashtable_t* table, void* key) 
 {
     unsigned int hash = table->hash_func(key) % table->size;
 
-    hashtable_entry_t * x = table->entries[hash];
+    hashtable_entry_t* x = table->entries[hash];
     if( !x ) 
     {
         return NULL;
@@ -142,11 +142,11 @@ void * hashtable_get(hashtable_t * table, void * key)
     }
 }
 
-void * hashtable_remove(hashtable_t * table, void * key) 
+void* hashtable_remove(hashtable_t* table, void* key) 
 {
     unsigned int hash = table->hash_func(key) % table->size;
 
-    hashtable_entry_t * x = table->entries[hash];
+    hashtable_entry_t* x = table->entries[hash];
     if( !x ) 
     {
         return NULL;
@@ -154,19 +154,19 @@ void * hashtable_remove(hashtable_t * table, void * key)
     {
         if( table->hash_comp(x->key, key) ) 
         {
-            void * out = x->value;
+            void* out = x->value;
             table->entries[hash] = x->next;
             table->hash_key_free(x->key);
             table->hash_val_free(x);
             return out;
         } else 
         {
-            hashtable_entry_t * p = x;
+            hashtable_entry_t* p = x;
             x = x->next;
             do {
                 if( table->hash_comp(x->key, key) ) 
                 {
-                    void * out = x->value;
+                    void* out = x->value;
                     p->next = x->next;
                     table->hash_key_free(x->key);
                     table->hash_val_free(x);
@@ -180,11 +180,11 @@ void * hashtable_remove(hashtable_t * table, void * key)
     }
 }
 
-int hashtable_has(hashtable_t * table, void * key) 
+int hashtable_has(hashtable_t* table, void* key) 
 {
     unsigned int hash = table->hash_func(key) % table->size;
 
-    hashtable_entry_t * x = table->entries[hash];
+    hashtable_entry_t* x = table->entries[hash];
     if( !x ) 
     {
         return 0;
@@ -202,13 +202,13 @@ int hashtable_has(hashtable_t * table, void * key)
 
 }
 
-list_t * hashtable_keys(hashtable_t * table) 
+list_t* hashtable_keys(hashtable_t* table) 
 {
-    list_t * l = list_create();
+    list_t* l = list_create();
 
     for( unsigned int i = 0; i < table->size; ++i )
     {
-        hashtable_entry_t * x = table->entries[i];
+        hashtable_entry_t* x = table->entries[i];
         while( x )
         {
             list_insert(l, x->key);
@@ -219,13 +219,13 @@ list_t * hashtable_keys(hashtable_t * table)
     return l;
 }
 
-list_t * hashtable_values(hashtable_t * table) 
+list_t* hashtable_values(hashtable_t* table) 
 {
-    list_t * l = list_create();
+    list_t* l = list_create();
 
     for( unsigned int i = 0; i < table->size; ++i )
     {
-        hashtable_entry_t * x = table->entries[i];
+        hashtable_entry_t* x = table->entries[i];
         while( x )
         {
             list_insert(l, x->value);
@@ -236,11 +236,11 @@ list_t * hashtable_values(hashtable_t * table)
     return l;
 }
 
-void hashtable_free(hashtable_t * table) 
+void hashtable_free(hashtable_t* table) 
 {
     for( unsigned int i = 0; i < table->size; ++i )
     {
-        hashtable_entry_t * x = table->entries[i], * p;
+        hashtable_entry_t* x = table->entries[i], * p;
         while( x )
         {
             p = x;
@@ -252,7 +252,7 @@ void hashtable_free(hashtable_t * table)
     free(table->entries);
 }
 
-int hashtable_is_empty(hashtable_t * table)
+int hashtable_is_empty(hashtable_t* table)
 {
     for( unsigned int i = 0; i < table->size; ++i )
     {

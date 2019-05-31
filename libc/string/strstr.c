@@ -6,9 +6,9 @@
 
 static char* strstr_2b( const unsigned char* haystack, const unsigned char* needle )
 {
-	uint16_t nw = needle[0] << 8 | needle[1];
-	uint16_t hw = haystack[0] << 8 | haystack[1];
-	for( haystack++; *haystack && hw != nw; hw = hw << 8 | *haystack++ );
+	uint16_t nw = (uint16_t)(needle[0] << 8 | needle[1]);
+	uint16_t hw = (uint16_t)(haystack[0] << 8 | haystack[1]);
+	for( haystack++; *haystack && hw != nw; hw = (uint16_t)(hw << 8 | *haystack++) );
 	return *haystack ? (char *)haystack-1 : 0;
 }
 

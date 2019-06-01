@@ -2,7 +2,8 @@
 
 # Build requirements
 `automake-1.15`
-`gcc g++`
+`gcc`
+`g++`
 `Make`
 `Bison`
 `Flex`
@@ -20,7 +21,7 @@
 
 `./mkiso.sh` - Runs `./build.sh` then makes an iso image
 
-`./qemu.sh` - Runs `./qemu.sh` then opens the iso in qemu -cdrom
+`./qemu.sh` - Runs `./mkiso.sh` then opens the iso in qemu -cdrom
 
 # Cleanup
 `./clean.sh` - Removes all build files

@@ -162,7 +162,7 @@ static void* map_in( shm_chunk_t* chunk, process_t* proc )
                 for( unsigned int i = 0; i < chunk->num_frames; i++ )
                 {
                     page_t* page = get_page(last_address + i * 0x1000, 1, proc->thread.page_directory);
-                    page->frame = chunk->frames[i];
+                    page->frame = chunk->frames[i] & 0xfffff;
                     alloc_frame(page, 0, 1);
                     invalidate_tables_at(last_address + i * 0x1000);
                     mapping->vaddrs[i] = last_address + i * 0x1000;
@@ -184,7 +184,7 @@ static void* map_in( shm_chunk_t* chunk, process_t* proc )
             for( unsigned int i = 0; i < chunk->num_frames; i++ )
             {
                 page_t * page = get_page(last_address + i * 0x1000, 1, proc->thread.page_directory);
-				page->frame = chunk->frames[i];
+				page->frame = chunk->frames[i] & 0xfffff;
 				alloc_frame(page, 0, 1);
 				invalidate_tables_at(last_address + i * 0x1000);
                 mapping->vaddrs[i] = last_address + i * 0x1000;
@@ -202,7 +202,7 @@ static void* map_in( shm_chunk_t* chunk, process_t* proc )
 
         page_t* page = get_page(new_vpage, 1, proc->thread.page_directory);
 
-        page->frame = chunk->frames[i];
+        page->frame = chunk->frames[i] & 0xfffff;
         alloc_frame(page, 0, 1);
         invalidate_tables_at(new_vpage);
         mapping->vaddrs[i] = new_vpage;

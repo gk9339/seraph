@@ -93,5 +93,3 @@ void fault_handler( struct regs* r )
         STOP;
     }
 }
-
-

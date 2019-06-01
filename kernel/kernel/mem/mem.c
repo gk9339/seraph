@@ -68,7 +68,7 @@ uintptr_t kmalloc_real( size_t size, int align, uintptr_t* phys )
                     set_frame((index + i) * 0x1000);
                     page_t* page = get_page((uintptr_t)address + (i * 0x1000), 0, kernel_directory);
                     ASSUME(page != NULL);
-                    page->frame = index + i;
+                    page->frame = (index + i) & 0xfffff;
                     page->writethrough = 1;
                     page->cachedisable = 1;
                 }
@@ -197,7 +197,7 @@ void alloc_frame( page_t* page, int is_kernel, int is_writable )
         uint32_t index = first_frame();
 
         set_frame(index * 0x1000);
-        page->frame = index;
+        page->frame = index & 0xfffff;
         spin_unlock(frame_alloc_lock);
         page->present = 1;
         page->rw = (is_writable == 1)?1:0;
@@ -211,7 +211,7 @@ void dma_frame( page_t* page, int is_kernel, int is_writable, uintptr_t address 
     page->present = 1;
     page->rw = (is_writable == 1)?1:0;
     page->user = (is_kernel == 1)?0:1;
-    page->frame = address / 0x1000;
+    page->frame = (address / 0x1000) & 0xfffff;
     set_frame(address);
 }
 

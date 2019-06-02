@@ -3,43 +3,44 @@
 #include <stdlib.h>
 #include <sys/types.h>
 
-static uint32_t read_null( fs_node_t* node, uint32_t offset, uint32_t size, uint8_t* buffer )
+static uint32_t read_null( fs_node_t* node __attribute__((unused)), uint32_t offset __attribute__((unused)), uint32_t size __attribute__((unused)), uint8_t* buffer __attribute__((unused)) )
 {
 	return 0;
 }
 
-static uint32_t write_null( fs_node_t* node, uint32_t offset, uint32_t size, uint8_t* buffer )
+static uint32_t write_null( fs_node_t* node __attribute__((unused)), uint32_t offset __attribute__((unused)), uint32_t size __attribute__((unused)), uint8_t* buffer __attribute__((unused)) )
 {
 	return 0;
 }
 
-static void open_null(fs_node_t* node, unsigned int flags)
+static void open_null(fs_node_t* node __attribute__((unused)), unsigned int flags __attribute__((unused)))
 {
 	return;
 }
 
-static void close_null(fs_node_t* node)
+static void close_null(fs_node_t* node __attribute__((unused)))
 {
 	return;
 }
 
-static uint32_t read_zero( fs_node_t* node, uint32_t offset, uint32_t size, uint8_t* buffer )
+static uint32_t read_zero( fs_node_t* node __attribute__((unused)), uint32_t offset __attribute__((unused)), uint32_t size, uint8_t* buffer __attribute__((unused)) )
 {
 	memset(buffer, 0x00, size);
+
 	return 1;
 }
 
-static uint32_t write_zero( fs_node_t* node, uint32_t offset, uint32_t size, uint8_t* buffer ) 
+static uint32_t write_zero( fs_node_t* node __attribute__((unused)), uint32_t offset __attribute__((unused)), uint32_t size __attribute__((unused)), uint8_t* buffer __attribute__((unused)) ) 
 {
 	return 0;
 }
 
-static void open_zero( fs_node_t* node, unsigned int flags )
+static void open_zero( fs_node_t* node __attribute__((unused)), unsigned int flags __attribute__((unused)) )
 {
 	return;
 }
 
-static void close_zero( fs_node_t* node )
+static void close_zero( fs_node_t* node __attribute__((unused)) )
 {
 	return;
 }

@@ -3,4 +3,4 @@
 _start:
 	pop %eax
 	push $main
-	call main
+	call _pre_main

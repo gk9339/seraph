@@ -56,7 +56,7 @@
 #define SYS_SETPGID 63
 #define SYS_GETPGID 64
 
-#define DECL_SYSCALL0(fn)                int syscall_##fn()
+#define DECL_SYSCALL0(fn)                int syscall_##fn( void )
 #define DECL_SYSCALL1(fn,p1)             int syscall_##fn(p1)
 #define DECL_SYSCALL2(fn,p1,p2)          int syscall_##fn(p1,p2)
 #define DECL_SYSCALL3(fn,p1,p2,p3)       int syscall_##fn(p1,p2,p3)
@@ -109,9 +109,12 @@
 		return __res; \
 }
 
+DECL_SYSCALL1(exit, int);
 DECL_SYSCALL3(open, const char *, int, int);
 DECL_SYSCALL3(read, int, char *, int);
 DECL_SYSCALL3(write, int, char *, int);
 DECL_SYSCALL1(close, int);
+DECL_SYSCALL2(nanosleep, unsigned long, unsigned long);
+DECL_SYSCALL0(yield);
 
 #endif

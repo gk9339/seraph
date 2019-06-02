@@ -1,4 +1,5 @@
 #include <kernel/irq.h>
+#include <kernel/timer.h>
 #include <kernel/isr.h>
 #include <sys/types.h>
 #include <kernel/types.h>
@@ -27,6 +28,12 @@ static void ptr_validate( void* ptr, const char* syscall )
         debug_logf(debug_str, "SEGFAULT: invalid pointer passsed to %s (0x%x < 0x%x)", syscall, (uintptr_t)ptr, current_process->image.entry);
         KPANIC("Segmentation fault", NULL);
     }
+}
+
+static int __attribute__((noreturn)) sys_exit( int retval )
+{
+    task_exit((retval & 0xFF) << 8);
+    while(1);
 }
 
 static int sys_open( const char* file, int flags, uint16_t mode )
@@ -181,12 +188,46 @@ static int sys_close( int fd )
     return -EBADF;
 }
 
+static int sys_sleepabs( unsigned long seconds, unsigned long subseconds )
+{
+    sleep_until((process_t*)current_process, seconds, subseconds);
+
+    switch_task(0);
+
+    if( seconds > timer_ticks || (seconds == timer_ticks && subseconds >= timer_subticks) )
+    {
+        return 0;
+    }else
+    {
+        return 1;
+    }
+}
+
+static int sys_sleep( unsigned long seconds, unsigned long subseconds )
+{
+    unsigned long s, ss;
+    relative_time(seconds, subseconds * 10, &s, &ss);
+
+    return sys_sleepabs(s, ss);
+}
+
+static int sys_yield( void )
+{
+    switch_task(1);
+
+    return 1;
+}
+
 static int (*syscalls[])() =
 {
-    [SYS_OPEN]  = sys_open,
-    [SYS_READ]  = sys_read,
+    [SYS_EXT] = sys_exit,
+    [SYS_OPEN] = sys_open,
+    [SYS_READ] = sys_read,
     [SYS_WRITE] = sys_write,
     [SYS_CLOSE] = sys_close,
+    [SYS_SLEEPABS] = sys_sleepabs,
+    [SYS_SLEEP] = sys_sleep,
+    [SYS_YIELD] = sys_yield,
 };
 
 static void syscall_handler( struct regs* r )

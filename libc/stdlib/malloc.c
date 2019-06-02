@@ -1,11 +1,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include <limits.h>
-
+#ifdef __is_libk
 #include <kernel/types.h>
 #include <kernel/kernel.h>
 #include <kernel/mem.h>
 #include <kernel/spinlock.h>
+#else
+#include <sys/syscall.h>
+#endif 
 
 #define NUM_BINS 11U
 #define SMALLEST_BIN_LOG 2U
@@ -27,11 +30,26 @@ static void* __attribute__((malloc)) kcalloc_i( uintptr_t nmemb, uintptr_t size 
 static void* __attribute__((malloc)) kvalloc_i( uintptr_t size );
 static void kfree_i( void* ptr );
 #else
+typedef volatile int spin_lock_t[2];
+
 static void* __attribute__((malloc)) malloc_i( uintptr_t size );
 static void* __attribute__((malloc)) realloc_i( void* ptr, uintptr_t size );
 static void* __attribute__((malloc)) calloc_i( uintptr_t nmemb, uintptr_t size );
 static void* __attribute__((malloc)) valloc_i( uintptr_t size );
 static void free_i( void* ptr );
+
+static void spin_lock( volatile int* lock )
+{
+    while( __sync_lock_test_and_set(lock, 0x01) )
+    {
+        syscall_yield();
+    }
+}
+
+static void spin_unlock( volatile int* lock )
+{
+    __sync_lock_release(lock);
+}
 #endif
 
 static spin_lock_t mem_lock = { 0 };
@@ -91,14 +109,11 @@ void* __attribute__((malloc)) valloc( uintptr_t size )
 void free( void* ptr )
 {
     spin_lock(mem_lock);
-    if( (uintptr_t)ptr > placement_pointer )
-    {
 #if defined(__is_libk)
         kfree_i(ptr);
 #else
     // TODO: userland free()
 #endif
-    }
     spin_unlock(mem_lock);
 }
 

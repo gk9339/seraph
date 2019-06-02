@@ -49,11 +49,17 @@ hashtable/hashtable.o \
 
 HOSTEDOBJS=\
 $(ARCH_HOSTEDOBJS) \
+libc.o \
 unistd/stub.o \
 unistd/open.o \
+unistd/usleep.o \
+unistd/sleep.o \
+stdio/stdio.o \
 stdio/stub.o \
 stdlib/stub.o \
 errno/errno.o \
+stdio/stdio.o \
+sched/sched_yield.o \
 
 OBJS=\
 $(FREEOBJS) \

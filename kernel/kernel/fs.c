@@ -9,6 +9,7 @@
 #include <tree.h>
 #include <kernel/process.h>
 #include <kernel/cmos.h>
+#include <kernel/serial.h>
 
 #define MAX_SYMLINK_DEPTH 8
 #define MAX_SYMLINK_SIZE 4096
@@ -704,10 +705,10 @@ void* vfs_mount( char* path, fs_node_t* local_root )
 
     tree_node_t * ret_val = NULL;
 
-    char * p = strdup(path);
-    char * i = p;
+    char* p = strdup(path);
+    char* i = p;
 
-    int path_len   = strlen(p);
+    int path_len = strlen(p);
 
     /* Chop the path up */
     while (i < p + path_len) 
@@ -1015,4 +1016,44 @@ static fs_node_t* kopen_recur( char* filename, uint32_t flags, uint32_t symlink_
 fs_node_t* kopen( char* filename, uint32_t flags )
 {
     return kopen_recur(filename, flags, 0, (char*)(current_process->wd_name));
+}
+
+static void debug_print_vfs_tree_node( tree_node_t* node, size_t height )
+{
+    /* End recursion on a blank entry */
+	if (!node) return;
+
+    char* tmp = malloc(512);
+	memset(tmp, 0, 512);
+	char* c = tmp;
+
+    /* Indent output */
+	for (uint32_t i = 0; i < height; ++i) {
+		c += sprintf(c, "  ");
+	}
+
+    /* Get the current process */
+	struct vfs_entry * fnode = (struct vfs_entry *)node->value;
+
+    /* Print the process name */
+	if (fnode->file) {
+		c += sprintf(c, "%s > %s 0x%x (%s, %s)", fnode->name, fnode->device, fnode->file, fnode->fs_type, fnode->file->name);
+	} else {
+		c += sprintf(c, "%s > (empty)", fnode->name);
+	}
+
+    /* Linefeed */
+	debug_log(tmp);
+	free(tmp);
+
+    foreach(child, node->children)
+    {
+		/* Recursively print the children */
+		debug_print_vfs_tree_node(child->value, height + 1);
+    }
+}
+
+void debug_print_vfs_tree( void )
+{
+	debug_print_vfs_tree_node(fs_tree->root, 0);
 }

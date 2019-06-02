@@ -83,7 +83,6 @@ static const char* exception_messages[32] =
 void fault_handler( struct regs* r )
 {
     irq_handler_t handler = isr_routines[r->int_no];
-    printf("%s\n", exception_messages[r->int_no]);
     if(handler)
     {
         handler(r);

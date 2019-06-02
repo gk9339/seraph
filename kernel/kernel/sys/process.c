@@ -269,16 +269,6 @@ static pid_t get_next_pid( void )
     return pid;
 }
 
-static void process_disown( process_t* proc )
-{
-    tree_node_t* entry = proc->tree_entry;
-
-    spin_lock(tree_lock);
-    tree_break_off(process_tree, entry);
-    tree_node_insert_child_node(process_tree, process_tree->root, entry);
-    spin_unlock(tree_lock);
-}
-
 process_t* spawn_process( volatile process_t* parent, int reuse_fds )
 {
     process_t* proc = malloc(sizeof(process_t));

@@ -44,11 +44,14 @@ kernel/sys/symbols.o \
 kernel/sys/task.o \
 kernel/sys/process.o \
 kernel/sys/signal.o \
+kernel/sys/syscall.o \
 kernel/spinlock.o \
 kernel/bitset.o \
 kernel/args.o \
 kernel/fs.o \
 kernel/elf.o \
+kernel/cbuffer.o \
+kernel/zero.o \
 
 OBJS=\
 $(ARCHDIR)/crti.o \
@@ -75,10 +78,10 @@ seraph.kernel: $(OBJS) $(ARCHDIR)/linker.ld
 	grub-file --is-x86-multiboot seraph.kernel
 
 .c.o:
-	$(CC) -MD -c $< -o $@ -std=gnu11 $(CFLAGS) $(CPPFLAGS)
+	$(CC) -MD -c $< -o $@ -std=gnu11 $(CFLAGS)$(CPPFLAGS)
 
 .S.o:
-	$(CC) -MD -c $< -o $@ $(CFLAGS) $(CPPFLAGS)
+	$(CC) -MD -c $< -o $@ $(CFLAGS)$(CPPFLAGS)
 
 clean:
 	rm -f seraph.kernel

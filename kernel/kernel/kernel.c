@@ -24,6 +24,7 @@
 #include <kernel/args.h>
 #include <kernel/elf.h>
 #include <kernel/ramdisk.h>
+#include <kernel/syscall.h>
 
 #define CHECK_FLAG(flags,bit) ((flags)&(1<<(bit)))
 
@@ -90,7 +91,6 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
     }
     while(last_mod & 0x7FF) last_mod++;
     kmalloc_startat(last_mod);
-
     
     /* Memory Initialization */
     if( !CHECK_FLAG(mbi->flags, 0) ) /* mem_upper/mem_lower  */
@@ -148,13 +148,16 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
     debug_log("FPU initialization");
     fpu_initialize();
 
+    debug_log("Syscalls initialization");
+    syscalls_initialize();
+
     debug_log("SHM initialization");
     shm_initialize();
 
     /* Test keyboard handler */
     debug_log("Install keyboard handler");
     keyboard_install();
-
+    
     debug_log("Initialize fs types");
     tarfs_initialize();
 
@@ -173,8 +176,9 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
             ramdisk_mount(module_start, module_size);
         }
     }
-
+    
     map_vfs_directory("/dev");
+    zero_initialize();
     
     debug_log("setup root mount");
     if( args_present("root") )
@@ -188,6 +192,11 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
     }else
     {
         KPANIC("No root option given", NULL)
+    }
+
+    if( !fs_root )
+    {
+        map_vfs_directory("/");
     }
 
     char* boot_exec = "bin/init";
@@ -212,22 +221,37 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
 
 void kpanic( char* error_message, const char* file, int line, struct regs* regs )
 {
-    terminal_clear();
+    int_disable();
+    char debug_str[256];
+
+    terminal_setcolor(4);
+
     printf("PANIC: %s ", error_message);
+    debug_logf(debug_str, "PANIC: %s ", error_message);
     printf("File: %s ", file);
+    debug_logf(debug_str, "File: %s ", file);
     printf("Line: %d ", line);
+    debug_logf(debug_str, "Line: %d ", line);
     if(regs)
     {
         printf("\nREGISTERS:");
+        debug_logf(debug_str, "\nREGISTERS:");
         printf("eax=0x%x ebx=0x%x\n", regs->eax, regs->ebx);
+        debug_logf(debug_str, "eax=0x%x ebx=0x%x\n", regs->eax, regs->ebx);
         printf("ecx=0x%x edx=0x%x\n", regs->ecx, regs->edx);
+        debug_logf(debug_str, "ecx=0x%x edx=0x%x\n", regs->ecx, regs->edx);
         printf("esp=0x%x ebp=0x%x\n", regs->esp, regs->ebp);
+        debug_logf(debug_str, "esp=0x%x ebp=0x%x\n", regs->esp, regs->ebp);
         printf("ERRCD: 0x%x ", regs->err_code);
+        debug_logf(debug_str, "ERRCD: 0x%x ", regs->err_code);
         printf("EFLAGS: 0x%x\n", regs->eflags);
+        debug_logf(debug_str, "EFLAGS: 0x%x\n", regs->eflags);
         printf("User ESP: 0x%x ", regs->useresp);
+        debug_logf(debug_str, "User ESP: 0x%x ", regs->useresp);
         printf("eip=0x%x\n", regs->eip);
+        debug_logf(debug_str, "eip=0x%x\n", regs->eip);
     }
-
+    
     int_disable();
     STOP
 }

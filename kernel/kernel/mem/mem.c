@@ -228,7 +228,7 @@ static void free_frame( page_t* page )
     }
 }
 
-static uintptr_t memory_use( void )
+uintptr_t memory_use( void )
 {
     uintptr_t ret = 0;
     uint32_t i, j;
@@ -244,7 +244,7 @@ static uintptr_t memory_use( void )
     return ret * 4;
 }
 
-static uintptr_t memory_total( void )
+uintptr_t memory_total( void )
 {
     return nframes * 4;
 }
@@ -426,11 +426,10 @@ void page_fault( struct regs* r )
     int reserved = r->err_code & 0x8 ?1:0;
     int id = r->err_code & 0x10 ?1:0;
 
-    sprintf(debug_str, 
-    "Segmentation Fault:(p:%d, rw:%d, user:%d, reserved:%d, id:%d) at 0x%x eip: 0x%x pid = %d, %d [%s]",
-            present, rw, user, reserved, id, faulting_address, r->eip, current_process->id, 
-            current_process->group, current_process->name);
-    debug_log(debug_str);
+    debug_logf(debug_str, "Segmentation Fault:(p:%d, rw:%d, user:%d, reserved:%d, id:%d) at 0x%x eip: 0x%x pid = %d, %d [%s]",
+                present, rw, user, reserved, id, faulting_address, r->eip, current_process->id, current_process->group, current_process->name);
+
+    send_signal(current_process->id, SIGSEGV, 1);
 }
 
 void heap_install( void )

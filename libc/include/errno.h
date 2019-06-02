@@ -125,4 +125,6 @@
 #define ESTRPIPE 143          /* Streams pipe error */
 #define EWOULDBLOCK EAGAIN    /* Operation would block */
 
+extern int errno;
+
 #endif

@@ -277,9 +277,18 @@ int vsprintf( char* s, const char* restrict format, va_list parameters )
         {
 			format++;
 			const char* str = va_arg(parameters, const char*);
-			size_t len = strlen(str);
-			if (!sprint(s + written, str, len))
-				return -1;
+            size_t len;
+            if( str != NULL )
+            {
+    			len = strlen(str);
+	    		if( !sprint(s + written, str, len) )
+		    		return -1;
+            }else
+            {
+                len = 6;
+                if( !sprint(s + written, "(null)", len) )
+                    return -1;
+            }
 			written += len;
 		}else if( *format == 'x' )
         {

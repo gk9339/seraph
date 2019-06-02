@@ -6,6 +6,7 @@ mkdir -p isodir
 mkdir -p isodir/boot
 mkdir -p isodir/boot/grub
 
+mkdir -p sysroot/dev
 ./script/initrd.py
 
 cp sysroot/boot/seraph.kernel isodir/boot/seraph.kernel

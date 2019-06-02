@@ -170,10 +170,12 @@ int vfs_register(char * name, vfs_mount_callback callback);
 int vfs_mount_type(char * type, char * arg, char * mountpoint);
 void vfs_lock(fs_node_t * node);
 
-void debug_print_vfs_tree(void);
+void debug_print_vfs_tree( void );
 
 void map_vfs_directory(char *);
 
 int make_unix_pipe(fs_node_t ** pipes);
+
+void zero_initialize( void );
 
 #endif

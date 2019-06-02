@@ -82,4 +82,7 @@ page_table_t* clone_table( page_table_t* src, uintptr_t* physAddr );
 void move_stack( void* new_stack_start, size_t size );
 void copy_page_physical( uint32_t, uint32_t );
 
+uintptr_t memory_use( void );
+uintptr_t memory_total( void );
+
 #endif

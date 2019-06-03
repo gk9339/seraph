@@ -1,9 +1,9 @@
 #ifndef _KERNEL_SERIAL_H
 #define _KERNEL_SERIAL_H
 
-#include <kernel/kernel.h>
-#include <string.h>
-#include <stdarg.h>
+#include <stddef.h> /* size_t */
+#include <kernel/kernel.h> /* asm volatile macro */
+#include <string.h> /* strlen */
 
 #define _inline inline __attribute__((always_inline))
 
@@ -50,7 +50,8 @@ static _inline void inportsm( unsigned short port, unsigned char* data, unsigned
 
 static _inline void debug_log( const char* str )
 {
-    for( size_t i = 0; i < strlen(str); i++ )
+    size_t len = strlen(str);
+    for( size_t i = 0; i < len; i++ )
     {
         if( str[i] == '\0' ) break;
         while( (inportb(0x3F8 + 5) & 0x20) == 0 );

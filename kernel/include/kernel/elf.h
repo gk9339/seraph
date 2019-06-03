@@ -1,7 +1,7 @@
 #ifndef _KERNEL_ELF_H
 #define _KERNEL_ELF_H
 
-#include <sys/types.h>
+#include <sys/types.h> /* intN_t */
 
 /*
  * ELF Magic Signature

@@ -1,10 +1,9 @@
 #ifndef _KERNEL_MEM_H
 #define _KERNEL_MEM_H
 
-#include <stddef.h>
-
-#include <kernel/types.h>
-#include <sys/types.h>
+#include <stddef.h> /* size_t */
+#include <kernel/types.h> /* struct regs */
+#include <sys/types.h> /* intN_t */
 
 #define USER_STACK_BOTTOM 0xAFF00000
 #define USER_STACK_TOP 0xB0000000

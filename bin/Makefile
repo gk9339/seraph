@@ -26,7 +26,7 @@ all: $(OBJS) $(EXECS)
 	$(CC) -MD -c $< -o $@ -std=gnu11 $(CFLAGS)
 
 $(EXECS): $(OBJS)
-	$(CC) -static $< -o $@ $(CFLAGS) $(LIBS)
+	$(CC) $< -o $@ $(CFLAGS) $(LIBS)
 
 clean:
 	rm -f $(EXECS)

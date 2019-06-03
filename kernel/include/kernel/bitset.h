@@ -1,7 +1,7 @@
 #ifndef _KERNEL_BITSET_H
 #define _KERNEL_BITSET_H
 
-#include <stddef.h>
+#include <stddef.h> /* for size_t */
 
 typedef struct
 {

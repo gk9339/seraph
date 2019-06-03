@@ -6,5 +6,5 @@ DEFN_SYSCALL0(yield, SYS_YIELD)
 
 int sched_yield( void )
 {
-    syscall_yield();
+    return syscall_yield();
 }

@@ -3,28 +3,28 @@
 #include <stdio.h>
 #include <kernel/kernel.h>
 #include <kernel/multiboot.h>
-#include <kernel/serial.h>
 #include <kernel/gdt.h>
 #include <kernel/idt.h>
 #include <kernel/isr.h>
 #include <kernel/irq.h>
 #include <kernel/mem.h>
-#include <kernel/tty.h>
+#include <kernel/args.h>
 #include <kernel/fs.h>
+#include <kernel/ramdisk.h>
+#include <kernel/tarfs.h>
+#include <kernel/ext2.h>
 #include <kernel/task.h>
+#include <kernel/elf.h>
 #include <kernel/process.h>
 #include <kernel/timer.h>
 #include <kernel/cmos.h>
 #include <kernel/fpu.h>
-#include <kernel/shm.h>
-#include <kernel/keyboard.h>
-#include <kernel/ext2.h>
-#include <kernel/tarfs.h>
-#include <sys/types.h>
-#include <kernel/args.h>
-#include <kernel/elf.h>
-#include <kernel/ramdisk.h>
 #include <kernel/syscall.h>
+#include <kernel/shm.h>
+#include <kernel/serial.h>
+#include <kernel/tty.h>
+#include <kernel/keyboard.h>
+#include <sys/types.h>
 
 #define CHECK_FLAG(flags,bit) ((flags)&(1<<(bit)))
 
@@ -72,7 +72,6 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
                 uint32_t module_end   = mod->mod_end;
                 if( (uintptr_t)mod + sizeof(multiboot_module_t) > last_mod )
                 {
-                    /* Just in case some silly person put this *behind* the modules... */
                     last_mod = (uintptr_t)mod + sizeof(multiboot_module_t);
                     debug_logf(debug_str, "moving forward to 0x%x", last_mod);
                 }

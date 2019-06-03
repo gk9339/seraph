@@ -1,13 +1,13 @@
 #ifndef _KERNEL_PROCESS_H
 #define _KERNEL_PROCESS_H
 
-#include <kernel/types.h>
-#include <kernel/mem.h>
-#include <kernel/fs.h>
-#include <tree.h>
-#include <time.h>
-#include <sys/types.h>
-#include <sys/signals.h>
+#include <kernel/types.h> /* struct regs */
+#include <kernel/mem.h> /* page_directory_t */
+#include <kernel/fs.h> /* fs_node_t */
+#include <tree.h> /* tree_t */
+#include <time.h> /* list_t */
+#include <sys/types.h> /* intN_t */
+#include <sys/signals.h> /* NUMSIGNALS */
 
 #define SIGNAL_RETURN 0x1523A6AA
 #define THREAD_RETURN 0x260913A3

@@ -1,9 +1,5 @@
 #include <stdio.h>
 
-FILE* stdin = NULL;
-FILE* stdout = NULL;
-FILE* stderr = NULL;
-
 struct _FILE
 {
     int fd;

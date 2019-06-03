@@ -18,7 +18,6 @@
 #include <sys/signals.h>
 #include <sys/wait.h>
 #include <errno.h>
-#include <kernel/errno.h>
 #include <list.h>
 #include <tree.h>
 

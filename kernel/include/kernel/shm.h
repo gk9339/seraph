@@ -1,8 +1,8 @@
 #ifndef _KERNEL_SHM_H
 #define _KERNEL_SHM_H
 
-#include <sys/types.h>
-#include <kernel/process.h>
+#include <sys/types.h> /* intN_t */
+#include <kernel/process.h> /* process_t */
 
 #define SHM_START 0xB0000000
 #define SHM_PATH_SEPARATOR "."

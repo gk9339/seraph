@@ -1,7 +1,7 @@
 #ifndef _KERNEL_TSS_H
 #define _KERNEL_TSS_H
 
-#include <sys/types.h>
+#include <sys/types.h> /* intN_t */
 
 void tss_flush( void );
 

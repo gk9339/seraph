@@ -88,7 +88,7 @@ void fault_handler( struct regs* r )
         handler(r);
     }else
     {
-        printf("%s\n", exception_messages[r->int_no]);
+        printf("\n%s\n", exception_messages[r->int_no]);
         KPANIC("Process caused an unhandled exception", r);
         STOP;
     }

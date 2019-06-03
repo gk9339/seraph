@@ -116,5 +116,6 @@ DECL_SYSCALL3(write, int, char *, int);
 DECL_SYSCALL1(close, int);
 DECL_SYSCALL2(nanosleep, unsigned long, unsigned long);
 DECL_SYSCALL0(yield);
+DECL_SYSCALL1(sbrk, int);
 
 #endif

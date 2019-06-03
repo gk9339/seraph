@@ -1,10 +1,10 @@
 #ifndef _KERNEL_CBUFFER_H
 #define _KERNEL_CBUFFER_H
 
-#include <stddef.h>
-#include <sys/types.h>
-#include <list.h>
-#include <kernel/fs.h>
+#include <stddef.h> /* size_t */
+#include <sys/types.h> /* intN_t */
+#include <list.h> /* list_t */
+#include <kernel/fs.h> /* fs_node_t */
 
 typedef struct
 {

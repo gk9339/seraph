@@ -1,3 +1,4 @@
+#include <time.h>
 #include <kernel/cmos.h>
 #include <sys/types.h>
 #include <kernel/serial.h>

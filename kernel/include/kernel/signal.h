@@ -1,9 +1,8 @@
 #ifndef _KERNEL_SIGNAL_H
 #define _KERNEL_SIGNAL_H
 
-#include <kernel/kernel.h>
-#include <sys/types.h>
-#include <kernel/process.h>
+#include <sys/types.h> /* intN_t */
+#include <kernel/process.h> /* process_t */
 
 typedef struct
 {

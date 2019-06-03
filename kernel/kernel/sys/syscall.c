@@ -8,6 +8,7 @@
 #include <kernel/fs.h>
 #include <kernel/serial.h>
 #include <kernel/syscall.h>
+#include <kernel/spinlock.h>
 #include <sys/syscall.h>
 #include <errno.h>
 
@@ -188,6 +189,30 @@ static int sys_close( int fd )
     return -EBADF;
 }
 
+static int sys_sbrk( int size )
+{
+    process_t* proc = (process_t*)current_process;
+    if( proc->group != 0 )
+    {
+        proc = process_from_pid(proc->group);
+    }
+
+    spin_lock(proc->image.lock);
+    uintptr_t ret = proc->image.heap;
+    uintptr_t i_ret = ret;
+    ret = (ret + 0xffff) & ~0xfff; /* rounds to 0x1000 */
+    proc->image.heap += (ret - i_ret) + size;
+    while( proc->image.heap > proc->image.heap_actual )
+    {
+        proc->image.heap_actual += 0x1000;
+        alloc_frame(get_page(proc->image.heap_actual, 1, current_directory), 0, 1);
+        invalidate_tables_at(proc->image.heap_actual);
+    }
+    spin_unlock(proc->image.lock);
+
+    return ret;
+}
+
 static int sys_sleepabs( unsigned long seconds, unsigned long subseconds )
 {
     sleep_until((process_t*)current_process, seconds, subseconds);
@@ -225,6 +250,7 @@ static int (*syscalls[])() =
     [SYS_READ] = sys_read,
     [SYS_WRITE] = sys_write,
     [SYS_CLOSE] = sys_close,
+    [SYS_SBRK] = sys_sbrk,
     [SYS_SLEEPABS] = sys_sleepabs,
     [SYS_SLEEP] = sys_sleep,
     [SYS_YIELD] = sys_yield,

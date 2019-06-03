@@ -10,10 +10,10 @@ unset CC
 unset NM
 unset PREFIX
 unset CFLAGS
-unset SYSROOT
 
 TARGET=i686-seraph
-PREFIX=$TOOLCHAIN
+DIR=$(pwd)
+PREFIX=$DIR/toolchain
 
 mkdir -p "$PREFIX"
 cd "$PREFIX"

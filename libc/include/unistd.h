@@ -6,6 +6,8 @@
 
 pid_t fork( void );
 
+void* sbrk( intptr_t );
+
 int execv( const char*, char* const argv[] );
 int execve( const char*, char* const argv[], char* const envp[] );
 int execvp( const char*, char* const argv[] );

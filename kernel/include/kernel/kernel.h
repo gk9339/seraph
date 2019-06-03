@@ -1,8 +1,8 @@
 #ifndef _KERNEL_H
 #define _KERNEL_H
 
-#include <kernel/types.h>
-#include <sys/types.h>
+#include <kernel/types.h> /* struct regs */
+#include <sys/types.h> /* uintptr_t */
 
 #define ASSUME(cond) __extension__({ if(!(cond)) { __builtin_unreachable(); } })
 
@@ -21,6 +21,7 @@ extern void* _kernel_start;
 extern void* _kernel_end;
 extern uintptr_t initial_esp;
 
+void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp );
 void kpanic(char* error_message, const char* file, int line, struct regs* regs);
 
 #endif

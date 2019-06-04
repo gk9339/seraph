@@ -11,6 +11,9 @@
 #include <kernel/spinlock.h>
 #include <sys/syscall.h>
 #include <errno.h>
+#include <stdlib.h>
+#include <kernel/elf.h>
+#include <kernel/shm.h>
 
 #define FD_INRANGE(FD) ((FD) < (int)current_process->fds->length && (FD) >= 0)
 #define FD_ENTRY(FD) (current_process->fds->entries[(FD)])
@@ -189,6 +192,60 @@ static int sys_close( int fd )
     return -EBADF;
 }
 
+static int sys_execve( const char* filename, char* const argv[], char* const envp[] )
+{
+    PTR_VALIDATE(argv);
+    PTR_VALIDATE(filename);
+    PTR_VALIDATE(envp);
+
+    int argc = 0;
+    int envc = 0;
+    while( argv[argc] )
+    {
+        PTR_VALIDATE(argv[argc]);
+        argc++;
+    }
+    if( envp )
+    {
+        while( envp[envc] )
+        {
+            PTR_VALIDATE(envp[envc]);
+            envc++;
+        }
+    }
+
+    char ** argv_ = malloc(sizeof(char *) * (argc + 1));
+
+	for( int j = 0; j < argc; j++ )
+    {
+		argv_[j] = malloc((strlen(argv[j]) + 1) * sizeof(char));
+		memcpy(argv_[j], argv[j], strlen(argv[j]) + 1);
+	}
+	
+    argv_[argc] = 0;
+	char ** envp_;
+	if( envp && envc )
+    {
+		envp_ = malloc(sizeof(char *) * (envc + 1));
+		for( int j = 0; j < envc; j++ )
+        {
+			envp_[j] = malloc((strlen(envp[j]) + 1) * sizeof(char));
+			memcpy(envp_[j], envp[j], strlen(envp[j]) + 1);
+		}
+		envp_[envc] = 0;
+	}else
+    {
+		envp_ = malloc(sizeof(char *));
+		envp_[0] = NULL;
+    }
+
+    shm_release_all((process_t*)current_process);
+
+    current_process->cmdline = argv_;
+
+    return exec((char*)filename, argc, (char**)argv_, (char**)envp_);
+}
+
 static int sys_sbrk( int size )
 {
     process_t* proc = (process_t*)current_process;
@@ -250,6 +307,7 @@ static int (*syscalls[])() =
     [SYS_READ] = sys_read,
     [SYS_WRITE] = sys_write,
     [SYS_CLOSE] = sys_close,
+    [SYS_EXECVE] = sys_execve,
     [SYS_SBRK] = sys_sbrk,
     [SYS_SLEEPABS] = sys_sleepabs,
     [SYS_SLEEP] = sys_sleep,

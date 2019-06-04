@@ -65,7 +65,7 @@
 
 #define DEFN_SYSCALL0(fn, num) \
 	int syscall_##fn() { \
-		int a; __asm__ __volatile__("int $0x7F" : "=a" (a) : "0" (num)); \
+		int a; __asm__ __volatile__("movl %1,%%eax; int $0x7F" : "=a" (a) : "0" (num)); \
 		return a; \
 	}
 
@@ -81,7 +81,7 @@
 	int syscall_##fn(P1 p1, P2 p2) { \
 		int __res; __asm__ __volatile__("push %%ebx; movl %2,%%ebx; int $0x7F; pop %%ebx" \
 				: "=a" (__res) \
-				: "0" (num), "r" ((int)(p1)), "c"((int)(p2))); \
+				: "a" (num), "r" ((int)(p1)), "c"((int)(p2))); \
 		return __res; \
 	}
 
@@ -89,7 +89,7 @@
 	int syscall_##fn(P1 p1, P2 p2, P3 p3) { \
 		int __res; __asm__ __volatile__("push %%ebx; movl %2,%%ebx; int $0x7F; pop %%ebx" \
 				: "=a" (__res) \
-				: "0" (num), "r" ((int)(p1)), "c"((int)(p2)), "d"((int)(p3))); \
+				: "a" (num), "r" ((int)(p1)), "c"((int)(p2)), "d"((int)(p3))); \
 		return __res; \
 	}
 
@@ -97,7 +97,7 @@
 	int syscall_##fn(P1 p1, P2 p2, P3 p3, P4 p4) { \
 		int __res; __asm__ __volatile__("push %%ebx; movl %2,%%ebx; int $0x7F; pop %%ebx" \
 				: "=a" (__res) \
-				: "0" (num), "r" ((int)(p1)), "c"((int)(p2)), "d"((int)(p3)), "S"((int)(p4))); \
+				: "a" (num), "r" ((int)(p1)), "c"((int)(p2)), "d"((int)(p3)), "S"((int)(p4))); \
 		return __res; \
 	}
 
@@ -105,7 +105,7 @@
 	int syscall_##fn(P1 p1, P2 p2, P3 p3, P4 p4, P5 p5) { \
 		int __res; __asm__ __volatile__("push %%ebx; movl %2,%%ebx; int $0x7F; pop %%ebx" \
 				: "=a" (__res) \
-				: "0" (num), "r" ((int)(p1)), "c"((int)(p2)), "d"((int)(p3)), "S"((int)(p4)), "D"((int)(p5))); \
+				: "a" (num), "r" ((int)(p1)), "c"((int)(p2)), "d"((int)(p3)), "S"((int)(p4)), "D"((int)(p5))); \
 		return __res; \
 }
 
@@ -114,6 +114,7 @@ DECL_SYSCALL3(open, const char *, int, int);
 DECL_SYSCALL3(read, int, char *, int);
 DECL_SYSCALL3(write, int, char *, int);
 DECL_SYSCALL1(close, int);
+DECL_SYSCALL3(execve, char*, char**, char**);
 DECL_SYSCALL2(nanosleep, unsigned long, unsigned long);
 DECL_SYSCALL0(yield);
 DECL_SYSCALL1(sbrk, int);

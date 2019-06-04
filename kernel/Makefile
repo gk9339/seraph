@@ -52,6 +52,7 @@ kernel/args.o \
 kernel/fs.o \
 kernel/elf.o \
 kernel/cbuffer.o \
+kernel/pipe.o \
 
 OBJS=\
 $(ARCHDIR)/crti.o \

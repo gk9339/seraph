@@ -305,7 +305,8 @@ extern void enter_userspace( uintptr_t location, uintptr_t stack );
 
 void enter_user_jump( uintptr_t location, int argc, char** argv, uintptr_t stack )
 {
-    debug_log("ENTERING USERSPACE");
+    char debug_str[512];
+    debug_logf(debug_str, "%s -> Starting userspace execution", current_process->name);
     int_disable();
     set_kernel_stack(current_process->image.stack);
 

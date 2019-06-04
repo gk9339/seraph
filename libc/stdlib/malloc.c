@@ -313,7 +313,7 @@ static void malloc_i_skip_list_delete( malloc_i_big_bin_header_t* value )
             if( update[i]->forward[i] )
             {
                 if( (uintptr_t)(update[i]->forward[i]) % PAGE_SIZE != 0 ) KPANIC("MALLOC ERROR", NULL);
-                if( (uintptr_t)(update[i]->forward[i] + sizeof(malloc_i_big_bin_header_t)) % PAGE_SIZE != 0 ) KPANIC("MALLOC ERROR", NULL);
+                if( (uintptr_t)(update[i]->forward[i]->size + sizeof(malloc_i_big_bin_header_t)) % PAGE_SIZE != 0 ) KPANIC("MALLOC ERROR", NULL);
             }
         }
 

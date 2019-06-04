@@ -206,6 +206,10 @@ process_t* spawn_init( void )
     init->sched_node.next = NULL;
     init->sched_node.value = init;
 
+    init->sleep_node.prev = NULL;
+    init->sleep_node.next = NULL;
+    init->sleep_node.value = init;
+
     init->timed_sleep_node = NULL;
 
     init->is_daemon = 0;
@@ -433,7 +437,7 @@ uint32_t process_append_fd( process_t* proc, fs_node_t* node )
         proc->fds->offsets = realloc(proc->fds->offsets, proc->fds->capacity * sizeof(uint64_t));
     }
     proc->fds->entries[proc->fds->length] = node;
-    proc->fds->entries[proc->fds->length] = 0;
+    proc->fds->modes[proc->fds->length] = 0;
     proc->fds->offsets[proc->fds->length] = 0;
     proc->fds->length++;
 

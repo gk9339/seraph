@@ -115,6 +115,7 @@ DECL_SYSCALL3(read, int, char *, int);
 DECL_SYSCALL3(write, int, char *, int);
 DECL_SYSCALL1(close, int);
 DECL_SYSCALL3(execve, char*, char**, char**);
+DECL_SYSCALL0(fork);
 DECL_SYSCALL2(nanosleep, unsigned long, unsigned long);
 DECL_SYSCALL0(yield);
 DECL_SYSCALL1(sbrk, int);

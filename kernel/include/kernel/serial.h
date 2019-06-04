@@ -51,12 +51,14 @@ static _inline void inportsm( unsigned short port, unsigned char* data, unsigned
 static _inline void debug_log( const char* str )
 {
     size_t len = strlen(str);
+    
     for( size_t i = 0; i < len; i++ )
     {
         if( str[i] == '\0' ) break;
         while( (inportb(0x3F8 + 5) & 0x20) == 0 );
         outportb(0x3F8, (unsigned char)str[i]);
     }
+    
     while( (inportb(0x3F8 + 5) & 0x20) == 0 );
     outportb(0x3F8, '\r');
     while( (inportb(0x3F8 + 5) & 0x20) == 0 );

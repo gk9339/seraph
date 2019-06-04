@@ -246,6 +246,11 @@ static int sys_execve( const char* filename, char* const argv[], char* const env
     return exec((char*)filename, argc, (char**)argv_, (char**)envp_);
 }
 
+static int sys_fork( void )
+{
+    return (int)fork();
+}
+
 static int sys_sbrk( int size )
 {
     process_t* proc = (process_t*)current_process;
@@ -308,6 +313,7 @@ static int (*syscalls[])() =
     [SYS_WRITE] = sys_write,
     [SYS_CLOSE] = sys_close,
     [SYS_EXECVE] = sys_execve,
+    [SYS_FORK] = sys_fork,
     [SYS_SBRK] = sys_sbrk,
     [SYS_SLEEPABS] = sys_sleepabs,
     [SYS_SLEEP] = sys_sleep,

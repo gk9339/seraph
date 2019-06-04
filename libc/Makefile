@@ -57,6 +57,7 @@ unistd/sleep.o \
 unistd/sbrk.o \
 unistd/read.o \
 unistd/execv.o \
+unistd/fork.o \
 stdio/stdio.o \
 stdio/stub.o \
 stdlib/stub.o \

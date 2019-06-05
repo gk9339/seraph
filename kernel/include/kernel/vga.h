@@ -1,5 +1,5 @@
-#ifndef ARCH_I386_VGA_H
-#define ARCH_I386_VGA_H
+#ifndef _KERNEL_VGA_H
+#define _KERNEL_VGA_H
 
 #include <sys/types.h>
 
@@ -31,5 +31,13 @@ static inline uint16_t vga_entry( unsigned char uc, uint8_t color )
 {
 	return (uint16_t)((uint16_t) uc | (uint16_t) color << 8);
 }
+
+void terminal_initialize( void );
+void terminal_clear( void );
+void terminal_scroll( size_t rows );
+void terminal_putchar( char c );
+void terminal_write( const char* data, size_t size );
+void terminal_writestring( const char* data );
+void terminal_setcolor( uint8_t );
 
 #endif

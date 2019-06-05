@@ -12,11 +12,9 @@ LDFLAGS:=$(LDFLAGS)
 LIBS:=$(LIBS) -lc
 
 OBJS=\
-init.o \
 terminal.o \
 
 EXECS=\
-init \
 terminal \
 
 .PHONY: all clean install install-headers install-bin
@@ -27,11 +25,8 @@ all: $(OBJS) $(EXECS)
 .c.o:
 	$(CC) -MD -c $< -o $@ -std=gnu11 $(CFLAGS)
 
-init: init.o
-	$(CC) $< -o $@ $(CFLAGS) $(LIBS)
-
 terminal: terminal.o
-	$(CC) $< -o $@ $(CFLAGS) $(LIBS)
+	$(CC) $< -o $@ $(CFLAGS)$(LIBS)
 
 clean:
 	rm -f $(EXECS)

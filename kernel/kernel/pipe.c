@@ -90,7 +90,7 @@ static void pipe_alert_waiters( pipe_device_t* pipe )
 	}
 }
 
-uint32_t read_pipe( fs_node_t*node, uint32_t offset, uint32_t size, uint8_t* buffer )
+static uint32_t read_pipe( fs_node_t*node, uint32_t offset __attribute__((unused)), uint32_t size, uint8_t* buffer )
 {
 	/* Retreive the pipe object associated with this file node */
 	pipe_device_t* pipe = (pipe_device_t*)node->device;
@@ -123,7 +123,7 @@ uint32_t read_pipe( fs_node_t*node, uint32_t offset, uint32_t size, uint8_t* buf
 	return collected;
 }
 
-uint32_t write_pipe( fs_node_t*node, uint32_t offset, uint32_t size, uint8_t* buffer )
+static uint32_t write_pipe( fs_node_t*node, uint32_t offset __attribute__((unused)), uint32_t size, uint8_t* buffer )
 {
 	/* Retreive the pipe object associated with this file node */
 	pipe_device_t* pipe = (pipe_device_t*)node->device;
@@ -157,7 +157,7 @@ uint32_t write_pipe( fs_node_t*node, uint32_t offset, uint32_t size, uint8_t* bu
 	return written;
 }
 
-void open_pipe( fs_node_t* node, unsigned int flags )
+static void open_pipe( fs_node_t* node, unsigned int flags __attribute__((unused)) )
 {
 	/* Retreive the pipe object associated with this file node */
 	pipe_device_t* pipe = (pipe_device_t*)node->device;
@@ -168,7 +168,7 @@ void open_pipe( fs_node_t* node, unsigned int flags )
 	return;
 }
 
-void close_pipe( fs_node_t* node )
+static void close_pipe( fs_node_t* node )
 {
 	/* Retreive the pipe object associated with this file node */
 	pipe_device_t* pipe = (pipe_device_t*)node->device;

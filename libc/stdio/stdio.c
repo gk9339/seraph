@@ -58,14 +58,20 @@ FILE _stderr =
 	.bufsiz = BUFSIZ,
 };
 
+static int __stdio_init_done = 0;
+
 FILE* stdin = &_stdin;
 FILE* stdout = &_stdout;
 FILE* stderr = &_stderr;
 
 void __stdio_init_buffers( void )
 {
-    _stdin.read_buf = malloc(BUFSIZ);
-    _stdin._name = strdup("stdin");
-    _stdout._name = strdup("stdout");
-    _stderr._name = strdup("stderr");
+    if( !__stdio_init_done )
+    {
+        __stdio_init_done++;
+        _stdin.read_buf = malloc(BUFSIZ);
+        _stdin._name = strdup("stdin");
+        _stdout._name = strdup("stdout");
+        _stderr._name = strdup("stderr");
+    }
 }

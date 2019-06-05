@@ -5,8 +5,7 @@
 #include <kernel/types.h>
 #include <kernel/multiboot.h>
 #include <kernel/serial.h>
-
-#include "vga.h"
+#include <kernel/vga.h>
 
 static const size_t VGA_WIDTH = 80;
 static const size_t VGA_HEIGHT = 25;

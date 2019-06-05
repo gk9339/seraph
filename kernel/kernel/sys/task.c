@@ -306,7 +306,7 @@ extern void enter_userspace( uintptr_t location, uintptr_t stack );
 void enter_user_jump( uintptr_t location, int argc, char** argv, uintptr_t stack )
 {
     char debug_str[512];
-    debug_logf(debug_str, "%s -> Starting userspace execution", current_process->name);
+    debug_logf(debug_str, "%s -> Starting", current_process->name);
     int_disable();
     set_kernel_stack(current_process->image.stack);
 
@@ -317,12 +317,14 @@ void enter_user_jump( uintptr_t location, int argc, char** argv, uintptr_t stack
 
 void task_exit( int retval )
 {
+    char debug_str[512];
     if( __builtin_expect(current_process->id == 0, 0) )/* Probably not a good thing */
     {
         switch_next();
         return;
     }
 
+    debug_logf(debug_str, "%s -> Finishing", current_process->name);
     cleanup_process((process_t*)current_process, retval);
 
     process_t* parent = process_get_parent((process_t*)current_process);

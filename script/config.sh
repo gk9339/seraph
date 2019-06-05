@@ -1,8 +1,8 @@
 #!/bin/sh
 set -e
 
-SYSTEM_HEADER_PROJECTS="libc kernel bin"
-PROJECTS="libc kernel bin"
+SYSTEM_HEADER_PROJECTS="libc kernel sbin bin"
+PROJECTS="libc kernel sbin bin"
 
 export MAKE=${MAKE:-make}
 export HOST=${HOST:-$(./script/default-host.sh)}

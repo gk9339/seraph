@@ -18,10 +18,10 @@ ARCHDIR=arch/$(HOSTARCH)
 
 include $(ARCHDIR)/make.config
 
-CFLAGS:=$(CFLAGS) $(KERNEL_ARCH_CFLAGS)
-CPPFLAGS:=$(CPPFLAGS) $(KERNEL_ARCH_CPPFLAGS)
-LDFLAGS:=$(LDFLAGS) $(KERNEL_ARCH_LDFLAGS)
-LIBS:=$(LIBS) $(KERNEL_ARCH_LIBS)
+CFLAGS:=$(CFLAGS)$(KERNEL_ARCH_CFLAGS)
+CPPFLAGS:=$(CPPFLAGS)$(KERNEL_ARCH_CPPFLAGS)
+LDFLAGS:=$(LDFLAGS)$(KERNEL_ARCH_LDFLAGS)
+LIBS:=$(LIBS)$(KERNEL_ARCH_LIBS)
 
 KERNEL_OBJS=\
 $(KERNEL_ARCH_OBJS) \
@@ -39,6 +39,7 @@ kernel/io/ext2.o \
 kernel/io/ramdisk.o \
 kernel/io/serial.o \
 kernel/io/zero.o \
+kernel/io/vga.o \
 kernel/mem/mem.o \
 kernel/mem/shm.o \
 kernel/sys/symbols.o \

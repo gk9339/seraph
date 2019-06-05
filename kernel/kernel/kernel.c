@@ -16,13 +16,14 @@
 #include <kernel/task.h>
 #include <kernel/elf.h>
 #include <kernel/process.h>
+#include <kernel/signal.h>
 #include <kernel/timer.h>
 #include <kernel/cmos.h>
 #include <kernel/fpu.h>
 #include <kernel/syscall.h>
 #include <kernel/shm.h>
 #include <kernel/serial.h>
-#include <kernel/tty.h>
+#include <kernel/vga.h>
 #include <kernel/keyboard.h>
 #include <sys/types.h>
 
@@ -54,7 +55,12 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
     }
     mbi = (multiboot_info_t*)addr;
     initial_esp = esp;
-    
+
+    if (CHECK_FLAG (mbi->flags, 1))
+    {
+        debug_logf(debug_str, "boot_device = 0x%x\n", (unsigned) mbi->boot_device);
+    }
+
     uintptr_t last_mod = (uintptr_t)&_kernel_end;
     if( CHECK_FLAG(mbi->flags, 5) ) /* mods */
     {
@@ -198,7 +204,7 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
         map_vfs_directory("/");
     }
 
-    char* boot_exec = "bin/init";
+    char* boot_exec = "/sbin/init";
     char* boot_arg = NULL;
     char* argv[] =
     {
@@ -225,8 +231,10 @@ void kpanic( char* error_message, const char* file, int line, struct regs* regs 
 
     terminal_setcolor(4);
 
-    printf("PANIC: %s ", error_message);
-    debug_logf(debug_str, "PANIC: %s ", error_message);
+    printf("UNHANDLED EXCEPTION: %s ", error_message);
+    debug_logf(debug_str, "UNHANDLED EXCEPTION: %s ", error_message);
+    printf("pid: %d", getpid());
+    debug_logf(debug_str, "pid: %d", getpid());
     printf("File: %s ", file);
     debug_logf(debug_str, "File: %s ", file);
     printf("Line: %d ", line);
@@ -250,7 +258,5 @@ void kpanic( char* error_message, const char* file, int line, struct regs* regs 
         printf("eip=0x%x\n", regs->eip);
         debug_logf(debug_str, "eip=0x%x\n", regs->eip);
     }
-    
-    int_disable();
-    STOP
+    send_signal(current_process->id, SIGKILL, 1);
 }

@@ -6,7 +6,6 @@ DEFN_SYSCALL1(exit, SYS_EXT, int)
 
 extern void _init( void );
 extern void _fini( void );
-extern void __stdio_init_buffers( void );
 
 char** environ = NULL;
 int _environ_size = 0;

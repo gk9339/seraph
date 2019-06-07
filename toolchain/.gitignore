@@ -1,0 +1,9 @@
+bin
+binutils-build
+gcc-build
+i686-seraph
+include
+lib
+libexec
+share
+tarballs

@@ -31,7 +31,7 @@ pushd tarballs
     if [ ! -d "binutils-2.32" ]; then
         tar -xf "binutils-2.32.tar.gz"
         pushd "binutils-2.32"
-            patch -p1 < $DIR/toolchain-patches/binutils.patch
+            patch -p1 < $PREFIX/patches/binutils.patch
             pushd "ld"
                 automake-1.15
             popd
@@ -41,7 +41,7 @@ pushd tarballs
     if [ ! -d "gcc-8.3.0" ]; then
         tar -xf "gcc-8.3.0.tar.gz"
         pushd "gcc-8.3.0"
-            patch -p1 < $DIR/toolchain-patches/gcc.patch
+            patch -p1 < $PREFIX/patches/gcc.patch
             pushd "libstdc++-v3"
                 aclocal-1.15
                 automake-1.15

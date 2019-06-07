@@ -4,14 +4,17 @@ set -e
 SYSTEM_HEADER_PROJECTS="libc kernel sbin bin"
 PROJECTS="libc kernel sbin bin"
 
-export MAKE=${MAKE:-make}
-export HOST=${HOST:-$(./script/default-host.sh)}
+export SYSROOT="$(pwd)/sysroot"
 export TOOLCHAIN="$(pwd)/toolchain/bin/"
 
-export AR=${TOOLCHAIN}${HOST}-ar
-export AS=${TOOLCHAIN}${HOST}-as
-export CC=${TOOLCHAIN}${HOST}-gcc
-export NM=${TOOLCHAIN}${HOST}-nm
+export MAKE=${MAKE:-make}
+export HOST=${HOST:-$(./script/default-host.sh)}
+export PATH=${TOOLCHAIN}:$PATH
+
+export AR=${HOST}-ar
+export AS=${HOST}-as
+export CC=${HOST}-gcc
+export NM=${HOST}-nm
 
 export PREFIX=/
 export EXEC_PREFIX=$PREFIX
@@ -22,7 +25,6 @@ export INCLUDEDIR=$PREFIX/include
 export CFLAGS='-O0 -g'
 export CPPFLAGS=''
 
-export SYSROOT="$(pwd)/sysroot"
 
 # Work around that the -elf gcc targets doesn't have a system include directory
 # because it was configured with --without-headers rather than --with-sysroot.

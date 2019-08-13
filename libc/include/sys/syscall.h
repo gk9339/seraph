@@ -55,6 +55,7 @@
 #define SYS_SETSID 62
 #define SYS_SETPGID 63
 #define SYS_GETPGID 64
+#define SYS_DEBUGVFSTREE 100
 
 #define DECL_SYSCALL0(fn)                int syscall_##fn( void )
 #define DECL_SYSCALL1(fn,p1)             int syscall_##fn(p1)
@@ -116,8 +117,10 @@ DECL_SYSCALL3(write, int, char *, int);
 DECL_SYSCALL1(close, int);
 DECL_SYSCALL3(execve, char*, char**, char**);
 DECL_SYSCALL0(fork);
-DECL_SYSCALL2(nanosleep, unsigned long, unsigned long);
-DECL_SYSCALL0(yield);
 DECL_SYSCALL1(sbrk, int);
+DECL_SYSCALL5(openpty, int*, int*, char*, void*, void*);
+DECL_SYSCALL0(yield);
+DECL_SYSCALL2(nanosleep, unsigned long, unsigned long);
+DECL_SYSCALL0(debugvfstree);
 
 #endif

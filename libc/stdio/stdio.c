@@ -7,14 +7,16 @@ struct _FILE
 {
     int fd;
 
-    char* read_buf;
+    char* read_base;
+    char* read_ptr;
+    char* read_end;
+    char* write_base;
+    char* write_ptr;
+    char* write_end;
+    char* buf_base;
+    char* buf_end;
+    
     int available;
-    int offset;
-    int read_from;
-    int ungetc;
-    int eof;
-    int bufsiz;
-    long last_read_start;
 
     char* _name;
 };
@@ -22,56 +24,71 @@ struct _FILE
 FILE _stdin =
 {
     .fd = 0,
-    .read_buf = NULL,
+    .read_base = NULL,
+    .read_ptr = NULL,
+    .read_end = NULL,
+    .write_base = NULL,
+    .write_ptr = NULL,
+    .write_end = NULL,
+    .buf_base = NULL,
+    .buf_end = NULL,
     .available = 0,
-    .offset = 0,
-    .read_from = 0,
-    .ungetc = -1,
-    .eof = 0,
-    .last_read_start = 0,
-    .bufsiz = BUFSIZ,
+    ._name = "stdin",
 };
 
 FILE _stdout =
 {
 	.fd = 1,
-	.read_buf = NULL,
-	.available = 0,
-	.offset = 0,
-	.read_from = 0,
-	.ungetc = -1,
-	.eof = 0,
-	.last_read_start = 0,
-	.bufsiz = BUFSIZ,
+    .read_base = NULL,
+    .read_ptr = NULL,
+    .read_end = NULL,
+    .write_base = NULL,
+    .write_ptr = NULL,
+    .write_end = NULL,
+    .buf_base = NULL,
+    .buf_end = NULL,
+    .available = 0,
+    ._name = "stdout",
 };
 
 FILE _stderr =
 {
 	.fd = 2,
-	.read_buf = NULL,
-	.available = 0,
-	.offset = 0,
-	.read_from = 0,
-	.ungetc = -1,
-	.eof = 0,
-	.last_read_start = 0,
-	.bufsiz = BUFSIZ,
+    .read_base = NULL,
+    .read_ptr = NULL,
+    .read_end = NULL,
+    .write_base = NULL,
+    .write_ptr = NULL,
+    .write_end = NULL,
+    .buf_base = NULL,
+    .buf_end = NULL,
+    .available = 0,
+    ._name = "stderr",
 };
-
-static int __stdio_init_done = 0;
 
 FILE* stdin = &_stdin;
 FILE* stdout = &_stdout;
 FILE* stderr = &_stderr;
 
-void __stdio_init_buffers( void )
+FILE* fdopen( int fd, const char* mode )
 {
-    if( !__stdio_init_done )
-    {
-        __stdio_init_done++;
-        _stdin.read_buf = malloc(BUFSIZ);
-        _stdin._name = strdup("stdin");
-        _stdout._name = strdup("stdout");
-        _stderr._name = strdup("stderr");
-    }
+    FILE* out = malloc(sizeof(FILE));
+    memset(out, 0, sizeof(struct _FILE));
+
+    out->fd = fd;
+    out->read_base = NULL,
+    out->read_ptr = NULL,
+    out->read_end = NULL,
+    out->write_base = NULL,
+    out->write_ptr = NULL,
+    out->write_end = NULL,
+    out->buf_base = malloc(BUFSIZ);
+    out->buf_end = out->buf_base + BUFSIZ;
+    out->available = 0;
+    
+    char tmp[30];
+    sprintf(tmp, "fd[%d]", fd);
+    out->_name = strdup(tmp);
+
+    return out;
 }

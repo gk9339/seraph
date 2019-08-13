@@ -1,7 +1,6 @@
 #include <stddef.h>
 #include <string.h>
 
-#include <kernel/tty.h>
 #include <kernel/types.h>
 #include <kernel/multiboot.h>
 #include <kernel/serial.h>

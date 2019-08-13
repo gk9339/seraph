@@ -3,6 +3,9 @@
 #include <string.h>
 #include <stdio.h>
 #include <fcntl.h>
+#include <pty.h>
+#include <debug.h>
+#include <sys/signals.h>
 
 static const size_t VGA_WIDTH = 80;
 static const size_t VGA_HEIGHT = 25;
@@ -13,6 +16,13 @@ static size_t terminal_column;
 static uint8_t terminal_color;
 static uint16_t* terminal_buffer;
 
+static int fd_master, fd_slave;
+static FILE* terminal;
+static int input_stopped = 0;
+volatile int exit_terminal = 0;
+
+static void sig_suspend_input( int sig );
+
 int main( void )
 {
     terminal_row = 0;
@@ -20,17 +30,49 @@ int main( void )
 	terminal_color = vga_entry_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
     terminal_buffer = VGA_MEMORY;
 
-    int kfd = open("/dev/kbd", O_RDONLY);
-    int ret;
-    char c;
-    while(1)
+/*    openpty(&fd_master, &fd_slave, NULL, NULL, NULL);
+    terminal = fdopen(fd_slave, "w");
+
+    struct winsize pty_winsize;
+    pty_winsize.ws_row = VGA_HEIGHT;
+    pty_winsize.ws_col = VGA_WIDTH;
+    pty_winsize.ws_xpixel = 0;
+    pty_winsize.ws_ypixel = 0;
+    ioctl(fd_master, TIOCSWINSZ, &pty_winsize);
+*/
+    terminal_clear();
+
+    fflush(stdin);
+/*
+    signal(SIGUSR2, sig_suspend_input);
+
+    int pid = getpid();
+    uint32_t f = fork();
+
+    if( getpid() != pid )
     {
-        ret = read(kfd, &c, 1);
-        if( ret )
+        setsid();
+        dup2(fd_slave, 0);
+        dup2(fd_slave, 1);
+        dup2(fd_slave, 2);
+
+        exit_terminal = 1;
+    }else
+    {*/
+        int kfd = open("/dev/kbd", O_RDONLY);
+        int ret;
+        char c;
+        while( !exit_terminal )
         {
-            printf("%c", c);
+            if( input_stopped ) continue;
+
+            ret = read(kfd, &c, 1);
+            if( ret )
+            {
+                printf("%c", c);
+            }
         }
-    }
+    //}
     
     return 0;
 }
@@ -124,3 +166,13 @@ void terminal_writestring( const char* data )
 {
 	terminal_write(data, strlen(data));
 }
+/*
+static void sig_suspend_input( int sig )
+{
+    char* exit_message = "[Input stopped]\n";
+    write(fd_slave, exit_message, sizeof(exit_message));
+
+    input_stopped = 1;
+
+    signal(SIGUSR2, sig_suspend_input);
+}*/

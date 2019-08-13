@@ -14,6 +14,7 @@
 #include <stdlib.h>
 #include <kernel/elf.h>
 #include <kernel/shm.h>
+#include <kernel/pty.h>
 
 #define FD_INRANGE(FD) ((FD) < (int)current_process->fds->length && (FD) >= 0)
 #define FD_ENTRY(FD) (current_process->fds->entries[(FD)])
@@ -275,6 +276,30 @@ static int sys_sbrk( int size )
     return ret;
 }
 
+static int sys_openpty( int* master, int* slave, char* name, void* _ign0, void* winsize )
+{
+    if( !master || !slave ) return -EINVAL;
+    if( master && !PTR_INRANGE(master) ) return -EINVAL;
+    if( slave && !PTR_INRANGE(slave) ) return -EINVAL;
+    if( winsize && !PTR_INRANGE(winsize) ) return -EINVAL;
+
+    fs_node_t* fs_master;
+    fs_node_t* fs_slave;
+
+    pty_create(winsize, &fs_master, &fs_slave);
+
+    *master = process_append_fd((process_t*)current_process, fs_master);
+    *slave = process_append_fd((process_t*)current_process, fs_slave);
+
+    FD_MODE(*master) = 03;
+    FD_MODE(*slave) = 03;
+
+    open_fs(fs_master, 0);
+    open_fs(fs_slave, 0);
+
+    return 0;
+}
+
 static int sys_sleepabs( unsigned long seconds, unsigned long subseconds )
 {
     sleep_until((process_t*)current_process, seconds, subseconds);
@@ -305,6 +330,13 @@ static int sys_yield( void )
     return 1;
 }
 
+static int sys_debugvfstree( void )
+{
+    debug_print_vfs_tree();
+
+    return 0;
+}
+
 static int (*syscalls[])() =
 {
     [SYS_EXT] = sys_exit,
@@ -315,9 +347,11 @@ static int (*syscalls[])() =
     [SYS_EXECVE] = sys_execve,
     [SYS_FORK] = sys_fork,
     [SYS_SBRK] = sys_sbrk,
+    [SYS_OPENPTY] = sys_openpty,
     [SYS_SLEEPABS] = sys_sleepabs,
     [SYS_SLEEP] = sys_sleep,
     [SYS_YIELD] = sys_yield,
+    [SYS_DEBUGVFSTREE] = sys_debugvfstree,
 };
 
 static void syscall_handler( struct regs* r )

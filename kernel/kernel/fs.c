@@ -314,7 +314,7 @@ int create_file_fs( char* name, uint16_t permission )
     free(path);
     free(parent);
 
-return ret;
+    return ret;
 }
 
 int unlink_fs( char* name )
@@ -370,6 +370,7 @@ int unlink_fs( char* name )
 
     free(path);
     close_fs(parent);
+    
     return ret;
 }
 

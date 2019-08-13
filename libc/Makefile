@@ -64,6 +64,8 @@ stdlib/stub.o \
 errno/errno.o \
 stdio/stdio.o \
 sched/sched_yield.o \
+pty/pty.o \
+debug/debugvfstree.o \
 
 OBJS=\
 $(FREEOBJS) \

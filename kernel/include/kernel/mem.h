@@ -23,7 +23,7 @@ typedef struct page
     unsigned int global:1;
     unsigned int unused:3;
     unsigned int frame:20;
-} __attribute((packed)) page_t;
+} __attribute__((packed)) page_t;
 
 typedef struct page_table
 {

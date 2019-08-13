@@ -26,6 +26,8 @@ size_t fwrite( const void*, size_t, size_t, FILE* );
 int fseek( FILE*, long, int );
 long ftell( FILE* );
 
+FILE* fdopen( int, const char* );
+
 void setbuf( FILE*, char* );
 int fflush( FILE* );
 

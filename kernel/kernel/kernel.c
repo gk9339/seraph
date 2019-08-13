@@ -184,6 +184,7 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
     
     map_vfs_directory("/dev");
     zero_initialize();
+    null_initialize();
     
     debug_log("setup root mount");
     if( args_present("root") )

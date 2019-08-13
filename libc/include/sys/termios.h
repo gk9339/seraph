@@ -1,6 +1,8 @@
 #ifndef _TERMIOS_H
 #define _TERMIOS_H
 
+#include <sys/types.h> /* pid_t */
+
 #define VEOF     1 /* ^D (end of file) */
 #define VEOL     2 /* NULL (end of line) */
 #define VERASE   3 /* ^H (backspace/del) */

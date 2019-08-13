@@ -39,6 +39,7 @@ kernel/io/ext2.o \
 kernel/io/ramdisk.o \
 kernel/io/serial.o \
 kernel/io/zero.o \
+kernel/io/null.o \
 kernel/io/vga.o \
 kernel/mem/mem.o \
 kernel/mem/shm.o \
@@ -54,6 +55,7 @@ kernel/fs.o \
 kernel/elf.o \
 kernel/cbuffer.o \
 kernel/pipe.o \
+kernel/pty.o \
 
 OBJS=\
 $(ARCHDIR)/crti.o \

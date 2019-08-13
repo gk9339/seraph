@@ -38,13 +38,13 @@
 #define     _IFSOCK 0140000 /* socket */
 #define     _IFIFO  0010000 /* fifo */
 
-struct fs_node;
+struct fs_node; /* Defined below */
 
-typedef uint32_t (*read_type_t) (struct fs_node *, uint32_t, uint32_t, uint8_t *);
-typedef uint32_t (*write_type_t) (struct fs_node *, uint32_t, uint32_t, uint8_t *);
-typedef void (*open_type_t) (struct fs_node *, unsigned int flags);
-typedef void (*close_type_t) (struct fs_node *);
-typedef struct dirent *(*readdir_type_t) (struct fs_node *, uint32_t);
+typedef uint32_t (*read_type_t) (struct fs_node *, uint32_t, uint32_t, uint8_t *); /* Read file */
+typedef uint32_t (*write_type_t) (struct fs_node *, uint32_t, uint32_t, uint8_t *); /* Write file */
+typedef void (*open_type_t) (struct fs_node *, unsigned int flags); /* Open fs_node */
+typedef void (*close_type_t) (struct fs_node *); /* Close fs_node */
+typedef struct dirent *(*readdir_type_t) (struct fs_node *, uint32_t); 
 typedef struct fs_node *(*finddir_type_t) (struct fs_node *, char *name);
 typedef int (*create_type_t) (struct fs_node *, char *name, uint16_t permission);
 typedef int (*unlink_type_t) (struct fs_node *, char *name);
@@ -62,7 +62,7 @@ typedef void (*truncate_type_t) (struct fs_node *);
 typedef struct fs_node 
 {
     char name[256];         /* The filename. */
-    void * device;          /* Device object (optional) */
+    void* device;           /* Device object (optional) */
     uint32_t mask;          /* The permissions mask. */
     uint32_t uid;           /* The owning user. */
     uint32_t gid;           /* The owning group. */
@@ -112,30 +112,31 @@ struct dirent
 
 struct stat
 {
-    uint16_t st_dev;
-    uint16_t st_ino;
-    uint32_t st_mode;
-    uint16_t  st_nlink;
-    uint16_t  st_uid;
-    uint16_t  st_gid;
-    uint16_t  st_rdev;
-    uint32_t  st_size;
-    uint32_t  st_atime;
-    uint32_t  __unused1;
-    uint32_t  st_mtime;
-    uint32_t  __unused2;
-    uint32_t  st_ctime;
-    uint32_t  __unused3;
-    uint32_t  st_blksize;
-    uint32_t  st_blocks;
+    uint16_t st_dev; /* Device ID of device containing file */
+    uint16_t st_ino; /* File serial number */
+    uint32_t st_mode; /* Mode of file */
+    uint16_t st_nlink; /* Number of hard links to file */
+    uint16_t st_uid; /* User ID of file */
+    uint16_t st_gid; /* Group ID of file */
+    uint16_t st_rdev; /* Device ID (if file is character of block special) */
+    uint32_t st_size; /* For regular files, size in bytes, symlink, length in bytes of the pathname in the link,
+                         shmem object, length in bytes, typed memory object, length in bytes */
+    uint32_t st_atime; /* Time of last access */
+    uint32_t __unused1;
+    uint32_t st_mtime; /* Time of last modification */
+    uint32_t __unused2;
+    uint32_t st_ctime; /* Time of last status change */
+    uint32_t __unused3;
+    uint32_t st_blksize; /* Filesystem specific perferred I/O block size of the object */
+    uint32_t st_blocks; /* Number of blocks allocated to this object */
 };
 
 struct vfs_entry 
 {
-    char * name;
-    fs_node_t * file;
-    char * device;
-    char * fs_type;
+    char* name; /* Name of vfs entry */
+    fs_node_t* file; /* Pointer to file struct */
+    char* device;
+    char* fs_type;
 };
 
 extern fs_node_t *fs_root;
@@ -168,13 +169,11 @@ typedef fs_node_t * (*vfs_mount_callback)(char * arg, char * mount_point);
 int vfs_register(char * name, vfs_mount_callback callback);
 int vfs_mount_type(char * type, char * arg, char * mountpoint);
 void vfs_lock(fs_node_t * node);
+void map_vfs_directory(char *);
 
 void debug_print_vfs_tree( void );
 
-void map_vfs_directory(char *);
-
-int make_unix_pipe(fs_node_t ** pipes);
-
 void zero_initialize( void );
+void null_initialize( void );
 
 #endif

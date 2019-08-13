@@ -5,6 +5,7 @@
 `gcc`
 `g++`
 `Make`
+`wget`
 `Bison`
 `Flex`
 `GMP`

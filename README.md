@@ -14,6 +14,8 @@
 `Texinfo`
 `GRUB2`
 `xorriso/libisoburn`
+`python3`
+`mtools`
 
 # Build
 `./toolchain.sh` - Build the toolchain used for the rest of the build

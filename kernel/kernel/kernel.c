@@ -56,11 +56,13 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
     mbi = (multiboot_info_t*)addr;
     initial_esp = esp;
 
+    /* Multiboot boot device */
     if (CHECK_FLAG (mbi->flags, 1))
     {
         debug_logf(debug_str, "boot_device = 0x%x\n", (unsigned) mbi->boot_device);
     }
 
+    /* Multiboot modules */
     uintptr_t last_mod = (uintptr_t)&_kernel_end;
     if( CHECK_FLAG(mbi->flags, 5) ) /* mods */
     {
@@ -182,10 +184,12 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
         }
     }
     
+    /* virtual dev filesystem */
     map_vfs_directory("/dev");
     zero_initialize();
     null_initialize();
     
+    /* ramfs initialization */
     debug_log("setup root mount");
     if( args_present("root") )
     {
@@ -205,6 +209,7 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
         map_vfs_directory("/");
     }
 
+    /* Set up environment for /sbin/init */
     char* boot_exec = "/sbin/init";
     char* boot_arg = NULL;
     char* argv[] =
@@ -220,8 +225,10 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
         argc++;
     }
 
+    /* Start /sbin/init */
     system(argv[0], argc, argv, NULL);
     
+    /* Something went very wrong */
     KPANIC("INIT FAILED", NULL);
 }
 

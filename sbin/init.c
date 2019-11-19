@@ -3,6 +3,7 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <stdio.h>
+#include <debug.h>
 
 int main( void )
 {
@@ -19,7 +20,7 @@ int main( void )
         execve("/bin/terminal", arg, env);
     }
 
-    waitpid(-1, NULL, WNOKERN);
+    while ((pid=waitpid(-1,NULL,WNOKERN))!=-1);
 
     return 0;
 }

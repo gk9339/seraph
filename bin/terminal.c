@@ -4,7 +4,6 @@
 #include <stdio.h>
 #include <fcntl.h>
 #include <pty.h>
-#include <debug.h>
 #include <sys/signals.h>
 #include <signal.h>
 
@@ -47,7 +46,6 @@ int main( void )
 
     signal(SIGUSR2, sig_suspend_input);
 
-    debugproctree();
     uint32_t f = fork();
 
     if( f == 0 )
@@ -62,8 +60,6 @@ int main( void )
         sleep(3);
     }else
     {
-        debugproctree();
-
         /*
         int kfd = open("/dev/kbd", O_RDONLY);
         int ret;

@@ -77,6 +77,9 @@ uint32_t fork( void )
 
     make_process_ready(new_proc);
 
+    char debug_str[512];
+    debug_logf(debug_str, "%s - %d (%d) -> Fork", new_proc->name, new_proc->id, current_process->id);
+    
     int_resume();
 
     return new_proc->id;

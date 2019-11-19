@@ -8,6 +8,16 @@ pid_t fork( void );
 
 void* sbrk( intptr_t );
 
+pid_t getpid( void );
+uid_t getuid( void );
+gid_t getgid( void );
+
+pid_t setsid( void );
+
+int setuid( uid_t );
+int setpgid( pid_t, pid_t );
+int getpgid( pid_t );
+
 int execv( const char*, char* const argv[] );
 int execve( const char*, char* const argv[], char* const envp[] );
 int execvp( const char*, char* const argv[] );
@@ -19,5 +29,8 @@ int close( int fd );
 
 int usleep( useconds_t usec );
 int sleep( unsigned int sec );
+
+int dup( int oldfd );
+int dup2( int oldfd, int newfd );
 
 #endif

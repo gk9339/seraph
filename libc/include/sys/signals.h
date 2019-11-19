@@ -37,4 +37,6 @@
 #define NUMSIGNALS  38
 #define NSIG NUMSIGNALS
 
+typedef void (*sighandler_t)(int);
+
 #endif

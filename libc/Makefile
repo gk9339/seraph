@@ -58,6 +58,16 @@ unistd/sbrk.o \
 unistd/read.o \
 unistd/execv.o \
 unistd/fork.o \
+unistd/getpid.o \
+unistd/getuid.o \
+unistd/setuid.o \
+unistd/getgid.o \
+unistd/setpgid.o \
+unistd/setsid.o \
+unistd/write.o \
+unistd/dup.o \
+unistd/dup2.o \
+ioctl/ioctl.o \
 stdio/stdio.o \
 stdio/stub.o \
 stdlib/stub.o \
@@ -65,7 +75,10 @@ errno/errno.o \
 stdio/stdio.o \
 sched/sched_yield.o \
 pty/pty.o \
+signal/signal.o \
+wait/wait.o \
 debug/debugvfstree.o \
+debug/debugproctree.o \
 
 OBJS=\
 $(FREEOBJS) \

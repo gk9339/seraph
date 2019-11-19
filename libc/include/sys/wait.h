@@ -6,4 +6,7 @@
 #define WSTOPPED  0x0004
 #define WNOKERN   0x0010
 
+int waitpid( int, int*, int );
+int wait( int* );
+
 #endif

@@ -1,6 +1,7 @@
 #include <unistd.h>
 #include <sys/syscall.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <stdio.h>
 
 int main( void )
@@ -17,6 +18,8 @@ int main( void )
         char* env[] = { NULL };
         execve("/bin/terminal", arg, env);
     }
+
+    waitpid(-1, NULL, WNOKERN);
 
     return 0;
 }

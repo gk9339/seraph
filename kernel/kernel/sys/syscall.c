@@ -252,6 +252,17 @@ static int sys_fork( void )
     return (int)fork();
 }
 
+static int sys_getpid( void )
+{
+    if( current_process->group )
+    {
+        return current_process->group;
+    }else
+    {
+        return current_process->id;
+    }
+}
+
 static int sys_sbrk( int size )
 {
     process_t* proc = (process_t*)current_process;
@@ -274,6 +285,18 @@ static int sys_sbrk( int size )
     spin_unlock(proc->image.lock);
 
     return ret;
+}
+
+static int sys_signal( uint32_t signum, uintptr_t handler )
+{
+    if( signum > NUMSIGNALS )
+    {
+        return -EINVAL;
+    }
+
+    uintptr_t old = current_process->signals.functions[signum];
+    current_process->signals.functions[signum] = handler;
+    return (int)old;
 }
 
 static int sys_openpty( int* master, int* slave, char* name, void* _ign0, void* winsize )
@@ -300,6 +323,28 @@ static int sys_openpty( int* master, int* slave, char* name, void* _ign0, void* 
     return 0;
 }
 
+static int sys_dup2( int oldfd, int newfd )
+{
+    return process_move_fd((process_t*)current_process, oldfd, newfd);
+}
+
+static int sys_getuid( void )
+{
+    return current_process->real_user;
+}
+
+static int sys_setuid( user_t new_uid )
+{
+    if( current_process->user == USER_ROOT_UID )
+    {
+        current_process->user = new_uid;
+        current_process->real_user = new_uid;
+        return 0;
+    }
+
+    return -EPERM;
+}
+
 static int sys_sleepabs( unsigned long seconds, unsigned long subseconds )
 {
     sleep_until((process_t*)current_process, seconds, subseconds);
@@ -323,6 +368,17 @@ static int sys_sleep( unsigned long seconds, unsigned long subseconds )
     return sys_sleepabs(s, ss);
 }
 
+static int sys_ioctl( int fd, int request, void* argp )
+{
+    if( FD_CHECK(fd) )
+    {
+        PTR_VALIDATE(argp);
+        return ioctl_fs(FD_ENTRY(fd), request, argp);
+    }
+
+    return -EBADF;
+}
+
 static int sys_yield( void )
 {
     switch_task(1);
@@ -330,10 +386,121 @@ static int sys_yield( void )
     return 1;
 }
 
+static int sys_waitpid( int pid, int* status, int options )
+{
+    if( status && !PTR_INRANGE(status) )
+    {
+        return -EINVAL;
+    }
+
+    return waitpid(pid, status, options);
+}
+
+static int sys_setsid( void )
+{
+    if( current_process->job == current_process->group )
+    {
+        return -EPERM;
+    }
+
+    current_process->session = current_process->group;
+    current_process->job = current_process->group;
+
+    return current_process->session;
+}
+
+static int sys_setpgid( pid_t pid, pid_t pgid )
+{
+    if( pgid < 0 )
+    {
+        return -EINVAL;
+    }
+
+    process_t* proc;
+
+    if( pid == 0 )
+    {
+        proc = (process_t*)current_process;
+    }else
+    {
+        proc = process_from_pid(pid);
+    }
+
+    if( !proc )
+    {
+        debug_log("setpgid - process not found");
+        return -ESRCH;
+    }
+
+    if( proc->session != current_process->session )
+    {
+        debug_log("setpgid - child is in different session");
+        return -EPERM;
+    }
+
+    if( proc->session == proc->group )
+    {
+        debug_log("setpgid - process is session leader");
+        return -EPERM;
+    }
+
+    if( pgid == 0 )
+    {
+        proc->job = proc->group;
+    }else
+    {
+        process_t* pgroup = process_from_pid(pgid);
+
+        if( !pgroup )
+        {
+            debug_log("setpgid - can't find pgroup");
+            return -EPERM;
+        }
+
+        if( pgroup->session != proc->session )
+        {
+            debug_log("setpgid - tried to move to a different session");
+            return -EPERM;
+        }
+
+        proc->job = pgid;
+    }
+
+    return 0;
+}
+
+static int sys_getpgid( pid_t pid )
+{
+    process_t* proc;
+
+    if( pid == 0 )
+    {
+        proc = (process_t*)current_process;
+    }else
+    {
+        proc = process_from_pid(pid);
+    }
+
+    if( !proc )
+    {
+        debug_log("getpgid - process not found");
+        return -ESRCH;
+    }
+
+    return proc->job;
+}
+
 static int sys_debugvfstree( void )
 {
     debug_print_vfs_tree();
 
+    return 0;
+}
+
+static int sys_debugproctree( void )
+{
+    debug_print_proc_tree();
+    
     return 0;
 }
 
@@ -346,12 +513,23 @@ static int (*syscalls[])() =
     [SYS_CLOSE] = sys_close,
     [SYS_EXECVE] = sys_execve,
     [SYS_FORK] = sys_fork,
+    [SYS_GETPID] = sys_getpid,
     [SYS_SBRK] = sys_sbrk,
+    [SYS_SIGNAL] = sys_signal,
     [SYS_OPENPTY] = sys_openpty,
+    [SYS_DUP2] = sys_dup2,
+    [SYS_GETUID] = sys_getuid,
+    [SYS_SETUID] = sys_setuid,
     [SYS_SLEEPABS] = sys_sleepabs,
     [SYS_SLEEP] = sys_sleep,
+    [SYS_IOCTL] = sys_ioctl,
     [SYS_YIELD] = sys_yield,
+    [SYS_WAITPID] = sys_waitpid,
+    [SYS_SETSID] = sys_setsid,
+    [SYS_SETPGID] = sys_setpgid,
+    [SYS_GETPGID] = sys_getpgid,
     [SYS_DEBUGVFSTREE] = sys_debugvfstree,
+    [SYS_DEBUGPROCTREE] = sys_debugproctree,
 };
 
 static void syscall_handler( struct regs* r )

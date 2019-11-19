@@ -144,7 +144,7 @@ void delete_process( process_t* proc )
     int has_children = entry->children->length;
     tree_remove_reparent_root(process_tree, entry);
     list_delete(process_list, list_find(process_list, proc));
-    spin_lock(tree_lock);
+    spin_unlock(tree_lock);
 
     if( has_children )
     {
@@ -864,4 +864,42 @@ int process_alert_node( process_t* process, void* value )
     }
 
     return -1;
+}
+
+static void debug_print_proc_tree_node( tree_node_t* node, size_t height )
+{
+    /* End recursion on a blank entry */
+	if (!node) return;
+
+    char* tmp = malloc(512);
+	memset(tmp, 0, 512);
+	char* c = tmp;
+
+    /* Indent output */
+	for (uint32_t i = 0; i < height; ++i) {
+		c += sprintf(c, "  ");
+	}
+
+    /* Get the current process */
+	process_t* proc = (process_t*)node->value;
+
+    /* Print the process name */
+	if (proc) {
+		c += sprintf(c, "%s - %d", proc->name, proc->id);
+	}
+
+    /* Linefeed */
+	debug_log(tmp);
+	free(tmp);
+
+    foreach(child, node->children)
+    {
+		/* Recursively print the children */
+		debug_print_proc_tree_node(child->value, height + 1);
+    }
+}
+
+void debug_print_proc_tree( void )
+{
+	debug_print_proc_tree_node(process_tree->root, 0);
 }

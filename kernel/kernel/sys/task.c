@@ -306,7 +306,7 @@ extern void enter_userspace( uintptr_t location, uintptr_t stack );
 void enter_user_jump( uintptr_t location, int argc, char** argv, uintptr_t stack )
 {
     char debug_str[512];
-    debug_logf(debug_str, "%s -> Starting", current_process->name);
+    debug_logf(debug_str, "%s - %d -> Starting", current_process->name, current_process->id);
     int_disable();
     set_kernel_stack(current_process->image.stack);
 
@@ -324,7 +324,7 @@ void task_exit( int retval )
         return;
     }
 
-    debug_logf(debug_str, "%s -> Finishing", current_process->name);
+    debug_logf(debug_str, "%s - %d -> Finishing", current_process->name, current_process->id);
     cleanup_process((process_t*)current_process, retval);
 
     process_t* parent = process_get_parent((process_t*)current_process);

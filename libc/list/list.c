@@ -80,17 +80,20 @@ void list_append_after( list_t* list, node_t* before, node_t* node )
             list->head->prev = node;
             list->head = node;
             list->length++;
-        }else if( before == list->tail )
+        }else 
         {
-            list->tail = node;
-        }else
-        {
-            before->next->prev = node;
-            node->next = before->next;
+            if( before == list->tail )
+            {
+                list->tail = node;
+            }else
+            {
+                before->next->prev = node;
+                node->next = before->next;
+            }
+            node->prev = before;
+            before->next = node;
+            list->length++;
         }
-        node->prev = before;
-        before->next = node;
-        list->length++;
     }
 }
 

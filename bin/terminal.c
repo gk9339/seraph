@@ -6,6 +6,7 @@
 #include <pty.h>
 #include <debug.h>
 #include <sys/signals.h>
+#include <signal.h>
 
 static const size_t VGA_WIDTH = 80;
 static const size_t VGA_HEIGHT = 25;
@@ -30,7 +31,7 @@ int main( void )
 	terminal_color = vga_entry_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
     terminal_buffer = VGA_MEMORY;
 
-/*    openpty(&fd_master, &fd_slave, NULL, NULL, NULL);
+    openpty(&fd_master, &fd_slave, NULL, NULL, NULL);
     terminal = fdopen(fd_slave, "w");
 
     struct winsize pty_winsize;
@@ -39,17 +40,17 @@ int main( void )
     pty_winsize.ws_xpixel = 0;
     pty_winsize.ws_ypixel = 0;
     ioctl(fd_master, TIOCSWINSZ, &pty_winsize);
-*/
+
     terminal_clear();
 
     fflush(stdin);
-/*
+
     signal(SIGUSR2, sig_suspend_input);
 
-    int pid = getpid();
+    debugproctree();
     uint32_t f = fork();
 
-    if( getpid() != pid )
+    if( f == 0 )
     {
         setsid();
         dup2(fd_slave, 0);
@@ -57,8 +58,13 @@ int main( void )
         dup2(fd_slave, 2);
 
         exit_terminal = 1;
+
+        sleep(3);
     }else
-    {*/
+    {
+        debugproctree();
+
+        /*
         int kfd = open("/dev/kbd", O_RDONLY);
         int ret;
         char c;
@@ -71,8 +77,10 @@ int main( void )
             {
                 printf("%c", c);
             }
-        }
-    //}
+        }*/
+
+        sleep(6);
+    }
     
     return 0;
 }
@@ -166,7 +174,7 @@ void terminal_writestring( const char* data )
 {
 	terminal_write(data, strlen(data));
 }
-/*
+
 static void sig_suspend_input( int sig )
 {
     char* exit_message = "[Input stopped]\n";
@@ -175,4 +183,4 @@ static void sig_suspend_input( int sig )
     input_stopped = 1;
 
     signal(SIGUSR2, sig_suspend_input);
-}*/
+}

@@ -1,6 +1,9 @@
 #ifndef _SYSCALL_H
 #define _SYSCALL_H
 
+#include <sys/types.h>
+#include <signal.h>
+
 #define SYS_EXT 0
 #define SYS_GETEUID 1
 #define SYS_OPEN 2
@@ -56,6 +59,7 @@
 #define SYS_SETPGID 63
 #define SYS_GETPGID 64
 #define SYS_DEBUGVFSTREE 100
+#define SYS_DEBUGPROCTREE 101
 
 #define DECL_SYSCALL0(fn)                int syscall_##fn( void )
 #define DECL_SYSCALL1(fn,p1)             int syscall_##fn(p1)
@@ -117,10 +121,21 @@ DECL_SYSCALL3(write, int, char *, int);
 DECL_SYSCALL1(close, int);
 DECL_SYSCALL3(execve, char*, char**, char**);
 DECL_SYSCALL0(fork);
+DECL_SYSCALL0(getpid);
 DECL_SYSCALL1(sbrk, int);
+DECL_SYSCALL2(signal, uint32_t, sighandler_t*);
 DECL_SYSCALL5(openpty, int*, int*, char*, void*, void*);
+DECL_SYSCALL2(dup2, int, int);
+DECL_SYSCALL0(getuid);
+DECL_SYSCALL1(setuid, unsigned int);
 DECL_SYSCALL0(yield);
 DECL_SYSCALL2(nanosleep, unsigned long, unsigned long);
+DECL_SYSCALL3(ioctl, int, int, void*);
+DECL_SYSCALL3(waitpid, int, int*, int);
+DECL_SYSCALL0(setsid);
+DECL_SYSCALL2(setpgid, int, int);
+DECL_SYSCALL1(getpgid, int);
 DECL_SYSCALL0(debugvfstree);
+DECL_SYSCALL0(debugproctree);
 
 #endif

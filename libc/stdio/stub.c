@@ -31,11 +31,6 @@ size_t fread( void* ptr, size_t size, size_t nmemb, FILE* stream )
     return 0;
 }
 
-size_t fwrite( const void* ptr, size_t size, size_t nmemb, FILE* stream )
-{
-    return 0;
-}
-
 int fseek( FILE* stream, long offset, int whence )
 {
     return 0;

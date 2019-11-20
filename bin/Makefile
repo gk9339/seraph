@@ -13,9 +13,11 @@ LIBS:=$(LIBS) -lc
 
 OBJS=\
 terminal.o \
+sh.o \
 
 EXECS=\
 terminal \
+sh \
 
 .PHONY: all clean install install-headers install-bin
 .SUFFIXES: .o .c
@@ -26,6 +28,9 @@ all: $(OBJS) $(EXECS)
 	$(CC) -MD -c $< -o $@ -std=gnu11 $(CFLAGS)
 
 terminal: terminal.o
+	$(CC) $< -o $@ $(CFLAGS)$(LIBS)
+
+sh: sh.o
 	$(CC) $< -o $@ $(CFLAGS)$(LIBS)
 
 clean:

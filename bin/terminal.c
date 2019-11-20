@@ -26,8 +26,8 @@ static void sig_suspend_input( int sig );
 int main( void )
 {
     terminal_row = 0;
-	terminal_column = 0;
-	terminal_color = vga_entry_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
+    terminal_column = 0;
+    terminal_color = vga_entry_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
     terminal_buffer = VGA_MEMORY;
 
     openpty(&fd_master, &fd_slave, NULL, NULL, NULL);
@@ -55,12 +55,11 @@ int main( void )
         dup2(fd_slave, 1);
         dup2(fd_slave, 2);
 
-        exit_terminal = 1;
-
-        sleep(3);
+        char* arg[] = { NULL };
+        char* env[] = { NULL };
+        execve("/bin/sh", arg, env);
     }else
     {
-        /*
         int kfd = open("/dev/kbd", O_RDONLY);
         int ret;
         char c;
@@ -71,11 +70,9 @@ int main( void )
             ret = read(kfd, &c, 1);
             if( ret )
             {
-                printf("%c", c);
+                write(fd_master, &c, 1);
             }
-        }*/
-
-        sleep(6);
+        }
     }
     
     return 0;

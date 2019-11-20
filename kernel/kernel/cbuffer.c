@@ -30,7 +30,7 @@ size_t circular_buffer_available( circular_buffer_t* cbuffer )
 {
     if( cbuffer->read_ptr == cbuffer->write_ptr )
     {
-        return 0;
+        return cbuffer->size - 1;
     }
 
     if( cbuffer->read_ptr > cbuffer->write_ptr )

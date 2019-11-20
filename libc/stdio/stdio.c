@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <sys/syscall.h>
 #include <string.h>
+#include <errno.h>
 
 struct _FILE
 {
@@ -91,4 +92,16 @@ FILE* fdopen( int fd, const char* mode )
     out->_name = strdup(tmp);
 
     return out;
+}
+
+size_t fwrite( const void* ptr, size_t size, size_t count, FILE* stream )
+{
+    size_t out_size = size * count;
+
+    if( !out_size )
+    {
+        return 0;
+    }
+
+    __sets_errno(syscall_write(stream->fd, (void*)ptr, out_size));
 }

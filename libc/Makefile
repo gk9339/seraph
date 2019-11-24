@@ -49,7 +49,8 @@ hashtable/hashtable.o \
 
 HOSTEDOBJS=\
 $(ARCH_HOSTEDOBJS) \
-libc.o \
+entry.o \
+exit.o \
 unistd/stub.o \
 unistd/open.o \
 unistd/usleep.o \

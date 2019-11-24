@@ -183,7 +183,8 @@ typedef struct
     int kbd_esc_buf;
 } key_event_state_t;
 
-void key_event(int ret, key_event_t * event);
-int kbd_scancode(key_event_state_t * state, unsigned char c, key_event_t * event);
+void key_event( int ret, key_event_t* event );
+kbd_key_t kbd_key( key_event_state_t* state, unsigned char c );
+int kbd_scancode( key_event_state_t* state, unsigned char c, key_event_t* event );
 
 #endif

@@ -299,7 +299,7 @@ static int sys_signal( uint32_t signum, uintptr_t handler )
     return (int)old;
 }
 
-static int sys_openpty( int* master, int* slave, char* name, void* _ign0, void* winsize )
+static int sys_openpty( int* master, int* slave, char* name __attribute__((unused)), void* termios, void* winsize )
 {
     if( !master || !slave ) return -EINVAL;
     if( master && !PTR_INRANGE(master) ) return -EINVAL;
@@ -309,7 +309,7 @@ static int sys_openpty( int* master, int* slave, char* name, void* _ign0, void* 
     fs_node_t* fs_master;
     fs_node_t* fs_slave;
 
-    pty_create(winsize, &fs_master, &fs_slave);
+    pty_create(termios, winsize, &fs_master, &fs_slave);
 
     *master = process_append_fd((process_t*)current_process, fs_master);
     *slave = process_append_fd((process_t*)current_process, fs_slave);
@@ -556,6 +556,9 @@ static int sys_debugproctree( void )
     return 0;
 }
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wstrict-prototypes"
+#pragma GCC diagnostic ignored "-Wincompatible-pointer-types"
 static int (*syscalls[])() =
 {
     [SYS_EXT] = sys_exit,
@@ -585,6 +588,7 @@ static int (*syscalls[])() =
     [SYS_DEBUGVFSTREE] = sys_debugvfstree,
     [SYS_DEBUGPROCTREE] = sys_debugproctree,
 };
+#pragma GCC diagnostic pop
 
 static void syscall_handler( struct regs* r )
 {

@@ -18,9 +18,9 @@ int setuid( uid_t );
 int setpgid( pid_t, pid_t );
 int getpgid( pid_t );
 
-int execv( const char*, char* const argv[] );
+int execv( const char*, char* const argv[] ); //stub
 int execve( const char*, char* const argv[], char* const envp[] );
-int execvp( const char*, char* const argv[] );
+int execvp( const char*, char* const argv[] ); //stub
 
 ssize_t write( int fd, const void* buf, size_t count );
 ssize_t read( int fd, void* buf, size_t count );

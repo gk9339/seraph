@@ -11,10 +11,8 @@ static fs_node_t* keyboard_pipe;
 
 static int keyboard_handler( struct regs *r __attribute__((unused)) )
 {
-    unsigned char scancode;
     if(inportb(KEY_PENDING) & 0x01)
     {
-        //scancode = convert_scancode(inportb(KEY_DEVICE));
         write_fs(keyboard_pipe, 0, 1, (uint8_t []){inportb(KEY_DEVICE)});
     }
     
@@ -25,7 +23,6 @@ static int keyboard_handler( struct regs *r __attribute__((unused)) )
 int keyboard_install( void )
 {
     keyboard_pipe = make_pipe(128);
-
     keyboard_pipe->flags = FS_CHARDEVICE;
 
     vfs_mount("/dev/kbd", keyboard_pipe);

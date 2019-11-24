@@ -153,20 +153,28 @@ void terminal_putchar( char c )
     {
         terminal_column = 0;
         if( terminal_row != VGA_HEIGHT - 1 )
+        {
             terminal_row++;
-        else
+        }else
+        {
             terminal_scroll(1);
+        }
     }else if( uc == '\b' )
     {
         if( terminal_column == 0 )
         {
             terminal_column = VGA_WIDTH - 1;
             if( terminal_row == 0 )
+            {
                 terminal_row = VGA_HEIGHT - 1;
-            else
+            }else
+            {
                 terminal_row--;
+            }
         }else
+        {
             terminal_column--;
+        }
         /* Replace whatever character was at this location with ' ' */
         terminal_putentryat(' ', terminal_color, terminal_column, terminal_row);
     }else if( uc > 31 ) /* Print only printable ascii characters */
@@ -177,9 +185,12 @@ void terminal_putchar( char c )
         {
 	    	terminal_column = 0;
     		if ( terminal_row != VGA_HEIGHT - 1 )
+            {
 		    	terminal_row++;
-            else
+            }else
+            {
                 terminal_scroll(1);
+            }
         }
     }
 }
@@ -197,7 +208,7 @@ void terminal_writestring( const char* data )
 	terminal_write(data, strlen(data));
 }
 
-static void sig_suspend_input( int sig )
+static void sig_suspend_input( int sig __attribute__((unused)) )
 {
     char* exit_message = "[Input stopped]\n";
     write(fd_slave, exit_message, sizeof(exit_message));

@@ -40,7 +40,7 @@ void pty_output_process_slave( pty_t*, uint8_t );
 void pty_output_process( pty_t*, uint8_t );
 void pty_input_process( pty_t*, uint8_t );
 
-int pty_create( void*, fs_node_t**, fs_node_t** );
-pty_t* pty_new( struct winsize* );
+int pty_create( void*, void*, fs_node_t**, fs_node_t** );
+pty_t* pty_new( struct termios*, struct winsize* );
 
 #endif

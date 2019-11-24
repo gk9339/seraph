@@ -7,6 +7,7 @@
 struct _FILE
 {
     int fd;
+    short flags;
 
     char* read_base;
     char* read_ptr;
@@ -25,6 +26,7 @@ struct _FILE
 FILE _stdin =
 {
     .fd = 0,
+    .flags = 0,
     .read_base = NULL,
     .read_ptr = NULL,
     .read_end = NULL,
@@ -40,6 +42,7 @@ FILE _stdin =
 FILE _stdout =
 {
 	.fd = 1,
+    .flags = 0,
     .read_base = NULL,
     .read_ptr = NULL,
     .read_end = NULL,
@@ -55,6 +58,7 @@ FILE _stdout =
 FILE _stderr =
 {
 	.fd = 2,
+    .flags = 0,
     .read_base = NULL,
     .read_ptr = NULL,
     .read_end = NULL,

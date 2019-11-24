@@ -363,14 +363,14 @@ static int pty_ioctl( pty_t* pty, int request, void* argp )
     }
 }
 
-static uint32_t  read_pty_master( fs_node_t* node, uint32_t offset, uint32_t size, uint8_t* buffer )
+static uint32_t  read_pty_master( fs_node_t* node, uint32_t offset __attribute__((unused)), uint32_t size, uint8_t* buffer )
 { 
     pty_t* pty = (pty_t*)node->device;
 
     return circular_buffer_read(pty->out, size, buffer);
 }
 
-static uint32_t write_pty_master( fs_node_t* node, uint32_t offset, uint32_t size, uint8_t* buffer )
+static uint32_t write_pty_master( fs_node_t* node, uint32_t offset __attribute__((unused)), uint32_t size, uint8_t* buffer )
 {
     pty_t* pty = (pty_t*)node->device;
 
@@ -383,17 +383,17 @@ static uint32_t write_pty_master( fs_node_t* node, uint32_t offset, uint32_t siz
     return l;
 }
 
-static void open_pty_master( fs_node_t* node, unsigned int flags )
+static void open_pty_master( fs_node_t* node __attribute__((unused)), unsigned int flags __attribute__((unused)) )
 {
     return;
 }
 
-static void close_pty_master( fs_node_t* node )
+static void close_pty_master( fs_node_t* node __attribute__((unused)) )
 {
     return;
 }
 
-static uint32_t  read_pty_slave( fs_node_t* node, uint32_t offset, uint32_t size, uint8_t* buffer )
+static uint32_t  read_pty_slave( fs_node_t* node, uint32_t offset __attribute__((unused)), uint32_t size, uint8_t* buffer )
 {
     pty_t* pty = (pty_t*)node->device;
 
@@ -412,7 +412,7 @@ static uint32_t  read_pty_slave( fs_node_t* node, uint32_t offset, uint32_t size
     }
 }
 
-static uint32_t write_pty_slave( fs_node_t* node, uint32_t offset, uint32_t size, uint8_t* buffer )
+static uint32_t write_pty_slave( fs_node_t* node, uint32_t offset __attribute__((unused)), uint32_t size, uint8_t* buffer )
 {
     pty_t* pty = (pty_t*)node->device;
 
@@ -425,7 +425,7 @@ static uint32_t write_pty_slave( fs_node_t* node, uint32_t offset, uint32_t size
     return l;
 }
 
-static void open_pty_slave( fs_node_t* node, unsigned int flags )
+static void open_pty_slave( fs_node_t* node __attribute__((unused)), unsigned int flags __attribute__((unused)) )
 {
     return;
 }
@@ -453,271 +453,271 @@ static int ioctl_pty_slave( fs_node_t* node, int request, void* argp )
 
 static int pty_available_input( fs_node_t* node )
 {
-	pty_t* pty = (pty_t*)node->device;
-	return circular_buffer_unread(pty->in);
+    pty_t* pty = (pty_t*)node->device;
+    return circular_buffer_unread(pty->in);
 }
 
 static int pty_available_output( fs_node_t* node )
 {
-	pty_t* pty = (pty_t*)node->device;
-	return circular_buffer_unread(pty->out);
+    pty_t* pty = (pty_t*)node->device;
+    return circular_buffer_unread(pty->out);
 }
 
 static int check_pty_master( fs_node_t* node )
 {
-	pty_t* pty = (pty_t*)node->device;
-	if( circular_buffer_unread(pty->out) > 0 )
+    pty_t* pty = (pty_t*)node->device;
+    if( circular_buffer_unread(pty->out) > 0 )
     {
-		return 0;
-	}
-	return 1;
+        return 0;
+    }
+    return 1;
 }
 
 static int check_pty_slave( fs_node_t* node )
 {
-	pty_t* pty = (pty_t*)node->device;
-	if( circular_buffer_unread(pty->in) > 0 )
+    pty_t* pty = (pty_t*)node->device;
+    if( circular_buffer_unread(pty->in) > 0 )
     {
-		return 0;
-	}
-	return 1;
+        return 0;
+    }
+    return 1;
 }
 
 static int wait_pty_master( fs_node_t* node, void* process )
 {
-	pty_t* pty = (pty_t*)node->device;
-	circular_buffer_selectwait(pty->out, process);
-	return 0;
+    pty_t* pty = (pty_t*)node->device;
+    circular_buffer_selectwait(pty->out, process);
+    return 0;
 }
 
 static int wait_pty_slave( fs_node_t* node, void* process )
 {
-	pty_t* pty = (pty_t*)node->device;
-	circular_buffer_selectwait(pty->in, process);
-	return 0;
+    pty_t* pty = (pty_t*)node->device;
+    circular_buffer_selectwait(pty->in, process);
+    return 0;
 }
 
 static fs_node_t* pty_master_create( pty_t* pty )
 {
-	fs_node_t* fnode = malloc(sizeof(fs_node_t));
-	memset(fnode, 0x00, sizeof(fs_node_t));
+    fs_node_t* fnode = malloc(sizeof(fs_node_t));
+    memset(fnode, 0x00, sizeof(fs_node_t));
 
-	fnode->name[0] = '\0';
-	sprintf(fnode->name, "pty master");
-	fnode->uid   = current_process->user;
-	fnode->gid   = 0;
-	fnode->mask  = 0666;
-	fnode->flags = FS_PIPE;
-	fnode->read  =  read_pty_master;
-	fnode->write = write_pty_master;
-	fnode->open  =  open_pty_master;
-	fnode->close = close_pty_master;
-	fnode->selectcheck = check_pty_master;
-	fnode->selectwait  = wait_pty_master;
-	fnode->readdir = NULL;
-	fnode->finddir = NULL;
-	fnode->ioctl = ioctl_pty_master;
-	fnode->get_size = pty_available_output;
-	fnode->ctime   = now();
-	fnode->mtime   = now();
-	fnode->atime   = now();
+    fnode->name[0] = '\0';
+    sprintf(fnode->name, "pty master");
+    fnode->uid   = current_process->user;
+    fnode->gid   = 0;
+    fnode->mask  = 0666;
+    fnode->flags = FS_PIPE;
+    fnode->read  =  read_pty_master;
+    fnode->write = write_pty_master;
+    fnode->open  =  open_pty_master;
+    fnode->close = close_pty_master;
+    fnode->selectcheck = check_pty_master;
+    fnode->selectwait  = wait_pty_master;
+    fnode->readdir = NULL;
+    fnode->finddir = NULL;
+    fnode->ioctl = ioctl_pty_master;
+    fnode->get_size = pty_available_output;
+    fnode->ctime   = now();
+    fnode->mtime   = now();
+    fnode->atime   = now();
 
-	fnode->device = pty;
+    fnode->device = pty;
 
-	return fnode;
+    return fnode;
 }
 
 static fs_node_t* pty_slave_create( pty_t* pty )
 {
-	fs_node_t* fnode = malloc(sizeof(fs_node_t));
-	memset(fnode, 0x00, sizeof(fs_node_t));
+    fs_node_t* fnode = malloc(sizeof(fs_node_t));
+    memset(fnode, 0x00, sizeof(fs_node_t));
 
-	fnode->name[0] = '\0';
-	sprintf(fnode->name, "pty slave");
-	fnode->uid   = current_process->user;
-	fnode->gid   = 0;
-	fnode->mask  = 0620;
-	fnode->flags = FS_CHARDEVICE;
-	fnode->read  =  read_pty_slave;
-	fnode->write = write_pty_slave;
-	fnode->open  =  open_pty_slave;
-	fnode->close = close_pty_slave;
-	fnode->selectcheck = check_pty_slave;
-	fnode->selectwait  = wait_pty_slave;
-	fnode->readdir = NULL;
-	fnode->finddir = NULL;
-	fnode->ioctl = ioctl_pty_slave;
-	fnode->get_size = pty_available_input;
-	fnode->ctime   = now();
-	fnode->mtime   = now();
-	fnode->atime   = now();
+    fnode->name[0] = '\0';
+    sprintf(fnode->name, "pty slave");
+    fnode->uid   = current_process->user;
+    fnode->gid   = 0;
+    fnode->mask  = 0620;
+    fnode->flags = FS_CHARDEVICE;
+    fnode->read  =  read_pty_slave;
+    fnode->write = write_pty_slave;
+    fnode->open  =  open_pty_slave;
+    fnode->close = close_pty_slave;
+    fnode->selectcheck = check_pty_slave;
+    fnode->selectwait  = wait_pty_slave;
+    fnode->readdir = NULL;
+    fnode->finddir = NULL;
+    fnode->ioctl = ioctl_pty_slave;
+    fnode->get_size = pty_available_input;
+    fnode->ctime   = now();
+    fnode->mtime   = now();
+    fnode->atime   = now();
 
-	fnode->device = pty;
+    fnode->device = pty;
 
-	return fnode;
+    return fnode;
 }
 
 static int isatty( fs_node_t* node )
 {
-	if (!node) return 0;
-	if (!node->ioctl) return 0;
-	return ioctl_fs(node, IOCTLDTYPE, NULL) == IOCTL_DTYPE_TTY;
+    if (!node) return 0;
+    if (!node->ioctl) return 0;
+    return ioctl_fs(node, IOCTLDTYPE, NULL) == IOCTL_DTYPE_TTY;
 }
 
-static int readlink_dev_tty( fs_node_t* node, char* buf, size_t size )
+static int readlink_dev_tty( fs_node_t* node __attribute__((unused)), char* buf, size_t size )
 {
-	pty_t* pty = NULL;
+    pty_t* pty = NULL;
 
-	for( unsigned int i = 0; i < ((current_process->fds->length < 3) ? current_process->fds->length : 3); ++i )
+    for( unsigned int i = 0; i < ((current_process->fds->length < 3) ? current_process->fds->length : 3); ++i )
     {
-		if( isatty(current_process->fds->entries[i]) )
+        if( isatty(current_process->fds->entries[i]) )
         {
-			pty = (pty_t*)current_process->fds->entries[i]->device;
-			break;
-		}
-	}
+            pty = (pty_t*)current_process->fds->entries[i]->device;
+            break;
+        }
+    }
 
-	char tmp[30];
-	size_t req;
-	if( !pty )
+    char tmp[30];
+    size_t req;
+    if( !pty )
     {
-		sprintf(tmp, "/dev/null");
-	}else
+        sprintf(tmp, "/dev/null");
+    }else
     {
-		pty->fill_name(pty, tmp);
-	}
+        pty->fill_name(pty, tmp);
+    }
 
-	req = strlen(tmp) + 1;
+    req = strlen(tmp) + 1;
 
-	if( size < req )
+    if( size < req )
     {
-		memcpy(buf, tmp, size);
-		buf[size-1] = '\0';
-		return size-1;
-	}
+        memcpy(buf, tmp, size);
+        buf[size-1] = '\0';
+        return size-1;
+    }
 
-	if( size > req ) size = req;
+    if( size > req ) size = req;
 
-	memcpy(buf, tmp, size);
-	return size-1;
+    memcpy(buf, tmp, size);
+    return size-1;
 }
 
 static fs_node_t* create_dev_tty( void )
 {
-	fs_node_t* fnode = malloc(sizeof(fs_node_t));
-	memset(fnode, 0x00, sizeof(fs_node_t));
+    fs_node_t* fnode = malloc(sizeof(fs_node_t));
+    memset(fnode, 0x00, sizeof(fs_node_t));
 
     fnode->inode = 0;
-	strcpy(fnode->name, "tty");
-	fnode->mask = 0777;
-	fnode->uid  = 0;
-	fnode->gid  = 0;
-	fnode->flags   = FS_FILE | FS_SYMLINK;
-	fnode->readlink = readlink_dev_tty;
-	fnode->length  = 1;
-	fnode->nlink   = 1;
-	fnode->ctime   = now();
-	fnode->mtime   = now();
-	fnode->atime   = now();
-	return fnode;
+    strcpy(fnode->name, "tty");
+    fnode->mask = 0777;
+    fnode->uid  = 0;
+    fnode->gid  = 0;
+    fnode->flags   = FS_FILE | FS_SYMLINK;
+    fnode->readlink = readlink_dev_tty;
+    fnode->length  = 1;
+    fnode->nlink   = 1;
+    fnode->ctime   = now();
+    fnode->mtime   = now();
+    fnode->atime   = now();
+    return fnode;
 }
 
-static struct dirent* readdir_pty( fs_node_t* fnode, uint32_t index )
+static struct dirent* readdir_pty( fs_node_t* fnode __attribute__((unused)), uint32_t index )
 {
-	if( index == 0 )
+    if( index == 0 )
     {
-		struct dirent* out = malloc(sizeof(struct dirent));
-		memset(out, 0x00, sizeof(struct dirent));
-		out->ino = 0;
-		strcpy(out->name, ".");
-		return out;
-	}
+        struct dirent* out = malloc(sizeof(struct dirent));
+        memset(out, 0x00, sizeof(struct dirent));
+        out->ino = 0;
+        strcpy(out->name, ".");
+        return out;
+    }
 
-	if( index == 1 )
+    if( index == 1 )
     {
-		struct dirent* out = malloc(sizeof(struct dirent));
-		memset(out, 0x00, sizeof(struct dirent));
-		out->ino = 0;
-		strcpy(out->name, "..");
-		return out;
-	}
+        struct dirent* out = malloc(sizeof(struct dirent));
+        memset(out, 0x00, sizeof(struct dirent));
+        out->ino = 0;
+        strcpy(out->name, "..");
+        return out;
+    }
 
-	index -= 2;
+    index -= 2;
 
-	pty_t* out_pty = NULL;
-	list_t* values = hashtable_values(_pty_index);
-	foreach( node, values )
+    pty_t* out_pty = NULL;
+    list_t* values = hashtable_values(_pty_index);
+    foreach( node, values )
     {
-		if( index == 0 )
+        if( index == 0 )
         {
-			out_pty = node->value;
-			break;
-		}
-		index--;
-	}
-	list_free(values);
+            out_pty = node->value;
+            break;
+        }
+        index--;
+    }
+    list_free(values);
 
-	if( out_pty )
+    if( out_pty )
     {
-		struct dirent* out = malloc(sizeof(struct dirent));
-		memset(out, 0x00, sizeof(struct dirent));
-		out->ino = out_pty->name;
-		out->name[0] = '\0';
-		sprintf(out->name, "%d", out_pty->name);
-		return out;
-	}else
+        struct dirent* out = malloc(sizeof(struct dirent));
+        memset(out, 0x00, sizeof(struct dirent));
+        out->ino = out_pty->name;
+        out->name[0] = '\0';
+        sprintf(out->name, "%d", out_pty->name);
+        return out;
+    }else
     {
-		return NULL;
-	}
+        return NULL;
+    }
 }
 
-static fs_node_t* finddir_pty( fs_node_t* node, char* name )
+static fs_node_t* finddir_pty( fs_node_t* node __attribute__((unused)), char* name )
 {
-	if( !name ) return NULL;
-	if( strlen(name) < 1 ) return NULL;
+    if( !name ) return NULL;
+    if( strlen(name) < 1 ) return NULL;
 
-	int c = 0;
-	for( int i = 0; name[i]; ++i )
+    int c = 0;
+    for( int i = 0; name[i]; ++i )
     {
-		if( name[i] < '0' || name[i] > '9' )
+        if( name[i] < '0' || name[i] > '9' )
         {
-			return NULL;
-		}
-		c = c * 10 + name[i] - '0';
-	}
+            return NULL;
+        }
+        c = c * 10 + name[i] - '0';
+    }
 
-	pty_t* _pty = hashtable_get(_pty_index, (void*)c);
+    pty_t* _pty = hashtable_get(_pty_index, (void*)c);
 
-	if( !_pty )
+    if( !_pty )
     {
-		return NULL;
-	}
+        return NULL;
+    }
 
-	return _pty->slave;
+    return _pty->slave;
 }
 
 static fs_node_t* create_pty_dir( void )
 {
-	fs_node_t * fnode = malloc(sizeof(fs_node_t));
-	memset(fnode, 0x00, sizeof(fs_node_t));
+    fs_node_t * fnode = malloc(sizeof(fs_node_t));
+    memset(fnode, 0x00, sizeof(fs_node_t));
 
     fnode->inode = 0;
-	strcpy(fnode->name, "pty");
-	fnode->mask = 0555;
-	fnode->uid  = 0;
-	fnode->gid  = 0;
-	fnode->flags   = FS_DIRECTORY;
-	fnode->read    = NULL;
-	fnode->write   = NULL;
-	fnode->open    = NULL;
-	fnode->close   = NULL;
-	fnode->readdir = readdir_pty;
-	fnode->finddir = finddir_pty;
-	fnode->nlink   = 1;
-	fnode->ctime   = now();
-	fnode->mtime   = now();
-	fnode->atime   = now();
-	return fnode;
+    strcpy(fnode->name, "pty");
+    fnode->mask = 0555;
+    fnode->uid  = 0;
+    fnode->gid  = 0;
+    fnode->flags   = FS_DIRECTORY;
+    fnode->read    = NULL;
+    fnode->write   = NULL;
+    fnode->open    = NULL;
+    fnode->close   = NULL;
+    fnode->readdir = readdir_pty;
+    fnode->finddir = finddir_pty;
+    fnode->nlink   = 1;
+    fnode->ctime   = now();
+    fnode->mtime   = now();
+    fnode->atime   = now();
+    return fnode;
 }
 
 static void pty_initialize( void )
@@ -730,79 +730,86 @@ static void pty_initialize( void )
     vfs_mount("/dev/tty", _dev_tty);
 }
 
-pty_t* pty_new( struct winsize* pty_winsize )
+pty_t* pty_new( struct termios* pty_termios, struct winsize* pty_winsize )
 {
     if (!_pty_index) {
-		pty_initialize();
-	}
+        pty_initialize();
+    }
 
-	pty_t* pty = malloc(sizeof(pty_t));
+    pty_t* pty = malloc(sizeof(pty_t));
 
-	pty->next_is_verbatim = 0;
+    pty->next_is_verbatim = 0;
 
-	/* stdin linkage; characters from terminal → PTY slave */
-	pty->in  = circular_buffer_create(PTY_BUFFER_SIZE);
-	pty->out = circular_buffer_create(PTY_BUFFER_SIZE);
+    /* stdin linkage; characters from terminal → PTY slave */
+    pty->in  = circular_buffer_create(PTY_BUFFER_SIZE);
+    pty->out = circular_buffer_create(PTY_BUFFER_SIZE);
 
-	pty->in->discard = 1;
+    pty->in->discard = 1;
 
-	/* Master endpoint - writes go to stdin, reads come from stdout */
-	pty->master = pty_master_create(pty);
+    /* Master endpoint - writes go to stdin, reads come from stdout */
+    pty->master = pty_master_create(pty);
 
-	/* Slave endpoint, reads come from stdin, writes go to stdout */
-	pty->slave  = pty_slave_create(pty);
+    /* Slave endpoint, reads come from stdin, writes go to stdout */
+    pty->slave  = pty_slave_create(pty);
 
-	/* tty name */
-	pty->name   = _pty_counter++;
-	pty->fill_name = pty_fill_name;
+    /* tty name */
+    pty->name   = _pty_counter++;
+    pty->fill_name = pty_fill_name;
 
-	pty->write_in = pty_write_in;
-	pty->write_out = pty_write_out;
+    pty->write_in = pty_write_in;
+    pty->write_out = pty_write_out;
 
-	hashtable_set(_pty_index, (void*)pty->name, pty);
+    hashtable_set(_pty_index, (void*)pty->name, pty);
 
-	if( pty_winsize )
+    if( pty_winsize )
     {
-		memcpy(&pty->pty_winsize, pty_winsize, sizeof(struct winsize));
-	}else
+        memcpy(&pty->pty_winsize, pty_winsize, sizeof(struct winsize));
+    }else
     {
-		/* Sane defaults */
-		pty->pty_winsize.ws_row = 25;
-		pty->pty_winsize.ws_col = 80;
-	}
+        /* Sane defaults */
+        pty->pty_winsize.ws_row = 25;
+        pty->pty_winsize.ws_col = 80;
+    }
 
-	/* Controlling and foreground processes are set to 0 by default */
-	pty->controlling_process = 0;
-	pty->foreground_process = 0;
+    /* Controlling and foreground processes are set to 0 by default */
+    pty->controlling_process = 0;
+    pty->foreground_process = 0;
 
-	pty->pty_termios.c_iflag = ICRNL | BRKINT;
-	pty->pty_termios.c_oflag = ONLCR | OPOST;
-	pty->pty_termios.c_lflag = ECHO | ECHOE | ECHOK | ICANON | ISIG | IEXTEN;
-	pty->pty_termios.c_cflag = CREAD | CS8;
-	pty->pty_termios.c_cc[VEOF]   =  4; /* ^D */
-	pty->pty_termios.c_cc[VEOL]   =  0; /* Not set */
-	pty->pty_termios.c_cc[VERASE] = 0x7f; /* ^? */
-	pty->pty_termios.c_cc[VINTR]  =  3; /* ^C */
-	pty->pty_termios.c_cc[VKILL]  = 21; /* ^U */
-	pty->pty_termios.c_cc[VMIN]   =  1;
-	pty->pty_termios.c_cc[VQUIT]  = 28; /* ^\ */
-	pty->pty_termios.c_cc[VSTART] = 17; /* ^Q */
-	pty->pty_termios.c_cc[VSTOP]  = 19; /* ^S */
-	pty->pty_termios.c_cc[VSUSP] = 26; /* ^Z */
-	pty->pty_termios.c_cc[VTIME]  =  0;
-	pty->pty_termios.c_cc[VLNEXT] = 22; /* ^V */
-	pty->pty_termios.c_cc[VWERASE] = 23; /* ^W */
+    if( pty_termios )
+    {
+        memcpy(&pty->pty_termios, pty_termios, sizeof(struct termios));
+    }else
+    {   
+        /* Sane defaults */
+        pty->pty_termios.c_iflag = ICRNL | BRKINT;
+        pty->pty_termios.c_oflag = ONLCR | OPOST;
+        pty->pty_termios.c_lflag = ECHO | ECHOE | ECHOK | ICANON | ISIG | IEXTEN;
+        pty->pty_termios.c_cflag = CREAD | CS8;
+        pty->pty_termios.c_cc[VEOF]   =  4; /* ^D */
+        pty->pty_termios.c_cc[VEOL]   =  0; /* Not set */
+        pty->pty_termios.c_cc[VERASE] = 0x7f; /* ^? */
+        pty->pty_termios.c_cc[VINTR]  =  3; /* ^C */
+        pty->pty_termios.c_cc[VKILL]  = 21; /* ^U */
+        pty->pty_termios.c_cc[VMIN]   =  1;
+        pty->pty_termios.c_cc[VQUIT]  = 28; /* ^\ */
+        pty->pty_termios.c_cc[VSTART] = 17; /* ^Q */
+        pty->pty_termios.c_cc[VSTOP]  = 19; /* ^S */
+        pty->pty_termios.c_cc[VSUSP] = 26; /* ^Z */
+        pty->pty_termios.c_cc[VTIME]  =  0;
+        pty->pty_termios.c_cc[VLNEXT] = 22; /* ^V */
+        pty->pty_termios.c_cc[VWERASE] = 23; /* ^W */   
+    }
 
-	pty->canon_buffer  = malloc(PTY_BUFFER_SIZE);
-	pty->canon_bufsize = PTY_BUFFER_SIZE-2;
-	pty->canon_buflen  = 0;
+    pty->canon_buffer  = malloc(PTY_BUFFER_SIZE);
+    pty->canon_bufsize = PTY_BUFFER_SIZE-2;
+    pty->canon_buflen  = 0;
 
     return pty;
 }
 
-int pty_create( void* size, fs_node_t** fs_master, fs_node_t** fs_slave )
+int pty_create( void* termios, void* winsize, fs_node_t** fs_master, fs_node_t** fs_slave )
 {
-    pty_t* pty = pty_new(size);
+    pty_t* pty = pty_new(termios, winsize);
 
     *fs_master = pty->master;
     *fs_slave = pty->slave;

@@ -1,20 +1,7 @@
 #include <stdio.h>
 
-struct _FILE
-{
-    int fd;
-
-    char* read_buf;
-    int available;
-    int offset;
-    int read_from;
-    int ungetc;
-    int eof;
-    int bufsiz;
-    long last_read_start;
-    
-    char* _name;
-};
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-parameter"
 
 int fopen( const char* pathname, const char* mode )
 {
@@ -56,7 +43,9 @@ int fprintf( FILE* file, const char* format, ... )
     return 0;
 }
 
-int vprintf( FILE* file, const char* format, va_list args )
+int vfprintf( FILE* file, const char* format, va_list args )
 {
     return 0;
 }
+
+#pragma GCC diagnostic pop

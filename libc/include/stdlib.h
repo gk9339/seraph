@@ -13,8 +13,8 @@ void* __attribute__((malloc)) calloc( uintptr_t nmemb, uintptr_t size );
 void* __attribute__((malloc)) valloc( uintptr_t size );
 void free( void* ptr );
 
-long atoi( const char* );
+long atoi( const char* ); //stub
 
-int atexit(void (*function)(void));
+int atexit(void (*function)(void)); //stub
 
 #endif

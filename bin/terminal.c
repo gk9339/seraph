@@ -6,6 +6,8 @@
 #include <pty.h>
 #include <sys/signals.h>
 #include <signal.h>
+#include <sys/fswait.h>
+#include <drivers/keyboard.h>
 
 static const size_t VGA_WIDTH = 80;
 static const size_t VGA_HEIGHT = 25;
@@ -22,6 +24,9 @@ static int input_stopped = 0;
 volatile int exit_terminal = 0;
 
 static void sig_suspend_input( int sig );
+
+void handle_input_char(char c);
+void handle_input_string(char * c);
 
 int main( void )
 {
@@ -63,14 +68,35 @@ int main( void )
         int kfd = open("/dev/kbd", O_RDONLY);
         int ret;
         char c;
+
+        int fds[] = {fd_master, kfd};
+        unsigned char buf[1024];
+        key_event_state_t kbd_state = {0};
+        key_event_t event;
+
         while( !exit_terminal )
         {
+            int index = fswait2(2, fds, 200);
+
             if( input_stopped ) continue;
 
-            ret = read(kfd, &c, 1);
-            if( ret )
+            if( index == 0 )
             {
-                write(fd_master, &c, 1);
+                ret = read(fd_master, buf, 1024);
+
+                for( int i = 0; i < ret; i++ )
+                {
+                    terminal_putchar(buf[i]);
+                }
+            }else if ( index == 1 )
+            {
+                ret = read(kfd, &c, 1);
+
+                if( ret > 0 )
+                {
+                    ret = kbd_scancode(&kbd_state, c, &event);
+                    key_event(ret, &event);
+                }
             }
         }
     }
@@ -89,6 +115,7 @@ void terminal_clear( void )
 			terminal_buffer[index] = vga_entry(' ', terminal_color);
 		}
 	}
+
     terminal_row = 0;
     terminal_column = 0;
 }
@@ -160,7 +187,9 @@ void terminal_putchar( char c )
 void terminal_write( const char* data, size_t size ) 
 {
 	for (size_t i = 0; i < size; i++)
-		terminal_putchar(data[i]);
+    {
+		terminal_putchar(data[i]);    
+    }
 }
 
 void terminal_writestring( const char* data ) 
@@ -176,4 +205,14 @@ static void sig_suspend_input( int sig )
     input_stopped = 1;
 
     signal(SIGUSR2, sig_suspend_input);
+}
+
+void handle_input_char( char c )
+{
+	write(fd_master, &c, 1);
+}
+
+void handle_input_string( char* c )
+{
+	write(fd_master, c, strlen(c));
 }

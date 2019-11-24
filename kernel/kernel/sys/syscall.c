@@ -386,6 +386,58 @@ static int sys_yield( void )
     return 1;
 }
 
+static int sys_fswait( int c, int fds[] )
+{
+    PTR_VALIDATE(fds);
+    
+    for( int i = 0; i < c; i++ )
+    {
+        if( !FD_CHECK(fds[i]) )
+        {
+            return -EBADF;
+        }
+    }
+
+    fs_node_t** nodes = malloc(sizeof(fs_node_t*)*(c + 1));
+
+    for( int i = 0; i < c; i++ )
+    {
+        nodes[i] = FD_ENTRY(fds[i]);
+    }
+    nodes[c] = NULL;
+
+    int result = process_wait_nodes((process_t*)current_process, nodes, -1);
+    free(nodes);
+
+    return result;
+}
+
+static int sys_fswait2( int c, int fds[], int timeout )
+{
+    PTR_VALIDATE(fds);
+    
+    for( int i = 0; i < c; i++ )
+    {
+        if( !FD_CHECK(fds[i]) )
+        {
+            return -EBADF;
+        }
+    }
+
+    fs_node_t** nodes = malloc(sizeof(fs_node_t*)*(c + 1));
+
+    for( int i = 0; i < c; i++ )
+    {
+        nodes[i] = FD_ENTRY(fds[i]);
+    }
+    nodes[c] = NULL;
+
+    int result = process_wait_nodes((process_t*)current_process, nodes, timeout);
+    free(nodes);
+
+    return result;
+}
+
 static int sys_waitpid( int pid, int* status, int options )
 {
     if( status && !PTR_INRANGE(status) )
@@ -524,6 +576,8 @@ static int (*syscalls[])() =
     [SYS_SLEEP] = sys_sleep,
     [SYS_IOCTL] = sys_ioctl,
     [SYS_YIELD] = sys_yield,
+    [SYS_FSWAIT] = sys_fswait,
+    [SYS_FSWAIT2] = sys_fswait2,
     [SYS_WAITPID] = sys_waitpid,
     [SYS_SETSID] = sys_setsid,
     [SYS_SETPGID] = sys_setpgid,

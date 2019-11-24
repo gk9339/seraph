@@ -131,6 +131,8 @@ DECL_SYSCALL1(setuid, unsigned int);
 DECL_SYSCALL0(yield);
 DECL_SYSCALL2(nanosleep, unsigned long, unsigned long);
 DECL_SYSCALL3(ioctl, int, int, void*);
+DECL_SYSCALL2(fswait, int, int*);
+DECL_SYSCALL3(fswait2, int, int*, int);
 DECL_SYSCALL3(waitpid, int, int*, int);
 DECL_SYSCALL0(setsid);
 DECL_SYSCALL2(setpgid, int, int);

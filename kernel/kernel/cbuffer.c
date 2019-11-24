@@ -66,6 +66,7 @@ size_t circular_buffer_read( circular_buffer_t* cbuffer, size_t size, uint8_t* b
     while( !collected )
     {
         spin_lock(cbuffer->lock);
+        if(!cbuffer){while(1){;}};
         while( circular_buffer_unread(cbuffer) > 0 && collected < size )
         {
             buffer[collected] = cbuffer->buffer[cbuffer->read_ptr];

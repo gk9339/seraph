@@ -22,7 +22,7 @@ export BOOTDIR=/boot
 export LIBDIR=$EXEC_PREFIX/lib
 export INCLUDEDIR=$PREFIX/include
 
-export CFLAGS='-O0 -g'
+export CFLAGS='-g'
 export CPPFLAGS=''
 
 

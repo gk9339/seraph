@@ -9,7 +9,7 @@ LIBDIR?=$(EXEC_PREFIX)/lib
 
 CFLAGS:=$(CFLAGS) -ffreestanding -Wall -Wextra -pedantic -Wshadow -Wpointer-arith \
 -Wcast-align -Wmissing-prototypes -Wmissing-declarations -Wredundant-decls -Wnested-externs \
--Winline -Wconversion -Wstrict-prototypes -Wno-sign-conversion
+-Winline -Wconversion -Wstrict-prototypes -Wno-sign-conversion -O3
 CPPFLAGS:=$(CPPFLAGS) -Iinclude
 LIBK_CFLAGS:=$(CFLAGS)
 LIBK_CPPFLAGS:=$(CPPFLAGS) -D__is_libk
@@ -77,6 +77,8 @@ sched/sched_yield.o \
 pty/pty.o \
 signal/signal.o \
 wait/wait.o \
+sys/fswait.o \
+drivers/keyboard.o \
 debug/debugvfstree.o \
 debug/debugproctree.o \
 

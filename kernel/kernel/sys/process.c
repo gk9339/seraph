@@ -901,5 +901,6 @@ static void debug_print_proc_tree_node( tree_node_t* node, size_t height )
 
 void debug_print_proc_tree( void )
 {
+    debug_log("\n");
 	debug_print_proc_tree_node(process_tree->root, 0);
 }

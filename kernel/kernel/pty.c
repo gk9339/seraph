@@ -295,7 +295,7 @@ void pty_input_process( pty_t* pty, uint8_t c )
 static void pty_fill_name( pty_t* pty, char* out )
 {
     ((char*)out)[0] = '\0';
-    sprintf((char*)out, "/dev/pty%d", pty->name);
+    sprintf((char*)out, "/dev/pty/pty%d", pty->name);
 }
 
 static int pty_ioctl( pty_t* pty, int request, void* argp )
@@ -752,7 +752,7 @@ pty_t* pty_new( struct termios* pty_termios, struct winsize* pty_winsize )
     /* Slave endpoint, reads come from stdin, writes go to stdout */
     pty->slave  = pty_slave_create(pty);
 
-    /* tty name */
+    /* pty name */
     pty->name   = _pty_counter++;
     pty->fill_name = pty_fill_name;
 
@@ -803,6 +803,10 @@ pty_t* pty_new( struct termios* pty_termios, struct winsize* pty_winsize )
     pty->canon_buffer  = malloc(PTY_BUFFER_SIZE);
     pty->canon_bufsize = PTY_BUFFER_SIZE-2;
     pty->canon_buflen  = 0;
+
+    char path[32];
+    pty->fill_name(pty, path);
+    vfs_mount(path, pty->slave);
 
     return pty;
 }

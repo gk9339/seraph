@@ -1056,5 +1056,6 @@ static void debug_print_vfs_tree_node( tree_node_t* node, size_t height )
 
 void debug_print_vfs_tree( void )
 {
+    debug_log("\n");
 	debug_print_vfs_tree_node(fs_tree->root, 0);
 }

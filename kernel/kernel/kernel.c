@@ -117,7 +117,7 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
                 for( unsigned long int i = 0; i < mmap->len; i+= 0x1000 )
                 {
                     if( mmap->addr + i > 0xFFFFFFFF ) break;
-                    debug_logf(debug_str, "Marking 0x%x", (uint32_t)mmap->addr + i);
+                    //debug_logf(debug_str, "Marking 0x%x", (uint32_t)mmap->addr + i);
                     paging_mark_system((mmap->addr + i) & 0xFFFFF000);
                 }
             }

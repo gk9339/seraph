@@ -1,9 +1,11 @@
 #include <stdio.h>
 #include <unistd.h>
+#include <debug.h>
+#include <string.h>
 
 int main( void )
 {
-    unsigned char buf[1024];
+    char buf[1024];
 
     while(1)
     {
@@ -12,7 +14,17 @@ int main( void )
         if( r > 0 )
         {
             buf[r] = '\0';
-            printf("Input: %s", buf);
+
+            if( !strcmp(buf, "ls\n") )
+            {
+                debugvfstree();
+            }else if( !strcmp(buf, "ps\n") )
+            {
+                debugproctree();
+            }else
+            {
+                printf("Input: %s", buf);
+            }
         }
     }
 }

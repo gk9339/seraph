@@ -12,12 +12,13 @@ LDFLAGS:=$(LDFLAGS)
 LIBS:=$(LIBS) -lc
 
 OBJS=\
-terminal.o \
-sh.o \
+terminal/terminal.o \
+terminal/keyboard.o \
+sh/sh.o \
 
 EXECS=\
-terminal \
-sh \
+terminal/terminal \
+sh/sh \
 
 .PHONY: all clean install install-headers install-bin
 .SUFFIXES: .o .c
@@ -27,11 +28,11 @@ all: $(OBJS) $(EXECS)
 .c.o:
 	$(CC) -MD -c $< -o $@ -std=gnu11 $(CFLAGS)
 
-terminal: terminal.o
-	$(CC) $< -o $@ $(CFLAGS)$(LIBS)
+terminal/terminal: terminal/terminal.o terminal/keyboard.o
+	$(CC) $^ -o $@ $(CFLAGS)$(LIBS)
 
-sh: sh.o
-	$(CC) $< -o $@ $(CFLAGS)$(LIBS)
+sh/sh: sh/sh.o
+	$(CC) $^ -o $@ $(CFLAGS)$(LIBS)
 
 clean:
 	rm -f $(EXECS)
@@ -40,6 +41,8 @@ clean:
 install: install-headers install-bin
 
 install-headers:
+	mkdir -p $(DESTDIR)$(INCLUDEDIR)
+	cp -R --preserve=timestamps include/. $(DESTDIR)$(INCLUDEDIR)/.
 
 install-bin: $(EXECS)
 	mkdir -p $(DESTDIR)$(BINDIR)

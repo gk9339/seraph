@@ -12,10 +12,10 @@ LDFLAGS:=$(LDFLAGS)
 LIBS:=$(LIBS) -lc
 
 OBJS=\
-init.o \
+init/init.o \
 
 EXECS=\
-init \
+init/init \
 
 .PHONY: all clean install install-headers install-sbin
 .SUFFIXES: .o .c
@@ -25,8 +25,8 @@ all: $(OBJS) $(EXECS)
 .c.o:
 	$(CC) -MD -c $< -o $@ -std=gnu11 $(CFLAGS)
 
-init: init.o
-	$(CC) $< -o $@ $(CFLAGS)$(LIBS)
+init/init: init/init.o
+	$(CC) $^ -o $@ $(CFLAGS)$(LIBS)
 
 clean:
 	rm -f $(EXECS)
@@ -35,6 +35,8 @@ clean:
 install: install-headers install-sbin
 
 install-headers:
+	mkdir -p $(DESTDIR)$(INCLUDEDIR)
+	cp -R --preserve=timestamps include/. $(DESTDIR)$(INCLUDEDIR)/.
 
 install-sbin: $(EXECS)
 	mkdir -p $(DESTDIR)$(SBINDIR)

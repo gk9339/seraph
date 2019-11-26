@@ -15,7 +15,7 @@ set timeout=0
 set default=0
 
 menuentry "seraph" {
-    multiboot /boot/seraph.kernel root=/dev/ram0 root_type=tar
+    multiboot /boot/seraph.kernel root=/dev/ram0 root_type=ustar
     module /boot/seraph.initrd
 }
 EOF

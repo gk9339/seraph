@@ -77,9 +77,8 @@ stdio/stdio.o \
 sched/sched_yield.o \
 pty/pty.o \
 signal/signal.o \
-wait/wait.o \
+sys/wait.o \
 sys/fswait.o \
-drivers/keyboard.o \
 debug/debugvfstree.o \
 debug/debugproctree.o \
 

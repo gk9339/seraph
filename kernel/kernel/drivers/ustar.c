@@ -1,10 +1,10 @@
-#include <kernel/tarfs.h>
+#include <kernel/ustar.h>
 #include <kernel/fs.h>
 #include <kernel/kernel.h>
 #include <string.h>
 #include <stdlib.h>
 
-struct tarfs 
+struct ustar_dev 
 {
     fs_node_t* device;
     unsigned int length;
@@ -36,8 +36,8 @@ struct ustar
     char prefix[155];
 };
 
-static int ustar_from_offset( struct tarfs* self, unsigned int offset, struct ustar* out );
-static fs_node_t* file_from_ustar( struct tarfs* self, struct ustar* file, unsigned int offset );
+static int ustar_from_offset( struct ustar_dev* self, unsigned int offset, struct ustar* out );
+static fs_node_t* file_from_ustar( struct ustar_dev* self, struct ustar* file, unsigned int offset );
 
 static unsigned int interpret_uid( struct ustar* file )
 {
@@ -108,7 +108,7 @@ static int count_slashes( char* string )
     return i;
 }
 
-static struct dirent * readdir_tar_root( fs_node_t*node, uint32_t index )
+static struct dirent * readdir_ustar_root( fs_node_t*node, uint32_t index )
 {
     if( index == 0 )
     {
@@ -130,7 +130,7 @@ static struct dirent * readdir_tar_root( fs_node_t*node, uint32_t index )
 
     index -= 2;
 
-    struct tarfs* self = node->device;
+    struct ustar_dev* self = node->device;
     /* Go through each file and pick the ones are at the root */
     /* Root files will have no /, so this is easy */
     unsigned int offset = 0;
@@ -181,9 +181,9 @@ static struct dirent * readdir_tar_root( fs_node_t*node, uint32_t index )
     return NULL;
 }
 
-static uint32_t read_tarfs( fs_node_t* node, uint32_t offset, uint32_t size, uint8_t * buffer )
+static uint32_t read_ustar( fs_node_t* node, uint32_t offset, uint32_t size, uint8_t * buffer )
 {
-    struct tarfs* self = node->device;
+    struct ustar_dev* self = node->device;
     struct ustar* file = malloc(sizeof(struct ustar));
     ustar_from_offset(self, node->inode, file);
     size_t file_size = interpret_size(file);
@@ -199,7 +199,7 @@ static uint32_t read_tarfs( fs_node_t* node, uint32_t offset, uint32_t size, uin
     return read_fs(self->device, offset + node->inode + 512, size, buffer);
 }
 
-static struct dirent * readdir_tarfs( fs_node_t*node, uint32_t index )
+static struct dirent * readdir_ustar( fs_node_t*node, uint32_t index )
 {
     if( index == 0 )
     {
@@ -221,7 +221,7 @@ static struct dirent * readdir_tarfs( fs_node_t*node, uint32_t index )
 
     index -= 2;
 
-    struct tarfs* self = node->device;
+    struct ustar_dev* self = node->device;
 
     /* Go through each file and pick the ones are at the root */
     /* Root files will have no /, so this is easy */
@@ -284,9 +284,9 @@ static struct dirent * readdir_tarfs( fs_node_t*node, uint32_t index )
     return NULL;
 }
 
-static fs_node_t* finddir_tarfs( fs_node_t*node, char*name )
+static fs_node_t* finddir_ustar( fs_node_t*node, char*name )
 {
-    struct tarfs* self = node->device;
+    struct ustar_dev* self = node->device;
 
     /* find my own filename */
     struct ustar* file = malloc(sizeof(struct ustar));
@@ -335,9 +335,9 @@ static fs_node_t* finddir_tarfs( fs_node_t*node, char*name )
     return NULL;
 }
 
-static int readlink_tarfs( fs_node_t* node, char* buf, size_t size )
+static int readlink_ustar( fs_node_t* node, char* buf, size_t size )
 {
-    struct tarfs* self = node->device;
+    struct ustar_dev* self = node->device;
     struct ustar* file = malloc(sizeof(struct ustar));
     ustar_from_offset(self, node->inode, file);
 
@@ -355,7 +355,7 @@ static int readlink_tarfs( fs_node_t* node, char* buf, size_t size )
     }
 }
 
-static fs_node_t* file_from_ustar( struct tarfs* self, struct ustar* file, unsigned int offset )
+static fs_node_t* file_from_ustar( struct ustar_dev* self, struct ustar* file, unsigned int offset )
 {
     fs_node_t* fs = malloc(sizeof(fs_node_t));
     memset(fs, 0, sizeof(fs_node_t));
@@ -374,28 +374,28 @@ static fs_node_t* file_from_ustar( struct tarfs* self, struct ustar* file, unsig
     if( file->type[0] == '5' )
     {
         fs->flags = FS_DIRECTORY;
-        fs->readdir = readdir_tarfs;
-        fs->finddir = finddir_tarfs;
+        fs->readdir = readdir_ustar;
+        fs->finddir = finddir_ustar;
     }else if( file->type[0] == '1' )
     {
         /* go through file and find target, reassign inode to point to that */
     }else if( file->type[0] == '2' )
     {
         fs->flags = FS_SYMLINK;
-        fs->readlink = readlink_tarfs;
+        fs->readlink = readlink_ustar;
     }else
     {
         fs->flags = FS_FILE;
-        fs->read = read_tarfs;
+        fs->read = read_ustar;
     }
     free(file);
     
     return fs;
 }
 
-static fs_node_t* finddir_tar_root( fs_node_t*node, char*name )
+static fs_node_t* finddir_ustar_root( fs_node_t*node, char*name )
 {
-    struct tarfs* self = node->device;
+    struct ustar_dev* self = node->device;
 
     unsigned int offset = 0;
     struct ustar* file = malloc(sizeof(struct ustar));
@@ -435,7 +435,7 @@ static fs_node_t* finddir_tar_root( fs_node_t*node, char*name )
     return NULL;
 }
 
-static int ustar_from_offset( struct tarfs* self, unsigned int offset, struct ustar* out )
+static int ustar_from_offset( struct ustar_dev* self, unsigned int offset, struct ustar* out )
 {
     read_fs(self->device, offset, sizeof(struct ustar), (unsigned char*)out);
     if( out->ustar[0] != 'u' ||
@@ -469,7 +469,7 @@ static int tokenize( char* str, char* sep, char** buf )
     return argc;
 }
 
-static fs_node_t* tar_mount( char* device, char* mount_path __attribute__((unused)) )
+static fs_node_t* ustar_mount( char* device, char* mount_path __attribute__((unused)) )
 {
     char* arg = strdup(device);
     char* argv[10];
@@ -483,7 +483,7 @@ static fs_node_t* tar_mount( char* device, char* mount_path __attribute__((unuse
         return NULL;
     }
 
-    struct tarfs* self = malloc(sizeof(struct tarfs));
+    struct ustar_dev* self = malloc(sizeof(struct ustar_dev));
 
     self->device = dev;
     self->length = dev->length;
@@ -495,17 +495,17 @@ static fs_node_t* tar_mount( char* device, char* mount_path __attribute__((unuse
     root->gid = 0;
     root->length = 0;
     root->mask = 0555;
-    root->readdir = readdir_tar_root;
-    root->finddir = finddir_tar_root;
+    root->readdir = readdir_ustar_root;
+    root->finddir = finddir_ustar_root;
     root->flags = FS_DIRECTORY;
     root->device = self;
 
     return root;
 }
 
-int tarfs_initialize( void )
+int ustar_initialize( void )
 {
-    vfs_register("tar", tar_mount);
+    vfs_register("ustar", ustar_mount);
 
     return 0;
 }

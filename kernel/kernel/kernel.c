@@ -11,7 +11,7 @@
 #include <kernel/args.h>
 #include <kernel/fs.h>
 #include <kernel/ramdisk.h>
-#include <kernel/tarfs.h>
+#include <kernel/ustar.h>
 #include <kernel/ext2.h>
 #include <kernel/task.h>
 #include <kernel/elf.h>
@@ -47,7 +47,8 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
     /* Terminal Initialization */
     debug_log("Terminal initialization");
     terminal_initialize();
-    
+    printf("Kernel Initializing");
+
     /* Multiboot check */
     if( magic != MULTIBOOT_BOOTLOADER_MAGIC )
     {
@@ -108,7 +109,7 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
 
     if( CHECK_FLAG(mbi->flags, 6) ) /* mmap */
     {
-        debug_log("Parsing memory map.");
+        debug_log("\nParsing memory map.");
         multiboot_memory_map_t* mmap = (void*)mbi->mmap_addr;
         while( (uintptr_t)mmap < mbi->mmap_addr + mbi->mmap_length )
         {
@@ -124,7 +125,7 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
             mmap = (multiboot_memory_map_t*)((uintptr_t)mmap + mmap->size + sizeof(uintptr_t));
         }
     }
-    debug_log("Finalize paging / heap install");
+    debug_log("Finalize paging / heap install\n");
     paging_finalize();
     
     char cmdline[1024];
@@ -143,7 +144,7 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
     isr_initialize();
     irq_initialize();
     
-    debug_log("vfs initialization");
+    debug_log("VFS initialization");
     vfs_initialize();
 
     debug_log("Tasking initialization");
@@ -165,8 +166,8 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
     debug_log("Install keyboard handler");
     keyboard_install();
     
-    debug_log("Initialize fs types");
-    tarfs_initialize();
+    debug_log("Initialize fs types\n");
+    ustar_initialize();
 
     /* Load modules from bootloader */
     if( CHECK_FLAG(mbi->flags, 5) ) /* mods */
@@ -185,12 +186,13 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
     }
     
     /* virtual dev filesystem */
+    debug_log("\nSetup /dev");
     map_vfs_directory("/dev");
     zero_initialize();
     null_initialize();
     
     /* ramfs initialization */
-    debug_log("setup root mount");
+    debug_log("Setup root mount");
     if( args_present("root") )
     {
         char* root_type = "ext2";
@@ -198,6 +200,7 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
         {
             root_type = args_value("root_type");
         }
+        debug_logf(debug_str, "Root type = %s", root_type);
         vfs_mount_type(root_type, args_value("root"), "/");
     }else
     {
@@ -206,7 +209,7 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
 
     if( !fs_root )
     {
-        map_vfs_directory("/");
+        KPANIC("Root mount failed", NULL)
     }
 
     /* Set up environment for /sbin/init */
@@ -226,6 +229,7 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
     }
 
     /* Start /sbin/init */
+    debug_log("Starting /sbin/init\n");
     system(argv[0], argc, argv, NULL);
     
     /* Something went very wrong */

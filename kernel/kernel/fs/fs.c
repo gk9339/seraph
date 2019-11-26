@@ -243,7 +243,7 @@ fs_node_t* finddir_fs( fs_node_t* node, char* name )
 {
     if( !node ) return NULL;
 
-    if( (node->flags & FS_DIRECTORY) && node->readdir )
+    if( (node->flags & FS_DIRECTORY) && node->finddir )
     {
         fs_node_t* ret = node->finddir(node, name);
         return ret;

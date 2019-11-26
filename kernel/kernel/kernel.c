@@ -111,6 +111,8 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
     {
         debug_log("\nParsing memory map.");
         multiboot_memory_map_t* mmap = (void*)mbi->mmap_addr;
+        int memory_mark_counter = 0;
+        debug_log("(0)");
         while( (uintptr_t)mmap < mbi->mmap_addr + mbi->mmap_length )
         {
             if(mmap->type == 2)
@@ -119,6 +121,7 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
                 {
                     if( mmap->addr + i > 0xFFFFFFFF ) break;
                     //debug_logf(debug_str, "Marking 0x%x", (uint32_t)mmap->addr + i);
+                    debug_logf(debug_str, "\033[F(%d)", ++memory_mark_counter);
                     paging_mark_system((mmap->addr + i) & 0xFFFFF000);
                 }
             }

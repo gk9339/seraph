@@ -123,7 +123,7 @@ DECL_SYSCALL3(execve, char*, char**, char**);
 DECL_SYSCALL0(fork);
 DECL_SYSCALL0(getpid);
 DECL_SYSCALL1(sbrk, int);
-DECL_SYSCALL2(signal, uint32_t, sighandler_t*);
+DECL_SYSCALL2(signal, uint32_t, sighandler_t);
 DECL_SYSCALL5(openpty, int*, int*, char*, void*, void*);
 DECL_SYSCALL2(dup2, int, int);
 DECL_SYSCALL0(getuid);

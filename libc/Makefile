@@ -91,9 +91,7 @@ LIBK_OBJS=$(FREEOBJS:.o=.libk.o)
 BINARIES=libc.a libk.a
 
 CRTS=\
-crt0.o \
-crti.o \
-crtn.o \
+$(ARCH_CRTS) \
 
 .PHONY: all clean install install-headers install-libs
 .SUFFIXES: .o .libk.o .c .S

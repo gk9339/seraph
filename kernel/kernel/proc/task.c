@@ -327,7 +327,7 @@ void task_exit( int retval )
         return;
     }
 
-    debug_logf(debug_str, "%s - %d -> Finishing", current_process->name, current_process->id);
+    debug_logf(debug_str, "%s - %d -> Finishing [%d]", current_process->name, current_process->id, retval);
     cleanup_process((process_t*)current_process, retval);
 
     process_t* parent = process_get_parent((process_t*)current_process);

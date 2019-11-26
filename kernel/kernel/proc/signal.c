@@ -60,12 +60,12 @@ void enter_signal_handler( uintptr_t location, int signum, uintptr_t stack )
 {
     int_disable();
     uintptr_t ebp = current_process->syscall_registers->ebp;
-    uintptr_t esp = current_process->syscall_registers->esp;
+    uintptr_t esp = current_process->syscall_registers->useresp;
     asm volatile(
         "mov %2, %%esp\n"
         "pushl %4\n"
         "pushl %3\n"
-        "pushl %2\n"
+        "pushl %1\n"
         "pushl $" STRSTR(SIGNAL_RETURN) "\n"
         "mov $0x23, %%ax\n"
         "mov %%ax, %%ds\n"
@@ -80,6 +80,7 @@ void enter_signal_handler( uintptr_t location, int signum, uintptr_t stack )
         "orl $0x200, %%eax\n"
         "pushl %%eax\n"
         "pushl $0x1B\n"
+        "pushl %0\n"
         "iret\n"
         ::"m"(location), "m"(signum), "r"(stack), "m"(ebp), "m"(esp): "%ax", "%esp", "%eax"
         );

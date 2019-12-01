@@ -58,6 +58,8 @@
 #define SYS_SETSID 62
 #define SYS_SETPGID 63
 #define SYS_GETPGID 64
+#define SYS_SETHEAP 65
+#define SYS_MMAP 66
 #define SYS_DEBUGVFSTREE 100
 #define SYS_DEBUGPROCTREE 101
 
@@ -139,5 +141,7 @@ DECL_SYSCALL2(setpgid, int, int);
 DECL_SYSCALL1(getpgid, int);
 DECL_SYSCALL0(debugvfstree);
 DECL_SYSCALL0(debugproctree);
+DECL_SYSCALL1(setheap, uintptr_t);
+DECL_SYSCALL1(mmap, size_t);
 
 #endif

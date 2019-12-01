@@ -7,7 +7,7 @@ EXEC_PREFIX?=$(PREFIX)
 BOOTDIR?=$(EXEC_PREFIX)/boot
 INCLUDEDIR?=$(PREFIX)/include
 
-CFLAGS:=$(CFLAGS) -ffreestanding -Wall -Wextra -pedantic -Wshadow -Wpointer-arith \
+CFLAGS:=$(CFLAGS) -static -ffreestanding -Wall -Wextra -pedantic -Wshadow -Wpointer-arith \
 -Wcast-align -Wmissing-prototypes -Wmissing-declarations -Wredundant-decls -Wnested-externs \
 -Winline -Wconversion -Wstrict-prototypes -Wno-sign-conversion -O1
 CPPFLAGS:=$(CPPFLAGS) -Iinclude

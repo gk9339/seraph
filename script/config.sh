@@ -1,7 +1,7 @@
 #!/bin/sh
 set -e
 
-SYSTEM_HEADER_PROJECTS="libc kernel sbin bin"
+SYSTEM_HEADER_PROJECTS="libc kernel linker sbin bin"
 PROJECTS="libc kernel sbin bin"
 
 export SYSROOT="$(pwd)/sysroot"

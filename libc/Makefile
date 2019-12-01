@@ -79,6 +79,8 @@ pty/pty.o \
 signal/signal.o \
 sys/wait.o \
 sys/fswait.o \
+sys/setheap.o \
+sys/mmap.o \
 debug/debugvfstree.o \
 debug/debugproctree.o \
 
@@ -88,7 +90,7 @@ $(HOSTEDOBJS) \
 
 LIBK_OBJS=$(FREEOBJS:.o=.libk.o)
 
-BINARIES=libc.a libk.a
+BINARIES=libc.a libk.a 
 
 CRTS=\
 $(ARCH_CRTS) \
@@ -96,10 +98,13 @@ $(ARCH_CRTS) \
 .PHONY: all clean install install-headers install-libs
 .SUFFIXES: .o .libk.o .c .S
 
-all: $(BINARIES) $(CRTS)
+all: $(BINARIES) $(CRTS) libc.so
 
 libc.a: $(OBJS)
 	$(AR) rcs $@ $(OBJS)
+
+libc.so: $(OBJS)
+	$(CC) -nodefaultlibs -o $@ $(CFLAGS) -shared -fPIC $^ -lgcc
 
 libk.a: $(LIBK_OBJS)
 	$(AR) rcs $@ $(LIBK_OBJS)

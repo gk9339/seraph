@@ -2,7 +2,7 @@
 set -e
 
 SYSTEM_HEADER_PROJECTS="libc kernel linker sbin bin"
-PROJECTS="libc kernel sbin bin"
+PROJECTS="libc kernel linker sbin bin"
 
 export SYSROOT="$(pwd)/sysroot"
 export TOOLCHAIN="$(pwd)/toolchain/bin/"

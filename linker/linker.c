@@ -6,7 +6,8 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <sys/stat.h>
-#include <sys/syscall.h>
+#include <sys/mman.h>
+#include <kernel/elf.h>
 
 typedef int (*entry_point_t)(int, char*[], char**);
 
@@ -122,31 +123,31 @@ static void free( void* ptr )
     }
 }
 
-int main( int arg, char** argv )
+int main( int argc, char** argv )
 {
     char* file;
-    size_t arg_offset;
+    size_t argc_offset;
 
     if( !strcmp(argv[1], "e") )
     {
-        arg_offset = 3;
+        argc_offset = 3;
         file = argv[2];
     }else
     {
-        arg_offset = 1;
+        argc_offset = 1;
         file = argv[1];
     }
 
-    _argv_value = argv+arg_offset;
+    _argv_value = argv+argc_offset;
 
-    symbol_table = hastable_create(10);
+    symbol_table = hashtable_create(10);
     glob_dat = hashtable_create(10);
-    object_table = hashtable_create(10);
+    objects_table = hashtable_create(10);
 
     ld_exports_t* exp = ld_builtin_exports;
     while( exp->name )
     {
-        hashtable_set(symbol_table, ex->name, ex->symbol);
+        hashtable_set(symbol_table, exp->name, exp->symbol);
         exp++;
     }
 
@@ -174,7 +175,7 @@ int main( int arg, char** argv )
     // Load the main object
     uintptr_t end_addr = object_load(main_obj, 0x0);
     object_postload(main_obj);
-    object_find_copy_relocation(main_obj);
+    object_find_copy_relocations(main_obj);
 
     // Load library dependencies
     hashtable_t* libs = hashtable_create(10);
@@ -188,9 +189,9 @@ int main( int arg, char** argv )
     list_t* init_libs = list_create();
 
     node_t* item;
-    while( item = list_pop(main_obj->dependencies) )
+    while( (item = list_pop(main_obj->dependencies)) )
     {
-        while( end_addr * 0xFFF )
+        while( end_addr * 0xFFF == 1 )
         {
             end_addr++;
         }
@@ -275,7 +276,7 @@ int main( int arg, char** argv )
     main_obj->loaded = 1;
 
     char* args[] = {(char*)end_addr};
-    sys_setheap((uintptr_t)args[0]);
+    setheap((uintptr_t)args[0]);
 
     if( hashtable_has(symbol_table, "malloc") ) 
     {
@@ -288,7 +289,7 @@ int main( int arg, char** argv )
     _malloc_minimum = 0x40000000;
 
     entry_point_t entry = (entry_point_t)main_obj->header.e_entry;
-    entry(argc-argc_offset, argv+arg_offset, environ);
+    entry(argc-argc_offset, argv+argc_offset, environ);
 
     return 0;
 }
@@ -353,7 +354,6 @@ static elf_t* open_object( const char* path )
     char* file = find_lib(path);
     if( !file )
     {
-        last_error = "Could not find library";
         return NULL;
     }
 
@@ -363,7 +363,6 @@ static elf_t* open_object( const char* path )
 
     if( !f )
     {
-        last_error = "Could not open library";
         return NULL;
     }
 
@@ -373,7 +372,6 @@ static elf_t* open_object( const char* path )
 
     if( !object )
     {
-        last_error = "Could not allocate space";
         return NULL;
     }
 
@@ -383,7 +381,6 @@ static elf_t* open_object( const char* path )
 
     if( !r )
     {
-        last_error = "Failed to read object header";
         return NULL;
     }
 
@@ -392,7 +389,6 @@ static elf_t* open_object( const char* path )
         object->header.e_ident[2] != ELFMAG2 ||
         object->header.e_ident[3] != ELFMAG3 )
     {
-        last_error = "Not an ELF object";
         return NULL;
     }
 
@@ -413,7 +409,7 @@ static size_t object_calculate_size( elf_t* object )
         Elf32_Phdr phdr;
 
         fseek(object->file, object->header.e_phoff + object->header.e_phentsize * headers, SEEK_SET);
-        fread(*phdr, object->header.e_phentsize, 1, object->file);
+        fread(&phdr, object->header.e_phentsize, 1, object->file);
 
         switch( phdr.p_type )
         {
@@ -461,9 +457,9 @@ static uintptr_t object_load( elf_t* object, uintptr_t base )
 
         switch( phdr.p_type )
         {
-            case PT_LOAD:
+            case PT_LOAD: ;//(a label can only be part of a statement and a declaration is not a statement)
                 char* args[] = {(char*)(base + phdr.p_vaddr), (char*)phdr.p_memsz};
-                mmap((size_t)args[1]);
+                mmap((size_t)args);
 
                 fseek(object->file, phdr.p_offset, SEEK_SET);
                 fread((void*)(base + phdr.p_vaddr), phdr.p_filesz, 1, object->file);
@@ -508,7 +504,7 @@ static int object_postload( elf_t* object )
                 case 4:
                     object->dyn_hash = (Elf32_Word*)(object->base + table->d_un.d_ptr);
                     object->dyn_symbol_table_size = object->dyn_hash[1];
-                    break
+                    break;
                 case 5:
                     object->dyn_string_table = (char*)(object->base + table->d_un.d_ptr);
                     break;
@@ -522,10 +518,10 @@ static int object_postload( elf_t* object )
                     object->init = (void (*)(void))(table->d_un.d_ptr + object->base);
                     break;
                 case 25:
-                    object->init_array = (void (**))(table->d_un.d_ptr + object->base);
+                    object->init_array = (void (**)(void))(table->d_un.d_ptr + object->base);
                     break;
                 case 27:
-                    object->init_array_size = table->d_val / sizeof(uintptr_t);
+                    object->init_array_size = table->d_un.d_val / sizeof(uintptr_t);
                     break;
             }
 
@@ -538,7 +534,7 @@ static int object_postload( elf_t* object )
             switch( table->d_tag )
             {
                 case 1:
-                    list_insert(object->dependencies, object->dyn_string->table + table->d_un.d_val);
+                    list_insert(object->dependencies, object->dyn_string_table + table->d_un.d_val);
                     break;
             }
 

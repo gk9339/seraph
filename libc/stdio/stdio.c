@@ -3,6 +3,7 @@
 #include <sys/syscall.h>
 #include <string.h>
 #include <errno.h>
+#include <fcntl.h>
 
 struct _FILE
 {
@@ -15,8 +16,6 @@ struct _FILE
     char* write_base;
     char* write_ptr;
     char* write_end;
-    char* buf_base;
-    char* buf_end;
     
     int available;
 
@@ -33,8 +32,6 @@ FILE _stdin =
     .write_base = NULL,
     .write_ptr = NULL,
     .write_end = NULL,
-    .buf_base = NULL,
-    .buf_end = NULL,
     .available = 0,
     ._name = "stdin",
 };
@@ -49,8 +46,6 @@ FILE _stdout =
     .write_base = NULL,
     .write_ptr = NULL,
     .write_end = NULL,
-    .buf_base = NULL,
-    .buf_end = NULL,
     .available = 0,
     ._name = "stdout",
 };
@@ -65,8 +60,6 @@ FILE _stderr =
     .write_base = NULL,
     .write_ptr = NULL,
     .write_end = NULL,
-    .buf_base = NULL,
-    .buf_end = NULL,
     .available = 0,
     ._name = "stderr",
 };
@@ -74,6 +67,69 @@ FILE _stderr =
 FILE* stdin = &_stdin;
 FILE* stdout = &_stdout;
 FILE* stderr = &_stderr;
+
+static void parse_mode( const char* mode, int* flags_, int* mask_ )
+{
+    const char* x = mode;
+
+    int flags = 0;
+    int mask = 0644;
+
+    while( *x )
+    {
+        if( *x == 'a' )
+        {
+            flags |= O_WRONLY;
+            flags |= O_APPEND;
+            flags |= O_CREAT;
+        }
+
+        if( *x == 'w' )
+        {
+            flags |= O_WRONLY;
+            flags |= O_CREAT;
+            flags |= O_TRUNC;
+            mask = 0666;
+        }
+
+        if( *x == '+' )
+        {
+            flags |= O_RDWR;
+            flags &= ~(O_APPEND);
+        }
+        x++;
+    }
+
+    *flags_ = flags;
+    *mask_ = mask;
+}
+
+FILE* fopen( const char* pathname, const char* mode )
+{
+    int flags, mask;
+    parse_mode(mode, &flags, &mask);
+
+    int fd = syscall_open(pathname, flags, mask);
+
+    if( fd < 0 )
+    {
+        errno = -fd;
+        return NULL;
+    }
+
+    FILE* out = calloc(1, sizeof(FILE));
+    out->fd = fd;
+    out->read_base = out->read_ptr = malloc(BUFSIZ);
+    out->read_end = out->read_base + BUFSIZ;
+    out->write_base = out->read_ptr = malloc(BUFSIZ);
+    out->write_end = out->read_base + BUFSIZ;
+
+    out->available = 0;
+
+    out->_name = strdup(pathname);
+
+    return out;
+}
 
 FILE* fdopen( int fd, const char* mode )
 {
@@ -87,8 +143,7 @@ FILE* fdopen( int fd, const char* mode )
     out->write_base = NULL,
     out->write_ptr = NULL,
     out->write_end = NULL,
-    out->buf_base = malloc(BUFSIZ);
-    out->buf_end = out->buf_base + BUFSIZ;
+    
     out->available = 0;
     
     char tmp[30];

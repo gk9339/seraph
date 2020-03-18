@@ -4,6 +4,8 @@
 #include <stddef.h>
 #include <sys/types.h>
 
+extern char** environ;
+
 pid_t fork( void );
 
 void* sbrk( intptr_t );

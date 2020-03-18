@@ -1,6 +1,7 @@
 #ifndef _SYS_TYPES_H
 #define _SYS_TYPES_H
 
+typedef long unsigned int size_t;
 typedef long ssize_t;
 
 typedef unsigned long long uint64_t;

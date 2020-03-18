@@ -23,7 +23,7 @@ extern FILE* stdin;
 extern FILE* stdout;
 extern FILE* stderr;
 
-int fopen( const char*, const char* ); //stub
+FILE* fopen( const char*, const char* ); //stub
 int fclose( FILE* ); //stub
 size_t fread( void*, size_t, size_t, FILE* ); //stub
 size_t fwrite( const void*, size_t, size_t, FILE* ); 

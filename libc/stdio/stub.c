@@ -3,11 +3,6 @@
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-parameter"
 
-int fopen( const char* pathname, const char* mode )
-{
-    return 0;
-}
-
 int fclose( FILE* stream )
 {
     return 0;

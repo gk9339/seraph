@@ -23,7 +23,7 @@ ld.so: linker.c linker.ld ../libc/libc.a
 clean:
 	rm -f $(LIBS)
 
-install: install-headers install-sbin
+install: install-headers install-linker
 
 install-headers:
 

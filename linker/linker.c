@@ -564,18 +564,234 @@ static int need_symbol_for_type( unsigned char type )
 //Apply ELF relocations
 static int object_relocate( elf_t* object )
 {
+    if( object->dyn_symbol_table )
+    {
+        Elf32_Sym* table = object->dyn_symbol_table;
+        for( uintptr_t i = 0; i < (uintptr_t)object->dyn_symbol_table; i++ )
+        {
+            char* symname = (char*)((uintptr_t)object->dyn_string_table + table->st_name);
 
+            if( !hashtable_has(symbol_table, symname) )
+            {
+                if( table->st_shndx )
+                {
+                    hashtable_set(symbol_table, symname, (void*)(table->st_value + object->base));
+                }
+            }
+
+            table++;
+        }
+    }
+
+    for( uintptr_t x = 0; x < object->header.e_shentsize * object->header.e_shnum; x += object->header.e_shentsize )
+    {
+        Elf32_Shdr shdr;
+
+        fseek(object->file, object->header.e_shoff + x, SEEK_SET);
+        fread(&shdr, object->header.e_shentsize, 1, object->file);
+
+        if( shdr.sh_type == 9 )
+        {
+            Elf32_Rel* table = (Elf32_Rel*)(shdr.sh_addr + object->base);
+            while( (uintptr_t)table - ((uintptr_t)shdr.sh_addr + object->base) < shdr.sh_size )
+            {
+                unsigned int symbol = ELF32_R_SYM(table->r_info);
+                unsigned char type = ELF32_R_TYPE(table->r_info);
+                Elf32_Sym* sym = &object->dyn_symbol_table[symbol];
+
+                char* symname = NULL;
+                uintptr_t x = sym->st_value + object->base;
+                if( need_symbol_for_type(type) || (type == 5) )
+                {
+                    symname = (char*)((uintptr_t)object->dyn_string_table + sym->st_name);
+                    if( symname && hashtable_has(symbol_table, symname) )
+                    {
+                        x = ((uintptr_t)hashtable_get(symbol_table, symname));
+                    }else
+                    {
+                        x = 0x0;
+                    }
+                }
+
+                switch(type)
+                {
+                    case 6: //GLOB_DAT
+                        if( symname && hashtable_has(glob_dat, symname) )
+                        {
+                            x = (uintptr_t)hashtable_get(glob_dat, symname);
+                        }
+                    case 7: //JUMP_SLOT
+                        memcpy((void*)(table->r_offset + object->base), &x, sizeof(uintptr_t));
+                        break;
+                    case 1: //32
+                        x += *((ssize_t*)(table->r_offset + object->base));
+                        x -= (table->r_offset + object->base);
+                        memcpy((void*)(table->r_offset + object->base), &x, sizeof(uintptr_t));
+                        break;
+                    case 2: // PC32
+                        x += *((ssize_t*)(table->r_offset + object->base));
+                        x -= (table->r_offset + object->base);
+                        memcpy((void*)(table->r_offset + object->base), &x, sizeof(uintptr_t));
+                        break;
+                    case 8: // RELATIVE
+                        x = object->base;
+                        x += *((ssize_t*)(table->r_offset + object->base));
+                        memcpy((void*)(table->r_offset + object->base), &x, sizeof(uintptr_t));
+                        break;
+                    case 5: // COPY
+                        memcpy((void*)(table->r_offset + object->base), (void*)x, sym->st_size);
+                        break;
+                }
+
+                table++;
+            }
+        }
+    }
+
+    return 0;
 }
 
 //Copy relocations need to be located before other relocations
-static void object_find_copy_relocations( elf_t* object );
+static void object_find_copy_relocations( elf_t* object )
+{
+    for( uintptr_t x = 0; x < object->header.e_shentsize * object->header.e_shnum; x += object->header.e_shentsize )
+    {
+        Elf32_Shdr shdr;
+
+        fseek(object->file, object->header.e_shoff + x, SEEK_SET);
+        fread(&shdr, object->header.e_shentsize, 1, object->file);
+
+        if( shdr.sh_type == 9 )
+        {
+            Elf32_Rel* table = (Elf32_Rel*)(shdr.sh_addr + object->base);
+
+            while((uintptr_t)table - ((uintptr_t)shdr.sh_addr + object->base) < shdr.sh_size)
+            {
+                unsigned char type = ELF32_R_TYPE(table->r_info);
+                if( type == 5 )
+                {
+                    unsigned int symbol = ELF32_R_SYM(table->r_info);
+                    Elf32_Sym* sym = &object->dyn_symbol_table[symbol];
+                    char* symname = (char*)((uintptr_t)object->dyn_string_table + sym->st_name);
+                    hashtable_set(glob_dat, symname, (void*)table->r_offset);
+                }
+                table++;
+            }
+        }
+    }
+}
 
 //Find a symbol in a specific object
-static void* object_find_symbol( elf_t* object, const char* symbol_name );
+static void* object_find_symbol( elf_t* object, const char* symbol_name )
+{
+    if( !object->dyn_symbol_table )
+    {
+        return NULL;
+    }
+
+    Elf32_Sym* table = object->dyn_symbol_table;
+    for( size_t i = 0; i < object->dyn_symbol_table_size; i++ )
+    {
+        if( !strcmp(symbol_name, (char*)((uintptr_t)object->dyn_string_table + table->st_name)) )
+        {
+            return (void*)(table->st_value + object->base);
+        }
+        table++;
+    }
+
+    return NULL;
+}
 
 //Fully load an object
-static void* do_actual_load( const char* filename, elf_t* lib, int flags );
+static void* do_actual_load( const char* filename, elf_t* lib, int flags )
+{
+    if(!lib)
+    {
+        return NULL;
+    }
 
-static void* dlopen_ld( const char* filename, int flags );
-static int dlclose_ld( elf_t* lib );
-static char* dlerror_ld( void );
+    size_t lib_size = object_calculate_size(lib);
+
+    if( lib_size < 4096 )
+    {
+        lib_size = 4096;
+    }
+
+    uintptr_t load_addr = (uintptr_t)malloc(lib_size);
+    object_load(lib, load_addr);
+
+    object_postload(lib);
+
+    node_t* item;
+    while( (item = list_pop(lib->dependencies)) )
+    {
+        elf_t* _lib = open_object(item->value);
+
+        if( !_lib )
+        {
+            free((void*)load_addr);
+            lib->loaded = 0;
+            return NULL;
+        }
+
+        if( !_lib->loaded )
+        {
+            do_actual_load(item->value, _lib, 0);
+        }
+    }
+
+    object_relocate(lib);
+
+    fclose(lib->file);
+
+    if( lib->init_array )
+    {
+        for( size_t i = 0; i < lib->init_array_size; i++ )
+        {
+            lib->init_array[i]();
+        }
+    }
+
+    if( lib->init )
+    {
+        lib->init();
+    }
+
+    lib->loaded = 1;
+
+    return (void*)lib;
+}
+
+static void* dlopen_ld( const char* filename, int flags )
+{
+    elf_t* lib = open_object(filename);
+
+    if( !lib )
+    {
+        return NULL;
+    }
+
+    if( lib->loaded )
+    {
+        return lib;
+    }
+
+    void* ret = do_actual_load(filename, lib, flags);
+    if( !ret )
+    {
+        hashtable_remove(objects_table, (void*)filename);
+    }
+
+    return ret;
+}
+
+static int dlclose_ld( elf_t* lib )
+{
+    free((void*)lib->base);
+    return 0;
+}
+
+static char* dlerror_ld( void )
+{
+    return 0;
+}

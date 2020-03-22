@@ -23,17 +23,18 @@ extern FILE* stdin;
 extern FILE* stdout;
 extern FILE* stderr;
 
-FILE* fopen( const char*, const char* ); //stub
+FILE* fopen( const char*, const char* );
 int fclose( FILE* ); //stub
-size_t fread( void*, size_t, size_t, FILE* ); //stub
+size_t fread( void*, size_t, size_t, FILE* ); 
 size_t fwrite( const void*, size_t, size_t, FILE* ); 
-int fseek( FILE*, long, int ); //stub
+int fseek( FILE*, long, int ); 
 long ftell( FILE* ); //stub
 
 FILE* fdopen( int, const char* );
 
 void setbuf( FILE*, char* ); //stub
 int fflush( FILE* ); //stub
+int fileno( FILE* );
 
 int printf( const char* __restrict, ... );
 int putchar( int );

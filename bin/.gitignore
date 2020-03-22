@@ -1,6 +1,7 @@
 *
 
-!*.c
-!*/include
+!/**/
+!*/*.c
+!/include/**
 !Makefile
 !.gitignore

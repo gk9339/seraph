@@ -213,3 +213,28 @@ char* strstr( const char* haystack, const char* needle )
 	/* Two-way on large needles */
 	return strstr_twoway((void*)haystack, (void*)needle);
 }
+
+char* strnstr( const char* haystack, const char* needle, size_t len )
+{
+    char c, sc;
+    size_t clen;
+
+    if( (c = *needle++) != '\0' )
+    {
+        clen = strlen(needle);
+        do{
+            do{
+                if( len-- < 1 || (sc = *haystack++) == '\0' )
+                {
+                    return NULL;
+                }
+            }while( sc != c );
+            if( clen > len )
+            {
+                return NULL;
+            }
+        }while( strncmp(haystack, needle, len ) != 0 );
+    }
+
+    return (char*)haystack;
+}

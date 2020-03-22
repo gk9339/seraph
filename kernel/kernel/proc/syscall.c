@@ -217,27 +217,27 @@ static int sys_execve( const char* filename, char* const argv[], char* const env
 
     char ** argv_ = malloc(sizeof(char *) * (argc + 1));
 
-	for( int j = 0; j < argc; j++ )
+    for( int j = 0; j < argc; j++ )
     {
-		argv_[j] = malloc((strlen(argv[j]) + 1) * sizeof(char));
-		memcpy(argv_[j], argv[j], strlen(argv[j]) + 1);
-	}
-	
+        argv_[j] = malloc((strlen(argv[j]) + 1) * sizeof(char));
+        memcpy(argv_[j], argv[j], strlen(argv[j]) + 1);
+    }
+    
     argv_[argc] = 0;
-	char ** envp_;
-	if( envp && envc )
+    char ** envp_;
+    if( envp && envc )
     {
-		envp_ = malloc(sizeof(char *) * (envc + 1));
-		for( int j = 0; j < envc; j++ )
+        envp_ = malloc(sizeof(char *) * (envc + 1));
+        for( int j = 0; j < envc; j++ )
         {
-			envp_[j] = malloc((strlen(envp[j]) + 1) * sizeof(char));
-			memcpy(envp_[j], envp[j], strlen(envp[j]) + 1);
-		}
-		envp_[envc] = 0;
-	}else
+            envp_[j] = malloc((strlen(envp[j]) + 1) * sizeof(char));
+            memcpy(envp_[j], envp[j], strlen(envp[j]) + 1);
+        }
+        envp_[envc] = 0;
+    }else
     {
-		envp_ = malloc(sizeof(char *));
-		envp_[0] = NULL;
+        envp_ = malloc(sizeof(char *));
+        envp_[0] = NULL;
     }
 
     shm_release_all((process_t*)current_process);
@@ -321,6 +321,130 @@ static int sys_openpty( int* master, int* slave, char* name __attribute__((unuse
     open_fs(fs_slave, 0);
 
     return 0;
+}
+
+static int sys_seek( int fd, int offset, int whence )
+{
+    if( FD_CHECK(fd) )
+    {
+        if( (FD_ENTRY(fd)->flags & FS_PIPE) || (FD_ENTRY(fd)->flags & FS_CHARDEVICE) )
+        {
+            return -ESPIPE;
+        }
+
+        switch( whence )
+        {
+            case 0:
+                FD_OFFSET(fd) = offset;
+                break;
+            case 1:
+                FD_OFFSET(fd) += offset;
+                break;
+            case 2:
+                FD_OFFSET(fd) = FD_ENTRY(fd)->length + offset;
+                break;
+            default:
+                return -EINVAL;
+        }
+
+        return (int)FD_OFFSET(fd);
+    }
+
+    return -EBADF;
+}
+
+static int stat_node( fs_node_t* fn, uintptr_t st )
+{
+    struct stat* f = (struct stat*)st;
+    PTR_VALIDATE(f);
+
+    if( !fn )
+    {
+        memset(f, 0, sizeof(struct stat));
+        debug_log("stat: file does not exist");
+        return -ENOENT;
+    }
+
+    f->st_dev = (uint16_t)(((uint32_t)fn->device * 0xFFFF0) >> 8);
+    f->st_ino = fn->inode;
+
+    uint32_t flags = 0;
+    if( fn->flags & FS_FILE )
+    {
+        flags |= _IFREG;
+    }
+    if( fn->flags & FS_DIRECTORY )
+    {
+        flags |= _IFDIR;
+    }
+    if( fn->flags & FS_CHARDEVICE )
+    {
+        flags |= _IFCHR;
+    }
+    if( fn->flags & FS_BLOCKDEVICE )
+    {
+        flags |= _IFBLK;
+    }
+    if( fn->flags & FS_PIPE )
+    {
+        flags |= _IFIFO;
+    }
+    if( fn->flags & FS_SYMLINK )
+    {
+        flags |= _IFLNK;
+    }
+
+    f->st_mode = fn->mask | flags;
+    f->st_nlink = fn->nlink;
+    f->st_uid = fn->uid;
+    f->st_gid = fn->gid;
+    f->st_rdev = 0;
+    f->st_size = fn->length;
+
+    f->st_atime = fn->atime;
+    f->st_mtime = fn->mtime;
+    f->st_ctime = fn->ctime;
+    f->st_blksize = 512;
+
+    if (fn->get_size) {
+        f->st_size = fn->get_size(fn);
+    }
+
+    return 0;
+}
+
+static int sys_statf( char* file, uintptr_t st )
+{
+    int result;
+    PTR_VALIDATE(file);
+    PTR_VALIDATE(st);
+
+    fs_node_t* fn = kopen(file, 0);
+    result = stat_node(fn, st);
+
+    if( fn )
+    {
+        close_fs(fn);
+    }
+
+    return result;
+}
+
+static int sys_lstat( char* file, uintptr_t st )
+{
+    int result;
+    PTR_VALIDATE(file);
+    PTR_VALIDATE(st);
+
+    fs_node_t* fn = kopen(file, O_PATH | O_NOFOLLOW);
+    result = stat_node(fn, st);
+
+    if( fn )
+    {
+        close_fs(fn);
+    }
+
+    return result;
 }
 
 static int sys_dup2( int oldfd, int newfd )
@@ -572,6 +696,9 @@ static int (*syscalls[])() =
     [SYS_SBRK] = sys_sbrk,
     [SYS_SIGNAL] = sys_signal,
     [SYS_OPENPTY] = sys_openpty,
+    [SYS_SEEK] = sys_seek,
+    [SYS_STATF] = sys_statf,
+    [SYS_LSTAT] = sys_lstat,
     [SYS_DUP2] = sys_dup2,
     [SYS_GETUID] = sys_getuid,
     [SYS_SETUID] = sys_setuid,

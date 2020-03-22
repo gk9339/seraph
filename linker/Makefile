@@ -29,4 +29,4 @@ install-headers:
 
 install-linker: $(LIBS)
 	mkdir -p $(DESTDIR)$(LIBDIR)
-	cp $(EXECS) $(DESTDIR)$(LIBDIR)
+	cp $(LIBS) $(DESTDIR)$(LIBDIR)

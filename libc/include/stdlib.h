@@ -4,8 +4,12 @@
 #include <sys/cdefs.h>
 #include <sys/types.h>
 
-__attribute__((__noreturn__))
-void abort( void );
+__attribute__((__noreturn__)) void abort( void );
+
+char* getenv( const char* name );
+int putenv( char* name );
+int setenv( const char* name, const char* value, int overwrite );
+int unsetenv( const char* str );
 
 void* __attribute__((malloc)) malloc( uintptr_t size );
 void* __attribute__((malloc)) realloc( void* ptr, uintptr_t size );

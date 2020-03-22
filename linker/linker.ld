@@ -2,7 +2,7 @@ ENTRY(_start)
 
 SECTIONS
 {
-    .=0x3F000000;
+    . = 0x3F000000;
     phys = .;
 
     .text BLOCK(4K) : ALIGN(4K)
@@ -12,7 +12,7 @@ SECTIONS
         
     }
 
-    .rodata BLOCK(4K) : ALIGH(4K)
+    .rodata BLOCK(4K) : ALIGN(4K)
     {
         *(.rodata)
     }

@@ -112,13 +112,13 @@ struct dirent
 
 struct stat
 {
-    uint16_t st_dev; /* Device ID of device containing file */
-    uint16_t st_ino; /* File serial number */
+    uint32_t st_dev; /* Device ID of device containing file */
+    uint32_t st_ino; /* File serial number */
     uint32_t st_mode; /* Mode of file */
-    uint16_t st_nlink; /* Number of hard links to file */
-    uint16_t st_uid; /* User ID of file */
-    uint16_t st_gid; /* Group ID of file */
-    uint16_t st_rdev; /* Device ID (if file is character of block special) */
+    uint32_t st_nlink; /* Number of hard links to file */
+    uint32_t st_uid; /* User ID of file */
+    uint32_t st_gid; /* Group ID of file */
+    uint32_t st_rdev; /* Device ID (if file is character of block special) */
     uint32_t st_size; /* For regular files, size in bytes, symlink, length in bytes of the pathname in the link,
                          shmem object, length in bytes, typed memory object, length in bytes */
     uint32_t st_atime; /* Time of last access */

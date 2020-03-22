@@ -36,6 +36,7 @@ string/memmove.o \
 string/memset.o \
 string/strlen.o \
 string/strcmp.o \
+string/strncmp.o \
 string/strcpy.o \
 string/strdup.o \
 string/strtok.o \
@@ -52,6 +53,8 @@ $(ARCH_HOSTEDOBJS) \
 entry.o \
 exit.o \
 unistd/stub.o \
+unistd/close.o \
+unistd/lseek.o \
 unistd/open.o \
 unistd/usleep.o \
 unistd/sleep.o \
@@ -71,6 +74,10 @@ unistd/dup2.o \
 ioctl/ioctl.o \
 stdio/stdio.o \
 stdio/stub.o \
+stdlib/getenv.o \
+stdlib/putenv.o \
+stdlib/setenv.o \
+stdlib/unsetenv.o \
 stdlib/stub.o \
 errno/errno.o \
 stdio/stdio.o \
@@ -80,6 +87,7 @@ signal/signal.o \
 sys/wait.o \
 sys/fswait.o \
 sys/setheap.o \
+sys/stat.o \
 sys/mmap.o \
 debug/debugvfstree.o \
 debug/debugproctree.o \
@@ -90,20 +98,29 @@ $(HOSTEDOBJS) \
 
 LIBK_OBJS=$(FREEOBJS:.o=.libk.o)
 
-BINARIES=libc.a libk.a 
+BINARIES=libc.a libk.a libc.so
 
 CRTS=\
 $(ARCH_CRTS) \
 
-.PHONY: all clean install install-headers install-libs
+.PHONY: all clean install install-headers
 .SUFFIXES: .o .libk.o .c .S
 
-all: $(BINARIES) $(CRTS) libc.so
+all: $(BINARIES) $(CRTS)
 
 libc.a: $(OBJS)
 	$(AR) rcs $@ $(OBJS)
 
 libc.so: $(OBJS)
+	mkdir -p $(DESTDIR)$(LIBDIR)
+	$(AS) $(ARCHDIR)/crt0.S -o crt0.o
+	$(AS) $(ARCHDIR)/crti.S -o crti.o
+	$(AS) $(ARCHDIR)/crtn.S -o crtn.o
+	cp crt0.o $(DESTDIR)$(LIBDIR)
+	cp crti.o $(DESTDIR)$(LIBDIR)
+	cp crtn.o $(DESTDIR)$(LIBDIR)
+	OBJ=`$(CC) $(CFLAGS) $(LDFLAGS) -print-file-name=crtbegin.o` && cp "$$OBJ" $(DESTDIR)$(LIBDIR)
+	OBJ=`$(CC) $(CFLAGS) $(LDFLAGS) -print-file-name=crtend.o` && cp "$$OBJ" $(DESTDIR)$(LIBDIR)
 	$(CC) -nodefaultlibs -o $@ $(CFLAGS) -shared -fPIC $^ -lgcc
 
 libk.a: $(LIBK_OBJS)
@@ -121,25 +138,19 @@ libk.a: $(LIBK_OBJS)
 .S.libk.o:
 	$(CC) -MD -c $< -o $@ $(LIBK_CFLAGS)$(LIBK_CPPFLAGS)
 
-crt%.o: crt%.S
-	$(AS) $< -o $@
-
 clean:
 	rm -f $(BINARIES) *.a
 	rm -f $(CRTS) *.o
 	rm -f $(OBJS) $(LIBK_OBJS) *.o */*.o */*/*.o
 	rm -f $(OBJS:.o=.d) $(LIBK_OBJS:.o=.d) *.d */*.d */*/*.d
 
-install: install-headers install-libs
+install: $(BINARIES)
+	mkdir -p $(DESTDIR)$(LIBDIR)
+	cp $(BINARIES) $(DESTDIR)$(LIBDIR)
 
 install-headers:
 	mkdir -p $(DESTDIR)$(INCLUDEDIR)
 	cp -R --preserve=timestamps include/. $(DESTDIR)$(INCLUDEDIR)/.
-
-install-libs: $(BINARIES) $(CRTS)
-	mkdir -p $(DESTDIR)$(LIBDIR)
-	cp $(BINARIES) $(DESTDIR)$(LIBDIR)
-	cp $(CRTS) $(DESTDIR)$(LIBDIR)
 
 -include $(OBJS:.o=.d)
 -include $(LIBK_OBJS:.o=.d)

@@ -9,7 +9,7 @@ INCLUDEDIR?=$(PREFIX)/include
 
 CFLAGS:=$(CFLAGS) -Wall -Wextra -O3
 LDFLAGS:=$(LDFLAGS)
-LIBS:=$(LIBS) -lc
+LIBS:=$(LIBS)
 
 OBJS=\
 terminal/terminal.o \
@@ -36,7 +36,7 @@ sh/sh: sh/sh.o
 
 clean:
 	rm -f $(EXECS)
-	rm -f $(OBJS) *.d
+	rm -f $(OBJS) */*.d
 
 install: install-headers install-bin
 

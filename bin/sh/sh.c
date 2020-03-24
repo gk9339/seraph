@@ -2,6 +2,7 @@
 #include <unistd.h>
 #include <debug.h>
 #include <string.h>
+#include <signal.h>
 
 int main( void )
 {
@@ -22,10 +23,12 @@ int main( void )
             }else if( !strcmp(buf, "ps\n") )
             {
                 debugproctree();
-                
             }else if( !strcmp(buf, "exit\n") )
             {
                 return 0;
+            }else if( !strcmp(buf, "clear\n") )
+            {
+                kill(getppid(), SIGUSR1);
             }else
             {
                 printf("sh: Command not found: %s", buf);

@@ -5,5 +5,6 @@
 #include <sys/signals.h>
 
 sighandler_t signal(int, sighandler_t);
+int kill( pid_t, int );
 
 #endif

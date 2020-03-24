@@ -15,6 +15,7 @@
 #include <kernel/elf.h>
 #include <kernel/shm.h>
 #include <kernel/pty.h>
+#include <kernel/signal.h>
 
 #define FD_INRANGE(FD) ((FD) < (int)current_process->fds->length && (FD) >= 0)
 #define FD_ENTRY(FD) (current_process->fds->entries[(FD)])
@@ -285,6 +286,20 @@ static int sys_sbrk( int size )
     spin_unlock(proc->image.lock);
 
     return ret;
+}
+
+static int sys_kill( pid_t pid, uint32_t sig )
+{
+    if( pid < -1 )
+    {
+		return group_send_signal(-pid, sig, 0);
+	}else if( pid == 0 )
+    {
+		return group_send_signal(current_process->job, sig, 0);
+	}else
+    {
+		return send_signal(pid, sig, 0);
+	}
 }
 
 static int sys_signal( uint32_t signum, uintptr_t handler )
@@ -666,27 +681,6 @@ static int sys_getpgid( pid_t pid )
     return proc->job;
 }
 
-static int sys_debugvfstree( void )
-{
-    debug_print_vfs_tree();
-
-    return 0;
-}
-
-static int sys_debugproctree( void )
-{
-    debug_print_proc_tree();
-    
-    return 0;
-}
-
-static int sys_debugprint( char* message )
-{
-    debug_log(message);
-
-    return 0;
-}
-
 static int sys_mmap( uintptr_t address, size_t size )
 {
     if( address < 0x10000000 )
@@ -717,6 +711,32 @@ static int sys_mmap( uintptr_t address, size_t size )
     return 0;
 }
 
+static int sys_getppid( void )
+{
+    return process_get_parent(current_process)->id;
+}
+
+static int sys_debugvfstree( void )
+{
+    debug_print_vfs_tree();
+
+    return 0;
+}
+
+static int sys_debugproctree( void )
+{
+    debug_print_proc_tree();
+    
+    return 0;
+}
+
+static int sys_debugprint( char* message )
+{
+    debug_log(message);
+
+    return 0;
+}
+
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wstrict-prototypes"
 #pragma GCC diagnostic ignored "-Wincompatible-pointer-types"
@@ -731,6 +751,7 @@ static int (*syscalls[])() =
     [SYS_FORK] = sys_fork,
     [SYS_GETPID] = sys_getpid,
     [SYS_SBRK] = sys_sbrk,
+    [SYS_KILL] = sys_kill,
     [SYS_SIGNAL] = sys_signal,
     [SYS_OPENPTY] = sys_openpty,
     [SYS_SEEK] = sys_seek,
@@ -749,10 +770,11 @@ static int (*syscalls[])() =
     [SYS_SETSID] = sys_setsid,
     [SYS_SETPGID] = sys_setpgid,
     [SYS_GETPGID] = sys_getpgid,
+    [SYS_MMAP] = sys_mmap,
+    [SYS_GETPPID] = sys_getppid,
     [SYS_DEBUGVFSTREE] = sys_debugvfstree,
     [SYS_DEBUGPROCTREE] = sys_debugproctree,
     [SYS_DEBUGPRINT] = sys_debugprint,
-    [SYS_MMAP] = sys_mmap,
 };
 #pragma GCC diagnostic pop
 

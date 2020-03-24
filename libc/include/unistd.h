@@ -12,6 +12,7 @@ pid_t fork( void );
 void* sbrk( intptr_t );
 
 pid_t getpid( void );
+pid_t getppid( void );
 uid_t getuid( void );
 gid_t getgid( void );
 

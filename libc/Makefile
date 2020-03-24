@@ -63,6 +63,7 @@ unistd/read.o \
 unistd/execv.o \
 unistd/fork.o \
 unistd/getpid.o \
+unistd/getppid.o \
 unistd/getuid.o \
 unistd/setuid.o \
 unistd/getgid.o \
@@ -84,6 +85,7 @@ stdio/stdio.o \
 sched/sched_yield.o \
 pty/pty.o \
 signal/signal.o \
+signal/kill.o \
 sys/wait.o \
 sys/fswait.o \
 sys/setheap.o \

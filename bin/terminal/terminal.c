@@ -136,6 +136,8 @@ void terminal_clear( void )
     terminal_row = 0;
     terminal_column = 0;
     update_cursor(terminal_row, terminal_column);
+    
+    signal(SIGUSR1, (void(*)(int))terminal_clear);
 }
 
 void terminal_scroll( size_t rows )

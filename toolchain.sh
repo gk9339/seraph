@@ -67,4 +67,4 @@ pushd gcc-build
     make install-gcc install-target-libgcc
 popd
 
-cd $(DIR)
+cd "$DIR"

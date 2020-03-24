@@ -35,6 +35,7 @@ clean:
 install: install-headers install-sbin
 
 install-headers:
+	mkdir -p include 
 	mkdir -p $(DESTDIR)$(INCLUDEDIR)
 	cp -R --preserve=timestamps include/. $(DESTDIR)$(INCLUDEDIR)/.
 

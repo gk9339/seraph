@@ -60,6 +60,7 @@
 #define SYS_GETPGID 64
 #define SYS_SETHEAP 65
 #define SYS_MMAP 66
+#define SYS_GETPPID 67
 #define SYS_DEBUGVFSTREE 100
 #define SYS_DEBUGPROCTREE 101
 #define SYS_DEBUGPRINT 102
@@ -125,7 +126,9 @@ DECL_SYSCALL1(close, int);
 DECL_SYSCALL3(execve, char*, char**, char**);
 DECL_SYSCALL0(fork);
 DECL_SYSCALL0(getpid);
+DECL_SYSCALL0(getppid);
 DECL_SYSCALL1(sbrk, int);
+DECL_SYSCALL2(kill, pid_t, int);
 DECL_SYSCALL2(signal, uint32_t, sighandler_t);
 DECL_SYSCALL5(openpty, int*, int*, char*, void*, void*);
 DECL_SYSCALL3(lseek, int, int, int);
@@ -143,10 +146,10 @@ DECL_SYSCALL3(waitpid, int, int*, int);
 DECL_SYSCALL0(setsid);
 DECL_SYSCALL2(setpgid, int, int);
 DECL_SYSCALL1(getpgid, int);
+DECL_SYSCALL1(setheap, uintptr_t);
+DECL_SYSCALL2(mmap, uintptr_t, size_t);
 DECL_SYSCALL0(debugvfstree);
 DECL_SYSCALL0(debugproctree);
 DECL_SYSCALL1(debugprint, char*);
-DECL_SYSCALL1(setheap, uintptr_t);
-DECL_SYSCALL2(mmap, uintptr_t, size_t);
 
 #endif

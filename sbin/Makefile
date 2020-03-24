@@ -7,7 +7,7 @@ EXEC_PREFIX?=$(PREFIX)
 SBINDIR?=$(EXEC_PREFIX)/sbin
 INCLUDEDIR?=$(PREFIX)/include
 
-CFLAGS:=$(CFLAGS) -static -Wall -Wextra -O3
+CFLAGS:=$(CFLAGS) -static -Wall -Wextra -O2
 LDFLAGS:=$(LDFLAGS)
 LIBS:=$(LIBS) -lc
 

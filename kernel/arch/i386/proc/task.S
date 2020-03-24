@@ -38,7 +38,7 @@ enter_userspace:
     mov %eax, %gs
 
     # Store stack address in %eax 
-    mov %eax, %eax
+    mov %esp, %eax
 
     # Data segment with bottom 2 bits set for ring 3
     pushl $0x23

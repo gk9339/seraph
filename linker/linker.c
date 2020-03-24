@@ -125,17 +125,13 @@ static void free( void* ptr )
 
 int main( int argc, char** argv )
 {
-    char* file;
-    size_t argc_offset;
+    char* file = argv[1];
+    size_t argc_offset = 1;
 
-    if( !strcmp(argv[1], "e") )
+    if( !strcmp(argv[1], "-e") )
     {
         argc_offset = 3;
         file = argv[2];
-    }else
-    {
-        argc_offset = 1;
-        file = argv[1];
     }
 
     _argv_value = argv+argc_offset;
@@ -294,46 +290,54 @@ int main( int argc, char** argv )
     return 0;
 }
 
-//Locate library for LD_LIBRARY_PATH
+//Locate library for LD_LIBRARY PATH
 static char* find_lib( const char* file )
 {
+    //If it was an absolute path, there's no need to find it.
     if( strchr(file, '/') )
     {
         return strdup(file);
     }
 
-    char* path = _target_is_suid? NULL : getenv("LD_LIBRARY_PATH");
+    //Collect the environment variable.
+    char* path = _target_is_suid ? NULL : getenv("LD_LIBRARY_PATH");
     if( !path )
     {
+        //Not set - this is the default state. Should probably read from config file?
         path = "/lib";
     }
 
+    //Duplicate so we can tokenize without editing
     char* xpath = strdup(path);
-    char* p, * last;
-
-    for( p = strtok_r(xpath, ":", &last); p; p = strtok_r(NULL, ":", &last) )
+    char* p, *last;
+    for( (p = strtok_r(xpath, ":", &last)); p; p = strtok_r(NULL, ":", &last) )
     {
+        //Go through each LD_LIBRARY_PATH entry
         int r;
         struct stat stat_buf;
 
+        //Append the requested file to that path
         char* exe = malloc(strlen(p) + strlen(file) + 2);
         *exe = '\0';
         strcat(exe, p);
         strcat(exe, "/");
         strcat(exe, file);
 
+        //See if it exists
         r = stat(exe, &stat_buf);
         if( r != 0 )
         {
+            // Nope.
             free(exe);
-        }else
-        {
-            return exe;
+            continue;
         }
-    }
 
+        //It exists, so this is what we want.
+        return exe;
+    }
     free(xpath);
 
+    //No match found.
     return NULL;
 }
 
@@ -458,8 +462,7 @@ static uintptr_t object_load( elf_t* object, uintptr_t base )
         switch( phdr.p_type )
         {
             case PT_LOAD: ;//(a label can only be part of a statement and a declaration is not a statement)
-                char* args[] = {(char*)(base + phdr.p_vaddr), (char*)phdr.p_memsz};
-                mmap((size_t)args);
+                mmap(base + phdr.p_vaddr, phdr.p_memsz);
 
                 fseek(object->file, phdr.p_offset, SEEK_SET);
                 fread((void*)(base + phdr.p_vaddr), phdr.p_filesz, 1, object->file);
@@ -567,7 +570,7 @@ static int object_relocate( elf_t* object )
     if( object->dyn_symbol_table )
     {
         Elf32_Sym* table = object->dyn_symbol_table;
-        for( uintptr_t i = 0; i < (uintptr_t)object->dyn_symbol_table; i++ )
+        for( uintptr_t i = 0; i < (uintptr_t)object->dyn_symbol_table_size; i++ )
         {
             char* symname = (char*)((uintptr_t)object->dyn_string_table + table->st_name);
 
@@ -625,7 +628,6 @@ static int object_relocate( elf_t* object )
                         break;
                     case 1: //32
                         x += *((ssize_t*)(table->r_offset + object->base));
-                        x -= (table->r_offset + object->base);
                         memcpy((void*)(table->r_offset + object->base), &x, sizeof(uintptr_t));
                         break;
                     case 2: // PC32

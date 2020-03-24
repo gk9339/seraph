@@ -9,7 +9,7 @@ LIBDIR?=$(EXEC_PREFIX)/lib
 
 CFLAGS:=$(CFLAGS) -ffreestanding -Wall -Wextra -pedantic -Wshadow -Wpointer-arith \
 -Wcast-align -Wmissing-prototypes -Wmissing-declarations -Wredundant-decls -Wnested-externs \
--Winline -Wconversion -Wstrict-prototypes -Wno-sign-conversion -O3
+-Winline -Wconversion -Wstrict-prototypes -Wno-sign-conversion -O2
 CPPFLAGS:=$(CPPFLAGS) -Iinclude
 LIBK_CFLAGS:=$(CFLAGS)
 LIBK_CPPFLAGS:=$(CPPFLAGS) -D__is_libk
@@ -91,6 +91,7 @@ sys/stat.o \
 sys/mmap.o \
 debug/debugvfstree.o \
 debug/debugproctree.o \
+debug/debugprint.o \
 
 OBJS=\
 $(FREEOBJS) \

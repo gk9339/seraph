@@ -96,7 +96,7 @@ int fileno( FILE* stream )
 static size_t read_bytes( FILE* f, char* out, size_t len )
 {
     size_t r_out = 0;
-
+    
     while( len > 0 )
     {
         if( f->ungetc >= 0 )
@@ -111,13 +111,18 @@ static size_t read_bytes( FILE* f, char* out, size_t len )
 
         if( f->available == 0 )
         {
-            ssize_t r = read(fileno(f), &f->read_ptr, f->read_end - f->read_ptr);
+            if( f->read_ptr == f->read_end )
+            {
+                f->read_ptr = f->read_base;
+            }
+            ssize_t r = read(fileno(f), f->read_ptr, (f->read_end - f->read_ptr));
             if( r < 0 )
             {
                 return r_out;
             }else
             {
                 f->available = r;
+
             }
         }
 
@@ -137,7 +142,7 @@ static size_t read_bytes( FILE* f, char* out, size_t len )
             r_out++;
         }
     }
-
+    
     return r_out;
 }
 
@@ -247,6 +252,12 @@ int fclose( FILE* stream )
 
 int fseek( FILE* stream, long offset, int whence )
 {
+    stream->read_ptr = stream->read_base;
+    stream->write_ptr = stream->write_base;
+    stream->available = 0;
+    stream->ungetc = -1;
+    stream->eof = 0;
+
     int resp = syscall_lseek(stream->fd,offset,whence);
     if( resp < 0 )
     {

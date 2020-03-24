@@ -680,6 +680,43 @@ static int sys_debugproctree( void )
     return 0;
 }
 
+static int sys_debugprint( char* message )
+{
+    debug_log(message);
+
+    return 0;
+}
+
+static int sys_mmap( uintptr_t address, size_t size )
+{
+    if( address < 0x10000000 )
+    {
+        return -EINVAL;
+    }
+
+    if( address & 0xFFF )
+    {
+        size += address & 0xFFF;
+        address &= 0xFFFFF000;
+    }
+
+    process_t* proc = (process_t*)current_process;
+    if( proc->group != 0 )
+    {
+        proc = process_from_pid(proc->group);
+    }
+
+    spin_lock(proc->image.lock);
+    for( size_t x = 0; x < size; x += 0x1000 )
+    {
+        alloc_frame(get_page(address + x, 1, current_directory), 0, 1);
+        invalidate_tables_at(address + x);
+    }
+    spin_unlock(proc->image.lock);
+
+    return 0;
+}
+
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wstrict-prototypes"
 #pragma GCC diagnostic ignored "-Wincompatible-pointer-types"
@@ -714,6 +751,8 @@ static int (*syscalls[])() =
     [SYS_GETPGID] = sys_getpgid,
     [SYS_DEBUGVFSTREE] = sys_debugvfstree,
     [SYS_DEBUGPROCTREE] = sys_debugproctree,
+    [SYS_DEBUGPRINT] = sys_debugprint,
+    [SYS_MMAP] = sys_mmap,
 };
 #pragma GCC diagnostic pop
 

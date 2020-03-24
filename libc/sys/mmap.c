@@ -1,9 +1,9 @@
 #include <sys/syscall.h>
 #include <sys/mman.h>
 
-DEFN_SYSCALL1(mmap, SYS_MMAP, size_t)
+DEFN_SYSCALL2(mmap, SYS_MMAP, uintptr_t, size_t)
 
-int mmap( size_t size )
+int mmap( uintptr_t address, size_t size )
 {
-    return syscall_mmap(size);
+    return syscall_mmap(address, size);
 }

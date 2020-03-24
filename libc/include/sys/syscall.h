@@ -62,6 +62,7 @@
 #define SYS_MMAP 66
 #define SYS_DEBUGVFSTREE 100
 #define SYS_DEBUGPROCTREE 101
+#define SYS_DEBUGPRINT 102
 
 #define DECL_SYSCALL0(fn)                int syscall_##fn( void )
 #define DECL_SYSCALL1(fn,p1)             int syscall_##fn(p1)
@@ -144,7 +145,8 @@ DECL_SYSCALL2(setpgid, int, int);
 DECL_SYSCALL1(getpgid, int);
 DECL_SYSCALL0(debugvfstree);
 DECL_SYSCALL0(debugproctree);
+DECL_SYSCALL1(debugprint, char*);
 DECL_SYSCALL1(setheap, uintptr_t);
-DECL_SYSCALL1(mmap, size_t);
+DECL_SYSCALL2(mmap, uintptr_t, size_t);
 
 #endif

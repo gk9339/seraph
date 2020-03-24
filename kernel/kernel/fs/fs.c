@@ -1019,7 +1019,7 @@ fs_node_t* kopen( char* filename, uint32_t flags )
     return kopen_recur(filename, flags, 0, (char*)(current_process->wd_name));
 }
 
-static void debug_print_vfs_tree_node( tree_node_t* node, size_t height )
+static void debug_print_vfs_tree_node( char** str, tree_node_t* node, size_t height )
 {
     /* End recursion on a blank entry */
 	if (!node) return;
@@ -1038,24 +1038,23 @@ static void debug_print_vfs_tree_node( tree_node_t* node, size_t height )
 
     /* Print the process name */
 	if (fnode->file) {
-		c += sprintf(c, "%s > %s 0x%x (%s, %s)", fnode->name, fnode->device, fnode->file, fnode->fs_type, fnode->file->name);
+		c += sprintf(c, "%s > %s 0x%x (%s, %s)\n", fnode->name, fnode->device, fnode->file, fnode->fs_type, fnode->file->name);
 	} else {
-		c += sprintf(c, "%s > (empty)", fnode->name);
+		c += sprintf(c, "%s > (empty)\n", fnode->name);
 	}
 
     /* Linefeed */
-	debug_log(tmp);
+    strcat(*str, tmp);
 	free(tmp);
 
     foreach(child, node->children)
     {
 		/* Recursively print the children */
-		debug_print_vfs_tree_node(child->value, height + 1);
+		debug_print_vfs_tree_node(str, child->value, height + 1);
     }
 }
 
-void debug_print_vfs_tree( void )
+void debug_print_vfs_tree( char** str )
 {
-    debug_log("\n");
-	debug_print_vfs_tree_node(fs_tree->root, 0);
+	debug_print_vfs_tree_node(str, fs_tree->root, 0);
 }

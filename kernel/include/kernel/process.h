@@ -165,6 +165,6 @@ int waitpid( int pid, int* status, int options );
 
 int is_valid_process( process_t* proc );
 
-void debug_print_proc_tree( void );
+void debug_print_proc_tree( char** );
 
 #endif

@@ -171,7 +171,7 @@ int vfs_mount_type(char * type, char * arg, char * mountpoint);
 void vfs_lock(fs_node_t * node);
 void map_vfs_directory(char *);
 
-void debug_print_vfs_tree( void );
+void debug_print_vfs_tree( char** );
 
 void zero_initialize( void );
 void null_initialize( void );

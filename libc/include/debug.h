@@ -1,8 +1,8 @@
 #ifndef _DEBUG_H
 #define _DEBUG_H
 
-int debugvfstree( void );
-int debugproctree( void );
+int debugvfstree( char** );
+int debugproctree( char** );
 int debugprint( char*, const char* format, ... );
 
 #endif

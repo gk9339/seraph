@@ -1,8 +1,4 @@
-#include <stdio.h>
-#include <unistd.h>
-#include <debug.h>
-#include <string.h>
-#include <signal.h>
+#include "sh.h"
 
 int main( void )
 {
@@ -19,20 +15,38 @@ int main( void )
 
             if( !strcmp(buf, "ls\n") )
             {
-                debugvfstree();
+                ls();
             }else if( !strcmp(buf, "ps\n") )
             {
-                debugproctree();
+                ps();
             }else if( !strcmp(buf, "exit\n") )
             {
                 return 0;
             }else if( !strcmp(buf, "clear\n") )
             {
                 kill(getppid(), SIGUSR1);
-            }else
+            }else if( strcmp(buf, "\n") )
             {
                 printf("sh: Command not found: %s", buf);
             }
         }
     }
+}
+
+void ps( void )
+{
+    char* str = calloc(4096, sizeof(char));
+       
+    debugproctree(&str);
+
+    printf("%s", str);
+}
+
+void ls( void )
+{
+    char* str = calloc(4096, sizeof(char));
+       
+    debugvfstree(&str);
+
+    printf("%s", str);
 }

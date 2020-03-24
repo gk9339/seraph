@@ -713,19 +713,19 @@ static int sys_mmap( uintptr_t address, size_t size )
 
 static int sys_getppid( void )
 {
-    return process_get_parent(current_process)->id;
+    return process_get_parent((process_t*)current_process)->id;
 }
 
-static int sys_debugvfstree( void )
+static int sys_debugvfstree( char** str )
 {
-    debug_print_vfs_tree();
+    debug_print_vfs_tree(str);
 
     return 0;
 }
 
-static int sys_debugproctree( void )
+static int sys_debugproctree( char** str )
 {
-    debug_print_proc_tree();
+    debug_print_proc_tree(str);
     
     return 0;
 }

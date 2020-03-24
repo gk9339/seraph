@@ -243,6 +243,9 @@ static void sig_child_exit( int sig __attribute__ ((unused)) )
 {
     terminal_writestring("\n[Process completed]");
 
+	outportb(0x3D4, 0x0A);
+	outportb(0x3D5, 0x20);
+
     exit_terminal = 1;
 }
 

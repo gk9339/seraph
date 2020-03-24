@@ -148,8 +148,8 @@ DECL_SYSCALL2(setpgid, int, int);
 DECL_SYSCALL1(getpgid, int);
 DECL_SYSCALL1(setheap, uintptr_t);
 DECL_SYSCALL2(mmap, uintptr_t, size_t);
-DECL_SYSCALL0(debugvfstree);
-DECL_SYSCALL0(debugproctree);
+DECL_SYSCALL1(debugvfstree, char**);
+DECL_SYSCALL1(debugproctree, char**);
 DECL_SYSCALL1(debugprint, char*);
 
 #endif

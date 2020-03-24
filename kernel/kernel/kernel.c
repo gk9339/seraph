@@ -246,7 +246,7 @@ void kpanic( char* error_message, const char* file, int line, struct regs* regs 
 
     terminal_setcolor(4);
 
-    printf("UNHANDLED EXCEPTION: %s ", error_message);
+    printf("\nUNHANDLED EXCEPTION: %s ", error_message);
     debug_logf(debug_str, "UNHANDLED EXCEPTION: %s ", error_message);
     printf("pid: %d", getpid());
     debug_logf(debug_str, "pid: %d", getpid());

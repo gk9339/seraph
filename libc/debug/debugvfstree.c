@@ -1,9 +1,9 @@
 #include <debug.h>
 #include <sys/syscall.h>
 
-DEFN_SYSCALL0(debugvfstree, SYS_DEBUGVFSTREE)
+DEFN_SYSCALL1(debugvfstree, SYS_DEBUGVFSTREE, char**)
 
-int debugvfstree( void )
+int debugvfstree( char** str )
 {
-    return(syscall_debugvfstree());
+    return(syscall_debugvfstree(str));
 }

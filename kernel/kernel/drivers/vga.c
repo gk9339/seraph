@@ -24,10 +24,6 @@ void terminal_initialize( void )
     terminal_buffer = VGA_MEMORY;
 
     terminal_clear();
-
-    /* Disable cursor */
-    outportb(0x3D4, 0x0A);
-    outportb(0x3D5, 0x20);
 }
 
 void terminal_clear( void )
@@ -69,6 +65,16 @@ static void terminal_putentryat( unsigned char c, uint8_t color, size_t x, size_
 	terminal_buffer[index] = vga_entry(c, color);
 }
 
+static void update_cursor( int x, int y )
+{
+	uint16_t pos = y * VGA_WIDTH + x;
+ 
+	outportb(0x3D4, 0x0F);
+	outportb(0x3D5, (uint8_t)(pos & 0xFF));
+	outportb(0x3D4, 0x0E);
+	outportb(0x3D5, (uint8_t)((pos >> 8) & 0xFF));
+}
+
 void terminal_putchar( char c ) 
 {
 	unsigned char uc = (unsigned char)c;
@@ -78,20 +84,28 @@ void terminal_putchar( char c )
     {
         terminal_column = 0;
         if( terminal_row != VGA_HEIGHT - 1 )
+        {
             terminal_row++;
-        else
+        }else
+        {
             terminal_scroll(1);
+        }
     }else if( uc == '\b' )
     {
         if( terminal_column == 0 )
         {
             terminal_column = VGA_WIDTH - 1;
             if( terminal_row == 0 )
+            {
                 terminal_row = VGA_HEIGHT - 1;
-            else
+            }else
+            {
                 terminal_row--;
+            }
         }else
+        {
             terminal_column--;
+        }
         /* Replace whatever character was at this location with ' ' */
         terminal_putentryat(' ', terminal_color, terminal_column, terminal_row);
     }else if( uc > 31 ) /* Print only printable ascii characters */
@@ -102,17 +116,23 @@ void terminal_putchar( char c )
         {
 	    	terminal_column = 0;
     		if ( terminal_row != VGA_HEIGHT - 1 )
+            {
 		    	terminal_row++;
-            else
+            }else
+            {
                 terminal_scroll(1);
+            }
         }
     }
+    update_cursor(terminal_column, terminal_row);
 }
 
 void terminal_write( const char* data, size_t size ) 
 {
 	for (size_t i = 0; i < size; i++)
+    {
 		terminal_putchar(data[i]);
+    }
 }
 
 void terminal_writestring( const char* data ) 

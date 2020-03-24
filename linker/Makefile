@@ -6,7 +6,7 @@ PREFIX?=/lib
 EXEC_PREFIX?=$(PREFIX)
 LIBDIR?=$(EXEC_PREFIX)/lib
 
-CFLAGS:=$(CFLAGS) -static -Wall -Werror
+CFLAGS:=$(CFLAGS) -static -Wall -Werror -O3
 LDFLAGS:=$(LDFLAGS) -Wl,-static -T linker.ld
 
 LIBS=\
@@ -18,7 +18,7 @@ ld.so \
 all: $(LIBS)
 
 ld.so: linker.c linker.ld ../libc/libc.a
-	$(CC) $(CFLAGS)$(LDFLAGS) -o $@ -Os $<
+	$(CC) $(CFLAGS)$(LDFLAGS) -o $@ $<
 
 clean:
 	rm -f $(LIBS)

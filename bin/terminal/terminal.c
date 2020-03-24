@@ -106,6 +106,21 @@ int main( void )
     return 0;
 }
 
+static inline void outportb( unsigned short _port, unsigned char _data )
+{
+    asm volatile("outb %1, %0" :: "dN"(_port), "a"(_data));
+}
+
+static void update_cursor( int x, int y )
+{
+     uint16_t pos = y * VGA_WIDTH + x;
+ 
+     outportb(0x3D4, 0x0F);
+     outportb(0x3D5, (uint8_t)(pos & 0xFF));
+     outportb(0x3D4, 0x0E);
+     outportb(0x3D5, (uint8_t)((pos >> 8) & 0xFF));
+}
+
 void terminal_clear( void )
 {
     /* Clear screen */
@@ -120,6 +135,7 @@ void terminal_clear( void )
 
     terminal_row = 0;
     terminal_column = 0;
+    update_cursor(terminal_row, terminal_column);
 }
 
 void terminal_scroll( size_t rows )
@@ -195,6 +211,7 @@ void terminal_putchar( char c )
             }
         }
     }
+    update_cursor(terminal_column, terminal_row);
 }
 
 void terminal_write( const char* data, size_t size ) 
@@ -235,4 +252,4 @@ void handle_input_char( char c )
 void handle_input_string( char* c )
 {
 	write(fd_master, c, strlen(c));
-}
+} 

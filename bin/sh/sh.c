@@ -9,6 +9,7 @@ int main( void )
     
     while(1)
     {
+        printf(">");
         int r = read(0, buf, 1024);
 
         if( r > 0 )
@@ -27,7 +28,7 @@ int main( void )
                 return 0;
             }else
             {
-                printf("Input: %s", buf);
+                printf("sh: Command not found: %s", buf);
             }
         }
     }

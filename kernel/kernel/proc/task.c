@@ -78,7 +78,7 @@ uint32_t fork( void )
     make_process_ready(new_proc);
 
     char debug_str[512];
-    debug_logf(debug_str, "%s - %d (%d) -> Fork", new_proc->name, new_proc->id, current_process->id);
+    debug_logf(debug_str, "%d - %s -> Fork (%d)", new_proc->id, new_proc->name, current_process->id);
     
     int_resume();
 
@@ -309,7 +309,7 @@ extern void enter_userspace( uintptr_t location, uintptr_t stack );
 void enter_user_jump( uintptr_t location, int argc, char** argv, uintptr_t stack )
 {
     char debug_str[512];
-    debug_logf(debug_str, "%s - %d -> Starting", current_process->name, current_process->id);
+    debug_logf(debug_str, "%d - %s -> Starting", current_process->id, current_process->name);
     int_disable();
     set_kernel_stack(current_process->image.stack);
 
@@ -327,7 +327,7 @@ void task_exit( int retval )
         return;
     }
 
-    debug_logf(debug_str, "%s - %d -> Finishing [%d]", current_process->name, current_process->id, retval);
+    debug_logf(debug_str, "%d - %s -> Finishing [%d]", current_process->id, current_process->name, retval);
     cleanup_process((process_t*)current_process, retval);
 
     process_t* parent = process_get_parent((process_t*)current_process);

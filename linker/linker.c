@@ -229,6 +229,7 @@ int main( int argc, char** argv )
     }
 
     object_relocate(main_obj);
+    fclose(main_obj->file);
     while(end_addr & 0xFFF)
     {
         end_addr++;

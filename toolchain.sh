@@ -66,3 +66,5 @@ pushd gcc-build
     make all-gcc all-target-libgcc
     make install-gcc install-target-libgcc
 popd
+
+cd $(DIR)

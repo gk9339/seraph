@@ -24,8 +24,59 @@
 
 # Debug
 In seperate terminals:
+
 `qemu-system-i386 -s -S -serial stdio -cdrom seraph.iso`
+
 `gdb -ex 'tar rem :1234'` 
 
 # Cleanup
 `./clean.sh` - Removes all build files
+
+# Project Layout
+├── bin               - normal programs - dynamically linked  
+│   ├── include       - normal program headers  
+│   │   └── terminal  
+│   ├── sh            - shell  
+│   └── terminal      - VGA terminal  
+├── kernel            - kernel source  
+│   ├── arch          - arch specific code (asm)  
+│   │   └── i386  
+│   │       ├── cpu  
+│   │       ├── mem  
+│   │       └── proc  
+│   ├── include       - kernel headers  
+│   │   └── kernel  
+│   ├── kernel        - main kernel source  
+│   │   ├── cpu       - gdt/idt and isr/irq  
+│   │   ├── dev       - cmos, fpu, and PIT  
+│   │   ├── drivers   - device drivers, PS2 kbd, VGA, serial, ramdisk, ustar, ext2  
+│   │   ├── fs        - fs and vfs devices  
+│   │   ├── mem       - kernel memory functions / paging, shared memory  
+│   │   └── proc      - process management, ELF support, syscalls, signals  
+│   └── script        - scripts for kernel compilation  
+├── libc              - C library  
+│   ├── arch          - arch specific code (asm)  
+│   │   └── i386  
+│   ├── debug         - special debug functions  
+│   ├── errno  
+│   ├── hashtable     - hashtable ADT functions  
+│   ├── include       - C library headers  
+│   │   └── sys  
+│   ├── ioctl  
+│   ├── list          - linked list functions  
+│   ├── pty           - pty system calls  
+│   ├── sched  
+│   ├── signal  
+│   ├── stdio  
+│   ├── stdlib  
+│   ├── string  
+│   ├── sys  
+│   ├── tree          - tree ADT functions  
+│   └── unistd  
+├── linker            - dynamic linker  
+├── sbin              - programs required for boot - statically linked  
+│   ├── include  
+│   └── init          - pid 0  
+└── script            - other scripts for OS compilation  
+└── toolchain         - seraph specific gcc/binutils  
+    └── patches       - gcc/binutils patches  

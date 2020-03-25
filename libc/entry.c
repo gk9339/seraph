@@ -4,7 +4,6 @@
 
 extern void _init( void );
 extern void _fini( void );
-extern void __stdio_init_buffers( void );
 
 char** __get_argv( void );
 void _pre_main( int (*main)(int, char**), int argc, char* argv[] );
@@ -33,8 +32,6 @@ void _pre_main( int (*main)(int, char**), int argc, char* argv[] )
 
 __attribute__((constructor)) static void _libc_init( void )
 {
-    __stdio_init_buffers();
-
     unsigned int x = 0;
     unsigned int nulls = 0;
     

@@ -23,10 +23,8 @@ ld.so: linker.c linker.ld ../libc/libc.a
 clean:
 	rm -f $(LIBS)
 
-install: install-headers install-linker
-
 install-headers:
 
-install-linker: $(LIBS)
+install: $(LIBS)
 	mkdir -p $(DESTDIR)$(LIBDIR)
 	cp $(LIBS) $(DESTDIR)$(LIBDIR)

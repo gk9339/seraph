@@ -38,13 +38,14 @@ clean:
 	rm -f $(EXECS)
 	rm -f $(OBJS) */*.d
 
-install: install-headers install-bin
+include:
+	mkdir -p include
 
-install-headers:
+install-headers: include
 	mkdir -p $(DESTDIR)$(INCLUDEDIR)
 	cp -R --preserve=timestamps include/. $(DESTDIR)$(INCLUDEDIR)/.
 
-install-bin: $(EXECS)
+install: $(EXECS)
 	mkdir -p $(DESTDIR)$(BINDIR)
 	cp $(EXECS) $(DESTDIR)$(BINDIR)
 

@@ -67,7 +67,7 @@ static void terminal_putentryat( unsigned char c, uint8_t color, size_t x, size_
 
 static void update_cursor( int x, int y )
 {
-	uint16_t pos = y * VGA_WIDTH + x;
+	uint32_t pos = y * VGA_WIDTH + x;
  
 	outportb(0x3D4, 0x0F);
 	outportb(0x3D5, (uint8_t)(pos & 0xFF));
@@ -108,6 +108,10 @@ void terminal_putchar( char c )
         }
         /* Replace whatever character was at this location with ' ' */
         terminal_putentryat(' ', terminal_color, terminal_column, terminal_row);
+        
+    }else if( uc == '\r' )
+    {
+        terminal_column = 0;
     }else if( uc > 31 ) /* Print only printable ascii characters */
     {
         terminal_putentryat(uc, terminal_color, terminal_column, terminal_row);

@@ -92,13 +92,11 @@ clean:
 	rm -f $(OBJS) *.o */*.o */*/*.o
 	rm -f $(OBJS:.o=.d) *.d */*.d */*/*.d
 
-install: install-headers install-kernel
-
 install-headers:
 	mkdir -p $(DESTDIR)$(INCLUDEDIR)
 	cp -R --preserve=timestamps include/. $(DESTDIR)$(INCLUDEDIR)/.
 
-install-kernel: seraph.kernel
+install: seraph.kernel
 	mkdir -p $(DESTDIR)$(BOOTDIR)
 	cp seraph.kernel $(DESTDIR)$(BOOTDIR)
 

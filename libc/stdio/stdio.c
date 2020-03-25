@@ -78,16 +78,6 @@ FILE* stdin = &_stdin;
 FILE* stdout = &_stdout;
 FILE* stderr = &_stderr;
 
-extern char* _argv_0;
-
-void __stdio_init_buffers( void )
-{
-    _stdin.read_base = _stdin.read_ptr = malloc(BUFSIZ);
-    _stdin._name = strdup("stdin");
-    _stdout._name = strdup("stdout");
-    _stderr._name = strdup("stderr");
-}
-
 int fileno( FILE* stream )
 {
     return stream->fd;

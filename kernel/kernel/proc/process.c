@@ -901,4 +901,4 @@ static void debug_print_proc_tree_node( char** str, tree_node_t* node, size_t he
 void debug_print_proc_tree( char** str )
 {
 	debug_print_proc_tree_node(str, process_tree->root, 0);
-
+}

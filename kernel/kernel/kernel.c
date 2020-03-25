@@ -29,25 +29,27 @@
 
 #define CHECK_FLAG(flags,bit) ((flags)&(1<<(bit)))
 
+#define EARLY_KERNEL_DEBUG 0
+
 uintptr_t initial_esp = 0;
 
 void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp ) 
 {
-    debug_log("Start kernel_main");
     char debug_str[256];
     uint32_t mboot_mods_count = 0;
+    uint8_t debug = 0;
     multiboot_info_t* mbi;
     multiboot_module_t* mboot_mods = NULL;
+#if EARLY_KERNEL_DEBUG
+    debug_log("Start kernel_main");
+#endif
 
     /* CPU Initialization */
+#if EARLY_KERNEL_DEBUG
     debug_log("GDT / IDT initialization");
+#endif
     gdt_initialize();
     idt_initialize();
-
-    /* Terminal Initialization */
-    debug_log("Terminal initialization");
-    terminal_initialize();
-    printf("Kernel Initializing");
 
     /* Multiboot check */
     if( magic != MULTIBOOT_BOOTLOADER_MAGIC )
@@ -56,19 +58,30 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
     }
     mbi = (multiboot_info_t*)addr;
     initial_esp = esp;
+ 
+    /* Terminal Initialization */
+    if( CHECK_FLAG(debug, 0) ) debug_log("Terminal initialization");
+    terminal_initialize();
+    printf("Kernel Initializing\n");
 
+#if EARLY_KERNEL_DEBUG
     /* Multiboot boot device */
     if (CHECK_FLAG (mbi->flags, 1))
     {
         debug_logf(debug_str, "boot_device = 0x%x\n", (unsigned) mbi->boot_device);
     }
+#endif
 
     /* Multiboot modules */
     uintptr_t last_mod = (uintptr_t)&_kernel_end;
     if( CHECK_FLAG(mbi->flags, 5) ) /* mods */
     {
+#if EARLY_KERNEL_DEBUG
         debug_logf(debug_str, "There %s %d module%s starting at 0x%x", mbi->mods_count == 1 ? "is" : "are", mbi->mods_count, mbi->mods_count == 1 ? "" : "s", mbi->mods_addr);
+        printf("There %s %d module%s starting at 0x%x\n", mbi->mods_count == 1 ? "is" : "are", mbi->mods_count, mbi->mods_count == 1 ? "" : "s", mbi->mods_addr);
         debug_logf(debug_str, "Current kernel heap start point would be 0x%x", &_kernel_end);
+        printf("Current kernel heap start point would be 0x%x\n", &_kernel_end);
+#endif
         if( mbi->mods_count > 0 )
         {
             uint32_t i;
@@ -77,20 +90,31 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
             for( i = 0; i < mbi->mods_count; ++i )
             {
                 multiboot_module_t* mod = &mboot_mods[i];
+#if EARLY_KERNEL_DEBUG
                 uint32_t module_start = mod->mod_start;
+#endif
                 uint32_t module_end   = mod->mod_end;
                 if( (uintptr_t)mod + sizeof(multiboot_module_t) > last_mod )
                 {
                     last_mod = (uintptr_t)mod + sizeof(multiboot_module_t);
+#if EARLY_KERNEL_DEBUG
                     debug_logf(debug_str, "moving forward to 0x%x", last_mod);
+                    printf(debug_str, "moving forward to 0x%x\n", last_mod);
+#endif
                 }
+#if EARLY_KERNEL_DEBUG
                 debug_logf(debug_str, "Module %d is at 0x%x:0x%x", i, module_start, module_end);
+                printf("Module %d is at 0x%x:0x%x\n", i, module_start, module_end);
+#endif
                 if( last_mod < module_end )
                 {
                     last_mod = module_end;
                 }
             }
+#if EARLY_KERNEL_DEBUG
             debug_logf(debug_str, "Moving kernel heap start to 0x%x", last_mod);
+            printf("Moving kernel heap start to 0x%x\n", last_mod);
+#endif
         }
     }
     if( (uintptr_t)mbi > last_mod )
@@ -109,10 +133,16 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
 
     if( CHECK_FLAG(mbi->flags, 6) ) /* mmap */
     {
+#if EARLY_KERNEL_DEBUG
         debug_log("\nParsing memory map.");
+        printf("Parsing memory map.\n");
+#endif
         multiboot_memory_map_t* mmap = (void*)mbi->mmap_addr;
+#if EARLY_KERNEL_DEBUG
         int memory_mark_counter = 0;
         debug_log("(0)");
+        printf("(0)");
+#endif
         while( (uintptr_t)mmap < mbi->mmap_addr + mbi->mmap_length )
         {
             if(mmap->type == 2)
@@ -120,17 +150,23 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
                 for( unsigned long int i = 0; i < mmap->len; i+= 0x1000 )
                 {
                     if( mmap->addr + i > 0xFFFFFFFF ) break;
-                    //debug_logf(debug_str, "Marking 0x%x", (uint32_t)mmap->addr + i);
+#if EARLY_KERNEL_DEBUG
                     debug_logf(debug_str, "\033[F(%d)", ++memory_mark_counter);
+                    printf("\r(%d)", ++memory_mark_counter);
+#endif
                     paging_mark_system((mmap->addr + i) & 0xFFFFF000);
                 }
             }
             mmap = (multiboot_memory_map_t*)((uintptr_t)mmap + mmap->size + sizeof(uintptr_t));
         }
     }
+#if EARLY_KERNEL_DEBUG
     debug_log("Finalize paging / heap install\n");
+    printf("\nFinalize paging / heap install\n");
+#endif
     paging_finalize();
-    
+
+    /* Parse cmdline */
     char cmdline[1024];
     if( CHECK_FLAG(mbi->flags, 2) ) /* cmdline */
     {
@@ -139,43 +175,53 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
     }
 
     heap_install();
-
+    
     args_parse(cmdline);
+    
+    if( args_present("serialdebug") )
+    {
+        debug = 1;
+    }
+    if( args_present("verbose") )
+    {
+        debug = (uint8_t)(debug + 2);
+    }
 
     /* Interrupts Initialization */
-    debug_log("Interrupts initialization");
+    if( CHECK_FLAG(debug, 0) ) debug_log("Interrupts initialization");
+    if( CHECK_FLAG(debug, 1) ) printf("Interrupts initialization");
     isr_initialize();
     irq_initialize();
     
-    debug_log("VFS initialization");
+    if( CHECK_FLAG(debug, 0) ) debug_log("VFS initialization");
     vfs_initialize();
 
-    debug_log("Tasking initialization");
+    if( CHECK_FLAG(debug, 0) ) debug_log("Tasking initialization");
     tasking_initialize();
 
-    debug_log("Timer initialization");
+    if( CHECK_FLAG(debug, 0) ) debug_log("Timer initialization");
     timer_initialize();
 
-    debug_log("FPU initialization");
+    if( CHECK_FLAG(debug, 0) ) debug_log("FPU initialization");
     fpu_initialize();
 
-    debug_log("Syscalls initialization");
+    if( CHECK_FLAG(debug, 0) ) debug_log("Syscalls initialization");
     syscalls_initialize();
 
-    debug_log("SHM initialization");
+    if( CHECK_FLAG(debug, 0) ) debug_log("SHM initialization");
     shm_initialize();
 
     /* Test keyboard handler */
-    debug_log("Install keyboard handler");
+    if( CHECK_FLAG(debug, 0) ) debug_log("Install keyboard handler");
     keyboard_install();
     
-    debug_log("Initialize fs types\n");
+    if( CHECK_FLAG(debug, 0) ) debug_log("Initialize fs types\n");
     ustar_initialize();
 
     /* Load modules from bootloader */
     if( CHECK_FLAG(mbi->flags, 5) ) /* mods */
     {
-        debug_logf(debug_str, "%d modules to load", mboot_mods_count);
+        if( CHECK_FLAG(debug, 0) ) debug_logf(debug_str, "%d modules to load", mboot_mods_count);
         for( unsigned int i = 0; i < mbi->mods_count; ++i )
         {
             multiboot_module_t* mod = &mboot_mods[i];
@@ -183,19 +229,19 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
             uint32_t module_end = mod->mod_end;
             size_t   module_size = module_end - module_start;
 
-            debug_logf(debug_str, "Loading ramdisk: 0x%x:0x%x", module_start, module_end);
+            if( CHECK_FLAG(debug, 0) ) debug_logf(debug_str, "Loading ramdisk: 0x%x:0x%x", module_start, module_end);
             ramdisk_mount(module_start, module_size);
         }
     }
     
     /* virtual dev filesystem */
-    debug_log("\nSetup /dev");
+    if( CHECK_FLAG(debug, 0) ) debug_log("\nSetup /dev");
     map_vfs_directory("/dev");
     zero_initialize();
     null_initialize();
     
     /* ramfs initialization */
-    debug_log("Setup root mount");
+    if( CHECK_FLAG(debug, 0) ) debug_log("Setup root mount");
     if( args_present("root") )
     {
         char* root_type = "ext2";
@@ -203,7 +249,7 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
         {
             root_type = args_value("root_type");
         }
-        debug_logf(debug_str, "Root type = %s", root_type);
+        if( CHECK_FLAG(debug, 0) ) debug_logf(debug_str, "Root type = %s", root_type);
         vfs_mount_type(root_type, args_value("root"), "/");
     }else
     {
@@ -232,7 +278,7 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
     }
 
     /* Start /sbin/init */
-    debug_log("Starting /sbin/init\n");
+    if( CHECK_FLAG(debug, 0) ) debug_log("Starting /sbin/init\n");
     system(argv[0], argc, argv, NULL);
     
     /* Something went very wrong */

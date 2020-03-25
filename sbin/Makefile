@@ -32,14 +32,14 @@ clean:
 	rm -f $(EXECS)
 	rm -f $(OBJS) *.d
 
-install: install-headers install-sbin
+include:
+	mkdir -p include
 
-install-headers:
-	mkdir -p include 
+install-headers: include
 	mkdir -p $(DESTDIR)$(INCLUDEDIR)
 	cp -R --preserve=timestamps include/. $(DESTDIR)$(INCLUDEDIR)/.
 
-install-sbin: $(EXECS)
+install: $(EXECS)
 	mkdir -p $(DESTDIR)$(SBINDIR)
 	cp $(EXECS) $(DESTDIR)$(SBINDIR)
 

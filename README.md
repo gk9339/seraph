@@ -1,6 +1,6 @@
 # seraph
 
-# Build requirements (Archlinux)
+### Build requirements (Archlinux)
 `automake-1.15`
 `gcc`
 `make`
@@ -12,8 +12,24 @@
 `libisoburn`
 `python`
 `mtools`
+`qemu-arch-extra`
 
-# Build
+### Build requirements (Ubuntu)
+`automake-1.15`
+`libtool`
+`build-essential`
+`wget`
+`bison`
+`flex`
+`libgmp3-dev`
+`libmpc-dev`
+`libmpfr-dev`
+`grub2`
+`xorriso`
+`python3`
+`qemu-system-x86`
+
+### Build
 `./build.sh` - Build all parts of the project (Including toolchain)
 
 `./toolchain.sh` - Build the toolchain used for the rest of the build
@@ -22,17 +38,18 @@
 
 `./qemu.sh` - Runs `./mkiso.sh` then opens the iso in qemu -cdrom
 
-# Debug
+### Debug
 In seperate terminals:
 
 `qemu-system-i386 -s -S -serial stdio -cdrom seraph.iso`
 
 `gdb -ex 'tar rem :1234'` 
 
-# Cleanup
+### Cleanup
 `./clean.sh` - Removes all build files
 
-# Project Layout
+### Project Layout
+```
 ├── bin               - normal programs - dynamically linked  
 │   ├── include       - normal program headers  
 │   │   └── terminal  
@@ -80,3 +97,4 @@ In seperate terminals:
 └── script            - other scripts for OS compilation  
 └── toolchain         - seraph specific gcc/binutils  
     └── patches       - gcc/binutils patches  
+```

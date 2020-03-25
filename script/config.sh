@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 set -e
 
 SYSTEM_HEADER_PROJECTS="libc kernel linker sbin bin"

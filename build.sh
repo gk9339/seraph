@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 set -e
 
 if [ ! -f "./toolchain/bin/i686-seraph-gcc" ]; then

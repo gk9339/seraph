@@ -1,6 +1,9 @@
 #include <unistd.h>
+#include <sys/syscall.h>
 
-int getgid( void )
+DEFN_SYSCALL0(getgid, SYS_GETGID)
+
+uid_t getgid( void )
 {
-    return getuid();
+    return syscall_getgid();
 }

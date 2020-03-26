@@ -63,7 +63,7 @@ typedef struct descriptor_table
 {
     fs_node_t** entries;
     uint64_t* offsets;
-    int* modes;
+    int* flags;
     size_t length;
     size_t capacity;
     size_t refs;
@@ -82,6 +82,7 @@ typedef struct process
     char* description;  /* Process description */
     user_t user;        /* Effective User */
     user_t real_user;   /* Real user ID */
+    user_t user_group;  /* user gid */
     int mask;           /* umask */
 
     char** cmdline;

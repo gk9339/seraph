@@ -3,12 +3,24 @@
 
 #include <sys/types.h>
 
+#define S_IREAD     0000400    /* read permission, owner */
+#define S_IRUSR     S_IREAD
+#define S_IWRITE    0000200    /* write permission, owner */
+#define S_IWUSR     S_IWRITE
+#define S_IEXEC     0000100    /* execute/search permission, owner */
+#define S_IXUSR     S_IEXEC
+#define S_IRWXU     (S_IRUSR | S_IWUSR | S_IXUSR)
+#define S_IRGRP     0000040    /* read permission, group */
+#define S_IWGRP     0000020    /* write permission, group */
+#define S_IXGRP     0000010    /* execute/search permission, group */
+#define S_IRWXG     (S_IRGRP | S_IWGRP | S_IXGRP)
+#define S_IROTH     0000004    /* read permission, others */
+#define S_IWOTH     0000002    /* write permission, others */
+#define S_IXOTH     0000001    /* execute/search permission, others */
+#define S_IRWXO     (S_IROTH | S_IWOTH | S_IXOTH)
 #define S_ISUID     0004000    /* set user id on execution */
 #define S_ISGID     0002000    /* set group id on execution */
 #define S_ISVTX     0001000    /* save swapped text even after use */
-#define S_IREAD     0000400    /* read permission, owner */
-#define S_IWRITE    0000200    /* write permission, owner */
-#define S_IEXEC     0000100    /* execute/search permission, owner */
 #define S_ENFMT     0002000    /* enforcement-mode locking */
 
 #define _IFMT       0170000 /* type of file */

@@ -507,7 +507,7 @@ static fs_node_t* pty_master_create( pty_t* pty )
     fnode->uid   = current_process->user;
     fnode->gid   = 0;
     fnode->mask  = 0666;
-    fnode->flags = FS_PIPE;
+    fnode->type  = FS_PIPE;
     fnode->read  =  read_pty_master;
     fnode->write = write_pty_master;
     fnode->open  =  open_pty_master;
@@ -537,7 +537,7 @@ static fs_node_t* pty_slave_create( pty_t* pty )
     fnode->uid   = current_process->user;
     fnode->gid   = 0;
     fnode->mask  = 0620;
-    fnode->flags = FS_CHARDEVICE;
+    fnode->type  = FS_CHARDEVICE;
     fnode->read  =  read_pty_slave;
     fnode->write = write_pty_slave;
     fnode->open  =  open_pty_slave;
@@ -612,7 +612,7 @@ static fs_node_t* create_dev_tty( void )
     fnode->mask = 0777;
     fnode->uid  = 0;
     fnode->gid  = 0;
-    fnode->flags   = FS_FILE | FS_SYMLINK;
+    fnode->type = FS_FILE | FS_SYMLINK;
     fnode->readlink = readlink_dev_tty;
     fnode->length  = 1;
     fnode->nlink   = 1;
@@ -706,7 +706,7 @@ static fs_node_t* create_pty_dir( void )
     fnode->mask = 0555;
     fnode->uid  = 0;
     fnode->gid  = 0;
-    fnode->flags   = FS_DIRECTORY;
+    fnode->type = FS_DIRECTORY;
     fnode->read    = NULL;
     fnode->write   = NULL;
     fnode->open    = NULL;

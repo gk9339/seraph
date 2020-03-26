@@ -101,7 +101,7 @@ static fs_node_t* ramdisk_device_create( int device_number, uintptr_t location, 
     fnode->gid = 0;
     fnode->mask    = 0770;
     fnode->length  = size;
-    fnode->flags   = FS_BLOCKDEVICE;
+    fnode->type   = FS_BLOCKDEVICE;
     fnode->read    = read_ramdisk;
     fnode->write   = write_ramdisk;
     fnode->open    = open_ramdisk;

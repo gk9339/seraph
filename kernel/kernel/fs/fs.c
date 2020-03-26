@@ -40,7 +40,7 @@ static struct dirent* readdir_mapper( fs_node_t* node, uint32_t index )
         dir->ino = 1;
         return dir;
     }
-
+    
     index -= 2;
     unsigned int i = 0;
     foreach( child, d->children )
@@ -67,22 +67,20 @@ int has_permission( fs_node_t* node, int permission_bit )
     if( !node ) return 0;
 
     /* Even root needs exec */
-    if( current_process->user == 0 && permission_bit != 01 )
+    if( current_process->user == 0 && permission_bit != S_IXOTH )
     {
         return 1;
     }
-
-    uint32_t permission = node->mask;
-
-    uint8_t user_perm = (permission >> 6) & 07;
-    uint8_t other_perm = (permission) & 07;
-
+    
     if( current_process->user == node->uid )
     {
-        return permission_bit & user_perm;
-    }else
+        return permission_bit & ((node->mask & S_IRWXU) >> 6);
+    }else if( current_process->user_group == node->gid )
     {
-        return permission_bit & other_perm;
+        return permission_bit & ((node->mask & S_IRWXG) >> 3);
+    }
+    {
+        return permission_bit & (node->mask & S_IRWXO);
     }
 }
 
@@ -91,7 +89,7 @@ static fs_node_t* vfs_mapper( void )
     fs_node_t* fnode = malloc(sizeof(fs_node_t));
     memset(fnode, 0x00, sizeof(fs_node_t));
     fnode->mask = 0555;
-    fnode->flags = FS_DIRECTORY;
+    fnode->type = FS_DIRECTORY;
     fnode->readdir = readdir_mapper;
     fnode->ctime = now();
     fnode->mtime = now();
@@ -230,7 +228,7 @@ struct dirent* readdir_fs( fs_node_t* node, uint32_t index )
 {
     if( !node ) return NULL;
 
-    if( (node->flags & FS_DIRECTORY) && node->readdir )
+    if( (node->type & FS_DIRECTORY) && node->readdir )
     {
         struct dirent* ret = node->readdir(node, index);
         return ret;
@@ -243,7 +241,7 @@ fs_node_t* finddir_fs( fs_node_t* node, char* name )
 {
     if( !node ) return NULL;
 
-    if( (node->flags & FS_DIRECTORY) && node->finddir )
+    if( (node->type & FS_DIRECTORY) && node->finddir )
     {
         fs_node_t* ret = node->finddir(node, name);
         return ret;
@@ -918,7 +916,7 @@ static fs_node_t* kopen_recur( char* filename, uint32_t flags, uint32_t symlink_
          * of a path (like /home/symlink/file) even if O_NOFOLLOW and O_PATH are set. If we are
          * on the leaf of the path then we will look at those flags and act accordingly
          */
-        if ((node_ptr->flags & FS_SYMLINK) &&
+        if ((node_ptr->type & FS_SYMLINK) &&
                 !((flags & O_NOFOLLOW) && (flags & O_PATH) && depth == path_depth)) 
         {
             /* This ensures we don't return a path when NOFOLLOW is requested but PATH

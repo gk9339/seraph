@@ -3,6 +3,7 @@
 
 #include <sys/types.h>
 #include <signal.h>
+#include <stdarg.h>
 
 #define SYS_EXT 0
 #define SYS_GETEUID 1
@@ -61,6 +62,8 @@
 #define SYS_SETHEAP 65
 #define SYS_MMAP 66
 #define SYS_GETPPID 67
+#define SYS_GETGID 68
+#define SYS_FCNTL 69
 #define SYS_DEBUGVFSTREE 100
 #define SYS_DEBUGPROCTREE 101
 #define SYS_DEBUGPRINT 102
@@ -126,6 +129,7 @@ DECL_SYSCALL1(close, int);
 DECL_SYSCALL3(execve, char*, char**, char**);
 DECL_SYSCALL0(fork);
 DECL_SYSCALL0(getpid);
+DECL_SYSCALL0(getgid);
 DECL_SYSCALL0(getppid);
 DECL_SYSCALL1(sbrk, int);
 DECL_SYSCALL2(kill, pid_t, int);
@@ -147,6 +151,7 @@ DECL_SYSCALL0(setsid);
 DECL_SYSCALL2(setpgid, int, int);
 DECL_SYSCALL1(getpgid, int);
 DECL_SYSCALL1(setheap, uintptr_t);
+DECL_SYSCALL3(fcntl, int, int, va_list);
 DECL_SYSCALL2(mmap, uintptr_t, size_t);
 DECL_SYSCALL1(debugvfstree, char**);
 DECL_SYSCALL1(debugproctree, char**);

@@ -62,6 +62,7 @@ unistd/sbrk.o \
 unistd/read.o \
 unistd/execv.o \
 unistd/fork.o \
+unistd/fcntl.o \
 unistd/getpid.o \
 unistd/getppid.o \
 unistd/getuid.o \

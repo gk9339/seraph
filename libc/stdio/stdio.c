@@ -9,7 +9,6 @@
 struct _FILE
 {
     int fd;
-    short flags;
 
     char* read_base; //putback + get
     char* read_ptr;
@@ -29,7 +28,6 @@ struct _FILE
 FILE _stdin =
 {
     .fd = 0,
-    .flags = 0,
     .read_base = NULL,
     .read_ptr = NULL,
     .read_end = NULL,
@@ -45,7 +43,6 @@ FILE _stdin =
 FILE _stdout =
 {
     .fd = 1,
-    .flags = 0,
     .read_base = NULL,
     .read_ptr = NULL,
     .read_end = NULL,
@@ -61,7 +58,6 @@ FILE _stdout =
 FILE _stderr =
 {
     .fd = 2,
-    .flags = 0,
     .read_base = NULL,
     .read_ptr = NULL,
     .read_end = NULL,
@@ -202,6 +198,27 @@ FILE* fopen( const char* pathname, const char* mode )
 
 FILE* fdopen( int fd, const char* mode )
 {
+    int fdflags, flags, mask;
+    //Checks fd is valid
+    if( (fdflags = fcntl(fd, F_GETFL)) < 0 )
+    {
+        errno = -EBADF;
+        return 0;
+    }
+    parse_mode(mode, &flags, &mask);
+    //Checks mode is a subset of original
+    int fdmode = fdflags & O_ACCMODE;
+    if( fdmode != O_RDWR && (fdmode != (flags & O_ACCMODE)) )
+    {
+        errno = -EBADF;
+        return 0;
+    }
+    //POSIX reccomends setting O_APPEND to match
+    if( (flags & O_APPEND) && !(fdflags & O_APPEND) )
+    {
+        fcntl(fd, F_SETFL, fdflags | O_APPEND);
+    }
+
     FILE* out = malloc(sizeof(FILE));
     memset(out, 0, sizeof(struct _FILE));
 

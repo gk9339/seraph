@@ -3,7 +3,7 @@
 int main( void )
 {
     char buf[1024];
-    
+
     while(1)
     {
         printf(">");

@@ -32,7 +32,7 @@ static fs_node_t* null_device_create( void )
 	fnode->uid = 0;
 	fnode->gid = 0;
 	fnode->mask = 0666;
-	fnode->flags   = FS_CHARDEVICE;
+	fnode->type   = FS_CHARDEVICE;
 	fnode->read    = read_null;
 	fnode->write   = write_null;
 	fnode->open    = open_null;

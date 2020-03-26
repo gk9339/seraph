@@ -370,10 +370,10 @@ static fs_node_t* file_from_ustar( struct ustar_dev* self, struct ustar* file, u
     fs->length = interpret_size(file);
     fs->mask = interpret_mode(file);
     fs->nlink = 0; /* Unsupported */
-    fs->flags = FS_FILE;
+    fs->type = FS_FILE;
     if( file->type[0] == '5' )
     {
-        fs->flags = FS_DIRECTORY;
+        fs->type = FS_DIRECTORY;
         fs->readdir = readdir_ustar;
         fs->finddir = finddir_ustar;
     }else if( file->type[0] == '1' )
@@ -381,11 +381,11 @@ static fs_node_t* file_from_ustar( struct ustar_dev* self, struct ustar* file, u
         /* go through file and find target, reassign inode to point to that */
     }else if( file->type[0] == '2' )
     {
-        fs->flags = FS_SYMLINK;
+        fs->type = FS_SYMLINK;
         fs->readlink = readlink_ustar;
     }else
     {
-        fs->flags = FS_FILE;
+        fs->type = FS_FILE;
         fs->read = read_ustar;
     }
     free(file);
@@ -497,7 +497,7 @@ static fs_node_t* ustar_mount( char* device, char* mount_path __attribute__((unu
     root->mask = 0555;
     root->readdir = readdir_ustar_root;
     root->finddir = finddir_ustar_root;
-    root->flags = FS_DIRECTORY;
+    root->type = FS_DIRECTORY;
     root->device = self;
 
     return root;

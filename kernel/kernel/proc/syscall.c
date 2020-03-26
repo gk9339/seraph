@@ -12,6 +12,7 @@
 #include <sys/syscall.h>
 #include <errno.h>
 #include <stdlib.h>
+#include <fcntl.h>
 #include <kernel/elf.h>
 #include <kernel/shm.h>
 #include <kernel/pty.h>
@@ -21,10 +22,12 @@
 #define FD_ENTRY(FD) (current_process->fds->entries[(FD)])
 #define FD_CHECK(FD) (FD_INRANGE(FD) && FD_ENTRY(FD))
 #define FD_OFFSET(FD) (current_process->fds->offsets[(FD)])
-#define FD_MODE(FD) (current_process->fds->modes[(FD)])
+#define FD_FLAG(FD) (current_process->fds->flags[(FD)])
 
 #define PTR_INRANGE(PTR) ((uintptr_t)(PTR) > current_process->image.entry)
 #define PTR_VALIDATE(PTR) ptr_validate((void *)(PTR), __func__)
+
+#define CHECK_BIT(var, bit) ((var)&(1<<(bit)))
 
 static void ptr_validate( void* ptr, const char* syscall )
 {
@@ -47,8 +50,6 @@ static int sys_open( const char* file, int flags, uint16_t mode )
     PTR_VALIDATE(file);
     fs_node_t* node = kopen((char*)file, flags);
 
-    int access_bits = 0;
-
     if( node && (flags & O_CREAT) && (flags & O_EXCL) )
     {
         close_fs(node);
@@ -57,32 +58,24 @@ static int sys_open( const char* file, int flags, uint16_t mode )
 
     if( !(flags & O_WRONLY) || (flags & O_RDWR) )
     {
-        if( node && !has_permission(node, 04) )
+        if( node && !has_permission(node, S_IROTH) )
         {
             close_fs(node);
             return -EACCES;
-        }else
-        {
-            access_bits |= 01;
         }
     }
 
     if( (flags & O_RDWR) || (flags & O_WRONLY) )
     {
-        if( node && !has_permission(node, 02) )
+        if( node && !has_permission(node, S_IWOTH) )
         {
             close_fs(node);
             return -EACCES;
         }
         
-        if( node &&  (node->flags & FS_DIRECTORY) )
+        if( node &&  (node->type & FS_DIRECTORY) )
         {
             return -EISDIR;
-        }
-
-        if( (flags & O_RDWR) || (flags & O_WRONLY) )
-        {
-            access_bits |= 02;
         }
     }
 
@@ -100,7 +93,7 @@ static int sys_open( const char* file, int flags, uint16_t mode )
 
     if( node && (flags & O_DIRECTORY) )
     {
-        if( !(node->flags & FS_DIRECTORY) )
+        if( !(node->type & FS_DIRECTORY) )
         {
             return -ENOTDIR;
         }
@@ -108,7 +101,7 @@ static int sys_open( const char* file, int flags, uint16_t mode )
 
     if( node && (flags & O_TRUNC) )
     {
-        if( !(access_bits & 02) )
+        if( !((flags & O_ACCMODE) == O_WRONLY || (flags & O_ACCMODE) == O_RDWR) ) 
         {
             close_fs(node);
             return -EINVAL;
@@ -121,14 +114,14 @@ static int sys_open( const char* file, int flags, uint16_t mode )
         return -ENOENT;
     }
 
-    if( node && (flags & O_CREAT) && (node->flags & FS_DIRECTORY) )
+    if( node && (flags & O_CREAT) && (node->type & FS_DIRECTORY) )
     {
         close_fs(node);
         return -EISDIR;
     }
 
     int fd = process_append_fd((process_t*)current_process, node);
-    FD_MODE(fd) = access_bits;
+    FD_FLAG(fd) = flags;
     if( flags & O_APPEND )
     {
         FD_OFFSET(fd) = node->length;
@@ -147,15 +140,16 @@ static int sys_read( int fd, char* ptr, int len )
         PTR_VALIDATE(ptr);
 
         fs_node_t* node = FD_ENTRY(fd);
-        if( !(FD_MODE(fd) & 01) )
+        if( (FD_FLAG(fd) & O_ACCMODE) == O_RDONLY || (FD_FLAG(fd) & O_ACCMODE) == O_RDWR ) //fd read flag
         {
-            return -EACCES;
+            uint32_t out = read_fs(node, (uint32_t)FD_OFFSET(fd), len, (uint8_t*)ptr);
+            FD_OFFSET(fd) += out;
+
+            return (int)out;
+        }else
+        {
+
         }
-
-        uint32_t out = read_fs(node, (uint32_t)FD_OFFSET(fd), len, (uint8_t*)ptr);
-        FD_OFFSET(fd) += out;
-
-        return (int)out;
     }
 
     return -EBADF;
@@ -167,15 +161,13 @@ static int sys_write( int fd, char* ptr, int len )
     {
         PTR_VALIDATE(ptr);
         fs_node_t* node = FD_ENTRY(fd);
-        if( !(FD_MODE(fd) & 02) )
+        if( (FD_FLAG(fd) & O_ACCMODE) == O_WRONLY || (FD_FLAG(fd) & O_ACCMODE) == O_RDWR ) //fd write flag
         {
-            return -EACCES;
+            uint32_t out = write_fs(node, (uint32_t)FD_OFFSET(fd), len, (uint8_t*)ptr);
+            FD_OFFSET(fd) += out;
+
+            return out;
         }
-
-        uint32_t out = write_fs(node, (uint32_t)FD_OFFSET(fd), len, (uint8_t*)ptr);
-        FD_OFFSET(fd) += out;
-
-        return out;
     }
 
     return -EBADF;
@@ -329,8 +321,8 @@ static int sys_openpty( int* master, int* slave, char* name __attribute__((unuse
     *master = process_append_fd((process_t*)current_process, fs_master);
     *slave = process_append_fd((process_t*)current_process, fs_slave);
 
-    FD_MODE(*master) = 03;
-    FD_MODE(*slave) = 03;
+    FD_FLAG(*master) = O_RDWR;
+    FD_FLAG(*slave) = O_RDWR;
 
     open_fs(fs_master, 0);
     open_fs(fs_slave, 0);
@@ -342,7 +334,7 @@ static int sys_seek( int fd, int offset, int whence )
 {
     if( FD_CHECK(fd) )
     {
-        if( (FD_ENTRY(fd)->flags & FS_PIPE) || (FD_ENTRY(fd)->flags & FS_CHARDEVICE) )
+        if( (FD_ENTRY(fd)->type & FS_PIPE) || (FD_ENTRY(fd)->type & FS_CHARDEVICE) )
         {
             return -ESPIPE;
         }
@@ -383,33 +375,33 @@ static int stat_node( fs_node_t* fn, uintptr_t st )
     f->st_dev = (uint16_t)(((uint32_t)fn->device * 0xFFFF0) >> 8);
     f->st_ino = fn->inode;
 
-    uint32_t flags = 0;
-    if( fn->flags & FS_FILE )
+    uint32_t type = 0;
+    if( fn->type & FS_FILE )
     {
-        flags |= _IFREG;
+        type |= _IFREG;
     }
-    if( fn->flags & FS_DIRECTORY )
+    if( fn->type & FS_DIRECTORY )
     {
-        flags |= _IFDIR;
+        type |= _IFDIR;
     }
-    if( fn->flags & FS_CHARDEVICE )
+    if( fn->type & FS_CHARDEVICE )
     {
-        flags |= _IFCHR;
+        type |= _IFCHR;
     }
-    if( fn->flags & FS_BLOCKDEVICE )
+    if( fn->type & FS_BLOCKDEVICE )
     {
-        flags |= _IFBLK;
+        type |= _IFBLK;
     }
-    if( fn->flags & FS_PIPE )
+    if( fn->type & FS_PIPE )
     {
-        flags |= _IFIFO;
+        type |= _IFIFO;
     }
-    if( fn->flags & FS_SYMLINK )
+    if( fn->type & FS_SYMLINK )
     {
-        flags |= _IFLNK;
+        type |= _IFLNK;
     }
 
-    f->st_mode = fn->mask | flags;
+    f->st_mode = fn->mask | type;
     f->st_nlink = fn->nlink;
     f->st_uid = fn->uid;
     f->st_gid = fn->gid;
@@ -470,6 +462,11 @@ static int sys_dup2( int oldfd, int newfd )
 static int sys_getuid( void )
 {
     return current_process->real_user;
+}
+
+static int sys_getgid( void )
+{
+    return current_process->user_group;
 }
 
 static int sys_setuid( user_t new_uid )
@@ -716,6 +713,35 @@ static int sys_getppid( void )
     return process_get_parent((process_t*)current_process)->id;
 }
 
+static int sys_fcntl( int fd, int cmd, va_list args )
+{
+    if( !FD_CHECK(fd) )
+    {
+        return -EBADF;
+    }
+
+    int flag = FD_FLAG(fd);
+
+    switch(cmd)
+    {
+        case F_GETFD:
+            return flag >> 16;
+        case F_SETFD:
+            flag = (flag & ~(0xF0000)) | (va_arg(args, int) >> 16);
+            break;
+        case F_GETFL:
+            return flag & 0xFFFF;
+        case F_SETFL:
+            flag = (flag & (0xF000F)) | (va_arg(args, int) & 0xFFF0);
+            break;
+        default:
+            return -EINVAL;
+    }
+
+    FD_FLAG(fd) = flag;
+    return 0;
+}
+
 static int sys_debugvfstree( char** str )
 {
     debug_print_vfs_tree(str);
@@ -759,6 +785,7 @@ static int (*syscalls[])() =
     [SYS_LSTAT] = sys_lstat,
     [SYS_DUP2] = sys_dup2,
     [SYS_GETUID] = sys_getuid,
+    [SYS_GETGID] = sys_getgid,
     [SYS_SETUID] = sys_setuid,
     [SYS_SLEEPABS] = sys_sleepabs,
     [SYS_SLEEP] = sys_sleep,
@@ -772,6 +799,7 @@ static int (*syscalls[])() =
     [SYS_GETPGID] = sys_getpgid,
     [SYS_MMAP] = sys_mmap,
     [SYS_GETPPID] = sys_getppid,
+    [SYS_FCNTL] = sys_fcntl,
     [SYS_DEBUGVFSTREE] = sys_debugvfstree,
     [SYS_DEBUGPROCTREE] = sys_debugproctree,
     [SYS_DEBUGPRINT] = sys_debugprint,

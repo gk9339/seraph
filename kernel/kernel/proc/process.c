@@ -171,13 +171,14 @@ process_t* spawn_init( void )
     init->cmdline = NULL;
     init->user = 0;
     init->real_user = 0;
+    init->user_group = 0;
     init->mask = 022;
     init->status = 0;
     init->fds = malloc(sizeof(fd_table_t));
     init->fds->length = 0;
     init->fds->capacity = 4;
     init->fds->entries = malloc(init->fds->capacity * sizeof(fs_node_t*));
-    init->fds->modes = malloc(init->fds->capacity * sizeof(int));
+    init->fds->flags = malloc(init->fds->capacity * sizeof(int));
     init->fds->offsets = malloc(init->fds->capacity * sizeof(uint64_t));
 
     init->wd_node = clone_fs(fs_root);
@@ -284,6 +285,7 @@ process_t* spawn_process( volatile process_t* parent, int reuse_fds )
 
     proc->user = parent->user;
     proc->real_user = parent->real_user;
+    proc->user_group = parent->user_group;
     proc->mask = parent->mask;
 
     proc->job = parent->job;
@@ -318,13 +320,13 @@ process_t* spawn_process( volatile process_t* parent, int reuse_fds )
         proc->fds->capacity = parent->fds->capacity;
 
         proc->fds->entries = malloc(proc->fds->capacity * sizeof(fs_node_t*));
-        proc->fds->modes = malloc(proc->fds->capacity * sizeof(int));
+        proc->fds->flags = malloc(proc->fds->capacity * sizeof(int));
         proc->fds->offsets = malloc(proc->fds->capacity * sizeof(uint64_t));
 
         for( uint32_t i = 0; i < parent->fds->length; i++ )
         {
             proc->fds->entries[i] = clone_fs(parent->fds->entries[i]);
-            proc->fds->modes[i] = parent->fds->modes[i];
+            proc->fds->flags[i] = parent->fds->flags[i];
             proc->fds->offsets[i] = parent->fds->offsets[i];
         }
     }
@@ -424,7 +426,7 @@ uint32_t process_append_fd( process_t* proc, fs_node_t* node )
         if( !proc->fds->entries[i] )
         {
             proc->fds->entries[i] = node;
-            proc->fds->modes[i] = 0;
+            proc->fds->flags[i] = 0;
             proc->fds->offsets[i] = 0;
             return i;
         }
@@ -433,11 +435,11 @@ uint32_t process_append_fd( process_t* proc, fs_node_t* node )
     {
         proc->fds->capacity *= 2;
         proc->fds->entries = realloc(proc->fds->entries, proc->fds->capacity * sizeof(fs_node_t*));
-        proc->fds->modes = realloc(proc->fds->modes, proc->fds->capacity * sizeof(int));
+        proc->fds->flags = realloc(proc->fds->flags, proc->fds->capacity * sizeof(int));
         proc->fds->offsets = realloc(proc->fds->offsets, proc->fds->capacity * sizeof(uint64_t));
     }
     proc->fds->entries[proc->fds->length] = node;
-    proc->fds->modes[proc->fds->length] = 0;
+    proc->fds->flags[proc->fds->length] = 0;
     proc->fds->offsets[proc->fds->length] = 0;
     proc->fds->length++;
 
@@ -458,7 +460,7 @@ uint32_t process_move_fd( process_t* proc, int src, int dest )
     {
         close_fs(proc->fds->entries[dest]);
         proc->fds->entries[dest] = proc->fds->entries[src];
-        proc->fds->modes[dest] = proc->fds->modes[src];
+        proc->fds->flags[dest] = proc->fds->flags[src];
         proc->fds->offsets[dest] = proc->fds->offsets[src];
         open_fs(proc->fds->entries[dest], 0);
     }
@@ -636,7 +638,7 @@ void cleanup_process( process_t* proc, int retval )
             }
         }
         free(proc->fds->entries);
-        free(proc->fds->modes);
+        free(proc->fds->flags);
         free(proc->fds->offsets);
         free(proc->fds);
         free((void*)(proc->image.stack - KERNEL_STACK_SIZE));

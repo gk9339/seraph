@@ -464,6 +464,27 @@ static int sys_getuid( void )
     return current_process->real_user;
 }
 
+static int sys_readdir( int fd, int index, struct dirent* entry )
+{
+    if( FD_CHECK(fd) )
+    {
+        PTR_VALIDATE(entry);
+        struct dirent* kentry = readdir_fs(FD_ENTRY(fd), (uint32_t)index);
+
+        if(kentry)
+        {
+            memcpy(entry, kentry, sizeof *entry);
+            free(kentry);
+            return 1;
+        }else
+        {
+            return 0;
+        }
+    }
+
+    return -EBADF;
+}
+
 static int sys_getgid( void )
 {
     return current_process->user_group;
@@ -785,6 +806,7 @@ static int (*syscalls[])() =
     [SYS_LSTAT] = sys_lstat,
     [SYS_DUP2] = sys_dup2,
     [SYS_GETUID] = sys_getuid,
+    [SYS_READDIR] = sys_readdir,
     [SYS_GETGID] = sys_getgid,
     [SYS_SETUID] = sys_setuid,
     [SYS_SLEEPABS] = sys_sleepabs,

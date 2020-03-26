@@ -13,9 +13,12 @@ int main( void )
         {
             buf[r] = '\0';
 
-            if( !strcmp(buf, "ls\n") )
+            if( !strcmp(buf, "lvfs\n") )
             {
-                ls();
+                lvfs();
+            }else if( !strncmp(buf, "ls", 2) )
+            {
+                ls(buf);
             }else if( !strcmp(buf, "ps\n") )
             {
                 ps();
@@ -33,6 +36,36 @@ int main( void )
     }
 }
 
+void ls( char* argv )
+{
+    struct dirent* de;
+    DIR* dr = NULL;
+
+    char* token = strtok(argv, " ");
+    token = strtok(NULL, " ");
+
+    if( token == NULL )
+    {
+        dr = opendir(".");
+    }else
+    {
+        token[strlen(token)-1] = '\0';
+        dr = opendir(token);
+    }
+
+    if( dr == NULL )
+    {
+        printf("Couldn't open root.\n");
+    }else
+    {
+        while( (de = readdir(dr)) != NULL )
+        {
+            printf("%s\n", de->d_name);
+        }
+        closedir(dr);
+    }
+}
+
 void ps( void )
 {
     char* str = calloc(4096, sizeof(char));
@@ -42,7 +75,7 @@ void ps( void )
     printf("%s", str);
 }
 
-void ls( void )
+void lvfs( void )
 {
     char* str = calloc(4096, sizeof(char));
        

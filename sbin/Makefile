@@ -30,7 +30,7 @@ init/init: init/init.o
 
 clean:
 	rm -f $(EXECS)
-	rm -f $(OBJS) *.d
+	rm -f $(OBJS) */*.d
 
 include:
 	mkdir -p include

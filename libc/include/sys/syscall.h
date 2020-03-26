@@ -126,7 +126,7 @@ DECL_SYSCALL3(open, const char *, int, int);
 DECL_SYSCALL3(read, int, char *, int);
 DECL_SYSCALL3(write, int, char *, int);
 DECL_SYSCALL1(close, int);
-DECL_SYSCALL3(execve, char*, char**, char**);
+DECL_SYSCALL3(execve, const char*, char* const*, char* const*);
 DECL_SYSCALL0(fork);
 DECL_SYSCALL0(getpid);
 DECL_SYSCALL0(getgid);

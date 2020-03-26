@@ -16,7 +16,7 @@ int main( void )
     if(!pid)
     {
         char* arg[] = { "/bin/terminal", NULL };
-        char* env[] = { NULL };
+        char* env[] = { "PATH=/bin:/sbin", "LD_LIBRARY_PATH=/lib", NULL};
         execve("/bin/terminal", arg, env);
     }
 

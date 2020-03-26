@@ -202,7 +202,7 @@ FILE* fdopen( int fd, const char* mode )
     //Checks fd is valid
     if( (fdflags = fcntl(fd, F_GETFL)) < 0 )
     {
-        errno = -EBADF;
+        errno = EBADF;
         return 0;
     }
     parse_mode(mode, &flags, &mask);
@@ -210,7 +210,7 @@ FILE* fdopen( int fd, const char* mode )
     int fdmode = fdflags & O_ACCMODE;
     if( fdmode != O_RDWR && (fdmode != (flags & O_ACCMODE)) )
     {
-        errno = -EBADF;
+        errno = EBADF;
         return 0;
     }
     //POSIX reccomends setting O_APPEND to match

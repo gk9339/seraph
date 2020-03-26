@@ -63,8 +63,7 @@ int main( void )
         dup2(fd_slave, 2);
 
         char* arg[] = { NULL };
-        char* env[] = { NULL };
-        execve("/bin/sh", arg, env);
+        execvp("/bin/sh", arg);
     }else
     {
         int kfd = open("/dev/kbd", O_RDONLY);

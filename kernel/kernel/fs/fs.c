@@ -924,14 +924,12 @@ static fs_node_t* kopen_recur( char* filename, uint32_t flags, uint32_t symlink_
              */
             if ((flags & O_NOFOLLOW) && depth == path_depth - 1) 
             {
-                /* TODO(gerow): should probably be setting errno from this */
                 free((void *)path);
                 free(node_ptr);
                 return NULL;
             }
             if (symlink_depth >= MAX_SYMLINK_DEPTH) 
             {
-                /* TODO(gerow): should probably be setting errno from this */
                 free((void *)path);
                 free(node_ptr);
                 return NULL;
@@ -944,14 +942,12 @@ static fs_node_t* kopen_recur( char* filename, uint32_t flags, uint32_t symlink_
             int len = readlink_fs(node_ptr, symlink_buf, sizeof(symlink_buf));
             if (len < 0) 
             {
-                /* TODO(gerow): should probably be setting errno from this */
                 free((void *)path);
                 free(node_ptr);
                 return NULL;
             }
             if (symlink_buf[len] != '\0') 
             {
-                /* TODO(gerow): should probably be setting errno from this */
                 free((void *)path);
                 free(node_ptr);
                 return NULL;

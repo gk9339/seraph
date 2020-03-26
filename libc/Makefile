@@ -52,7 +52,6 @@ HOSTEDOBJS=\
 $(ARCH_HOSTEDOBJS) \
 entry.o \
 exit.o \
-unistd/stub.o \
 unistd/close.o \
 unistd/lseek.o \
 unistd/open.o \

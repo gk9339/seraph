@@ -36,36 +36,6 @@ int main( void )
     }
 }
 
-void ls( char* argv )
-{
-    struct dirent* de;
-    DIR* dr = NULL;
-
-    char* token = strtok(argv, " ");
-    token = strtok(NULL, " ");
-
-    if( token == NULL )
-    {
-        dr = opendir(".");
-    }else
-    {
-        token[strlen(token)-1] = '\0';
-        dr = opendir(token);
-    }
-
-    if( dr == NULL )
-    {
-        printf("Couldn't open root.\n");
-    }else
-    {
-        while( (de = readdir(dr)) != NULL )
-        {
-            printf("%s\n", de->d_name);
-        }
-        closedir(dr);
-    }
-}
-
 void ps( void )
 {
     char* str = calloc(4096, sizeof(char));

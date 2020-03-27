@@ -5,6 +5,8 @@
 #include <signal.h>
 #include <stdlib.h>
 #include <dirent.h>
+#include <time.h>
+#include <sys/stat.h>
 
 void ls( char* );
 void ps( void );

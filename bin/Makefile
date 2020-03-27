@@ -15,6 +15,7 @@ OBJS=\
 terminal/terminal.o \
 terminal/keyboard.o \
 sh/sh.o \
+sh/ls.o \
 
 EXECS=\
 terminal/terminal \
@@ -31,7 +32,7 @@ all: $(OBJS) $(EXECS)
 terminal/terminal: terminal/terminal.o terminal/keyboard.o
 	$(CC) $^ -o $@ $(CFLAGS)$(LIBS)
 
-sh/sh: sh/sh.o
+sh/sh: sh/sh.o sh/ls.o
 	$(CC) $^ -o $@ $(CFLAGS)$(LIBS)
 
 clean:

@@ -1,9 +1,11 @@
 #ifndef _SYSCALL_H
 #define _SYSCALL_H
 
-#include <sys/types.h>
+#include <stddef.h>
+#include <stdint.h>
 #include <signal.h>
 #include <stdarg.h>
+#include <sys/types.h>
 
 #define SYS_EXT 0
 #define SYS_GETEUID 1

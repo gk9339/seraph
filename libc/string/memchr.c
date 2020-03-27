@@ -1,5 +1,5 @@
 #include <string.h>
-#include <sys/types.h>
+#include <stdint.h>
 #include <limits.h>
 
 #define ALIGN (sizeof(size_t))

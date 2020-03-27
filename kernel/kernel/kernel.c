@@ -29,7 +29,7 @@
 
 #define CHECK_FLAG(flags,bit) ((flags)&(1<<(bit)))
 
-#define EARLY_KERNEL_DEBUG 0
+#define EARLY_KERNEL_DEBUG 1
 
 uintptr_t initial_esp = 0;
 

@@ -2,7 +2,7 @@
 #define _KERNEL_FS_H
 
 #include <sys/stat.h>
-#include <sys/types.h> /* intN_t */
+#include <stdint.h>
 #include <stddef.h> /* size_t */
 
 #define PATH_SEPARATOR '/'
@@ -32,24 +32,24 @@
 
 struct fs_node; /* Defined below */
 
-typedef uint32_t (*read_type_t) (struct fs_node *, uint32_t, uint32_t, uint8_t *); /* Read file */
-typedef uint32_t (*write_type_t) (struct fs_node *, uint32_t, uint32_t, uint8_t *); /* Write file */
-typedef void (*open_type_t) (struct fs_node *, unsigned int flags); /* Open fs_node */
-typedef void (*close_type_t) (struct fs_node *); /* Close fs_node */
-typedef struct dirent *(*readdir_type_t) (struct fs_node *, uint32_t); 
-typedef struct fs_node *(*finddir_type_t) (struct fs_node *, char *name);
-typedef int (*create_type_t) (struct fs_node *, char *name, uint16_t permission);
-typedef int (*unlink_type_t) (struct fs_node *, char *name);
-typedef int (*mkdir_type_t) (struct fs_node *, char *name, uint16_t permission);
-typedef int (*ioctl_type_t) (struct fs_node *, int request, void * argp);
-typedef int (*get_size_type_t) (struct fs_node *);
-typedef int (*chmod_type_t) (struct fs_node *, int mode);
-typedef int (*symlink_type_t) (struct fs_node *, char * name, char * value);
-typedef int (*readlink_type_t) (struct fs_node *, char * buf, size_t size);
-typedef int (*selectcheck_type_t) (struct fs_node *);
-typedef int (*selectwait_type_t) (struct fs_node *, void * process);
-typedef int (*chown_type_t) (struct fs_node *, int, int);
-typedef void (*truncate_type_t) (struct fs_node *);
+typedef uint32_t (*read_type_t)( struct fs_node*, uint32_t, uint32_t, uint8_t* ); /* Read file */
+typedef uint32_t (*write_type_t)( struct fs_node*, uint32_t, uint32_t, uint8_t* ); /* Write file */
+typedef void (*open_type_t)( struct fs_node*, unsigned int flags ); /* Open fs_node */
+typedef void (*close_type_t)( struct fs_node* ); /* Close fs_node */
+typedef struct dirent* (*readdir_type_t)( struct fs_node*, uint32_t ); 
+typedef struct fs_node* (*finddir_type_t)( struct fs_node*, char *name );
+typedef int (*create_type_t)( struct fs_node*, char *name, uint16_t permission );
+typedef int (*unlink_type_t)( struct fs_node*, char *name );
+typedef int (*mkdir_type_t)( struct fs_node*, char *name, uint16_t permission );
+typedef int (*ioctl_type_t)( struct fs_node*, int request, void * argp );
+typedef int (*get_size_type_t)( struct fs_node* );
+typedef int (*chmod_type_t)( struct fs_node*, int mode );
+typedef int (*symlink_type_t)( struct fs_node*, char * name, char * value );
+typedef int (*readlink_type_t)( struct fs_node*, char * buf, size_t size );
+typedef int (*selectcheck_type_t)( struct fs_node* );
+typedef int (*selectwait_type_t)( struct fs_node*, void* process );
+typedef int (*chown_type_t)( struct fs_node*, int, int );
+typedef void (*truncate_type_t)( struct fs_node* );
 
 typedef struct fs_node 
 {
@@ -109,37 +109,37 @@ struct vfs_entry
     char* fs_type;
 };
 
-extern fs_node_t *fs_root;
+extern fs_node_t* fs_root;
 
-int has_permission(fs_node_t *node, int permission_bit);
-uint32_t read_fs(fs_node_t *node, uint32_t offset, uint32_t size, uint8_t *buffer);
-uint32_t write_fs(fs_node_t *node, uint32_t offset, uint32_t size, uint8_t *buffer);
-void open_fs(fs_node_t *node, unsigned int flags);
-void close_fs(fs_node_t *node);
-struct dirent *readdir_fs(fs_node_t *node, uint32_t index);
-fs_node_t *finddir_fs(fs_node_t *node, char *name);
-int mkdir_fs(char *name, uint16_t permission);
-int create_file_fs(char *name, uint16_t permission);
-fs_node_t *kopen(char *filename, uint32_t flags);
-char *canonicalize_path(char *cwd, char *input);
-fs_node_t *clone_fs(fs_node_t * source);
-int ioctl_fs(fs_node_t *node, int request, void * argp);
-int chmod_fs(fs_node_t *node, int mode);
-int chown_fs(fs_node_t *node, int uid, int gid);
-int unlink_fs(char * name);
-int symlink_fs(char * value, char * name);
-int readlink_fs(fs_node_t * node, char * buf, size_t size);
-int selectcheck_fs(fs_node_t * node);
-int selectwait_fs(fs_node_t * node, void * process);
-void truncate_fs(fs_node_t * node);
+int has_permission( fs_node_t *node, int permission_bit );
+uint32_t read_fs( fs_node_t* node, uint32_t offset, uint32_t size, uint8_t* buffer );
+uint32_t write_fs( fs_node_t* node, uint32_t offset, uint32_t size, uint8_t* buffer );
+void open_fs( fs_node_t* node, unsigned int flags );
+void close_fs( fs_node_t* node );
+struct dirent* readdir_fs( fs_node_t* node, uint32_t index );
+fs_node_t* finddir_fs( fs_node_t* node, char *name );
+int mkdir_fs( char* name, uint16_t permission );
+int create_file_fs( char* name, uint16_t permission );
+fs_node_t* kopen( char* filename, uint32_t flags );
+char *canonicalize_path( char* cwd, char* input );
+fs_node_t* clone_fs( fs_node_t* source );
+int ioctl_fs( fs_node_t* node, int request, void* argp );
+int chmod_fs( fs_node_t* node, int mode );
+int chown_fs( fs_node_t* node, int uid, int gid );
+int unlink_fs( char* name );
+int symlink_fs( char* value, char* name );
+int readlink_fs( fs_node_t* node, char* buf, size_t size );
+int selectcheck_fs( fs_node_t* node );
+int selectwait_fs( fs_node_t* node, void* process );
+void truncate_fs( fs_node_t* node );
 
-void vfs_initialize(void);
-void * vfs_mount(char * path, fs_node_t * local_root);
-typedef fs_node_t * (*vfs_mount_callback)(char * arg, char * mount_point);
-int vfs_register(char * name, vfs_mount_callback callback);
-int vfs_mount_type(char * type, char * arg, char * mountpoint);
-void vfs_lock(fs_node_t * node);
-void map_vfs_directory(char *);
+void vfs_initialize( void );
+void* vfs_mount( char* path, fs_node_t* local_root );
+typedef fs_node_t* ( *vfs_mount_callback)(char* arg, char* mount_point );
+int vfs_register( char* name, vfs_mount_callback callback );
+int vfs_mount_type( char* type, char* arg, char* mountpoint );
+void vfs_lock( fs_node_t* node );
+void map_vfs_directory( char* );
 
 void debug_print_vfs_tree( char** );
 

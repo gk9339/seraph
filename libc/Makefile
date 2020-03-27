@@ -26,8 +26,6 @@ LIBK_CPPFLAGS:=$(LIBK_CPPFLAGS)$(KERNEL_ARCH_CPPFLAGS)
 FREEOBJS=\
 $(ARCH_FREEOBJS) \
 stdio/printf.o \
-stdio/putchar.o \
-stdio/puts.o \
 stdlib/abort.o \
 stdlib/malloc.o \
 string/memcmp.o \
@@ -44,9 +42,11 @@ string/strchr.o \
 string/strstr.o \
 string/memchr.o \
 string/strcat.o \
+string/strerror.o \
 list/list.o \
 tree/tree.o \
 hashtable/hashtable.o \
+errno/errno.o \
 
 HOSTEDOBJS=\
 $(ARCH_HOSTEDOBJS) \
@@ -74,14 +74,31 @@ unistd/write.o \
 unistd/dup.o \
 unistd/dup2.o \
 ioctl/ioctl.o \
+stdio/fclose.o \
+stdio/fflush.o \
+stdio/fopen.o \
+stdio/fread.o \
+stdio/fseek.o \
+stdio/fwrite.o \
+stdio/perror.o \
+stdio/putc.o \
+stdio/putchar.o \
+stdio/puts.o \
+stdio/setvbuf.o \
 stdio/stdio.o \
+stdio/fprintf.o \
+stdio/snprintf.o \
+stdio/sprintf.o \
+stdio/vfprintf.o \
+stdio/vprintf.o \
+stdio/vsnprintf.o \
+stdio/vsprintf.o \
 stdio/stub.o \
 stdlib/getenv.o \
 stdlib/putenv.o \
 stdlib/setenv.o \
 stdlib/unsetenv.o \
 stdlib/stub.o \
-errno/errno.o \
 stdio/stdio.o \
 sched/sched_yield.o \
 pty/pty.o \

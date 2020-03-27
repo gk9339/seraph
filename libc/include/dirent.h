@@ -1,7 +1,7 @@
 #ifndef _DIRENT_H
 #define _DIRENT_H
 
-#include <sys/types.h>
+#include <stdint.h>
 
 typedef struct dirent
 {

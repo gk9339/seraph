@@ -2,7 +2,10 @@
 #define _STDLIB_H 1
 
 #include <sys/cdefs.h>
-#include <sys/types.h>
+#include <stdint.h>
+
+#define EXIT_FAILURE 1
+#define EXIT_SUCCESS 0
 
 __attribute__((__noreturn__)) void abort( void );
 

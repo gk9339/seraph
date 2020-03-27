@@ -2,8 +2,7 @@
 #define _TREE_H
 
 #include <list.h>
-
-#include <sys/types.h>
+#include <stdint.h>
 
 typedef struct tree_node
 {

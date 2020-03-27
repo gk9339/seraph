@@ -1,7 +1,7 @@
 #ifndef _STAT_H
 #define _STAT_H
 
-#include <sys/types.h>
+#include <stdint.h>
 
 #define S_IREAD     0000400    /* read permission, owner */
 #define S_IRUSR     S_IREAD
@@ -31,6 +31,14 @@
 #define     _IFLNK  0120000 /* symbolic link */
 #define     _IFSOCK 0140000 /* socket */
 #define     _IFIFO  0010000 /* fifo */
+
+#define	S_ISBLK(m)	(((m)&_IFMT) == _IFBLK)
+#define	S_ISCHR(m)	(((m)&_IFMT) == _IFCHR)
+#define	S_ISDIR(m)	(((m)&_IFMT) == _IFDIR)
+#define	S_ISFIFO(m)	(((m)&_IFMT) == _IFIFO)
+#define	S_ISREG(m)	(((m)&_IFMT) == _IFREG)
+#define	S_ISLNK(m)	(((m)&_IFMT) == _IFLNK)
+#define	S_ISSOCK(m)	(((m)&_IFMT) == _IFSOCK)
 
 struct stat
 {

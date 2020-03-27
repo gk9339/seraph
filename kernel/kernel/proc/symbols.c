@@ -2,7 +2,7 @@
 #include <string.h>
 
 #include <kernel/symbols.h>
-#include <sys/types.h>
+#include <stdint.h>
 
 extern char kernel_symbols_start[];
 extern char kernel_symbols_end[];

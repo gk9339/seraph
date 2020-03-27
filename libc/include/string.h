@@ -2,7 +2,6 @@
 #define _STRING_H 1
 
 #include <sys/cdefs.h>
-#include <sys/types.h>
 #include <stddef.h>
 
 int memcmp( const void*, const void*, size_t );
@@ -35,5 +34,7 @@ char* strcat( char*, const char* );
 char* strncat( char*, const char*, size_t );
 
 void* memchr( const void*, int, size_t );
+
+char* strerror( int );
 
 #endif

@@ -1,7 +1,7 @@
 #ifndef _KERNEL_VGA_H
 #define _KERNEL_VGA_H
 
-#include <sys/types.h>
+#include <stdint.h>
 
 enum vga_color {
 	VGA_COLOR_BLACK = 0,

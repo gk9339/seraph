@@ -504,7 +504,7 @@ int symlink_fs( char* target, char* name )
     return ret;
 }
 
-int readlink_fs( fs_node_t* node, char* buf, uint32_t size )
+int readlink_fs( fs_node_t* node, char* buf, size_t size )
 {
     if( !node ) return -ENOENT;
 

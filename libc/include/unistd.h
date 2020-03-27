@@ -2,7 +2,10 @@
 #define _UNISTD_H
 
 #include <stddef.h>
+#include <stdint.h>
 #include <sys/types.h>
+
+typedef long ssize_t;
 
 extern char** environ;
 extern int _environ_size;

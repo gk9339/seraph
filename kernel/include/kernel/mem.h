@@ -3,7 +3,7 @@
 
 #include <stddef.h> /* size_t */
 #include <kernel/types.h> /* struct regs */
-#include <sys/types.h> /* intN_t */
+#include <stdint.h>
 
 #define USER_STACK_BOTTOM 0xAFF00000
 #define USER_STACK_TOP 0xB0000000

@@ -2,7 +2,7 @@
 #define _KERNEL_H
 
 #include <kernel/types.h> /* struct regs */
-#include <sys/types.h> /* uintptr_t */
+#include <stdint.h>
 
 #define ASSUME(cond) __extension__({ if(!(cond)) { __builtin_unreachable(); } })
 

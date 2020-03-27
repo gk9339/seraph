@@ -1,7 +1,7 @@
 #ifndef _KERNEL_EXT2_H
 #define _KERNEL_EXT2_H
 
-#include <sys/types.h> /* intN_t */
+#include <stdint.h>
 
 #define EXT2_SUPER_MAGIC 0xEF53
 

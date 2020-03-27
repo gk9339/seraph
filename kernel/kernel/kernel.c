@@ -189,39 +189,47 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
 
     /* Interrupts Initialization */
     if( CHECK_FLAG(debug, 0) ) debug_log("Interrupts initialization");
-    if( CHECK_FLAG(debug, 1) ) printf("Interrupts initialization");
+    if( CHECK_FLAG(debug, 1) ) printf("Interrupts initialization\n");
     isr_initialize();
     irq_initialize();
     
     if( CHECK_FLAG(debug, 0) ) debug_log("VFS initialization");
+    if( CHECK_FLAG(debug, 1) ) printf("VFS initialization\n");
     vfs_initialize();
 
     if( CHECK_FLAG(debug, 0) ) debug_log("Tasking initialization");
+    if( CHECK_FLAG(debug, 1) ) printf("Tasking initialization\n");
     tasking_initialize();
 
     if( CHECK_FLAG(debug, 0) ) debug_log("Timer initialization");
+    if( CHECK_FLAG(debug, 1) ) printf("Timer initialization\n");
     timer_initialize();
 
     if( CHECK_FLAG(debug, 0) ) debug_log("FPU initialization");
+    if( CHECK_FLAG(debug, 1) ) printf("FPU initialization\n");
     fpu_initialize();
 
     if( CHECK_FLAG(debug, 0) ) debug_log("Syscalls initialization");
+    if( CHECK_FLAG(debug, 1) ) printf("Syscalls initialization\n");
     syscalls_initialize();
 
     if( CHECK_FLAG(debug, 0) ) debug_log("SHM initialization");
+    if( CHECK_FLAG(debug, 1) ) printf("SHM initialization\n");
     shm_initialize();
 
-    /* Test keyboard handler */
     if( CHECK_FLAG(debug, 0) ) debug_log("Install keyboard handler");
+    if( CHECK_FLAG(debug, 1) ) printf("Install keyboard handler\n");
     keyboard_install();
     
     if( CHECK_FLAG(debug, 0) ) debug_log("Initialize fs types\n");
+    if( CHECK_FLAG(debug, 1) ) printf("Initialize fs types\n");
     ustar_initialize();
 
     /* Load modules from bootloader */
     if( CHECK_FLAG(mbi->flags, 5) ) /* mods */
     {
         if( CHECK_FLAG(debug, 0) ) debug_logf(debug_str, "%d modules to load", mboot_mods_count);
+        if( CHECK_FLAG(debug, 1) ) printf("%d modules to load\n", mboot_mods_count);
         for( unsigned int i = 0; i < mbi->mods_count; ++i )
         {
             multiboot_module_t* mod = &mboot_mods[i];
@@ -230,18 +238,21 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
             size_t   module_size = module_end - module_start;
 
             if( CHECK_FLAG(debug, 0) ) debug_logf(debug_str, "Loading ramdisk: 0x%x:0x%x", module_start, module_end);
+            if( CHECK_FLAG(debug, 1) ) printf("Loading ramdisk: 0x%x:0x%x\n", module_start, module_end);
             ramdisk_mount(module_start, module_size);
         }
     }
     
     /* virtual dev filesystem */
     if( CHECK_FLAG(debug, 0) ) debug_log("\nSetup /dev");
+    if( CHECK_FLAG(debug, 1) ) printf("\nSetup /dev\n");
     map_vfs_directory("/dev");
     zero_initialize();
     null_initialize();
     
     /* ramfs initialization */
     if( CHECK_FLAG(debug, 0) ) debug_log("Setup root mount");
+    if( CHECK_FLAG(debug, 1) ) printf("Setup root mount\n");
     if( args_present("root") )
     {
         char* root_type = "ext2";
@@ -250,6 +261,7 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
             root_type = args_value("root_type");
         }
         if( CHECK_FLAG(debug, 0) ) debug_logf(debug_str, "Root type = %s", root_type);
+        if( CHECK_FLAG(debug, 1) ) printf("Root type = %s\n", root_type);
         vfs_mount_type(root_type, args_value("root"), "/");
     }else
     {
@@ -279,6 +291,7 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
 
     /* Start /sbin/init */
     if( CHECK_FLAG(debug, 0) ) debug_log("Starting /sbin/init\n");
+    if( CHECK_FLAG(debug, 1) ) printf("Starting /sbin/init\n");
     system(argv[0], argc, argv, NULL);
     
     /* Something went very wrong */

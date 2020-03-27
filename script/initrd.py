@@ -10,5 +10,5 @@ def file_filter(tarinfo):
 
     return tarinfo
 
-with tarfile.open('./isodir/boot/seraph.initrd', 'w') as ramdisk:
+with tarfile.open('./sysroot/boot/seraph.initrd', 'w') as ramdisk:
     ramdisk.add('sysroot', arcname='/', filter=file_filter)

@@ -174,7 +174,6 @@ static struct dirent * readdir_ustar_root( fs_node_t*node, uint32_t index )
 
         offset += 512;
         offset += round_to_512(interpret_size(file));
-
     }
 
     free(file);

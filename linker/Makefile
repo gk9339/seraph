@@ -6,7 +6,7 @@ PREFIX?=/lib
 EXEC_PREFIX?=$(PREFIX)
 LIBDIR?=$(EXEC_PREFIX)/lib
 
-CFLAGS:=$(CFLAGS) -static -Wall -Werror -O3
+CFLAGS:=$(CFLAGS) -static -Wall -Werror -O1
 LDFLAGS:=$(LDFLAGS) -Wl,-static -T linker.ld
 
 LIBS=\

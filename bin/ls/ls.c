@@ -1,6 +1,12 @@
-#include "sh.h"
+#include <sys/types.h>
+#include <dirent.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
-void ls( char* argv )
+int main( int argc, char** argv )
 {
     struct dirent* de;
     DIR* dr = NULL;
@@ -8,31 +14,37 @@ void ls( char* argv )
     struct stat st;
     //char datestring[256];
     char* filename;
+    char* argpath;
+    size_t arglen;
 
-    char* token = strtok(argv, " ");
-    token = strtok(NULL, " ");
-
-    if( token == NULL )
+    if( argc > 2 )
     {
-        token = malloc(sizeof(char));
-        strcpy(token, ".");
+        printf("Usage: ls <path>\n");
+        exit(0);
+    }
+    if( argc == 1 )
+    {
+        argpath = ".";
     }else
     {
-        token[strlen(token)-1] = '\0';
+        argpath = argv[1];
     }
-    dr = opendir(token);
+
+    dr = opendir(argpath);
+    arglen = strlen(argpath);
 
     if( dr == NULL )
     {
-        printf("Couldn't open %s.\n", token);
+        printf("Couldn't open %s.\n", argpath);
+        exit(1);
     }else
     {
         while( (de = readdir(dr)) != NULL )
         {
             filename = de->d_name;
             
-            char* path = malloc(strlen(token) + strlen(filename) + 2);
-            sprintf(path, "%s/%s", token, filename);
+            char* path = malloc(arglen + strlen(filename) + 2);
+            sprintf(path, "%s/%s", argpath, filename);
 
             if( lstat(path, &st) < 0 )
             {
@@ -57,7 +69,10 @@ void ls( char* argv )
                 printf("/");
             }
             printf("\n");
+            free(path);
         }
         closedir(dr);
     }
+
+    return 0;
 }

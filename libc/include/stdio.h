@@ -49,6 +49,10 @@ int putc( int, FILE* );
 int putchar( int );
 int puts( const char* );
 
+int getc( FILE* );
+int getchar( void );
+int fgetc( FILE* );
+
 int printf( const char*, ... );
 int fprintf( FILE*, const char*, ... );
 int dprintf( int, const char*, ... );

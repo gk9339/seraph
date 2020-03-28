@@ -2,10 +2,10 @@
 .section .init
 _init:
 	push %ebp
-	movl %esp, %ebp
+	mov %esp, %ebp
 
 .global _fini
 .section .fini
 _fini:
 	push %ebp
-	movl %esp, %ebp
+	mov %esp, %ebp

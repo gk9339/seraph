@@ -9,7 +9,7 @@ LIBDIR?=$(EXEC_PREFIX)/lib
 
 CFLAGS:=$(CFLAGS) -ffreestanding -Wall -Wextra -pedantic -Wshadow -Wpointer-arith \
 -Wcast-align -Wmissing-prototypes -Wmissing-declarations -Wredundant-decls -Wnested-externs \
--Winline -Wconversion -Wstrict-prototypes -Wno-sign-conversion -O3
+-Winline -Wconversion -Wstrict-prototypes -Wno-sign-conversion -O1
 CPPFLAGS:=$(CPPFLAGS) -Iinclude
 LIBK_CFLAGS:=$(CFLAGS)
 LIBK_CPPFLAGS:=$(CPPFLAGS) -D__is_libk
@@ -94,8 +94,13 @@ stdio/fflush.o \
 stdio/fclose.o \
 stdio/fopen.o \
 stdio/fdopen.o \
+stdio/getchar.o \
+stdio/fgetc.o \
+stdio/getc.o \
 stdio/stdio.o \
 stdio/stub.o \
+stdlib/exit.o \
+stdlib/atexit.o \
 stdlib/getenv.o \
 stdlib/putenv.o \
 stdlib/setenv.o \

@@ -15,7 +15,7 @@ uint32_t fork( void );
 uint32_t clone( uintptr_t new_stack, uintptr_t thread_func, uintptr_t arg );
 uint32_t getpid( void );
 
-void enter_user_jump( uintptr_t location, int argc, char** argv, uintptr_t stack );
+void enter_user_jump( uintptr_t location, int argc, char** argv, char** env, uintptr_t stack );
 extern void return_to_userspace( void );
 
 #endif

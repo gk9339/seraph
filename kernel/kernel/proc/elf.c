@@ -203,7 +203,7 @@ static int exec_elf( char* path __attribute__((unused)), fs_node_t* file, int ar
     }
 
     /* Go go go */
-    enter_user_jump(entry, argc, argv_, USER_STACK_TOP);
+    enter_user_jump(entry, argc, argv_, env_, USER_STACK_TOP);
 
     /* We should never reach this code */
     return -1;

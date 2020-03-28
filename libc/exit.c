@@ -10,6 +10,9 @@ void _exit( int val );
 
 void _exit( int val )
 {
+    fflush(stdin);
+    fflush(stdout);
+    fflush(stderr);
     _fini();
     syscall_exit(val);
 

@@ -5,6 +5,7 @@
 
 int fclose( FILE* stream )
 {
+    fflush(stream);
     int out = syscall_close(stream->fd);
     free(stream->_name);
     free(stream->read_base);

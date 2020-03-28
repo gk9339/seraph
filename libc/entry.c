@@ -6,8 +6,8 @@ extern void _init( void );
 extern void _fini( void );
 
 char** __get_argv( void );
-void _pre_main( int (*main)(int, char**), int argc, char* argv[] );
-void _exit( int val );
+void _pre_main( int (*main)(int, char**, char**), int argc, char* argv[], char* env[] );
+extern void _exit( int val );
 
 char** environ = NULL;
 int _environ_size = 0;
@@ -19,15 +19,16 @@ char** __get_argv( void )
     return __argv;
 }
 
-void _pre_main( int (*main)(int, char**), int argc, char* argv[] )
+void _pre_main( int (*main)(int, char**, char**), int argc, char* argv[], char* env[] )
 {
     if( !__get_argv() )
     {
         __argv = argv;
     }
+    environ = env;
 
     _init();
-    _exit(main(argc, argv));
+    _exit(main(argc, argv, environ));
 }
 
 __attribute__((constructor)) static void _libc_init( void )
@@ -94,6 +95,4 @@ __attribute__((constructor)) static void _libc_init( void )
 
         environ = new_environ;
     }
-
-    _argv_0 = __get_argv()[0];
 }

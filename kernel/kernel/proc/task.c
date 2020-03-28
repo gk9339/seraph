@@ -306,13 +306,14 @@ void switch_next( void )
 
 extern void enter_userspace( uintptr_t location, uintptr_t stack );
 
-void enter_user_jump( uintptr_t location, int argc, char** argv, uintptr_t stack )
+void enter_user_jump( uintptr_t location, int argc, char** argv, char** env, uintptr_t stack )
 {
     char debug_str[512];
     debug_logf(debug_str, "%d - %s -> Starting", current_process->id, current_process->name);
     int_disable();
     set_kernel_stack(current_process->image.stack);
 
+    PUSH(stack, uintptr_t, (uintptr_t)env);
     PUSH(stack, uintptr_t, (uintptr_t)argv);
     PUSH(stack, int, argc);
     enter_userspace(location, stack);

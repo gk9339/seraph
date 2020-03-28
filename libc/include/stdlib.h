@@ -7,6 +7,8 @@
 #define EXIT_FAILURE 1
 #define EXIT_SUCCESS 0
 
+#define ATEXIT_MAX 32
+
 __attribute__((__noreturn__)) void abort( void );
 
 char* getenv( const char* name );
@@ -22,6 +24,7 @@ void free( void* ptr );
 
 long atoi( const char* ); //stub
 
-int atexit(void (*function)(void)); //stub
+int atexit(void (*function)(void));
+void exit( int );
 
 #endif

@@ -7,7 +7,7 @@ EXEC_PREFIX?=$(PREFIX)
 BINDIR?=$(EXEC_PREFIX)/bin
 INCLUDEDIR?=$(PREFIX)/include
 
-CFLAGS:=$(CFLAGS) -static -Wall -Wextra -O3
+CFLAGS:=$(CFLAGS) -static -Wall -Wextra -O1
 LDFLAGS:=$(LDFLAGS)
 LIBS:=$(LIBS) -lc
 
@@ -15,11 +15,12 @@ OBJS=\
 terminal/terminal.o \
 terminal/keyboard.o \
 sh/sh.o \
-sh/ls.o \
+ls/ls.o \
 
 EXECS=\
 terminal/terminal \
 sh/sh \
+ls/ls \
 
 .PHONY: all clean install install-headers install-bin
 .SUFFIXES: .o .c
@@ -32,7 +33,10 @@ all: $(OBJS) $(EXECS)
 terminal/terminal: terminal/terminal.o terminal/keyboard.o
 	$(CC) $^ -o $@ $(CFLAGS)$(LIBS)
 
-sh/sh: sh/sh.o sh/ls.o
+sh/sh: sh/sh.o
+	$(CC) $^ -o $@ $(CFLAGS)$(LIBS)
+
+ls/ls: ls/ls.o
 	$(CC) $^ -o $@ $(CFLAGS)$(LIBS)
 
 clean:

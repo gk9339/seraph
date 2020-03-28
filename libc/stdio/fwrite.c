@@ -96,11 +96,11 @@ size_t fwrite( const void* ptr, size_t size, size_t nmemb, FILE* stream )
                     {
                         *stream->write_ptr = *(char*)curptr;
                         stream->write_ptr++;
-                        curptr++;
-                        if( *stream->write_ptr == '\n' )
+                        if( *(stream->write_ptr - 1) == '\n' )
                         {
                             fflush(stream);
                         }
+                        curptr++;
                     }
                     out_size = 0;
                 }else
@@ -109,15 +109,14 @@ size_t fwrite( const void* ptr, size_t size, size_t nmemb, FILE* stream )
                     {
                         *stream->write_ptr = *(char*)curptr;
                         stream->write_ptr++;
-                        curptr++;
-                        if( *stream->write_ptr == '\n' )
+                        if( *(stream->write_ptr - 1) == '\n' )
                         {
                             fflush(stream);
                         }
+                        curptr++;
                     }
                     out_size -= buffer_space;
                     fflush(stream);
-                    
                 }
                 if( stream->eof )
                 {

@@ -11,7 +11,6 @@ int main( void )
         fflush(stdout);
         int r = read(0, buf, 1024);
 
-
         if( r > 0 )
         {
             buf[r] = '\0';

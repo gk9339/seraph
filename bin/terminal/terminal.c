@@ -71,7 +71,7 @@ int main( void )
         char c;
 
         int fds[] = {fd_master, kfd};
-        unsigned char buf[1024];
+        char buf[1024];
         key_event_state_t kbd_state = {0};
         key_event_t event;
 
@@ -84,11 +84,7 @@ int main( void )
             if( index == 0 )
             {
                 ret = read(fd_master, buf, 1024);
-
-                for( int i = 0; i < ret; i++ )
-                {
-                    terminal_putchar(buf[i]);
-                }
+                terminal_write(buf, ret);
             }else if ( index == 1 )
             {
                 ret = read(kfd, &c, 1);
@@ -212,7 +208,6 @@ void terminal_putchar( char c )
             }
         }
     }
-    update_cursor(terminal_column, terminal_row);
 }
 
 void terminal_write( const char* data, size_t size ) 
@@ -221,6 +216,7 @@ void terminal_write( const char* data, size_t size )
     {
 		terminal_putchar(data[i]);    
     }
+    update_cursor(terminal_column, terminal_row);
 }
 
 void terminal_writestring( const char* data ) 

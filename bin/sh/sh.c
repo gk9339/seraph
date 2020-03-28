@@ -3,11 +3,14 @@
 int main( void )
 {
     char buf[1024];
+    setlinebuf(stdout);
 
     while(1)
     {
         printf(">");
+        fflush(stdout);
         int r = read(0, buf, 1024);
+
 
         if( r > 0 )
         {

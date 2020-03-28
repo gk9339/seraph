@@ -42,21 +42,32 @@ static void parse_mode( const char* mode, int* flags_, int* mask_ )
     *mask_ = mask;
 }
 
-FILE* fopen( const char* pathname, const char* mode )
+FILE* fdopen( int fd, const char* mode )
 {
-    int flags, mask;
-    parse_mode(mode, &flags, &mask);
-
-    int fd = syscall_open(pathname, flags, mask);
-
-    if( fd < 0 )
+    int fdflags, flags, mask;
+    //Checks fd is valid
+    if( (fdflags = fcntl(fd, F_GETFL)) < 0 )
     {
-        errno = -fd;
-        return NULL;
+        errno = EBADF;
+        return 0;
+    }
+    parse_mode(mode, &flags, &mask);
+    //Checks mode is a subset of original
+    int fdmode = fdflags & O_ACCMODE;
+    if( fdmode != O_RDWR && (fdmode != (flags & O_ACCMODE)) )
+    {
+        errno = EBADF;
+        return 0;
+    }
+    //POSIX reccomends setting O_APPEND to match
+    if( (flags & O_APPEND) && !(fdflags & O_APPEND) )
+    {
+        fcntl(fd, F_SETFL, fdflags | O_APPEND);
     }
 
-    FILE* out = calloc(1, sizeof(FILE));
-    
+    FILE* out = malloc(sizeof(FILE));
+    memset(out, 0, sizeof(struct _FILE));
+
     out->fd = fd;
     out->read_base = out->read_ptr = out->read_end = NULL;
     out->write_base = out->write_ptr = out->write_end = NULL;
@@ -75,8 +86,10 @@ FILE* fopen( const char* pathname, const char* mode )
     }
     out->ungetc = -1;
     out->eof = 0;
-
-    out->_name = strdup(pathname);
+    
+    char tmp[30];
+    sprintf(tmp, "fd[%d]", fd);
+    out->_name = strdup(tmp);
 
     return out;
 }

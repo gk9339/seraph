@@ -3,30 +3,14 @@
 #include <stdlib.h>
 #include <errno.h>
 #include <sys/syscall.h>
+#include <stdbool.h>
 #include "file.h"
-
-static int memcpy_until_newline( void* restrict dstptr, const void* restrict srcptr, size_t size )
-{
-    unsigned char* dst = (unsigned char*)dstptr;
-    const unsigned char* src = (const unsigned char*)srcptr;
-
-    for( size_t i = 0; i < size; i++ )
-    {
-        dst[i] = src[i];
-        if( dst[i] == '\n' )
-        {
-            return i;
-        }
-    }
-
-    return size;
-}
 
 size_t fwrite( const void* ptr, size_t size, size_t nmemb, FILE* stream )
 {
     uintptr_t curptr = (uintptr_t)ptr;
     size_t out_size = size * nmemb;
-    size_t retval = 0;
+    size_t buffer_space;
 
     if( stream == NULL || stream->bufmode == -1 )
     {
@@ -39,63 +23,121 @@ size_t fwrite( const void* ptr, size_t size, size_t nmemb, FILE* stream )
         stream->write_base = stream->write_ptr = malloc(BUFSIZ);
         stream->write_end = stream->write_base + BUFSIZ;
     }
-    size_t buffer_size = stream->write_ptr - stream->write_base;
-    size_t buffer_space = stream->write_end - stream->write_ptr;
 
     if( !out_size )
     {
         return 0;
     }
 
+#ifdef __is_libk
+    while( out_size )
+    {
+        buffer_space = stream->write_end - stream->write_ptr;
+        if( out_size < buffer_space )
+        {
+            for( size_t i = 0; i < out_size; i++ )
+            {
+                *stream->write_ptr = *(char*)curptr;
+                stream->write_ptr++;
+                curptr++;
+            }
+            out_size = 0;
+        }else
+        {
+            return -1;
+        }
+        if( stream->eof )
+        {
+            break;
+        }
+    }
+    return ((size * nmemb) - out_size) / size;
+#else
     switch( stream->bufmode )
     {
         case _IOFBF:
-            if( out_size < buffer_space )
+            while( out_size )
             {
-                memcpy(stream->write_ptr, ptr, out_size);
-                stream->write_ptr += out_size;
-                return out_size;
-            }
-            while( out_size != 0 )
-            {
-                memcpy(stream->write_ptr, (void*)curptr, buffer_space);
-                out_size -= buffer_space;
-                retval += buffer_space;
-                curptr += buffer_space;
-                buffer_size = stream->write_ptr - stream->write_base;
-                if( buffer_size == 0 )
+                buffer_space = stream->write_end - stream->write_ptr;
+                if( out_size < buffer_space )
                 {
+                    for( size_t i = 0; i < out_size; i++ )
+                    {
+                        *stream->write_ptr = *(char*)curptr;
+                        stream->write_ptr++;
+                        curptr++;
+                    }
+                    out_size = 0;
+                }else
+                {
+                    for( size_t i = 0; i < out_size; i++ )
+                    {
+                        *stream->write_ptr = *(char*)curptr;
+                        stream->write_ptr++;
+                        curptr++;
+                    }
+                    out_size -= buffer_space;
                     fflush(stream);
-                    buffer_size = 0;
-                    buffer_space = stream->write_end - stream->write_ptr;    
+                    
+                }
+                if( stream->eof )
+                {
+                    break;
                 }
             }
-            return retval;
+            return ((size * nmemb) - out_size) / size;
         case _IOLBF:
-            if( out_size < buffer_space )
+            while( out_size )
             {
-                out_size = memcpy_until_newline(stream->write_ptr, ptr, out_size);
-                stream->write_ptr += out_size;
-                return out_size;
-            }
-            while( out_size != 0 )
-            {
-                retval += memcpy_until_newline(stream->write_ptr, (void*)curptr, buffer_space);
-                out_size -= buffer_space;
-                retval += buffer_space;
-                curptr += buffer_space;
-                buffer_size = stream->write_ptr - stream->write_base;
-                if( buffer_size == 0 )
+                buffer_space = stream->write_end - stream->write_ptr;
+                if( out_size < buffer_space )
                 {
+                    for( size_t i = 0; i < out_size; i++ )
+                    {
+                        *stream->write_ptr = *(char*)curptr;
+                        stream->write_ptr++;
+                        curptr++;
+                        if( *stream->write_ptr == '\n' )
+                        {
+                            fflush(stream);
+                        }
+                    }
+                    out_size = 0;
+                }else
+                {
+                    for( size_t i = 0; i < out_size; i++ )
+                    {
+                        *stream->write_ptr = *(char*)curptr;
+                        stream->write_ptr++;
+                        curptr++;
+                        if( *stream->write_ptr == '\n' )
+                        {
+                            fflush(stream);
+                        }
+                    }
+                    out_size -= buffer_space;
                     fflush(stream);
-                    buffer_size = 0;
-                    buffer_space = stream->write_end - stream->write_ptr;    
+                    
+                }
+                if( stream->eof )
+                {
+                    break;
                 }
             }
-            return retval;
+            return ((size * nmemb) - out_size) / size;
         case _IONBF: ;
-            __sets_errno(syscall_write(stream->fd, (void*)ptr, out_size));
+            int retval = syscall_write(stream->fd, (void*)ptr, out_size);
+            if( retval < 0 )
+            {
+                errno = -retval;
+                return 0;
+            }else
+            {
+                return nmemb;
+            }
+
     }
+#endif
 
     errno = EBADF;
     return 0;

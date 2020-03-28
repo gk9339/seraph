@@ -7,9 +7,9 @@ EXEC_PREFIX?=$(PREFIX)
 BINDIR?=$(EXEC_PREFIX)/bin
 INCLUDEDIR?=$(PREFIX)/include
 
-CFLAGS:=$(CFLAGS) -Wall -Wextra -O3
+CFLAGS:=$(CFLAGS) -static -Wall -Wextra -O3
 LDFLAGS:=$(LDFLAGS)
-LIBS:=$(LIBS)
+LIBS:=$(LIBS) -lc
 
 OBJS=\
 terminal/terminal.o \

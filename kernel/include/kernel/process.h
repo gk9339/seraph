@@ -1,13 +1,13 @@
 #ifndef _KERNEL_PROCESS_H
 #define _KERNEL_PROCESS_H
 
-#include <kernel/types.h> /* struct regs */
-#include <kernel/mem.h> /* page_directory_t */
-#include <kernel/fs.h> /* fs_node_t */
-#include <tree.h> /* tree_t */
-#include <time.h> /* list_t */
-#include <sys/types.h> /* intN_t */
-#include <sys/signals.h> /* NUMSIGNALS */
+#include <kernel/types.h> // struct regs
+#include <kernel/mem.h> // page_directory_t
+#include <kernel/fs.h> // fs_node_t
+#include <tree.h> // tree_t
+#include <time.h> // list_t
+#include <stdint.h> // intN_t
+#include <sys/signals.h> // NUMSIGNALS
 
 #define SIGNAL_RETURN 0x1523A6AA
 #define THREAD_RETURN 0x260913A3
@@ -22,7 +22,7 @@ typedef unsigned int status_t;
 
 extern list_t* process_list;
 
-/* Unix waitpid() options */
+// Unix waitpid() options
 enum wait_option
 {
     WCONTINUED,
@@ -30,12 +30,12 @@ enum wait_option
     WUNTRACED
 };
 
-/* x86 task */
+// x86 task
 typedef struct thread
 {
-    uintptr_t esp; /* Stack pointer */
-    uintptr_t ebp; /* Base pointer */
-    uintptr_t eip; /* Instruction pointer */
+    uintptr_t esp; // Stack pointer
+    uintptr_t ebp; // Base pointer
+    uintptr_t eip; // Instruction pointer
 
     uint8_t fpu_enabled;
     uint8_t fp_regs[512];
@@ -48,7 +48,7 @@ typedef struct thread
 typedef struct image
 {
     size_t size;
-    uintptr_t entry; /* Entry point */
+    uintptr_t entry; // Entry point
     uintptr_t heap;
     uintptr_t heap_actual;
     uintptr_t stack;
@@ -58,7 +58,7 @@ typedef struct image
     volatile int lock[2];
 } image_t;
 
-/* Resizable descriptor table */
+// Resizable descriptor table
 typedef struct descriptor_table
 {
     fs_node_t** entries;
@@ -74,38 +74,38 @@ typedef struct signal_table
     uintptr_t functions[NUMSIGNALS+1];
 } sig_table_t;
 
-/* Portable process struct*/
+// Portable process struct
 typedef struct process
 {
-    pid_t id;           /* Process ID */
-    char* name;         /* Process name */
-    char* description;  /* Process description */
-    user_t user;        /* Effective User */
-    user_t real_user;   /* Real user ID */
-    user_t user_group;  /* user gid */
-    int mask;           /* umask */
+    pid_t id;           // Process ID
+    char* name;         // Process name
+    char* description;  // Process description
+    user_t user;        // Effective User
+    user_t real_user;   // Real user ID
+    user_t user_group;  // user gid
+    int mask;           // umask
 
     char** cmdline;
 
-    pid_t group;    /* Thread group */
-    pid_t job;      /* Job group */
-    pid_t session;  /* Session group */
+    pid_t group;    // Thread group
+    pid_t job;      // Job group
+    pid_t session;  // Session group
 
-    thread_t thread;            /* Task information */
-    tree_node_t* tree_entry;    /* Process tree entry */
-    image_t image;              /* Memory image information */
-    fs_node_t* wd_node;         /* Working directory pointer */
-    char* wd_name;              /* Working directory name */
-    fd_table_t* fds;            /* File descriptor table */
-    status_t status;            /* Process status */
-    sig_table_t signals;        /* Signal handlers */
-    uint8_t finished;           /* Process finished */
-    uint8_t started;            /* Process started */
-    uint8_t running;            /* Process running */
-    struct regs* syscall_registers; /* Registers at interrupt */
-    list_t* wait_queue;         /* Processes waiting on this process */
-    list_t* shm_mappings;       /* Shared memory mappings */
-    list_t* signal_queue;       /* Queued signals */
+    thread_t thread;            // Task information
+    tree_node_t* tree_entry;    // Process tree entry
+    image_t image;              // Memory image information
+    fs_node_t* wd_node;         // Working directory pointer
+    char* wd_name;              // Working directory name
+    fd_table_t* fds;            // File descriptor table
+    status_t status;            // Process status
+    sig_table_t signals;        // Signal handlers
+    uint8_t finished;           // Process finished
+    uint8_t started;            // Process started
+    uint8_t running;            // Process running
+    struct regs* syscall_registers; // Registers at interrupt
+    list_t* wait_queue;         // Processes waiting on this process
+    list_t* shm_mappings;       // Shared memory mappings
+    list_t* signal_queue;       // Queued signals
     thread_t signal_state;
     char* signal_kstack;
     node_t sched_node;

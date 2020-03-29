@@ -57,7 +57,6 @@ static void init_fpu( void )
     asm volatile("fninit");
 }
 
-
 void switch_fpu( void )
 {
     save_fpu((process_t*)current_process);

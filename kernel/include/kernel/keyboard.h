@@ -6,6 +6,5 @@
 #define KEY_IRQ 1
 
 int keyboard_install( void );
-char convert_scancode( unsigned char );
 
 #endif

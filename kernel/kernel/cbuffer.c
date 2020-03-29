@@ -3,6 +3,7 @@
 #include <kernel/process.h>
 #include <stdlib.h>
 
+// Amount of unread bytes in cbuffer
 size_t circular_buffer_unread( circular_buffer_t* cbuffer )
 {
     if( cbuffer->read_ptr == cbuffer->write_ptr )
@@ -19,6 +20,7 @@ size_t circular_buffer_unread( circular_buffer_t* cbuffer )
     }
 }
 
+// Size of cbuffer
 size_t circular_buffer_size( fs_node_t* node )
 {
     circular_buffer_t* cbuffer = (circular_buffer_t*)node->device;
@@ -26,6 +28,7 @@ size_t circular_buffer_size( fs_node_t* node )
     return circular_buffer_unread(cbuffer);
 }
 
+// Available space in cbuffer
 size_t circular_buffer_available( circular_buffer_t* cbuffer )
 {
     if( cbuffer->read_ptr == cbuffer->write_ptr )
@@ -42,6 +45,7 @@ size_t circular_buffer_available( circular_buffer_t* cbuffer )
     }
 }
 
+// Increment read_ptr, wrapping around
 static inline void circular_buffer_increment_read( circular_buffer_t* cbuffer )
 {
     cbuffer->read_ptr++;
@@ -51,6 +55,7 @@ static inline void circular_buffer_increment_read( circular_buffer_t* cbuffer )
     }
 }
 
+// Increment write_ptr, wrapping around
 static inline void circular_buffer_increment_write( circular_buffer_t* cbuffer )
 {
     cbuffer->write_ptr++;
@@ -60,6 +65,7 @@ static inline void circular_buffer_increment_write( circular_buffer_t* cbuffer )
     }
 }
 
+// Read (size) bytes into *buffer from cbuffer
 size_t circular_buffer_read( circular_buffer_t* cbuffer, size_t size, uint8_t* buffer )
 {
     size_t collected = 0;
@@ -90,6 +96,7 @@ size_t circular_buffer_read( circular_buffer_t* cbuffer, size_t size, uint8_t* b
     return collected;
 }
 
+// Write (size) bytes into *buffer from cbuffer
 size_t circular_buffer_write( circular_buffer_t* cbuffer, size_t size, uint8_t* buffer )
 {
     size_t written = 0;
@@ -125,6 +132,7 @@ size_t circular_buffer_write( circular_buffer_t* cbuffer, size_t size, uint8_t* 
     return written;
 }
 
+// Initialize cbuffer
 circular_buffer_t* circular_buffer_create( size_t size )
 {
     circular_buffer_t* cbuffer = malloc(sizeof(circular_buffer_t));
@@ -146,6 +154,7 @@ circular_buffer_t* circular_buffer_create( size_t size )
     return cbuffer;
 }
 
+// Free cbuffer buffers, wakeup waiting processes
 void circular_buffer_destroy( circular_buffer_t* cbuffer )
 {
     free(cbuffer->buffer);
@@ -164,6 +173,7 @@ void circular_buffer_destroy( circular_buffer_t* cbuffer )
     }
 }
 
+// Interrupt reading/writing processes
 void circular_buffer_interrupt( circular_buffer_t* cbuffer )
 {
     cbuffer->internal_stop = 1;
@@ -171,6 +181,7 @@ void circular_buffer_interrupt( circular_buffer_t* cbuffer )
     wakeup_queue_interrupted(cbuffer->wait_queue_writers);
 }
 
+// Alert waiting processes
 void circular_buffer_alert_waiters( circular_buffer_t* cbuffer )
 {
     if( cbuffer->alert_waiters )
@@ -185,6 +196,7 @@ void circular_buffer_alert_waiters( circular_buffer_t* cbuffer )
     }
 }
 
+// Add process to alert_waiters list
 void circular_buffer_selectwait( circular_buffer_t* cbuffer, void* process )
 {
     if( !cbuffer->alert_waiters )

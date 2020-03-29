@@ -1,8 +1,8 @@
 #ifndef _KERNEL_H
 #define _KERNEL_H
 
-#include <kernel/types.h> /* struct regs */
-#include <stdint.h>
+#include <kernel/types.h> // struct regs
+#include <stdint.h> // intN_t
 
 #define ASSUME(cond) __extension__({ if(!(cond)) { __builtin_unreachable(); } })
 

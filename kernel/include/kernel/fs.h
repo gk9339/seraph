@@ -2,8 +2,8 @@
 #define _KERNEL_FS_H
 
 #include <sys/stat.h>
-#include <stdint.h>
-#include <stddef.h> /* size_t */
+#include <stdint.h> // intN_t
+#include <stddef.h> // size_t
 
 #define PATH_SEPARATOR '/'
 #define PATH_SEPARATOR_STRING "/"
@@ -30,12 +30,12 @@
 #define FS_SYMLINK     0x20
 #define FS_MOUNTPOINT  0x40
 
-struct fs_node; /* Defined below */
+struct fs_node; // Defined below
 
-typedef uint32_t (*read_type_t)( struct fs_node*, uint32_t, uint32_t, uint8_t* ); /* Read file */
-typedef uint32_t (*write_type_t)( struct fs_node*, uint32_t, uint32_t, uint8_t* ); /* Write file */
-typedef void (*open_type_t)( struct fs_node*, unsigned int flags ); /* Open fs_node */
-typedef void (*close_type_t)( struct fs_node* ); /* Close fs_node */
+typedef uint32_t (*read_type_t)( struct fs_node*, uint32_t, uint32_t, uint8_t* ); // Read file
+typedef uint32_t (*write_type_t)( struct fs_node*, uint32_t, uint32_t, uint8_t* ); // Write file
+typedef void (*open_type_t)( struct fs_node*, unsigned int flags ); // Open fs_node
+typedef void (*close_type_t)( struct fs_node* ); // Close fs_node
 typedef struct dirent* (*readdir_type_t)( struct fs_node*, uint32_t ); 
 typedef struct fs_node* (*finddir_type_t)( struct fs_node*, char *name );
 typedef int (*create_type_t)( struct fs_node*, char *name, uint16_t permission );
@@ -53,22 +53,22 @@ typedef void (*truncate_type_t)( struct fs_node* );
 
 typedef struct fs_node 
 {
-    char name[256];         /* The filename. */
-    void* device;           /* Device object (optional) */
-    uint32_t mask;          /* The permissions mask. */
-    uint32_t uid;           /* The owning user. */
-    uint32_t gid;           /* The owning group. */
-    uint32_t type;          /* Type of tile */
-    uint32_t inode;         /* Inode number. */
-    uint32_t length;        /* Size of the file, in byte. */
-    uint32_t impl;          /* Used to keep track which fs it belongs to. */
+    char name[256];  // The filename
+    void* device;    // Device object (optional)
+    uint32_t mask;   // The permissions mask
+    uint32_t uid;    // The owning user
+    uint32_t gid;    // The owning group
+    uint32_t type;   // Type of tile
+    uint32_t inode;  // Inode number
+    uint32_t length; // Size of the file, in byte
+    uint32_t impl;   // Used to keep track which fs it belongs to
+                              
+    // Times
+    uint32_t atime; // Accessed
+    uint32_t mtime; // Modified
+    uint32_t ctime; // Created
 
-    /* times */
-    uint32_t atime;         /* Accessed */
-    uint32_t mtime;         /* Modified */
-    uint32_t ctime;         /* Created  */
-
-    /* File operations */
+    // File operations
     read_type_t read;
     write_type_t write;
     open_type_t open;
@@ -85,7 +85,7 @@ typedef struct fs_node
     readlink_type_t readlink;
     truncate_type_t truncate;
 
-    struct fs_node *ptr;   /* Alias pointer, for symlinks. */
+    struct fs_node *ptr; // Alias pointer, for symlinks
     int32_t refcount;
     uint32_t nlink;
 
@@ -97,21 +97,21 @@ typedef struct fs_node
 
 struct dirent
 {
-    uint32_t ino;   /* Inode */
-    char name[256]; /* Directory name */
+    uint32_t ino; // Inode
+    char name[256]; // Directory name
 };
 
 struct vfs_entry 
 {
-    char* name; /* Name of vfs entry */
-    fs_node_t* file; /* Pointer to file struct */
+    char* name; // Name of vfs entry
+    fs_node_t* file; // Pointer to file struct
     char* device;
     char* fs_type;
 };
 
 extern fs_node_t* fs_root;
 
-int has_permission( fs_node_t *node, int permission_bit );
+int has_permission( fs_node_t *node, int permission_bit ); // Does current process user have permission
 uint32_t read_fs( fs_node_t* node, uint32_t offset, uint32_t size, uint8_t* buffer );
 uint32_t write_fs( fs_node_t* node, uint32_t offset, uint32_t size, uint8_t* buffer );
 void open_fs( fs_node_t* node, unsigned int flags );

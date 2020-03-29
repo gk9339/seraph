@@ -1,7 +1,11 @@
+# Function epilogue for _init
 .section .init
-	popl %ebp
-	ret
+    # Restore frame pointer
+    popl %ebp
+    ret
 
+# Function epilogue for _fini
 .section .fini
-	popl %ebp
-	ret
+    # Restore frame pointer
+    popl %ebp
+    ret

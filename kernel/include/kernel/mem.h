@@ -1,9 +1,9 @@
 #ifndef _KERNEL_MEM_H
 #define _KERNEL_MEM_H
 
-#include <stddef.h> /* size_t */
-#include <kernel/types.h> /* struct regs */
-#include <stdint.h>
+#include <stddef.h> // size_t
+#include <kernel/types.h> // struct regs
+#include <stdint.h> // intN_t
 
 #define USER_STACK_BOTTOM 0xAFF00000
 #define USER_STACK_TOP 0xB0000000
@@ -32,9 +32,9 @@ typedef struct page_table
 
 typedef struct page_directory
 {
-    uintptr_t physical_tables[1024]; /* Physical addresses of the tables */
-    page_table_t* tables[1024]; /* 1024 pointers to page tables */
-    uintptr_t physical_address; /* The physical address of the tables */
+    uintptr_t physical_tables[1024]; // Physical addresses of the tables
+    page_table_t* tables[1024]; // 1024 pointers to page tables
+    uintptr_t physical_address; // The physical address of the tables
     uint32_t ref_count;
 } page_directory_t;
 

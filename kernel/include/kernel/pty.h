@@ -1,11 +1,11 @@
 #ifndef _KERNEL_PTY_H
 #define _KERNEL_PTY_H
 
-#include <stddef.h> /* size_t */
-#include <kernel/fs.h> /* fs_node_t */
-#include <sys/termios.h> /* struct termios */
-#include <sys/ioctl.h> /* struct winsize */
-#include <kernel/cbuffer.h> /* circular_buffer_t */
+#include <stddef.h> // size_t
+#include <kernel/fs.h> // fs_node_t
+#include <sys/termios.h> // struct termios
+#include <sys/ioctl.h> // struct winsize
+#include <kernel/cbuffer.h> // circular_buffer_t
 
 typedef struct pty
 {

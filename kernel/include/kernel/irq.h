@@ -3,8 +3,8 @@
 
 #define SYSCALL_VECTOR 0x7F
 
-#include <stddef.h> /* size_t */
-#include <kernel/types.h> /* struct regs */
+#include <stddef.h> // size_t
+#include <kernel/types.h> // irq_handler_chain_t, struct regs
 
 void int_disable( void );
 void int_resume( void );

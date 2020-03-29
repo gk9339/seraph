@@ -9,6 +9,7 @@
     size_t offset = bit & 7; \
     size_t mask = 1 << offset;
 
+// Initialize given bitset_t of given size at *set
 void bitset_init( bitset_t* set, size_t size )
 {
     set->size = CEIL(size, 8);
@@ -16,11 +17,13 @@ void bitset_init( bitset_t* set, size_t size )
     memset(set->data, 0, set->size);
 }
 
+// Free data in bitset_t *set
 void bitset_free( bitset_t* set )
 {
     free(set->data);
 }
 
+// Reallocate bitset_t *set to be size
 static void bitset_resize( bitset_t* set, size_t size )
 {
     if( set->size >= size )
@@ -33,6 +36,7 @@ static void bitset_resize( bitset_t* set, size_t size )
     set->size = size;
 }
 
+// Set bit of bitset_t *set
 void bitset_set( bitset_t* set, size_t bit )
 {
     iom;
@@ -43,6 +47,21 @@ void bitset_set( bitset_t* set, size_t bit )
     set->data[index] = (unsigned char)(set->data[index] | mask);
 }
 
+// Clear bitset_t *set
+void bitset_clear( bitset_t* set, size_t bit )
+{
+    iom;
+    set->data[index] = (unsigned char)(set->data[index] & ~mask);
+}
+
+// Test bit of bitset_t *set
+int bitset_test( bitset_t* set, size_t bit )
+{
+    iom;
+    return !!(mask & set->data[index]);
+}
+
+// Find first unset bit of bitset_t *set
 int bitset_ffub( bitset_t* set )
 {
     for( size_t i = 0; i < set->size * 8; i++ )
@@ -54,16 +73,4 @@ int bitset_ffub( bitset_t* set )
         return (int)i;
     }
     return -1;
-}
-
-void bitset_clear( bitset_t* set, size_t bit )
-{
-    iom;
-    set->data[index] = (unsigned char)(set->data[index] & ~mask);
-}
-
-int bitset_test( bitset_t* set, size_t bit )
-{
-    iom;
-    return !!(mask & set->data[index]);
 }

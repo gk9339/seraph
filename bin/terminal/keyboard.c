@@ -12,21 +12,19 @@
 
 #define SET_UNSET(a,b,c) (a) = (c) ? ((a) | (b)) : ((a) & ~(b))
 
-extern void handle_input_char( char );
-extern void handle_input_string( char* );
-
+// Process keystroke into terminal input strings
 void key_event( int ret, key_event_t* event )
 {
     if( ret )
     {
-        /* ENTER = reads as linefeed, should be carriage return */
+        // ENTER = reads as linefeed, should be carriage return
         if( event->keycode == 10 )
         {
             handle_input_char('\r');
             return;
         }
 
-        /* BACKSPACE = reads as ^H, should be ^? */
+        // BACKSPACE = reads as ^H, should be ^?
         if( event->keycode == 8 )
         {
             handle_input_char(0x7F);
@@ -278,7 +276,7 @@ char kbd_us_caps[128] = {
     0, /* everything else */
 };
 
-/* Converts from incoming terminal keys to kbd_keys */
+// Converts from incoming terminal keys to kbd_keys
 kbd_key_t kbd_key( key_event_state_t* state, unsigned char c )
 {
     switch( state->kbd_state )
@@ -454,7 +452,7 @@ kbd_key_t kbd_key( key_event_state_t* state, unsigned char c )
     return KEY_BAD_STATE;
 }
 
-/* Convert scancodes to a series of keys */
+//converts from scancodes into key_event_t
 int kbd_scancode(key_event_state_t * state, unsigned char c, key_event_t * event )
 {
     event->keycode   = 0;
@@ -477,7 +475,7 @@ int kbd_scancode(key_event_state_t * state, unsigned char c, key_event_t * event
         if( c == 0xE0 )
         {
             state->kbd_s_state = 1;
-            /* Literally nothing */
+            //literally nothing
             return 0;
         }
 

@@ -1,13 +1,13 @@
 #ifndef _KERNEL_EXT2_H
 #define _KERNEL_EXT2_H
 
-#include <stdint.h>
+#include <stdint.h> // intN_t
 
 #define EXT2_SUPER_MAGIC 0xEF53
 
 #define EXT2_DIRECT_BLOCKS 12
 
-/* File Types */
+// File Types
 #define EXT2_S_IFSOCK    0xC000
 #define EXT2_S_IFLNK    0xA000
 #define EXT2_S_IFREG    0x8000
@@ -16,12 +16,12 @@
 #define EXT2_S_IFCHR    0x2000
 #define EXT2_S_IFIFO    0x1000
 
-/* setuid, etc. */
+// setuid, etc.
 #define EXT2_S_ISUID    0x0800
 #define EXT2_S_ISGID    0x0400
 #define EXT2_S_ISVTX    0x0200
 
-/* rights */
+// rights
 #define EXT2_S_IRUSR    0x0100
 #define EXT2_S_IWUSR    0x0080
 #define EXT2_S_IXUSR    0x0040
@@ -32,7 +32,7 @@
 #define EXT2_S_IWOTH    0x0002
 #define EXT2_S_IXOTH    0x0001
 
-/* Super block struct. */
+// Super block struct
 struct ext2_superblock
 {
     uint32_t inodes_count;
@@ -64,7 +64,7 @@ struct ext2_superblock
     uint16_t def_resuid;
     uint16_t def_resgid;
 
-    /* EXT2_DYNAMIC_REV */
+    // EXT2_DYNAMIC_REV
     uint32_t first_ino;
     uint16_t inode_size;
     uint16_t block_group_nr;
@@ -79,24 +79,24 @@ struct ext2_superblock
 
     uint32_t algo_bitmap;
 
-    /* Performance Hints */
+    // Performance Hints
     uint8_t prealloc_blocks;
     uint8_t prealloc_dir_blocks;
     uint16_t _padding;
 
-    /* Journaling Support */
+    // Journaling Support
     uint8_t journal_uuid[16];
     uint32_t journal_inum;
     uint32_t jounral_dev;
     uint32_t last_orphan;
 
-    /* Directory Indexing Support */
+    // Directory Indexing Support
     uint32_t hash_seed[4];
     uint8_t def_hash_version;
     uint16_t _padding_a;
     uint8_t _padding_b;
 
-    /* Other Options */
+    // Other Options
     uint32_t default_mount_options;
     uint32_t first_meta_bg;
     uint8_t _unused[760];
@@ -104,11 +104,11 @@ struct ext2_superblock
 } __attribute__ ((packed));
 typedef struct ext2_superblock ext2_superblock_t;
 
-/* Block group descriptor. */
+// Block group descriptor
 struct ext2_bgdescriptor
 {
     uint32_t block_bitmap;
-    uint32_t inode_bitmap;        // block no. of inode bitmap
+    uint32_t inode_bitmap; // Block no. of inode bitmap
     uint32_t inode_table;
     uint16_t free_blocks_count;
     uint16_t free_inodes_count;
@@ -118,13 +118,13 @@ struct ext2_bgdescriptor
 } __attribute__ ((packed));
 typedef struct ext2_bgdescriptor ext2_bgdescriptor_t;
 
-/* This is not actually the inode table.
- * It represents an inode in an inode table on disk. */
+// This is not actually the inode table
+// It represents an inode in an inode table on disk
 struct ext2_inodetable
 {
     uint16_t mode;
     uint16_t uid;
-    uint32_t size;  // file length in byte.
+    uint32_t size; // file length in byte
     uint32_t atime;
     uint32_t ctime;
     uint32_t mtime;
@@ -143,14 +143,14 @@ struct ext2_inodetable
 } __attribute__ ((packed));
 typedef struct ext2_inodetable ext2_inodetable_t;
 
-/* Represents directory entry on disk. */
+// Represents directory entry on disk
 struct ext2_dir
 {
     uint32_t inode;
     uint16_t rec_len;
     uint8_t name_len;
     uint8_t file_type;
-    char name[];    /* Actually a set of characters, at most 255 bytes */
+    char name[]; // Actually a set of characters, at most 255 bytes
 } __attribute__ ((packed));
 typedef struct ext2_dir ext2_dir_t;
 

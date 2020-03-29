@@ -1,9 +1,9 @@
 #ifndef _KERNEL_SERIAL_H
 #define _KERNEL_SERIAL_H
 
-#include <stddef.h> /* size_t */
-#include <kernel/kernel.h> /* asm volatile macro */
-#include <string.h> /* strlen */
+#include <stddef.h> // size_t
+#include <kernel/kernel.h> // asm volatile macro
+#include <string.h> // strlen
 
 #define _inline inline __attribute__((always_inline))
 

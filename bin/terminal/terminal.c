@@ -31,11 +31,13 @@ void handle_input_string(char * c);
 
 int main( void )
 {
+    // Initialize global variables
     terminal_row = 0;
     terminal_column = 0;
     terminal_color = vga_entry_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
     terminal_buffer = VGA_MEMORY;
 
+    // Open pty, setup pty slave FILE pointer
     openpty(&fd_master, &fd_slave, NULL, NULL, NULL);
     terminal = fdopen(fd_slave, "w");
 
@@ -46,10 +48,10 @@ int main( void )
     pty_winsize.ws_ypixel = 0;
     ioctl(fd_master, TIOCSWINSZ, &pty_winsize);
 
+    // Clear current screen
     terminal_clear();
 
-    fflush(stdin);
-
+    // Setup signal handlers
     signal(SIGUSR2, sig_suspend_input);
     signal(SIGCHLD, sig_child_exit);
 
@@ -57,7 +59,9 @@ int main( void )
 
     if( f == 0 )
     {
-        setsid();
+        // Child process
+        setsid(); // Start new session
+        // Setup pty slave as standard streams for shell
         dup2(fd_slave, 0);
         dup2(fd_slave, 1);
         dup2(fd_slave, 2);
@@ -66,6 +70,7 @@ int main( void )
         execvp("/bin/sh", arg);
     }else
     {
+        // Parent process
         int kfd = open("/dev/kbd", O_RDONLY);
         int ret;
         char c;
@@ -77,16 +82,19 @@ int main( void )
 
         while( !exit_terminal )
         {
+            // Wait on keyboard/pty master, or 200ms
             int index = fswait2(2, fds, 200);
 
             if( input_stopped ) continue;
 
             if( index == 0 )
             {
+                // Read data out of pty master buffer and write it
                 ret = read(fd_master, buf, 1024);
                 terminal_write(buf, ret);
             }else if ( index == 1 )
             {
+                // Read data from keyboard pipe, handle key event
                 ret = read(kfd, &c, 1);
 
                 if( ret > 0 )
@@ -101,11 +109,13 @@ int main( void )
     return 0;
 }
 
+// Utility function, output byte to serial port
 static inline void outportb( unsigned short _port, unsigned char _data )
 {
     asm volatile("outb %1, %0" :: "dN"(_port), "a"(_data));
 }
 
+// Update VGA text mode cursor to position
 static void update_cursor( int x, int y )
 {
      uint16_t pos = y * VGA_WIDTH + x;
@@ -116,9 +126,9 @@ static void update_cursor( int x, int y )
      outportb(0x3D5, (uint8_t)((pos >> 8) & 0xFF));
 }
 
+// Set every character to ' ', reset terminal position variables
 void terminal_clear( void )
 {
-    /* Clear screen */
     for (size_t y = 0; y < VGA_HEIGHT; y++) 
     {
 		for (size_t x = 0; x < VGA_WIDTH; x++) 
@@ -131,10 +141,9 @@ void terminal_clear( void )
     terminal_row = 0;
     terminal_column = 0;
     update_cursor(terminal_row, terminal_column);
-    
-    signal(SIGUSR1, (void(*)(int))terminal_clear);
 }
 
+// Move all lines up 1, deleting top line, fill bottom line with ' '
 void terminal_scroll( size_t rows )
 {
     for( size_t i = 0; i < rows; i++ )
@@ -148,22 +157,25 @@ void terminal_scroll( size_t rows )
     }
 }
 
+// Set terminal text colour
 void terminal_setcolor( uint8_t color ) 
 {
 	terminal_color = color;
 }
 
+// Put char at position in VGA buffer
 static void terminal_putentryat( unsigned char c, uint8_t color, size_t x, size_t y ) 
 {
 	const size_t index = y * VGA_WIDTH + x;
 	terminal_buffer[index] = vga_entry(c, color);
 }
 
+// Handle input character, special characters do things, normal characters printed to terminal
 void terminal_putchar( char c ) 
 {
 	unsigned char uc = (unsigned char)c;
 
-    /* Handle special characters */
+    // Handle special characters
 	if( uc == '\n' )
     {
         terminal_column = 0;
@@ -190,9 +202,9 @@ void terminal_putchar( char c )
         {
             terminal_column--;
         }
-        /* Replace whatever character was at this location with ' ' */
+        // Replace whatever character was at this location with ' '
         terminal_putentryat(' ', terminal_color, terminal_column, terminal_row);
-    }else if( uc > 31 ) /* Print only printable ascii characters */
+    }else if( uc > 31 ) // Print only printable ascii characters
     {
         terminal_putentryat(uc, terminal_color, terminal_column, terminal_row);
     
@@ -210,6 +222,7 @@ void terminal_putchar( char c )
     }
 }
 
+// Write data with known size to terminal, then update cursor after write
 void terminal_write( const char* data, size_t size ) 
 {
 	for (size_t i = 0; i < size; i++)
@@ -219,11 +232,13 @@ void terminal_write( const char* data, size_t size )
     update_cursor(terminal_column, terminal_row);
 }
 
+// Wrapper function for terminal_write, for strings
 void terminal_writestring( const char* data ) 
 {
 	terminal_write(data, strlen(data));
 }
 
+// Stop terminal input, input will no longer be processed by main loop
 static void sig_suspend_input( int sig __attribute__((unused)) )
 {
     char* exit_message = "[Input stopped]\n";
@@ -234,6 +249,7 @@ static void sig_suspend_input( int sig __attribute__((unused)) )
     signal(SIGUSR2, sig_suspend_input);
 }
 
+// Child process has exited, disable VGA cursor, then exit
 static void sig_child_exit( int sig __attribute__ ((unused)) )
 {
     terminal_writestring("\n[Process completed]");
@@ -244,11 +260,13 @@ static void sig_child_exit( int sig __attribute__ ((unused)) )
     exit_terminal = 1;
 }
 
+// Write char into pty master buffer
 void handle_input_char( char c )
 {
 	write(fd_master, &c, 1);
 }
 
+// Write string into pty master buffer
 void handle_input_string( char* c )
 {
 	write(fd_master, c, strlen(c));

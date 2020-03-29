@@ -9,11 +9,11 @@
 #define TOK_BUFSIZE 64
 #define TOK_DELIM " \t\r\n\a"
 
-
 int sh_cd( char** args );
 int sh_help( char** args );
 int sh_exit( char** args );
 
+// Builtin function names
 char* builtin_str[] =
 {
     "cd",
@@ -21,6 +21,7 @@ char* builtin_str[] =
     "exit",
 };
 
+// Builtin function pointers
 int (*builtin_func[])( char** ) =
 {
     &sh_cd,
@@ -33,6 +34,7 @@ int sh_num_builtins()
     return sizeof(builtin_str) / sizeof(char*);
 }
 
+// Change directory
 int sh_cd( char** args )
 {
     if( args[1] == NULL )
@@ -40,7 +42,8 @@ int sh_cd( char** args )
         fprintf(stderr, "sh: expected argument to cd\n");
     }else
     {
-/*        if( chdr(args[1]) != 0 )
+        // No chdr yet
+        /*if( chdr(args[1]) != 0 )
         {
             perror("sh");
         }*/
@@ -49,6 +52,7 @@ int sh_cd( char** args )
     return 1;
 }
 
+// Display help text
 int sh_help( char** args __attribute__((unused)) )
 {
     printf("seraph shell (/bin/sh)\n");
@@ -62,11 +66,13 @@ int sh_help( char** args __attribute__((unused)) )
     return 1;
 }
 
+// Exit shell
 int sh_exit( char** args __attribute__((unused)) )
 {
     return 0;
 }
 
+// Fork and execvp, wait for child to exit
 int sh_launch( char** args )
 {
     pid_t pid;
@@ -75,7 +81,7 @@ int sh_launch( char** args )
     pid = fork();
     if( pid == 0 )
     {
-        //child
+        // Child process
         if( execvp(args[0], args) == -1 )
         {
             perror("sh");
@@ -83,9 +89,11 @@ int sh_launch( char** args )
         exit(EXIT_FAILURE);
     }else if( pid < 0 )
     {
+        // Fork error
         perror("sh");
     }else
     {
+        // Parent process
         do{
             waitpid(pid, &status, WUNTRACED);
         }while( !WIFEXITED(status) && !WIFSIGNALED(status) );
@@ -94,6 +102,7 @@ int sh_launch( char** args )
     return 1;
 }
 
+// Check if command is builtin, if not run sh_launch
 int sh_execute( char** args )
 {
     if( args[0] == NULL )
@@ -112,6 +121,7 @@ int sh_execute( char** args )
     return sh_launch(args);
 }
 
+// Read line of input from stdio, replace \n with \0
 char* sh_readline( void )
 {
     int bufsize = RL_BUFSIZE;
@@ -155,6 +165,7 @@ char* sh_readline( void )
     }
 }
 
+// Split line into different strings, return array of arguments
 char** sh_splitline( char* line )
 {
     int bufsize = TOK_BUFSIZE;
@@ -194,6 +205,7 @@ char** sh_splitline( char* line )
     return tokens;
 }
 
+// Main shell loop: prompt, readline, splitline, execute
 void sh_loop( void )
 {
     char* line;
@@ -203,9 +215,9 @@ void sh_loop( void )
     do{
         printf("> ");
         fflush(stdout);
-        line = sh_readline();
-        args = sh_splitline(line);
-        status = sh_execute(args);
+        line = sh_readline(); // Read line from stdin
+        args = sh_splitline(line); // Split line into tokens
+        status = sh_execute(args); // Execute tokenized input 
 
         free(line);
         free(args);
@@ -214,9 +226,12 @@ void sh_loop( void )
 
 int main( void )
 {
+    // TODO: setup
     setlinebuf(stdout);
 
+    // Main shell loop
     sh_loop();
 
+    // TODO: cleanup
     return EXIT_SUCCESS;
 }

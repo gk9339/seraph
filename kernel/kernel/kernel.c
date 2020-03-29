@@ -29,7 +29,7 @@
 
 #define CHECK_FLAG(flags,bit) ((flags)&(1<<(bit)))
 
-#define EARLY_KERNEL_DEBUG 1
+#define EARLY_KERNEL_DEBUG 1 // Early debug messages to serial
 
 uintptr_t initial_esp = 0;
 
@@ -44,14 +44,14 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
     debug_log("Start kernel_main");
 #endif
 
-    /* CPU Initialization */
+    // CPU Initialization
 #if EARLY_KERNEL_DEBUG
     debug_log("GDT / IDT initialization");
 #endif
     gdt_initialize();
     idt_initialize();
 
-    /* Multiboot check */
+    // Multiboot check
     if( magic != MULTIBOOT_BOOTLOADER_MAGIC )
     {
         KPANIC("INVALID MAGIC NUMBER", NULL);
@@ -59,20 +59,20 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
     mbi = (multiboot_info_t*)addr;
     initial_esp = esp;
  
-    /* Terminal Initialization */
+    // Terminal Initialization
     if( CHECK_FLAG(debug, 0) ) debug_log("Terminal initialization");
     terminal_initialize();
     printf("Kernel Initializing\n");
 
 #if EARLY_KERNEL_DEBUG
-    /* Multiboot boot device */
+    // Multiboot boot device
     if (CHECK_FLAG (mbi->flags, 1))
     {
         debug_logf(debug_str, "boot_device = 0x%x\n", (unsigned) mbi->boot_device);
     }
 #endif
 
-    /* Multiboot modules */
+    // Multiboot modules
     uintptr_t last_mod = (uintptr_t)&_kernel_end;
     if( CHECK_FLAG(mbi->flags, 5) ) /* mods */
     {
@@ -124,14 +124,14 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
     while(last_mod & 0x7FF) last_mod++;
     kmalloc_startat(last_mod);
     
-    /* Memory Initialization */
-    if( !CHECK_FLAG(mbi->flags, 0) ) /* mem_upper/mem_lower  */
+    // Memory initialization
+    if( !CHECK_FLAG(mbi->flags, 0) ) // mem_upper/mem_lower
     {
         KPANIC("Missing MEM flag in multiboot header", NULL)
     }
     paging_initialize(mbi->mem_lower + mbi->mem_upper);
 
-    if( CHECK_FLAG(mbi->flags, 6) ) /* mmap */
+    if( CHECK_FLAG(mbi->flags, 6) ) // mmap
     {
 #if EARLY_KERNEL_DEBUG
         debug_log("\nParsing memory map.");
@@ -166,9 +166,9 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
 #endif
     paging_finalize();
 
-    /* Parse cmdline */
+    // Parse cmdline
     char cmdline[1024];
-    if( CHECK_FLAG(mbi->flags, 2) ) /* cmdline */
+    if( CHECK_FLAG(mbi->flags, 2) ) // cmdline
     {
         size_t len = strlen((char*)mbi->cmdline);
         memmove(cmdline, (char*)mbi->cmdline, len + 1);
@@ -187,7 +187,7 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
         debug = (uint8_t)(debug + 2);
     }
 
-    /* Interrupts Initialization */
+    // Interrupts Initialization
     if( CHECK_FLAG(debug, 0) ) debug_log("Interrupts initialization");
     if( CHECK_FLAG(debug, 1) ) printf("Interrupts initialization\n");
     isr_initialize();
@@ -225,8 +225,8 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
     if( CHECK_FLAG(debug, 1) ) printf("Initialize fs types\n");
     ustar_initialize();
 
-    /* Load modules from bootloader */
-    if( CHECK_FLAG(mbi->flags, 5) ) /* mods */
+    // Load modules from bootloader
+    if( CHECK_FLAG(mbi->flags, 5) ) // mods
     {
         if( CHECK_FLAG(debug, 0) ) debug_logf(debug_str, "%d modules to load", mboot_mods_count);
         if( CHECK_FLAG(debug, 1) ) printf("%d modules to load\n", mboot_mods_count);
@@ -243,14 +243,14 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
         }
     }
     
-    /* virtual dev filesystem */
+    // Virtual dev filesystem
     if( CHECK_FLAG(debug, 0) ) debug_log("\nSetup /dev");
     if( CHECK_FLAG(debug, 1) ) printf("\nSetup /dev\n");
     map_vfs_directory("/dev");
     zero_initialize();
     null_initialize();
     
-    /* ramfs initialization */
+    // ramfs initialization
     if( CHECK_FLAG(debug, 0) ) debug_log("Setup root mount");
     if( CHECK_FLAG(debug, 1) ) printf("Setup root mount\n");
     if( args_present("root") )
@@ -273,7 +273,7 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
         KPANIC("Root mount failed", NULL)
     }
 
-    /* Set up environment for /sbin/init */
+    // Set up environment for /sbin/init
     char* boot_exec = "/sbin/init";
     char* boot_arg = NULL;
     char* argv[] =
@@ -289,12 +289,12 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
         argc++;
     }
 
-    /* Start /sbin/init */
+    // Start /sbin/init
     if( CHECK_FLAG(debug, 0) ) debug_log("Starting /sbin/init\n");
     if( CHECK_FLAG(debug, 1) ) printf("Starting /sbin/init\n");
     system(argv[0], argc, argv, NULL);
     
-    /* Something went very wrong */
+    // Something went very wrong
     KPANIC("INIT FAILED", NULL);
 }
 

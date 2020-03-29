@@ -1,10 +1,10 @@
 #ifndef _KERNEL_PIPE_H
 #define _KERNEL_PIPE_H
 
-#include <sys/types.h>
-#include <kernel/fs.h>
-#include <stddef.h>
-#include <list.h>
+#include <stdint.h> // intN_t
+#include <kernel/fs.h> // fs_node_t
+#include <stddef.h> // size_t
+#include <list.h> // list_t
 
 typedef struct _pipe_device
 {

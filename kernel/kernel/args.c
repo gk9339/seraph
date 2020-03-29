@@ -7,6 +7,7 @@
 
 hashtable_t* kernel_args_table = NULL;
 
+// Tokenize str with seperators sep into buf, terminated in NULL
 static int tokenize( char* str, char* sep, char** buf )
 {
     char* pch_i;
@@ -14,7 +15,10 @@ static int tokenize( char* str, char* sep, char** buf )
     int argc = 0;
 
     pch_i = strtok_r(str, sep, &save_i);
-    if( !pch_i ) return 0;
+    if( !pch_i )
+    {
+        return 0;
+    }
 
     while( pch_i != NULL )
     {
@@ -27,20 +31,24 @@ static int tokenize( char* str, char* sep, char** buf )
     return argc;
 }
 
+// Test if karg is present in kernel arguments
 int args_present( char* karg )
 {
     return hashtable_has(kernel_args_table, karg);
 }
 
+// Get value of karg from kernel arguments
 char* args_value( char* karg )
 {
     return hashtable_get(kernel_args_table, karg);
 }
 
+// Parse cmdline as new kernel arguments
 void args_parse( char* cmdline )
 {
-    char* arg = strdup(cmdline);
-    char* argv[1024];
+    char* arg = strdup(cmdline),
+          argv[1024],
+          c, v, name, value;
     int argc = tokenize(arg, " ", argv);
 
     if( !kernel_args_table )
@@ -50,14 +58,14 @@ void args_parse( char* cmdline )
 
     for( int i = 0; i < argc; i++ )
     {
-        char* c = strdup(argv[i]);
-        char* name;
-        char* value;
+        c = strdup(argv[i]);
+        name;
+        value;
 
         name = c;
         value = NULL;
 
-        char* v = c;
+        v = c;
         while( *v )
         {
             if( *v == '=' )

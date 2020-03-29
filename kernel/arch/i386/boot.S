@@ -2,14 +2,14 @@
 #include <kernel/multiboot.h>
 
 # Declare constants for the multiboot header.
-.set ALIGN,    MULTIBOOT_PAGE_ALIGN 	# align loaded modules on page boundaries
-.set MEMINFO,  MULTIBOOT_MEMORY_INFO 	# provide memory map
-.set VIDEO,    MULTIBOOT_VIDEO_MODE 	# provide video mode
-.set FLAGS,    ALIGN | MEMINFO | VIDEO	# Multiboot 'flag' field
-.set MAGIC,    0x1BADB002       		# 'magic number' lets bootloader find the header
-.set CHECKSUM, -(MAGIC + FLAGS) 		# checksum of above, to prove we are multiboot
+.set ALIGN,    MULTIBOOT_PAGE_ALIGN    # Align loaded modules on page boundaries
+.set MEMINFO,  MULTIBOOT_MEMORY_INFO   # Provide memory map
+.set VIDEO,    MULTIBOOT_VIDEO_MODE    # Provide video mode
+.set FLAGS,    ALIGN | MEMINFO | VIDEO # Multiboot 'flag' field
+.set MAGIC,    0x1BADB002              # 'magic number' lets bootloader find the header
+.set CHECKSUM, -(MAGIC + FLAGS)        # Checksum of above, to prove we are Multiboot
 
-# Declare a header as in the Multiboot Standard.
+# Declare a header as in the Multiboot standard.
 .section .multiboot
 .align 4
 .long MAGIC
@@ -27,25 +27,25 @@ stack_bottom:
 .skip 16384 # 16 KiB
 stack_top:
 
-# The kernel entry point.
+# The kernel entry point
 .section .text
 .global _start
 .type _start, @function
 _start:
-	# Set up the stack
-	mov $stack_top, %esp
-	and $-16, %esp
+    # Set up the stack
+    mov $stack_top, %esp
+    and $-16, %esp
 
-	# Push the pointer to the stack, multiboot struct and magic value
-	pushl %esp
+    # Push the pointer to the stack, multiboot struct and magic value
+    pushl %esp
     pushl %ebx
-	pushl %eax
+    pushl %eax
 
-	# Enter the high-level kernel
-	cli
-	call kernel_main
+    # Enter the high-level kernel
+    cli
+    call kernel_main
 
-	# Infinite loop if the system has nothing more to do
-	cli
-1:	hlt
-	jmp 1b
+    # Infinite loop if the system has nothing more to do
+    cli
+1:  hlt
+    jmp 1b

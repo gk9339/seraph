@@ -75,6 +75,6 @@ void relative_time( unsigned long seconds, unsigned long subseconds,
 void timer_initialize( void )
 {
     boot_time = read_cmos();
-    irq_install_handler(TIMER_IRQ, timer_handler, "pit timer");
+    irq_install_handler(TIMER_IRQ, timer_handler, "PIT timer interrupt");
     timer_phase(SUBTICKS_PER_TICK);
 }

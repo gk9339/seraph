@@ -24,6 +24,7 @@ int main( int argc, char** argv )
     }
     if( argc == 1 )
     {
+        //use default directory '.'
         argpath = ".";
     }else
     {
@@ -35,6 +36,7 @@ int main( int argc, char** argv )
 
     if( dr == NULL )
     {
+        //opendir failed
         printf("Couldn't open %s.\n", argpath);
         exit(1);
     }else
@@ -48,6 +50,8 @@ int main( int argc, char** argv )
 
             if( lstat(path, &st) < 0 )
             {
+                //lstat failed
+                free(path);
                 continue;
             }
 
@@ -69,6 +73,7 @@ int main( int argc, char** argv )
                 printf("/");
             }
             printf("\n");
+
             free(path);
         }
         closedir(dr);

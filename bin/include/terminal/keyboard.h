@@ -157,7 +157,7 @@ typedef struct
     kbd_mod_t modifiers;
     kbd_act_t action;
 
-    unsigned char key; /* Key as a raw code, ready for reading, or \0 if it's not a good down strike / was a modifier change / etc/. */
+    unsigned char key; // Key as a raw code, ready for reading, or \0 if it's not a good down strike / was a modifier change / etc/
 } key_event_t;
 
 typedef struct
@@ -183,8 +183,12 @@ typedef struct
     int kbd_esc_buf;
 } key_event_state_t;
 
-void key_event( int ret, key_event_t* event );
-kbd_key_t kbd_key( key_event_state_t* state, unsigned char c );
-int kbd_scancode( key_event_state_t* state, unsigned char c, key_event_t* event );
+// Functions to be provided by terminal or similar
+extern void handle_input_char( char );
+extern void handle_input_string( char* );
+
+void key_event( int ret, key_event_t* event ); // Process keystroke into terminal input strings
+kbd_key_t kbd_key( key_event_state_t* state, unsigned char c ); // Converts from incoming char to kbd_key_t, depending on current status
+int kbd_scancode( key_event_state_t* state, unsigned char c, key_event_t* event ); // Converts from scancodes into key_event_t
 
 #endif

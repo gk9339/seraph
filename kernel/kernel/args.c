@@ -47,8 +47,8 @@ char* args_value( char* karg )
 void args_parse( char* cmdline )
 {
     char* arg = strdup(cmdline),
-          argv[1024],
-          c, v, name, value;
+          *argv[1024],
+          *c, *v, *name, *value;
     int argc = tokenize(arg, " ", argv);
 
     if( !kernel_args_table )
@@ -59,8 +59,6 @@ void args_parse( char* cmdline )
     for( int i = 0; i < argc; i++ )
     {
         c = strdup(argv[i]);
-        name;
-        value;
 
         name = c;
         value = NULL;

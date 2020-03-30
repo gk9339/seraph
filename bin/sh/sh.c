@@ -84,7 +84,7 @@ int sh_launch( char** args )
         // Child process
         if( execvp(args[0], args) == -1 )
         {
-            perror("sh");
+            printf("sh: Command not found\n");
         }
         exit(EXIT_FAILURE);
     }else if( pid < 0 )

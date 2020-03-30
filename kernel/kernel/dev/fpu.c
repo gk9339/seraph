@@ -57,16 +57,19 @@ static void init_fpu( void )
     asm volatile("fninit");
 }
 
+// Save FPU registers when switching away from process
 void switch_fpu( void )
 {
     save_fpu((process_t*)current_process);
 }
 
+// Restore FPU registers when switching to process
 void unswitch_fpu( void )
 {
     restore_fpu((process_t*)current_process);
 }
 
+// Enable / initialize FPU
 void fpu_initialize( void )
 {
     enable_fpu();

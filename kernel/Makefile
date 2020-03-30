@@ -69,7 +69,7 @@ $(KERNEL_OBJS) \
 $(LIBS) \
 $(ARCHDIR)/crtn.o \
 
-.PHONY: all clean install install-headers install-kernel
+.PHONY: all clean install install-headers
 .SUFFIXES: .o .c .S
 
 all: seraph.kernel

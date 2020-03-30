@@ -29,6 +29,7 @@ signed long _timer_drift = 0;
 
 static int behind = 0;
 
+// Set timer interval to value in hertz
 static void timer_phase( int hz )
 {
     int divisor = PIT_SCALE / hz;
@@ -37,6 +38,7 @@ static void timer_phase( int hz )
     outportb(PIT_A, (unsigned char)(divisor >> 8) & PIT_MASK);
 }
 
+// IRQ handler for timer (IRQ0), switch to next task
 static int timer_handler( struct regs* r __attribute__((unused)) )
 {
     if( ++timer_subticks == SUBTICKS_PER_TICK || (behind && ++timer_subticks == SUBTICKS_PER_TICK) )
@@ -58,8 +60,8 @@ static int timer_handler( struct regs* r __attribute__((unused)) )
     return 1;
 }
 
-void relative_time( unsigned long seconds, unsigned long subseconds, 
-                    unsigned long* out_seconds, unsigned long* out_subseconds )
+// Convert from relative time to absolute time
+void relative_time( unsigned long seconds, unsigned long subseconds, unsigned long* out_seconds, unsigned long* out_subseconds )
 {
     if( subseconds + timer_subticks > SUBTICKS_PER_TICK )
     {
@@ -72,6 +74,7 @@ void relative_time( unsigned long seconds, unsigned long subseconds,
     }
 }
 
+// Initialize boot time, install time IRQ, setup timer subticks
 void timer_initialize( void )
 {
     boot_time = read_cmos();

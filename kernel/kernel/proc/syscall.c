@@ -41,7 +41,7 @@ static void ptr_validate( void* ptr, const char* syscall )
 
 static int __attribute__((noreturn)) sys_exit( int retval )
 {
-    task_exit((retval & 0xFF) << 8);
+    task_exit(retval);
     while(1);
 }
 
@@ -368,7 +368,6 @@ static int stat_node( fs_node_t* fn, uintptr_t st )
     if( !fn )
     {
         memset(f, 0, sizeof(struct stat));
-        debug_log("stat: file does not exist");
         return -ENOENT;
     }
 

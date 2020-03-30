@@ -28,6 +28,7 @@ uint32_t first_n_frames(int n);
 uint32_t* frames;
 uint32_t nframes;
 
+// Set start of kernel heap
 void kmalloc_startat( uintptr_t address )
 {
     placement_pointer = address;
@@ -279,28 +280,20 @@ void paging_finalize( void )
 {
     get_page(0, 1, kernel_directory)->present = 0;
     set_frame(0);
-    
-    for( uintptr_t i = 0x1000; i < 0x80000; i += 0x1000 )
-    {
-        dma_frame(get_page(i, 1, kernel_directory), 1, 0, i);
-    }
-    
-    for( uintptr_t i = 0x80000; i < 0x100000; i += 0x1000 )
-    {
-        dma_frame(get_page(i, 1, kernel_directory), 1, 0, i);
-    }
 
-    for( uintptr_t i = 0x100000; i < placement_pointer + 0x3000; i += 0x1000 )
+    // Setup kernel frames read only
+    for( uintptr_t i = 0x1000; i < placement_pointer + 0x3000; i += 0x1000 )
     {
         dma_frame(get_page(i, 1, kernel_directory), 1, 0, i);
     }
-
-    /* Mapping VGA text-mode */
+    
+    // Mapping VGA text-mode 
     for( uintptr_t j = 0xb8000; j < 0xc0000; j += 0x1000 )
     {
         dma_frame(get_page(j, 0, kernel_directory), 0, 1, j);
     }
 
+    // Install page fault handler
     isr_install_handler(14, page_fault);
     kernel_directory->physical_address = (uintptr_t)kernel_directory->physical_tables;
 
@@ -312,13 +305,13 @@ void paging_finalize( void )
         kernel_heap_alloc_point = tmp_heap_start;
     }
 
-    /* Kernel heap space */
+    // Kernel heap space
     for( uintptr_t i = placement_pointer + 0x3000; i < tmp_heap_start; i += 0x1000 )
     {
         alloc_frame(get_page(i, 1, kernel_directory), 1, 0);
     }
 
-    /* Preallocate page entries for the rest of the kernel heap */
+    // Preallocate page entries for the rest of the kernel heap
     for( uintptr_t i = tmp_heap_start; i < KERNEL_HEAP_END; i += 0x1000 )
     {
         get_page(i, 1, kernel_directory);

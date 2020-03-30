@@ -30,6 +30,7 @@ static struct {
     tss_entry_t tss;
 } gdt __attribute__((used));
 
+// Utility function to setup GDT segment
 void gdt_set_gate( uint8_t num, uint64_t base, uint64_t limit, uint8_t access, uint8_t gran )
 {
     // Base address
@@ -48,24 +49,28 @@ void gdt_set_gate( uint8_t num, uint64_t base, uint64_t limit, uint8_t access, u
     ENTRY(num).access = access;
 }
 
+// Setup and then load GDT
 void gdt_initialize( void )
 {
+    // Setup GDT pointer and struct
     gdt_pointer_t *gdtptr = &gdt.pointer;
     gdtptr->limit = sizeof(gdt.entries) - 1;
     gdtptr->base = (uintptr_t)&ENTRY(0);
 
+    // Add main segments to GDT
     gdt_set_gate(0, 0, 0, 0, 0);                // NULL segment
     gdt_set_gate(1, 0, 0xFFFFFFFF, 0x9A, 0xCF); // Code segment
     gdt_set_gate(2, 0, 0xFFFFFFFF, 0x92, 0xCF); // Data segment
     gdt_set_gate(3, 0, 0xFFFFFFFF, 0xFA, 0xCF); // User code
     gdt_set_gate(4, 0, 0xFFFFFFFF, 0xF2, 0xCF); // User data
 
-    write_tss(5, 0x10, 0x0);
+    write_tss(5, 0x10, 0x0); // Add TSS segment to GDT
 
-    gdt_flush((uintptr_t)gdtptr);
-    tss_flush();
+    gdt_flush((uintptr_t)gdtptr); // Load GDT (gdt.S)
+    tss_flush(); // Load TSS (tss.S)
 }
 
+// Add TSS Segment to GDT
 static void write_tss( int32_t num, uint16_t ss0, uint32_t esp0 )
 {
     tss_entry_t* tss = &gdt.tss;

@@ -9,6 +9,7 @@
 
 static fs_node_t* keyboard_pipe;
 
+// Keyboard IRQ handler, writes scancode to keyboard pipe
 static int keyboard_handler( struct regs *r __attribute__((unused)) )
 {
     if(inportb(KEY_PENDING) & 0x01)
@@ -20,6 +21,7 @@ static int keyboard_handler( struct regs *r __attribute__((unused)) )
     return 1;
 }
 
+// Create and mount keyboard pipe, install keyboard IRQ
 int keyboard_install( void )
 {
     keyboard_pipe = make_pipe(128);

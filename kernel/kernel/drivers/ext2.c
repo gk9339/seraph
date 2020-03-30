@@ -2,6 +2,7 @@
 #include <kernel/fs.h>
 #include <kernel/kernel.h>
 
+// Placeholder ext2 mount
 static fs_node_t* ext2_fs_mount( char* device, char* mount_path )
 {
     (void)device, (void)mount_path;

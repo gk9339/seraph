@@ -7,7 +7,7 @@
 #include <sys/signals.h>
 #include <signal.h>
 #include <sys/fswait.h>
-#include <terminal/keyboard.h>
+#include <libkbd/libkbd.h>
 
 static const size_t VGA_WIDTH = 80;
 static const size_t VGA_HEIGHT = 25;
@@ -100,7 +100,7 @@ int main( void )
                 if( ret > 0 )
                 {
                     ret = kbd_scancode(&kbd_state, c, &event);
-                    key_event(ret, &event);
+                    handle_input_string(key_event(ret, &event));
                 }
             }
         }
@@ -204,6 +204,9 @@ void terminal_putchar( char c )
         }
         // Replace whatever character was at this location with ' '
         terminal_putentryat(' ', terminal_color, terminal_column, terminal_row);
+    }else if( uc == '\r' )
+    {
+        terminal_column = 0;
     }else if( uc > 31 ) // Print only printable ascii characters
     {
         terminal_putentryat(uc, terminal_color, terminal_column, terminal_row);
@@ -269,5 +272,8 @@ void handle_input_char( char c )
 // Write string into pty master buffer
 void handle_input_string( char* c )
 {
-	write(fd_master, c, strlen(c));
+    if( c != NULL )
+    {
+	    write(fd_master, c, strlen(c));
+    }
 } 

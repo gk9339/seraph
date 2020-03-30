@@ -2,44 +2,34 @@ DEFAULT_HOST!=../script/default-host.sh
 HOST?=DEFAULT_HOST
 HOSTARCH!=../script/target-triplet-to-arch.sh $(HOST)
 
-PREFIX?=/bin
+PREFIX?=/lib
 EXEC_PREFIX?=$(PREFIX)
-BINDIR?=$(EXEC_PREFIX)/bin
 INCLUDEDIR?=$(PREFIX)/include
+LIBDIR?=$(EXEC_PREFIX)/lib
 
-CFLAGS:=$(CFLAGS) -Wall -Wextra -O1
+CFLAGS:=$(CFLAGS) -shared -fPIC -Wall -Wextra -O1
 LDFLAGS:=$(LDFLAGS)
 LIBS:=$(LIBS)
 
 OBJS=\
-terminal/terminal.o \
-sh/sh.o \
-ls/ls.o \
+libkbd/libkbd.o
 
-EXECS=\
-terminal/terminal \
-sh/sh \
-ls/ls \
+LIBS=\
+libkbd/libkbd.so
 
 .PHONY: all clean install install-headers
 .SUFFIXES: .o .c
 
-all: $(OBJS) $(EXECS)
+all: $(OBJS) $(LIBS)
 
 .c.o:
 	$(CC) -MD -c $< -o $@ -std=gnu11 $(CFLAGS)
 
-terminal/terminal: terminal/terminal.o
-	$(CC) $^ -o $@ $(CFLAGS)$(LIBS) -lkbd
-
-sh/sh: sh/sh.o
-	$(CC) $^ -o $@ $(CFLAGS)$(LIBS)
-
-ls/ls: ls/ls.o
-	$(CC) $^ -o $@ $(CFLAGS)$(LIBS)
+libkbd/libkbd.so: libkbd/libkbd.o
+	$(CC) $^ -o $@ $(CFLAGS)
 
 clean:
-	rm -f $(EXECS)
+	rm -f $(LIBS)
 	rm -f $(OBJS) */*.d
 
 include:
@@ -49,8 +39,8 @@ install-headers: include
 	mkdir -p $(DESTDIR)$(INCLUDEDIR)
 	cp -R --preserve=timestamps include/. $(DESTDIR)$(INCLUDEDIR)/.
 
-install: $(EXECS)
-	mkdir -p $(DESTDIR)$(BINDIR)
-	cp $(EXECS) $(DESTDIR)$(BINDIR)
+install: $(LIBS)
+	mkdir -p $(DESTDIR)$(LIBDIR)
+	cp $(LIBS) $(DESTDIR)$(LIBDIR)
 
 -include $(OBJS:.o=.d)

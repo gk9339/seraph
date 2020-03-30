@@ -17,7 +17,7 @@ init/init.o \
 EXECS=\
 init/init \
 
-.PHONY: all clean install install-headers install-sbin
+.PHONY: all clean install install-headers
 .SUFFIXES: .o .c
 
 all: $(OBJS) $(EXECS)

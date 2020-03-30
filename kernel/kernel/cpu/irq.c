@@ -8,7 +8,7 @@
 #include <kernel/idt.h>
 #include <sys/types.h>
 
-/* Programmable interrupt controller */
+// Programmable interrupt controller
 #define PIC1 0x20
 #define PIC1_COMMAND PIC1
 #define PIC1_OFFSET 0x20
@@ -34,14 +34,11 @@
                     );              \
     }while(0)
 
-#define SYNC_CLI() asm volatile("cli");
-#define SYNC_STI() asm volatile("sti");
-
-/* Interrupt requests */
+// Interrupt requests
 #define IRQ_CHAIN_SIZE 16
 #define IRQ_CHAIN_DEPTH 4
 
-/* Interrupts */
+// Interrupts
 static volatile int sync_depth = 0;
 
 static void(*irqs[IRQ_CHAIN_SIZE])(void);
@@ -50,7 +47,7 @@ static char* _irq_handler_descriptions[IRQ_CHAIN_SIZE * IRQ_CHAIN_DEPTH] = {NULL
 
 void int_disable( void )
 {
-    /* Check if enabled first */
+    // Check if enabled first
     uint32_t flags;
     asm volatile(
                 "pushf\n"
@@ -61,8 +58,8 @@ void int_disable( void )
                 :"%eax"
                 );
 
-    /* Disable interrupts */
-    SYNC_CLI();
+    // Disable interrupts
+    asm volatile("cli");
 
     if( flags & ( 1<<9 ) )
     {
@@ -75,10 +72,10 @@ void int_disable( void )
 
 void int_resume( void )
 {
-    /* If there is one or no call depth, reenable */
+    // If there is one or no call depth, reenable
     if( sync_depth == 0 || sync_depth == 1 )
     {
-        SYNC_STI();
+        asm volatile("sti");
     }else
     {
         sync_depth--;
@@ -88,9 +85,10 @@ void int_resume( void )
 void int_enable( void )
 {
     sync_depth = 0;
-    SYNC_STI();
+    asm volatile("sti");
 }
 
+// Used for procfs
 char* get_irq_handler( int irq, int chain )
 {
     if( irq >= IRQ_CHAIN_SIZE ) return NULL;
@@ -98,10 +96,11 @@ char* get_irq_handler( int irq, int chain )
     return _irq_handler_descriptions[IRQ_CHAIN_SIZE * chain + irq];
 }
 
+// Installs handler to IRQ number, and sets description
 void irq_install_handler( size_t irq, irq_handler_chain_t handler, char* desc )
 {
-    /* Disable all interrupts while changing handlers */
-    SYNC_CLI();
+    // Disable all interrupts while changing handlers
+    asm volatile("cli");
     for( size_t i = 0; i < IRQ_CHAIN_DEPTH; i++ )
     {
         if( irq_routines[i * IRQ_CHAIN_SIZE + irq] )
@@ -110,42 +109,50 @@ void irq_install_handler( size_t irq, irq_handler_chain_t handler, char* desc )
         _irq_handler_descriptions[i * IRQ_CHAIN_SIZE + irq] = desc;
         break;
     }
-    SYNC_STI();
+    asm volatile("sti");
 }
 
+// Sets routine pointer and description to NULL, removing previous handler
 void irq_uninstall_handler( size_t irq )
 {
-    /* Disable all interrupts while changing handlers */
-    SYNC_CLI();
+    // Disable all interrupts while changing handlers
+    asm volatile("cli");
     for( size_t i = 0; i < IRQ_CHAIN_DEPTH; i++ )
+    {
         irq_routines[i * IRQ_CHAIN_SIZE + irq] = NULL;
-    SYNC_STI();
+        _irq_handler_descriptions[i * IRQ_CHAIN_SIZE + irq] = NULL;
+    }
+    asm volatile("sti");
 }
 
+// PIC Initialization for IRQs
 static void irq_remap( void )
 {
-    /* Cascade initialization */
+    // Send Initialization command to PIC1 and PIC2
     outportb(PIC1_COMMAND, ICW1_INIT|ICW1_ICW4); PIC_WAIT();
     outportb(PIC2_COMMAND, ICW1_INIT|ICW1_ICW4); PIC_WAIT();
 
-    /* Remap */
+    // Remap PIC1 and PIC2 to their offsets
     outportb(PIC1_DATA, PIC1_OFFSET); PIC_WAIT();
     outportb(PIC2_DATA, PIC2_OFFSET); PIC_WAIT();
 
+    // IRQ2 -> connection to slave
     outportb(PIC1_DATA, 0x04); PIC_WAIT();
     outportb(PIC2_DATA, 0x02); PIC_WAIT();
 
-    /* Request 8086 mode on each PIC */
+    // Request 8086 mode on each PIC
     outportb(PIC1_DATA, 0x01); PIC_WAIT();
     outportb(PIC2_DATA, 0x01); PIC_WAIT();
 }
 
+// Setup IDT gates for IRQs
 static void irq_setup_gates( void )
 {
     for( size_t i = 0; i < IRQ_CHAIN_SIZE; i++ )
         idt_set_gate((uint8_t)(32 + i), irqs[i], 0x08, 0x8E);
 }
 
+// Setup IRQ function table, intialize PICs, install IDT gates
 void irq_initialize( void )
 {
     char buffer[16];
@@ -162,6 +169,7 @@ void irq_initialize( void )
     outportb(0x4D1, val | ( 1 << ( 10 - 8 )) | ( 1 << ( 11 - 8 )));
 }
 
+// ACK to the correct PIC
 void irq_ack( size_t irq_no )
 {
     if( irq_no >= 8 )
@@ -169,9 +177,10 @@ void irq_ack( size_t irq_no )
     outportb(PIC1_COMMAND, PIC_EOI);
 }
 
+// Handle IRQ, if withing valid range, and if a handler is installed
 void irq_handler( struct regs* r )
 {
-    /* Disable interrupts while handling */
+    // Disable interrupts while handling
     int_disable();
     if( r->int_no < 47 && r->int_no >= 32 )
     {

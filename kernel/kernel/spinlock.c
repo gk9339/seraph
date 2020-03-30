@@ -35,7 +35,7 @@ static inline void arch_atomic_dec( volatile int* x )
        );
 }
 
-// switch task while waiting for lock
+// Switch task while waiting for lock
 static void spin_wait( volatile int* addr, volatile int* waiters )
 {
     if( waiters )
@@ -52,6 +52,14 @@ static void spin_wait( volatile int* addr, volatile int* waiters )
     }
 }
 
+// Initialize spinlock
+void spin_init( spin_lock_t lock )
+{
+    lock[0] = 0;
+    lock[1] = 0;
+}
+
+// Lock spinlock
 void spin_lock( spin_lock_t lock )
 {
     while( arch_atomic_swap(lock, 1) )
@@ -60,12 +68,7 @@ void spin_lock( spin_lock_t lock )
     }
 }
 
-void spin_init( spin_lock_t lock )
-{
-    lock[0] = 0;
-    lock[1] = 0;
-}
-
+// Unlock spinlock
 void spin_unlock( spin_lock_t lock )
 {
     if( lock[0] )

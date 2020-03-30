@@ -10,11 +10,11 @@ int main( int argc, char** argv )
 {
     struct dirent* de;
     DIR* dr = NULL;
-    char perm[] = "---------\0";
-    struct stat st;
+    char perm[] = "---------\0",
+         *filename, *argpath, *path;
     //char datestring[256];
-    char* filename;
-    char* argpath;
+    struct stat st;
+    mode_t mode;
     size_t arglen;
 
     if( argc > 2 )
@@ -24,7 +24,7 @@ int main( int argc, char** argv )
     }
     if( argc == 1 )
     {
-        //use default directory '.'
+        // Use default directory '.'
         argpath = ".";
     }else
     {
@@ -36,7 +36,7 @@ int main( int argc, char** argv )
 
     if( dr == NULL )
     {
-        //opendir failed
+        // Opendir failed
         printf("Couldn't open %s.\n", argpath);
         exit(1);
     }else
@@ -45,17 +45,17 @@ int main( int argc, char** argv )
         {
             filename = de->d_name;
             
-            char* path = malloc(arglen + strlen(filename) + 2);
+            path = malloc(arglen + strlen(filename) + 2);
             sprintf(path, "%s/%s", argpath, filename);
 
             if( lstat(path, &st) < 0 )
             {
-                //lstat failed
+                // lstat failed
                 free(path);
                 continue;
             }
 
-            mode_t mode = st.st_mode;
+            mode = st.st_mode;
 
             perm[0] = (mode & S_IRUSR) ? 'r' : '-';
             perm[1] = (mode & S_IWUSR) ? 'w' : '-';

@@ -21,6 +21,7 @@ enum
     CMOS_YEAR = 9
 };
 
+// Request data, then read into array
 static void cmos_dump( uint16_t* values )
 {
     for( uint8_t i = 0; i < 128; i++ )
@@ -30,12 +31,14 @@ static void cmos_dump( uint16_t* values )
     }
 }
 
+// Check if RTC update is in progress
 static int is_update_in_progress( void )
 {
     outportb(CMOS_ADDRESS, 0x0a);
     return inportb(CMOS_DATA) & 0x80;
 }
 
+// Get date/time data from CMOS data
 void get_date( uint16_t* month, uint16_t* day )
 {
     uint16_t values[128];
@@ -45,6 +48,7 @@ void get_date( uint16_t* month, uint16_t* day )
     *day = (uint16_t)from_bcd(values[CMOS_DAY]);
 }
 
+// Convert from years to seconds
 static uint32_t secs_of_years( int years )
 {
     uint32_t days = 0;
@@ -70,6 +74,7 @@ static uint32_t secs_of_years( int years )
     return days * 86400;
 }
 
+// Convert from months of year to seconds
 static uint32_t secs_of_month( int months, int year )
 {
     year += 2000;
@@ -120,6 +125,7 @@ static uint32_t secs_of_month( int months, int year )
     return days * 86400;
 }
 
+// Get CMOS data, convert to time (UNIX time)
 uint32_t read_cmos( void )
 {
     uint16_t values[128];
@@ -153,6 +159,7 @@ uint32_t read_cmos( void )
     return time;
 }
 
+// Get time of day by working off boot time, stored during timer initialization, and timer ticks since then
 int gettimeofday( struct timeval* tv, void* tz __attribute__((unused)) )
 {
     tv->tv_sec = boot_time + timer_ticks + timer_drift;
@@ -161,6 +168,7 @@ int gettimeofday( struct timeval* tv, void* tz __attribute__((unused)) )
     return 0;
 }
 
+// Current time in UNIX time
 uint32_t now( void )
 {
     struct timeval t;

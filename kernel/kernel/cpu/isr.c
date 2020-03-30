@@ -16,16 +16,19 @@ static struct
 
 static irq_handler_t isr_routines[256] = {0};
 
+// Adds routine to ISR table
 void isr_install_handler( size_t isr, irq_handler_t handler )
 {
     isr_routines[isr] = handler;
 }
 
+// Sets location in ISR table to NULL
 void isr_uninstall_handler( size_t isr )
 {
-    isr_routines[isr] = 0;
+    isr_routines[isr] = NULL;
 }
 
+// Setup ISR function table, setup syscall vector as additional ISR, install IDT gates
 void isr_initialize( void )
 {
     char buffer[16];
@@ -80,6 +83,7 @@ static const char* exception_messages[32] =
     "Reserved"
 };
 
+// Handle ISR, if handler exists, kernel panic otherwise
 void fault_handler( struct regs* r )
 {
     irq_handler_t handler = isr_routines[r->int_no];

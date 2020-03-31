@@ -7,10 +7,12 @@
 
 int main( void )
 {
+    // Setup standard streams to point to /dev/null
     syscall_open("/dev/null", 0, 0);
     syscall_open("/dev/null", 1, 0);
     syscall_open("/dev/null", 1, 0);
     
+    // TODO: use /etc/init.d or similar for this
     pid_t pid = fork();
 
     if(!pid)
@@ -22,5 +24,6 @@ int main( void )
 
     while ((pid=waitpid(-1,NULL,WNOKERN))!=-1);
 
+    // TODO: Shutdown
     return 0;
 }

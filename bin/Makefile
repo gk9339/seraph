@@ -12,14 +12,18 @@ LDFLAGS:=$(LDFLAGS)
 LIBS:=$(LIBS)
 
 OBJS=\
+init/init.o \
 terminal/terminal.o \
 sh/sh.o \
 ls/ls.o \
+clearn/clear.o \
 
 EXECS=\
+init/init \
 terminal/terminal \
 sh/sh \
 ls/ls \
+clear/clear \
 
 .PHONY: all clean install install-headers
 .SUFFIXES: .o .c
@@ -29,6 +33,9 @@ all: $(OBJS) $(EXECS)
 .c.o:
 	$(CC) -MD -c $< -o $@ -std=gnu11 $(CFLAGS)
 
+init/init: init/init.o
+	$(CC) $^ -o $@ $(CFLAGS)$(LIBS)
+
 terminal/terminal: terminal/terminal.o
 	$(CC) $^ -o $@ $(CFLAGS)$(LIBS) -lkbd
 
@@ -36,6 +43,9 @@ sh/sh: sh/sh.o
 	$(CC) $^ -o $@ $(CFLAGS)$(LIBS)
 
 ls/ls: ls/ls.o
+	$(CC) $^ -o $@ $(CFLAGS)$(LIBS)
+
+clear/clear: clear/clear.o
 	$(CC) $^ -o $@ $(CFLAGS)$(LIBS)
 
 clean:

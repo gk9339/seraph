@@ -272,8 +272,8 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
         KPANIC("Root mount failed", NULL)
     }
 
-    // Set up environment for /sbin/init
-    char* boot_exec = "/sbin/init";
+    // Set up environment for /bin/init
+    char* boot_exec = "/bin/init";
     char* boot_arg = NULL;
     char* argv[] =
     {
@@ -288,9 +288,9 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
         argc++;
     }
 
-    // Start /sbin/init
-    if( CHECK_FLAG(debug, 0) ) debug_log("Starting /sbin/init\n");
-    if( CHECK_FLAG(debug, 1) ) printf("Starting /sbin/init\n");
+    // Start /bin/init
+    if( CHECK_FLAG(debug, 0) ) debug_log("Starting /bin/init\n");
+    if( CHECK_FLAG(debug, 1) ) printf("Starting /bin/init\n");
     system(argv[0], argc, argv, NULL);
     
     // Something went very wrong

@@ -6,9 +6,7 @@ mkdir -p isodir
 mkdir -p isodir/boot
 mkdir -p isodir/boot/grub
 mkdir -p sysroot/boot/grub
-
 mkdir -p sysroot/dev
-./script/initrd.py
 
 cat > sysroot/boot/grub/grub.cfg << EOF
 set timeout=0
@@ -19,8 +17,10 @@ menuentry "seraph" {
     module /boot/seraph.initrd
 }
 EOF
+
+./script/initrd.py
+cp sysroot/boot/grub/grub.cfg isodir/boot/grub/grub.cfg
 cp sysroot/boot/seraph.kernel isodir/boot/seraph.kernel
 cp sysroot/boot/seraph.initrd isodir/boot/seraph.initrd
-cp sysroot/boot/grub/grub.cfg isodir/boot/grub/grub.cfg
 
 grub-mkrescue -o seraph.iso isodir

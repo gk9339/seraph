@@ -1,8 +1,8 @@
 #!/bin/bash
 set -e
 
-SYSTEM_HEADER_PROJECTS="libc kernel linker lib sbin bin"
-PROJECTS="libc kernel linker lib sbin bin"
+SYSTEM_HEADER_PROJECTS="libc kernel linker lib bin"
+PROJECTS="libc kernel linker lib bin"
 
 export SYSROOT="$(pwd)/sysroot"
 export TOOLCHAIN="$(pwd)/toolchain/bin/"

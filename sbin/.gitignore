@@ -1,8 +1,0 @@
-*
-
-!/**/
-!*/*.c
-!*/*.h
-!/include/**
-!Makefile
-!.gitignore

@@ -52,7 +52,9 @@ In seperate terminals:
 ```
 ├── bin               - normal programs - dynamically linked  
 │   ├── include       - normal program headers  
-│   │   └── terminal  
+│   ├── clear         - send terminal clear command
+│   ├── init          - pid 1
+│   ├── ls            - list file information
 │   ├── sh            - shell  
 │   └── terminal      - VGA terminal  
 ├── kernel            - kernel source  
@@ -71,6 +73,10 @@ In seperate terminals:
 │   │   ├── mem       - kernel memory functions / paging, shared memory  
 │   │   └── proc      - process management, ELF support, syscalls, signals  
 │   └── script        - scripts for kernel compilation  
+├── lib               - other shared libraries 
+│   ├── include       - other library headers
+│   ├── ansiterm      - processing ANSI escape characters etc
+│   ├── libkbd        - conversion of keyboard scancodes
 ├── libc              - C library  
 │   ├── arch          - arch specific code (asm)  
 │   │   └── i386  
@@ -80,6 +86,7 @@ In seperate terminals:
 │   ├── include       - C library headers  
 │   │   └── sys  
 │   ├── ioctl  
+│   ├── libgen   
 │   ├── list          - linked list functions  
 │   ├── pty           - pty system calls  
 │   ├── sched  
@@ -91,9 +98,6 @@ In seperate terminals:
 │   ├── tree          - tree ADT functions  
 │   └── unistd  
 ├── linker            - dynamic linker  
-├── sbin              - programs required for boot - statically linked  
-│   ├── include  
-│   └── init          - pid 0  
 └── script            - other scripts for OS compilation  
 └── toolchain         - seraph specific gcc/binutils  
     └── patches       - gcc/binutils patches  

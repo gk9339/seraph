@@ -12,10 +12,12 @@ LDFLAGS:=$(LDFLAGS)
 LIBS:=$(LIBS)
 
 OBJS=\
-libkbd/libkbd.o
+libkbd/libkbd.o \
+ansiterm/ansiterm.o \
 
 LIBS=\
-libkbd/libkbd.so
+libkbd/libkbd.so \
+ansiterm/ansiterm.so \
 
 .PHONY: all clean install install-headers
 .SUFFIXES: .o .c
@@ -26,6 +28,9 @@ all: $(OBJS) $(LIBS)
 	$(CC) -MD -c $< -o $@ -std=gnu11 $(CFLAGS)
 
 libkbd/libkbd.so: libkbd/libkbd.o
+	$(CC) $^ -o $@ $(CFLAGS)
+
+ansiterm/ansiterm.so: ansiterm/ansiterm.o
 	$(CC) $^ -o $@ $(CFLAGS)
 
 clean:

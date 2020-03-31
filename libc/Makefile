@@ -105,7 +105,6 @@ stdlib/getenv.o \
 stdlib/putenv.o \
 stdlib/setenv.o \
 stdlib/unsetenv.o \
-stdlib/stub.o \
 sched/sched_yield.o \
 pty/pty.o \
 signal/signal.o \
@@ -115,6 +114,8 @@ sys/fswait.o \
 sys/setheap.o \
 sys/stat.o \
 sys/mmap.o \
+libgen/basename.o \
+libgen/dirname.o \
 debug/debugvfstree.o \
 debug/debugproctree.o \
 debug/debugprint.o \

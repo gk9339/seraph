@@ -22,7 +22,7 @@ void* __attribute__((malloc)) calloc( uintptr_t nmemb, uintptr_t size );
 void* __attribute__((malloc)) valloc( uintptr_t size );
 void free( void* ptr );
 
-long atoi( const char* ); //stub
+long atoi( const char* );
 
 int atexit(void (*function)(void));
 void exit( int );

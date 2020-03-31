@@ -12,8 +12,6 @@
 #define SIGNAL_RETURN 0x1523A6AA
 #define THREAD_RETURN 0x260913A3
 
-#define KERNEL_STACK_SIZE 0x8000
-
 #define USER_ROOT_UID (user_t)0
 
 typedef signed int pid_t;

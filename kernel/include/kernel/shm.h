@@ -4,7 +4,6 @@
 #include <stdint.h> // intN_t
 #include <kernel/process.h> // process_t
 
-#define SHM_START 0xB0000000
 #define SHM_PATH_SEPARATOR "."
 
 struct shm_node;

@@ -2,6 +2,7 @@
 #include <kernel/mem.h>
 #include <kernel/spinlock.h>
 #include <kernel/process.h>
+#include <kernel/kconfig.h>
 #include <stddef.h>
 #include <sys/types.h>
 #include <tree.h>

@@ -12,9 +12,6 @@
 #include <kernel/task.h>
 #include <kernel/signal.h>
 
-#define KERNEL_HEAP_INIT 0x00800000
-#define KERNEL_HEAP_END 0x20000000
-
 #define INDEX_FROM_BIT(b) (b / 0x20)
 #define OFFSET_FROM_BIT(b) (b % 0x20)
 

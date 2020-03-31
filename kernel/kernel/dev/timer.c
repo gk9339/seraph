@@ -7,6 +7,7 @@
 #include <kernel/cmos.h>
 #include <kernel/task.h>
 #include <kernel/process.h>
+#include <kernel/kconfig.h>
 
 #define PIT_A 0x40
 #define PIT_B 0x41
@@ -18,9 +19,6 @@
 #define PIT_SET 0x34
 
 #define TIMER_IRQ 0
-
-#define SUBTICKS_PER_TICK 1000
-#define RESYNC_TIME 1
 
 unsigned long timer_ticks = 0;
 unsigned long timer_subticks = 0;

@@ -8,8 +8,7 @@
 #include <kernel/cmos.h>
 #include <kernel/kernel.h>
 #include <kernel/serial.h>
-
-#define PTY_BUFFER_SIZE 4096
+#include <kernel/kconfig.h>
 
 #define MIN(A, B) ((A) < (B) ? (A) : (B))
 

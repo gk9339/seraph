@@ -14,6 +14,7 @@
 #include <kernel/signal.h>
 #include <kernel/timer.h>
 #include <kernel/cmos.h>
+#include <kernel/kconfig.h>
 #include <sys/types.h>
 #include <sys/signals.h>
 #include <sys/wait.h>
@@ -38,8 +39,6 @@ static bitset_t pid_set;
 char* default_name = "[no_name]";
 
 static int _next_pid = 2;
-
-#define MAX_PID 32768 /* Makes a 4096-byte bitmap */
 
 int is_valid_process( process_t* process )
 {
@@ -69,7 +68,7 @@ void initialize_process_tree( void )
 
 process_t* next_ready_process( void )
 {
-    char debug[128];
+    char debug_str[128];
     if( !process_available() )
     {
         return kernel_idle_task;
@@ -77,14 +76,14 @@ process_t* next_ready_process( void )
 
     if( process_queue->head->owner != process_queue )
     {
-        sprintf(debug, "ERROR: process queue head node 0x%x has owner 0x%x but process queue is 0x%x", 
+        sprintf(debug_str, "ERROR: process queue head node 0x%x has owner 0x%x but process queue is 0x%x", 
                 process_queue->head, process_queue->head->owner, process_queue);
-        debug_log(debug);
+        debug_log(debug_str);
 
         process_t* proc = process_queue->head->value;
 
-        sprintf(debug, "PID asssociated with this node is %d", proc->id);
-        debug_log(debug);
+        sprintf(debug_str, "PID asssociated with this node is %d", proc->id);
+        debug_log(debug_str);
     }
     node_t* np = list_dequeue(process_queue);
     process_t* next = np->value;

@@ -4,9 +4,7 @@
 #include <stddef.h> // size_t
 #include <kernel/types.h> // struct regs
 #include <stdint.h> // intN_t
-
-#define USER_STACK_BOTTOM 0xAFF00000
-#define USER_STACK_TOP 0xB0000000
+#include <kernel/kconfig.h> // USER STACK / KERNEL HEAP values
 
 extern uintptr_t heap_end;
 

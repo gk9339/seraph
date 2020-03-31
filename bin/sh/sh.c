@@ -21,6 +21,14 @@ char* builtin_str[] =
     "exit",
 };
 
+// Builtin function descriptions
+char* builtin_desc[] =
+{
+    "[dir] - Change current working directory",
+    "- Display this help prompt",
+    "- Exit shell",
+};
+
 // Builtin function pointers
 int (*builtin_func[])( char** ) =
 {
@@ -55,12 +63,12 @@ int sh_cd( char** args )
 // Display help text
 int sh_help( char** args __attribute__((unused)) )
 {
-    printf("seraph shell (/bin/sh)\n");
-    printf("builtins:\n");
+    printf("seraph shell (/bin/sh)\n\n");
+    printf("Builtin commands:\n");
 
     for( int i = 0; i < sh_num_builtins(); i++ )
     {
-        printf("\t%s\n", builtin_str[i]);
+        printf("\t%s %s\n", builtin_str[i], builtin_desc[i]);
     }
 
     return 1;

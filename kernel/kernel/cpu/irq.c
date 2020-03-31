@@ -7,6 +7,7 @@
 #include <kernel/serial.h>
 #include <kernel/idt.h>
 #include <sys/types.h>
+#include <kernel/kconfig.h>
 
 // Programmable interrupt controller
 #define PIC1 0x20
@@ -33,10 +34,6 @@
                     "2:"            \
                     );              \
     }while(0)
-
-// Interrupt requests
-#define IRQ_CHAIN_SIZE 16
-#define IRQ_CHAIN_DEPTH 4
 
 // Interrupts
 static volatile int sync_depth = 0;

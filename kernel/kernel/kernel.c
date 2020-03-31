@@ -25,22 +25,20 @@
 #include <kernel/serial.h>
 #include <kernel/vga.h>
 #include <kernel/keyboard.h>
+#include <kernel/kconfig.h>
 #include <sys/types.h>
 
-#define CHECK_FLAG(flags,bit) ((flags)&(1<<(bit)))
-
-#define EARLY_KERNEL_DEBUG 1 // Early debug messages to serial
-
 uintptr_t initial_esp = 0;
+int debug = 0;
 
 void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp ) 
 {
     char debug_str[256];
     uint32_t mboot_mods_count = 0;
-    uint8_t debug = 0;
     multiboot_info_t* mbi;
     multiboot_module_t* mboot_mods = NULL;
 #if EARLY_KERNEL_DEBUG
+    debug = 1; // Required for debug_log to output, will be unset before parsing args
     debug_log("Start kernel_main");
 #endif
 
@@ -60,7 +58,7 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
     initial_esp = esp;
  
     // Terminal Initialization
-    if( CHECK_FLAG(debug, 0) ) debug_log("Terminal initialization");
+    debug_log("Terminal initialization");
     terminal_initialize();
     printf("Kernel Initializing\n");
 
@@ -163,6 +161,7 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
 #if EARLY_KERNEL_DEBUG
     debug_log("Finalize paging / heap install\n");
     printf("\nFinalize paging / heap install\n");
+    debug = 0; // Enabled manually by EARLY_KERNEL_DEBUG earlier
 #endif
     paging_finalize();
 
@@ -176,8 +175,8 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
 
     heap_install();
     
+    // Parse args
     args_parse(cmdline);
-    
     if( args_present("serialdebug") )
     {
         debug = 1;

@@ -27,8 +27,6 @@
 #define PTR_INRANGE(PTR) ((uintptr_t)(PTR) > current_process->image.entry)
 #define PTR_VALIDATE(PTR) ptr_validate((void *)(PTR), __func__)
 
-#define CHECK_BIT(var, bit) ((var)&(1<<(bit)))
-
 static void ptr_validate( void* ptr, const char* syscall )
 {
     if( ptr && !PTR_INRANGE(ptr) )

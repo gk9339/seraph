@@ -2,7 +2,7 @@
 #define _KERNEL_SERIAL_H
 
 #include <stddef.h> // size_t
-#include <kernel/kernel.h> // asm volatile macro
+#include <kernel/kernel.h> // asm volatile macro, debug
 #include <string.h> // strlen
 
 #define _inline inline __attribute__((always_inline))
@@ -50,6 +50,10 @@ static _inline void inportsm( unsigned short port, unsigned char* data, unsigned
 
 static _inline void debug_log( const char* str )
 {
+    if( !CHECK_FLAG(debug, 0) )
+    {
+        return;
+    }
     size_t len = strlen(str);
     
     for( size_t i = 0; i < len; i++ )

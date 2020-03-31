@@ -244,7 +244,7 @@ void switch_task( uint8_t reschedule )
 void switch_next( void )
 {
     uintptr_t esp, ebp, eip;
-    char debug[128];
+    char debug_str[128];
 
     current_process = next_ready_process();
 
@@ -255,15 +255,15 @@ void switch_next( void )
 
     if( (eip < (uintptr_t)&_kernel_start) || (eip > (uintptr_t)heap_end) )
     {
-        sprintf(debug, "Skipping broken process %d (eip = 0x%x <0x%x or >0x%x)", current_process->id, eip, &_kernel_start, &_kernel_end);
-        debug_log(debug);
+        sprintf(debug_str, "Skipping broken process %d (eip = 0x%x <0x%x or >0x%x)", current_process->id, eip, &_kernel_start, &_kernel_end);
+        debug_log(debug_str);
         switch_next();
     }
 
     if( current_process->finished )
     {
-        sprintf(debug, "Tried to switch to process %d, claims it is already finished.", current_process->id);
-        debug_log(debug);
+        sprintf(debug_str, "Tried to switch to process %d, claims it is already finished.", current_process->id);
+        debug_log(debug_str);
         switch_next();
     }
 

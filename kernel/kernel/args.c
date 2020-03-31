@@ -79,3 +79,9 @@ void args_parse( char* cmdline )
         hashtable_set(kernel_args_table, name, value);
     }
 }
+
+// Clear kernel args table
+void args_clear( void )
+{
+    hashtable_free(kernel_args_table);
+}

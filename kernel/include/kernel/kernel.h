@@ -5,6 +5,7 @@
 #include <stdint.h> // intN_t
 
 #define ASSUME(cond) __extension__({ if(!(cond)) { __builtin_unreachable(); } })
+#define CHECK_FLAG(flags,bit) ((flags)&(1<<((bit))))
 
 #define STR(x) #x
 #define STRSTR(x) STR(x)
@@ -20,6 +21,7 @@
 extern void* _kernel_start;
 extern void* _kernel_end;
 extern uintptr_t initial_esp;
+extern int debug;
 
 void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp );
 void kpanic(char* error_message, const char* file, int line, struct regs* regs);

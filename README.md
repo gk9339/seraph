@@ -58,13 +58,13 @@ In seperate terminals:
 │   ├── sh            - shell  
 │   └── terminal      - VGA terminal  
 ├── kernel            - kernel source  
+│   ├── include       
+│   │   └── kernel    - kernel headers
 │   ├── arch          - arch specific code (asm)  
 │   │   └── i386  
 │   │       ├── cpu  
 │   │       ├── mem  
 │   │       └── proc  
-│   ├── include       - kernel headers  
-│   │   └── kernel  
 │   ├── kernel        - main kernel source  
 │   │   ├── cpu       - gdt/idt and isr/irq  
 │   │   ├── dev       - cmos, fpu, and PIT  
@@ -75,16 +75,18 @@ In seperate terminals:
 │   └── script        - scripts for kernel compilation  
 ├── lib               - other shared libraries 
 │   ├── include       - other library headers
-│   ├── ansiterm      - processing ANSI escape characters etc
+│   ├── libm          - C math library 
+│   ├── libansiterm   - processing ANSI escape characters etc
 │   ├── libkbd        - conversion of keyboard scancodes
 ├── libc              - C library  
+│   ├── include       - C library headers  
+│   │   └── sys  
 │   ├── arch          - arch specific code (asm)  
 │   │   └── i386  
 │   ├── debug         - special debug functions  
+│   ├── dirent
 │   ├── errno  
 │   ├── hashtable     - hashtable ADT functions  
-│   ├── include       - C library headers  
-│   │   └── sys  
 │   ├── ioctl  
 │   ├── libgen   
 │   ├── list          - linked list functions  
@@ -95,8 +97,10 @@ In seperate terminals:
 │   ├── stdlib  
 │   ├── string  
 │   ├── sys  
+│   ├── time
 │   ├── tree          - tree ADT functions  
-│   └── unistd  
+│   ├── unistd
+│   └── wchar 
 ├── linker            - dynamic linker  
 └── script            - other scripts for OS compilation  
 └── toolchain         - seraph specific gcc/binutils  

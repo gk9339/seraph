@@ -491,6 +491,35 @@ static int sys_readdir( int fd, int index, struct dirent* entry )
     return -EBADF;
 }
 
+static int sys_chdir( char* dirpath )
+{
+    PTR_VALIDATE(dirpath);
+
+    char* path = canonicalize_path(current_process->wd_name, dirpath);
+    fs_node_t* chd = kopen(path, 0);
+    if( chd )
+    {
+        if( (chd->type & FS_DIRECTORY) == 0 )
+        {
+            close_fs(chd);
+            return -ENOTDIR;
+        }
+        if( !has_permission(chd, 01) )
+        {
+            close_fs(chd);
+            return -EACCES;
+        }
+        close_fs(chd);
+        free(current_process->wd_name);
+        current_process->wd_name = malloc(sizeof(path) + 1);
+        memcpy(current_process->wd_name, path, strlen(path) + 1);
+        return 0;
+    }else
+    {
+        return -ENOENT;
+    }
+}
+
 static int sys_getgid( void )
 {
     return current_process->user_group;
@@ -836,6 +865,7 @@ static int (*syscalls[])() =
     [SYS_DUP2] = sys_dup2,
     [SYS_GETUID] = sys_getuid,
     [SYS_READDIR] = sys_readdir,
+    [SYS_CHDIR] = sys_chdir,
     [SYS_GETGID] = sys_getgid,
     [SYS_SETUID] = sys_setuid,
     [SYS_SLEEPABS] = sys_sleepabs,

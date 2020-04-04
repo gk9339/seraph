@@ -469,7 +469,6 @@ uint32_t process_move_fd( process_t* proc, int src, int dest )
 
 int wakeup_queue( list_t* queue )
 {
-    char str[1024];
     int awoken_processes = 0;
     while( queue->length > 0 )
     {
@@ -479,7 +478,6 @@ int wakeup_queue( list_t* queue )
         if( !((process_t*)node->value)->finished )
         {
             make_process_ready(node->value);
-            debug_logf(str, "%d - %s", ((process_t*)node->value)->id, ((process_t*)node->value)->name);
         }
         awoken_processes++;
     }

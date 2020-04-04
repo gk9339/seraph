@@ -144,6 +144,7 @@ DECL_SYSCALL2(lstat, char*, void*);
 DECL_SYSCALL2(dup2, int, int);
 DECL_SYSCALL0(getuid);
 DECL_SYSCALL3(readdir, int, int, void*);
+DECL_SYSCALL1(chdir, char*);
 DECL_SYSCALL1(setuid, unsigned int);
 DECL_SYSCALL0(yield);
 DECL_SYSCALL2(nanosleep, unsigned long, unsigned long);

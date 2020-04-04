@@ -50,11 +50,10 @@ int sh_cd( char** args )
         fprintf(stderr, "sh: expected argument to cd\n");
     }else
     {
-        // No chdr yet
-        /*if( chdr(args[1]) != 0 )
+        if( chdir(args[1]) != 0 )
         {
             perror("sh");
-        }*/
+        }
     }
 
     return 1;

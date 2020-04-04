@@ -39,6 +39,8 @@ int close( int fd );
 int usleep( useconds_t usec );
 int sleep( unsigned int sec );
 
+int chdir( const char* path );
+
 int dup( int oldfd );
 int dup2( int oldfd, int newfd );
 

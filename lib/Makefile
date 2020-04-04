@@ -22,9 +22,7 @@ libansiterm/libansiterm.o \
 LIBS=\
 libm/libm.a \
 libm/libm.so \
-libkbd/libkbd.a \
 libkbd/libkbd.so \
-libansiterm/libansiterm.a \
 libansiterm/libansiterm.so \
 
 .PHONY: all clean install install-headers
@@ -41,14 +39,8 @@ libm/libm.a: $(LIBMOBJ)
 libm/libm.so: $(LIBMOBJ)
 	$(CC) $^ -o $@ $(DYNCFLAGS)
 
-libkbd/libkbd.a: libkbd/libkbd.o
-	$(AR) rcs $@ $^
-
 libkbd/libkbd.so: libkbd/libkbd.o
 	$(CC) $^ -o $@ $(DYNCFLAGS)
-
-libansiterm/libansiterm.a: libansiterm/libansiterm.o
-	$(AR) rcs $@ $^
 
 libansiterm/libansiterm.so: libansiterm/libansiterm.o
 	$(CC) $^ -o $@ $(DYNCFLAGS)

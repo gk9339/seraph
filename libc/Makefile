@@ -90,6 +90,7 @@ unistd/write.o \
 unistd/dup.o \
 unistd/dup2.o \
 unistd/pipe.o \
+unistd/chdir.o \
 ioctl/ioctl.o \
 stdio/fflush.o \
 stdio/fclose.o \

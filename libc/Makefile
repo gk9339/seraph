@@ -89,6 +89,7 @@ unistd/setsid.o \
 unistd/write.o \
 unistd/dup.o \
 unistd/dup2.o \
+unistd/pipe.o \
 ioctl/ioctl.o \
 stdio/fflush.o \
 stdio/fclose.o \
@@ -105,6 +106,7 @@ stdlib/getenv.o \
 stdlib/putenv.o \
 stdlib/setenv.o \
 stdlib/unsetenv.o \
+stdlib/atoi.o \
 sched/sched_yield.o \
 pty/pty.o \
 signal/signal.o \
@@ -116,6 +118,8 @@ sys/stat.o \
 sys/mmap.o \
 libgen/basename.o \
 libgen/dirname.o \
+wchar/wcwidth.o \
+time/gettimeofday.o \
 debug/debugvfstree.o \
 debug/debugproctree.o \
 debug/debugprint.o \
@@ -137,7 +141,7 @@ $(ARCH_CRTS) \
 all: $(BINARIES) $(CRTS)
 
 libc.a: $(OBJS)
-	$(AR) rcs $@ $(OBJS)
+	$(AR) rcs $@ $^
 
 libc.so: $(OBJS)
 	mkdir -p $(DESTDIR)$(LIBDIR)
@@ -152,7 +156,7 @@ libc.so: $(OBJS)
 	$(CC) -nodefaultlibs -o $@ $(CFLAGS) -shared -fPIC $^ -lgcc
 
 libk.a: $(LIBK_OBJS)
-	$(AR) rcs $@ $(LIBK_OBJS)
+	$(AR) rcs $@ $^
 
 .c.o:
 	$(CC) -MD -c $< -o $@ -std=gnu11 $(CFLAGS)$(CPPFLAGS)

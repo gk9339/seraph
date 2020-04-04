@@ -183,7 +183,7 @@ typedef struct
     int kbd_esc_buf;
 } key_event_state_t;
 
-char* key_event( int ret, key_event_t* event ); // Process keystroke into terminal input strings
+void key_event( int ret, key_event_t* event, void (*handle_input_string)(char*), void (*handle_input)(char)); // Process keystroke into terminal input strings
 kbd_key_t kbd_key( key_event_state_t* state, unsigned char c ); // Converts from incoming char to kbd_key_t, depending on current status
 int kbd_scancode( key_event_state_t* state, unsigned char c, key_event_t* event ); // Converts from scancodes into key_event_t
 

@@ -41,6 +41,7 @@ kernel/drivers/vga.o \
 kernel/fs/fs.o \
 kernel/fs/null.o \
 kernel/fs/pipe.o \
+kernel/fs/unixpipe.o \
 kernel/fs/zero.o \
 kernel/mem/mem.o \
 kernel/mem/shm.o \

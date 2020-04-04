@@ -242,16 +242,9 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
         }
     }
     
-    // Virtual dev filesystem
-    if( CHECK_FLAG(debug, 0) ) debug_log("\nSetup /dev");
-    if( CHECK_FLAG(debug, 1) ) printf("\nSetup /dev\n");
-    map_vfs_directory("/dev");
-    zero_initialize();
-    null_initialize();
-    
-    // ramfs initialization
-    if( CHECK_FLAG(debug, 0) ) debug_log("Setup root mount");
-    if( CHECK_FLAG(debug, 1) ) printf("Setup root mount\n");
+    // Root mount
+    if( CHECK_FLAG(debug, 0) ) debug_log("\nSetup root mount");
+    if( CHECK_FLAG(debug, 1) ) printf("\nSetup root mount\n");
     if( args_present("root") )
     {
         char* root_type = "ext2";
@@ -266,11 +259,17 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
     {
         KPANIC("No root option given", NULL)
     }
-
     if( !fs_root )
     {
         KPANIC("Root mount failed", NULL)
     }
+    
+    // Virtual dev filesystem
+    if( CHECK_FLAG(debug, 0) ) debug_log("Setup /dev");
+    if( CHECK_FLAG(debug, 1) ) printf("Setup /dev\n\n");
+    map_vfs_directory("/dev");
+    zero_initialize();
+    null_initialize();
 
     // Set up environment for /bin/init
     char* boot_exec = "/bin/init";

@@ -3,10 +3,17 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <debug.h>
 
 int main( void )
 {
+    if( getpid() != 1 )
+    {
+        printf("Init already started.\nExiting\n");
+        exit(0);
+    }
+
     // Setup standard streams to point to /dev/null
     syscall_open("/dev/null", 0, 0);
     syscall_open("/dev/null", 1, 0);

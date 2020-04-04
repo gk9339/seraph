@@ -75,8 +75,8 @@ int main( int argc, char** argv )
                 perm[6] = (mode & S_IROTH) ? 'r' : '-';
                 perm[7] = (mode & S_IWOTH) ? 'w' : '-';
                 perm[8] = (mode & S_IXOTH) ? 'x' : '-';
-			
-                printf("%s %ld %ld %ld %s", perm, st.st_uid, st.st_gid, st.st_size, filename);
+
+                printf("%s %ld %ld %zd %s", perm, st.st_uid, st.st_gid, st.st_size, filename);
                 if( S_ISDIR(st.st_mode) )
                 {
                     printf("/");
@@ -102,7 +102,7 @@ int main( int argc, char** argv )
         perm[6] = (mode & S_IROTH) ? 'r' : '-';
         perm[7] = (mode & S_IWOTH) ? 'w' : '-';
         perm[8] = (mode & S_IXOTH) ? 'x' : '-';
-		
+
         printf("%s %ld %ld %ld %s", perm, st.st_uid, st.st_gid, st.st_size, filename);
         if( S_ISDIR(st.st_mode) )
         {

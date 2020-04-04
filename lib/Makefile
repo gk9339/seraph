@@ -7,17 +7,25 @@ EXEC_PREFIX?=$(PREFIX)
 INCLUDEDIR?=$(PREFIX)/include
 LIBDIR?=$(EXEC_PREFIX)/lib
 
-CFLAGS:=$(CFLAGS) -shared -fPIC -Wall -Wextra -O1
+CFLAGS:=$(CFLAGS) -Wall -Wextra -O1
+DYNCFLAGS:=$(CFLAGS) -shared
 LDFLAGS:=$(LDFLAGS)
 LIBS:=$(LIBS)
 
+include libm/make.config
+
 OBJS=\
+$(LIBMOBJ) \
 libkbd/libkbd.o \
-ansiterm/ansiterm.o \
+libansiterm/libansiterm.o \
 
 LIBS=\
+libm/libm.a \
+libm/libm.so \
+libkbd/libkbd.a \
 libkbd/libkbd.so \
-ansiterm/ansiterm.so \
+libansiterm/libansiterm.a \
+libansiterm/libansiterm.so \
 
 .PHONY: all clean install install-headers
 .SUFFIXES: .o .c
@@ -27,11 +35,23 @@ all: $(OBJS) $(LIBS)
 .c.o:
 	$(CC) -MD -c $< -o $@ -std=gnu11 $(CFLAGS)
 
-libkbd/libkbd.so: libkbd/libkbd.o
-	$(CC) $^ -o $@ $(CFLAGS)
+libm/libm.a: $(LIBMOBJ)
+	$(AR) rcs $@ $^
 
-ansiterm/ansiterm.so: ansiterm/ansiterm.o
-	$(CC) $^ -o $@ $(CFLAGS)
+libm/libm.so: $(LIBMOBJ)
+	$(CC) $^ -o $@ $(DYNCFLAGS)
+
+libkbd/libkbd.a: libkbd/libkbd.o
+	$(AR) rcs $@ $^
+
+libkbd/libkbd.so: libkbd/libkbd.o
+	$(CC) $^ -o $@ $(DYNCFLAGS)
+
+libansiterm/libansiterm.a: libansiterm/libansiterm.o
+	$(AR) rcs $@ $^
+
+libansiterm/libansiterm.so: libansiterm/libansiterm.o
+	$(CC) $^ -o $@ $(DYNCFLAGS)
 
 clean:
 	rm -f $(LIBS)

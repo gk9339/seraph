@@ -17,6 +17,7 @@
 #include <kernel/shm.h>
 #include <kernel/pty.h>
 #include <kernel/signal.h>
+#include <kernel/unixpipe.h>
 
 #define FD_INRANGE(FD) ((FD) < (int)current_process->fds->length && (FD) >= 0)
 #define FD_ENTRY(FD) (current_process->fds->entries[(FD)])
@@ -182,6 +183,14 @@ static int sys_close( int fd )
     }
     
     return -EBADF;
+}
+
+static int sys_gettimeofday( struct timeval* tv, void* tzp )
+{
+    PTR_VALIDATE(tv);
+    PTR_VALIDATE(tzp);
+
+    return gettimeofday(tv, tzp);
 }
 
 static int sys_execve( const char* filename, char* const argv[], char* const envp[] )
@@ -602,6 +611,28 @@ static int sys_waitpid( int pid, int* status, int options )
     return waitpid(pid, status, options);
 }
 
+static int sys_pipe( int fd[2] )
+{
+    if( fd && !PTR_INRANGE(fd) )
+    {
+        return -EFAULT;
+    }
+
+    fs_node_t* outpipes[2];
+
+    make_unix_pipe(outpipes);
+
+    open_fs(outpipes[0], 0);
+    open_fs(outpipes[1], 0);
+
+    fd[0] = process_append_fd((process_t*)current_process, outpipes[0]);
+    fd[1] = process_append_fd((process_t*)current_process, outpipes[1]);
+    FD_FLAG(fd[0]) = O_RDWR;
+    FD_FLAG(fd[1]) = O_RDWR;
+
+    return 0;
+}
+
 static int sys_setsid( void )
 {
     if( current_process->job == current_process->group )
@@ -791,6 +822,7 @@ static int (*syscalls[])() =
     [SYS_READ] = sys_read,
     [SYS_WRITE] = sys_write,
     [SYS_CLOSE] = sys_close,
+    [SYS_GETTIMEOFDAY] = sys_gettimeofday,
     [SYS_EXECVE] = sys_execve,
     [SYS_FORK] = sys_fork,
     [SYS_GETPID] = sys_getpid,
@@ -813,6 +845,7 @@ static int (*syscalls[])() =
     [SYS_FSWAIT] = sys_fswait,
     [SYS_FSWAIT2] = sys_fswait2,
     [SYS_WAITPID] = sys_waitpid,
+    [SYS_PIPE] = sys_pipe,
     [SYS_SETSID] = sys_setsid,
     [SYS_SETPGID] = sys_setpgid,
     [SYS_GETPGID] = sys_getpgid,

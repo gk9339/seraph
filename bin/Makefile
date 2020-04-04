@@ -16,7 +16,7 @@ init/init.o \
 terminal/terminal.o \
 sh/sh.o \
 ls/ls.o \
-clearn/clear.o \
+clear/clear.o \
 
 EXECS=\
 init/init \
@@ -37,7 +37,7 @@ init/init: init/init.o
 	$(CC) $^ -o $@ $(CFLAGS)$(LIBS)
 
 terminal/terminal: terminal/terminal.o
-	$(CC) $^ -o $@ $(CFLAGS)$(LIBS) -lkbd
+	$(CC) $^ -o $@ $(CFLAGS)$(LIBS) -lansiterm -lkbd -lm
 
 sh/sh: sh/sh.o
 	$(CC) $^ -o $@ $(CFLAGS)$(LIBS)

@@ -1,5 +1,8 @@
 #include <libkbd/libkbd.h>
 #include <stddef.h>
+#include <string.h>
+
+#include <stdio.h>
 
 #define DEBUG_SCANCODES 0
 
@@ -14,174 +17,179 @@
 #define SET_UNSET(a,b,c) (a) = (c) ? ((a) | (b)) : ((a) & ~(b))
 
 // Process keystroke into terminal input strings
-char* key_event( int ret, key_event_t* event )
+void key_event( int ret, key_event_t* event, void (*handle_input_string)(char*), void (*handle_input)(char))
 {
     if( ret )
     {
+        if( event->modifiers & KEY_MOD_LEFT_ALT || event->modifiers & KEY_MOD_RIGHT_ALT )
+        {
+            handle_input('\033');
+        }
+        if( (event->modifiers & KEY_MOD_LEFT_SHIFT || event->modifiers & KEY_MOD_RIGHT_SHIFT) && event->key == '\t' )
+        {
+            handle_input_string("\033[Z");
+            return;
+        }
         // ENTER = reads as linefeed, should be carriage return
         if( event->keycode == 10 )
         {
-            char* ret = "\r";
-            return(ret);
+            handle_input('\r');
+            return;
         }
 
         // BACKSPACE = reads as ^H, should be ^?
         if( event->keycode == 8 )
         {
-            char* ret = " ";
-            ret[0] = 0x7F;
-            return(ret);
+            handle_input(0x7F);
+            return;
         }
 
-        char* ret = " ";
-        ret[0] = event->key;
-        return(ret);
+        handle_input(event->key);
     }else
     {
         if( event->action == KEY_ACTION_UP )
         {
-            return NULL;
+            return;
         }
         switch( event->keycode )
         {
             case KEY_F1:
-                return("\033OP");
+                handle_input_string("\033OP");
                 break;
             case KEY_F2:
-                return("\033OQ");
+                handle_input_string("\033OQ");
                 break;
             case KEY_F3:
-                return("\033OR");
+                handle_input_string("\033OR");
                 break;
             case KEY_F4:
-                return("\033OS");
+                handle_input_string("\033OS");
                 break;
             case KEY_F5:
-                return("\033[15~");
+                handle_input_string("\033[15~");
                 break;
             case KEY_F6:
-                return("\033[17~");
+                handle_input_string("\033[17~");
                 break;
             case KEY_F7:
-                return("\033[18~");
+                handle_input_string("\033[18~");
                 break;
             case KEY_F8:
-                return("\033[19~");
+                handle_input_string("\033[19~");
                 break;
             case KEY_F9:
-                return("\033[20~");
+                handle_input_string("\033[20~");
                 break;
             case KEY_F10:
-                return("\033[21~");
+                handle_input_string("\033[21~");
                 break;
             case KEY_F11:
-                return("\033[23~");
+                handle_input_string("\033[23~");
                 break;
             case KEY_F12:
-                return("\033[24~");
+                handle_input_string("\033[24~");
                 break;
             case KEY_ARROW_UP:
                 if( event->modifiers & KEY_MOD_LEFT_SHIFT && event->modifiers & KEY_MOD_LEFT_CTRL )
                 {
-                    return("\033[6A");
+                    handle_input_string("\033[6A");
                 }else if( event->modifiers & KEY_MOD_LEFT_CTRL )
                 {
-                    return("\033[5A");
+                    handle_input_string("\033[5A");
                 }else if( event->modifiers & KEY_MOD_LEFT_SHIFT && event->modifiers & KEY_MOD_LEFT_ALT )
                 {
-                    return("\033[4A");
+                    handle_input_string("\033[4A");
                 }else if( event->modifiers & KEY_MOD_LEFT_ALT )
                 {
-                    return("\033[3A");
+                    handle_input_string("\033[3A");
                 }else if( event->modifiers & KEY_MOD_LEFT_SHIFT )
                 {
-                    return("\033[2A");
+                    handle_input_string("\033[2A");
                 }else
                 {
-                    return("\033[A");
+                    handle_input_string("\033[A");
                 }
                 break;
             case KEY_ARROW_DOWN:
                 if( event->modifiers & KEY_MOD_LEFT_SHIFT && event->modifiers & KEY_MOD_LEFT_CTRL )
                 {
-                    return("\033[6B");
+                    handle_input_string("\033[6B");
                 }else if( event->modifiers & KEY_MOD_LEFT_CTRL )
                 {
-                    return("\033[5B");
+                    handle_input_string("\033[5B");
                 }else if( event->modifiers & KEY_MOD_LEFT_SHIFT && event->modifiers & KEY_MOD_LEFT_ALT )
                 {
-                    return("\033[4B");
+                    handle_input_string("\033[4B");
                 }else if( event->modifiers & KEY_MOD_LEFT_ALT )
                 {
-                    return("\033[3B");
+                    handle_input_string("\033[3B");
                 }else if( event->modifiers & KEY_MOD_LEFT_SHIFT )
                 {
-                    return("\033[2B");
+                    handle_input_string("\033[2B");
                 }else
                 {
-                    return("\033[B");
+                    handle_input_string("\033[B");
                 }
                 break;
             case KEY_ARROW_RIGHT:
                 if( event->modifiers & KEY_MOD_LEFT_SHIFT && event->modifiers & KEY_MOD_LEFT_CTRL )
                 {
-                    return("\033[6C");
+                    handle_input_string("\033[6C");
                 }else if( event->modifiers & KEY_MOD_LEFT_CTRL )
                 {
-                    return("\033[5C");
+                    handle_input_string("\033[5C");
                 }else if( event->modifiers & KEY_MOD_LEFT_SHIFT && event->modifiers & KEY_MOD_LEFT_ALT )
                 {
-                    return("\033[4C");
+                    handle_input_string("\033[4C");
                 }else if( event->modifiers & KEY_MOD_LEFT_ALT )
                 {
-                    return("\033[3C");
+                    handle_input_string("\033[3C");
                 }else if( event->modifiers & KEY_MOD_LEFT_SHIFT )
                 {
-                    return("\033[2C");
+                    handle_input_string("\033[2C");
                 }else
                 {
-                    return("\033[C");
+                    handle_input_string("\033[C");
                 }
                 break;
             case KEY_ARROW_LEFT:
                 if( event->modifiers & KEY_MOD_LEFT_SHIFT && event->modifiers & KEY_MOD_LEFT_CTRL )
                 {
-                    return("\033[6D");
+                    handle_input_string("\033[6D");
                 }else if( event->modifiers & KEY_MOD_LEFT_CTRL )
                 {
-                    return("\033[5D");
+                    handle_input_string("\033[5D");
                 }else if( event->modifiers & KEY_MOD_LEFT_SHIFT && event->modifiers & KEY_MOD_LEFT_ALT )
                 {
-                    return("\033[4D");
+                    handle_input_string("\033[4D");
                 }else if( event->modifiers & KEY_MOD_LEFT_ALT )
                 {
-                    return("\033[3D");
+                    handle_input_string("\033[3D");
                 }else if( event->modifiers & KEY_MOD_LEFT_SHIFT )
                 {
-                    return("\033[2D");
+                    handle_input_string("\033[2D");
                 }else
                 {
-                    return("\033[D");
+                    handle_input_string("\033[D");
                 }
                 break;
             case KEY_PAGE_UP:
-                return("\033[5~");
+                handle_input_string("\033[5~");
                 break;
             case KEY_PAGE_DOWN:
-                return("\033[6~");
+                handle_input_string("\033[6~");
                 break;
             case KEY_HOME:
-                return("\033[H");
+                handle_input_string("\033[H");
                 break;
             case KEY_END:
-                return("\033[F");
+                handle_input_string("\033[F");
                 break;
             case KEY_DEL:
-                return("\033[3~");
+                handle_input_string("\033[3~");
                 break;
         }
     }
-    return NULL;
 }
 
 char key_method[] = {

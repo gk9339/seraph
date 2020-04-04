@@ -17,6 +17,10 @@ int execvp( const char* file, char* const argv[] )
     if( file && (!strstr(file, "/")) )
     {
         char* path = getenv("PATH");
+        if( path == NULL )
+        {
+            path = "/bin";
+        }
         char* xpath = strdup(path);
         char* p, *last;
         for( p = strtok_r(xpath, ":", &last); p; p = strtok_r(NULL, ":", &last) )

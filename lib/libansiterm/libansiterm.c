@@ -1,4 +1,4 @@
-#include <ansiterm/ansiterm.h>
+#include <libansiterm/libansiterm.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -8,12 +8,12 @@ static wchar_t box_chars[] = L"▒␉␌␍␊°±␤␋┘┐┌└┼⎺⎻─
 
 inline uint32_t rgb( uint8_t r, uint8_t g, uint8_t b )
 {
-	return 0xFF000000 | (r << 16) | (g << 8) | (b);
+    return 0xFF000000 | (r << 16) | (g << 8) | (b);
 }
 
 inline uint32_t rgba( uint8_t r, uint8_t g, uint8_t b, uint8_t a )
 {
-	return (a << 24U) | (r << 16) | (g << 8) | (b);
+    return (a << 24U) | (r << 16) | (g << 8) | (b);
 }
 
 // Return the lower of two uint16_t
@@ -112,12 +112,12 @@ static void _ansi_put( term_state_t* state, char c )
             }else
             {
                 if (state->box && c >= 'a' && c <= 'z' )
-            {
+                {
                     char buf[7];
                     char *w = (char *)&buf;
                     to_eight(box_chars[c-'a'], w);
                     while (*w )
-            {
+                    {
                         callbacks->writer(*w);
                         w++;
                     }
@@ -194,7 +194,7 @@ static void _ansi_put( term_state_t* state, char c )
                                 switch( arg )
                                 {
                                     case 1:
-                                        callbacks->redraw_cursor();
+                                        callbacks->draw_cursor();
                                         break;
                                     default:
                                         break;

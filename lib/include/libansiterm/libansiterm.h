@@ -1,5 +1,5 @@
-#ifndef ANSITERM_H
-#define ANSITERM_H
+#ifndef LIBANSITERM_H
+#define LIBANSITERM_H
 
 #include <stdint.h>
 
@@ -72,17 +72,17 @@ typedef struct
     void (*writer)(char);
     void (*set_color)(uint32_t, uint32_t);
     void (*set_csr)(int, int);
-    short (*get_csr_x)(void);
-    short (*get_csr_y)(void);
+    uint16_t (*get_csr_x)(void);
+    uint16_t (*get_csr_y)(void);
     void (*set_cell)(int, int, uint32_t);
     void (*cls)(int);
     void (*scroll)(int);
-    void (*redraw_cursor)(void);
+    void (*draw_cursor)(void);
     void (*handle_input)(char*);
     void (*set_title)(char*);
     void (*set_cell_contents)(int, int, char*);
-    short (*get_cell_width)(void);
-    short (*get_cell_height)(void);
+    uint16_t (*get_cell_width)(void);
+    uint16_t (*get_cell_height)(void);
     void (*enable_csr)(int);
     void (*switch_buffer)(int);
     void (*insert_delete_lines)(int);

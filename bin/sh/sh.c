@@ -235,6 +235,10 @@ void sh_loop( void )
 int main( void )
 {
     // TODO: setup
+    if( getenv("PATH") == NULL )
+    {
+        putenv("PATH=/bin");
+    }
     setlinebuf(stdout);
 
     // Main shell loop

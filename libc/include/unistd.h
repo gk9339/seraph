@@ -42,4 +42,6 @@ int sleep( unsigned int sec );
 int dup( int oldfd );
 int dup2( int oldfd, int newfd );
 
+int pipe( int fd[2] );
+
 #endif

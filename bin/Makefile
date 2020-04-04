@@ -11,18 +11,20 @@ CFLAGS:=$(CFLAGS) -Wall -Wextra -O1
 LDFLAGS:=$(LDFLAGS)
 LIBS:=$(LIBS)
 
+include coreutils/make.config
+
 OBJS=\
+$(COREUTILSOBJ) \
 init/init.o \
 terminal/terminal.o \
 sh/sh.o \
-ls/ls.o \
 clear/clear.o \
 
 EXECS=\
+$(COREUTILSEXEC) \
 init/init \
 terminal/terminal \
 sh/sh \
-ls/ls \
 clear/clear \
 
 .PHONY: all clean install install-headers
@@ -40,9 +42,6 @@ terminal/terminal: terminal/terminal.o
 	$(CC) $^ -o $@ $(CFLAGS)$(LIBS) -lansiterm -lkbd -lm
 
 sh/sh: sh/sh.o
-	$(CC) $^ -o $@ $(CFLAGS)$(LIBS)
-
-ls/ls: ls/ls.o
 	$(CC) $^ -o $@ $(CFLAGS)$(LIBS)
 
 clear/clear: clear/clear.o

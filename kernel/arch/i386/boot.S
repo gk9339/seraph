@@ -17,8 +17,8 @@
 .long CHECKSUM
 .long 0, 0, 0, 0, 0 # Only used in aout, set 0 for elf
 .long 1    # Video mode
-.long 80 # Width
-.long 25  # Height
+.long 80   # Width
+.long 25   # Height
 .long 16   # Depth
 
 # Allocate the initial stack

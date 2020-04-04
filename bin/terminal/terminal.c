@@ -106,6 +106,7 @@ void flip_cursor( void );
 int best_match( uint32_t a );
 int is_wide( uint32_t codepoint );
 static inline void outportb( unsigned short _port, unsigned char _data ); // Utility function, output byte to serial port
+static inline unsigned char inportb( unsigned short _port );
 
 term_callbacks_t terminal_callbacks =
 {
@@ -294,7 +295,20 @@ void terminal_write( char c )
             draw_cursor();
         }else if( c == '\007' )
         {
-            // TODO:Bell
+            uint32_t div = 1193180 / 2000;
+            outportb(0x43, 0xb6);
+            outportb(0x42, (uint8_t)div);
+            outportb(0x42, (uint8_t)(div>>8));
+            uint8_t tmp = inportb(0x61);
+            if( tmp != (tmp | 3) )
+            {
+                outportb(0x61, tmp | 3);
+            }
+
+            usleep(15000);
+
+            tmp = inportb(0x61) & 0xFC;
+            outportb(0x61, tmp);
         }else if( c == '\b' )
         {
             if( csr_x > 0 )
@@ -738,4 +752,11 @@ int is_wide( uint32_t codepoint )
 static inline void outportb( unsigned short _port, unsigned char _data )
 {
     asm volatile("outb %1, %0" :: "dN"(_port), "a"(_data));
+}
+
+static inline unsigned char inportb( unsigned short _port )
+{
+    unsigned char rv;
+    asm volatile("inb %1, %0" : "=a"(rv):"dN"(_port));
+    return rv;
 }

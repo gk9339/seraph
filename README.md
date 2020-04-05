@@ -54,7 +54,7 @@ In seperate terminals:
 │   ├── include       - normal program headers  
 │   ├── clear         - send terminal clear command
 │   ├── init          - pid 1
-│   ├── ls            - list file information
+│   ├── coreutils     - rewriting of GNU coreutils
 │   ├── sh            - shell  
 │   └── terminal      - VGA terminal  
 ├── kernel            - kernel source  

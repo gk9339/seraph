@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-inline uint32_t ununicode(uint32_t c) {
+uint32_t ununicode(uint32_t c) {
     switch (c) {
         case L'☺': return 1;
         case L'☻': return 2;

@@ -628,7 +628,10 @@ void terminal_shift_region( int top, int height, int lines )
     {
         memmove(terminal_buffer + destination, terminal_buffer + source, count * terminal_width * sizeof(term_cell_t));
     }
-
+    
+    // Make the erased line have default fg colour
+    uint32_t fg_backup = fg;
+    fg = TERM_DEFAULT_FG;
     for( int i = new_top; i < new_bottom; i++ )
     {
         for( uint16_t x = 0; x < terminal_width; x++ )
@@ -636,6 +639,7 @@ void terminal_shift_region( int top, int height, int lines )
             cell_set(x, i, ' ', ansi_state->flags);
         }
     }
+    fg = fg_backup;
 
     terminal_redraw_all();
 }

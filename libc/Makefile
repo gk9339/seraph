@@ -91,6 +91,8 @@ unistd/dup.o \
 unistd/dup2.o \
 unistd/pipe.o \
 unistd/chdir.o \
+unistd/gethostname.o \
+unistd/sethostname.o \
 ioctl/ioctl.o \
 stdio/fflush.o \
 stdio/fclose.o \
@@ -117,6 +119,7 @@ sys/fswait.o \
 sys/setheap.o \
 sys/stat.o \
 sys/mmap.o \
+sys/uname.o \
 libgen/basename.o \
 libgen/dirname.o \
 wchar/wcwidth.o \

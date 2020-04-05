@@ -7,21 +7,21 @@ EXEC_PREFIX?=$(PREFIX)
 BINDIR?=$(EXEC_PREFIX)/bin
 INCLUDEDIR?=$(PREFIX)/include
 
-CFLAGS:=$(CFLAGS) -Wall -Wextra -O1
+CFLAGS:=$(CFLAGS) -Wall -Wextra -O0
 LDFLAGS:=$(LDFLAGS)
 LIBS:=$(LIBS)
 
 include coreutils/make.config
 
 OBJS=\
-$(COREUTILSOBJ) \
+$(patsubst %, coreutils/%, $(COREUTILSOBJ)) \
 init/init.o \
 terminal/terminal.o \
 sh/sh.o \
 clear/clear.o \
 
 EXECS=\
-$(COREUTILSEXEC) \
+$(patsubst %, coreutils/%, $(COREUTILSEXEC)) \
 init/init \
 terminal/terminal \
 sh/sh \

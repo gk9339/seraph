@@ -6,6 +6,16 @@
 #include <stdlib.h>
 #include <string.h>
 #include <libgen.h>
+#include <limits.h>
+#include <list.h>
+
+struct ls_entry
+{
+    struct stat st;
+    char* filename;
+};
+
+int num_places( int n );
 
 int main( int argc, char** argv )
 {
@@ -17,6 +27,9 @@ int main( int argc, char** argv )
     struct stat st;
     mode_t mode;
     size_t arglen;
+    int size_width = 0, width;
+    struct ls_entry* entry;
+    list_t* ls_list;
 
     if( argc > 2 )
     {
@@ -34,7 +47,7 @@ int main( int argc, char** argv )
 
     if( lstat(argpath, &st) < 0 )
     {
-        printf("Couldn't stat %s.\n", argpath);
+        printf("\033[0;31mCouldn't stat %s.\n", argpath); // Red
         exit(1);
     }
 
@@ -46,25 +59,46 @@ int main( int argc, char** argv )
         if( dr == NULL )
         {
             // Opendir failed
-            printf("Couldn't open %s.\n", argpath);
+            printf("\033[0;31mCouldn't open %s.\n", argpath); // Red
             exit(1);
         }else
         {
+            ls_list = list_create();
             while( (de = readdir(dr)) != NULL )
             {
                 filename = de->d_name;
 
                 path = malloc(arglen + strlen(filename) + 2);
                 sprintf(path, "%s/%s", argpath, filename);
+                entry = malloc(sizeof(struct ls_entry));
 
-                if( lstat(path, &st) < 0 )
+                if( lstat(path, &entry->st) < 0 )
                 {
                     // lstat failed
                     free(path);
+                    free(entry);
                     continue;
                 }
+                free(path);
 
-                mode = st.st_mode;
+                entry->filename = malloc(strlen(filename) + 1);
+                strcpy(entry->filename, filename);
+
+                width = num_places(entry->st.st_size);
+                if( width > size_width )
+                {
+                    size_width = width;
+                }
+
+                list_insert(ls_list, entry);
+            }
+            closedir(dr);
+
+            foreach(node, ls_list)
+            {
+                entry = node->value;
+                mode = entry->st.st_mode;
+                filename = entry->filename;
 
                 perm[0] = (mode & S_IRUSR) ? 'r' : '-';
                 perm[1] = (mode & S_IWUSR) ? 'w' : '-';
@@ -76,16 +110,37 @@ int main( int argc, char** argv )
                 perm[7] = (mode & S_IWOTH) ? 'w' : '-';
                 perm[8] = (mode & S_IXOTH) ? 'x' : '-';
 
-                printf("%s %ld %ld %zd %s", perm, st.st_uid, st.st_gid, st.st_size, filename);
-                if( S_ISDIR(st.st_mode) )
+                printf("%s %ld %ld %*zdB ", perm, entry->st.st_uid, entry->st.st_gid, size_width, entry->st.st_size);
+                if( S_ISBLK(entry->st.st_mode) )
                 {
-                    printf("/");
-                }
-                printf("\n");
+                    printf("\033[1;35m%s", filename); // Magenta (Block device)
+                }else if( S_ISCHR(entry->st.st_mode) )
+                {
+                    printf("\033[0;33m%s", filename); // Yellow/Orange (Character device)
 
-                free(path);
+                }else if( S_ISDIR(entry->st.st_mode) )
+                {
+                    printf("\033[1;34m%s\033[1;32m/", filename); // Blue/Green (Directory)
+                }else if( S_ISFIFO(entry->st.st_mode) )
+                {
+                    printf("\033[1;31m%s", filename); // Red (FIFO)
+                }else if( S_ISREG(entry->st.st_mode) )
+                {
+                    printf("%s", filename); // Default (Regular file)
+                }else if( S_ISLNK(entry->st.st_mode) )
+                {
+                    printf("\033[0;33m%s \033[0;34m-> ??", filename); // Default/Blue (Symlink)
+                }else if( S_ISSOCK(entry->st.st_mode) )
+                {
+                    printf("\033[0;31m%s", filename); // Red (Socket)
+                }
+                printf("\033[0m\n");
+
+                free(entry->filename);
+                free(entry);
             }
-            closedir(dr);
+
+            list_destroy(ls_list);
         }
     }else
     {
@@ -103,13 +158,51 @@ int main( int argc, char** argv )
         perm[7] = (mode & S_IWOTH) ? 'w' : '-';
         perm[8] = (mode & S_IXOTH) ? 'x' : '-';
 
-        printf("%s %ld %ld %ld %s", perm, st.st_uid, st.st_gid, st.st_size, filename);
-        if( S_ISDIR(st.st_mode) )
+        size_width = num_places(st.st_size);
+
+        printf("%s %ld %ld %*zdB ", perm, st.st_uid, st.st_gid, size_width, st.st_size);
+        if( S_ISBLK(st.st_mode) )
         {
-            printf("/");
+            printf("\033[1;35m\t%s", filename); // Magenta (Block device)
+        }else if( S_ISCHR(st.st_mode) )
+        {
+            printf("\033[0;33m\t%s", filename); // Yellow/Orange (Character device)
+
+        }else if( S_ISDIR(st.st_mode) )
+        {
+            printf("\033[1;34m\t%s\033[1;32m/", filename); // Blue/Green (Directory)
+        }else if( S_ISFIFO(st.st_mode) )
+        {
+            printf("\033[1;31m\t%s", filename); // Red (FIFO)
+        }else if( S_ISREG(st.st_mode) )
+        {
+            printf("\t%s", filename); // Default (Regular file)
+        }else if( S_ISLNK(st.st_mode) )
+        {
+            printf("\033[0;33m\t%s \033[0;34m-> ??", filename); // Default/Blue (Symlink)
+        }else if( S_ISSOCK(st.st_mode) )
+        {
+            printf("\033[0;31m\t%s", filename); // Red (Socket)
         }
-        printf("\n");
+        printf("\033[0m\n");
     }
 
     return 0;
+}
+
+int num_places( int n )
+{
+    int r = 1;
+    if( n < 0 )
+    {
+        n = (n == INT_MIN) ? INT_MAX: -n;
+    }
+
+    while( n > 9 )
+    {
+        n /= 10;
+        r++;
+    }
+
+    return r;
 }

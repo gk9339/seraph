@@ -57,6 +57,7 @@ kernel/bitset.o \
 kernel/cbuffer.o \
 kernel/kernel.o \
 kernel/spinlock.o \
+kernel/version.o \
 
 OBJS=\
 $(ARCHDIR)/crti.o \

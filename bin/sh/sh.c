@@ -47,12 +47,12 @@ int sh_cd( char** args )
 {
     if( args[1] == NULL )
     {
-        fprintf(stderr, "sh: expected argument to cd\n");
+        fprintf(stderr, "\033[0;31msh: expected argument to cd\n"); // Red
     }else
     {
         if( chdir(args[1]) != 0 )
         {
-            perror("sh");
+            perror("\033[0;31msh"); // Red
         }
     }
 
@@ -62,7 +62,7 @@ int sh_cd( char** args )
 // Display help text
 int sh_help( char** args __attribute__((unused)) )
 {
-    printf("seraph shell (/bin/sh)\n\n");
+    printf("\033[1;36mseraph\033[0m shell (/bin/sh)\n\n");
     printf("Builtin commands:\n");
 
     for( int i = 0; i < sh_num_builtins(); i++ )
@@ -91,13 +91,13 @@ int sh_launch( char** args )
         // Child process
         if( execvp(args[0], args) == -1 )
         {
-            printf("sh: Command not found\n");
+            printf("\033[0;31msh: Command not found\n"); // Red
         }
         exit(EXIT_FAILURE);
     }else if( pid < 0 )
     {
         // Fork error
-        perror("sh");
+        perror("\033[0;31msh"); // Red
     }else
     {
         // Parent process
@@ -138,7 +138,7 @@ char* sh_readline( void )
 
     if( !buffer )
     {
-        fprintf(stderr, "sh: malloc error\n");
+        fprintf(stderr, "\033[0;31msh: malloc error\n"); // Red
         exit(EXIT_FAILURE);
     }
 
@@ -165,7 +165,7 @@ char* sh_readline( void )
             buffer = realloc(buffer, bufsize);
             if( !buffer )
             {
-                fprintf(stderr, "sh: malloc error\n");
+                fprintf(stderr, "\033[0;31msh: malloc error\n"); // Red
                 exit(EXIT_FAILURE);
             }
         }
@@ -182,7 +182,7 @@ char** sh_splitline( char* line )
 
     if( !tokens )
     {
-        fprintf(stderr, "sh: malloc error\n");
+        fprintf(stderr, "\033[0;31msh: malloc error\n"); // Red
         exit(EXIT_FAILURE);
     }
 
@@ -200,7 +200,7 @@ char** sh_splitline( char* line )
             if( !tokens )
             {
                 free(tokens_backup);
-                fprintf(stderr, "sh: malloc error\n");
+                fprintf(stderr, "\033[0;31msh: malloc error\n"); // Red
                 exit(EXIT_FAILURE);
             }
         }
@@ -220,7 +220,7 @@ void sh_loop( void )
     int status;
 
     do{
-        printf("> ");
+        printf("\033[0m> ");
         fflush(stdout);
         line = sh_readline(); // Read line from stdin
         args = sh_splitline(line); // Split line into tokens

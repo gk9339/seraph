@@ -15,7 +15,7 @@ LIBS:=$(LIBS)
 include libm/make.config
 
 OBJS=\
-$(LIBMOBJ) \
+$(patsubst %, libm/%, $(LIBMOBJ)) \
 libkbd/libkbd.o \
 libansiterm/libansiterm.o \
 
@@ -33,10 +33,10 @@ all: $(OBJS) $(LIBS)
 .c.o:
 	$(CC) -MD -c $< -o $@ -std=gnu11 $(CFLAGS)
 
-libm/libm.a: $(LIBMOBJ)
+libm/libm.a: $(patsubst %, libm/%, $(LIBMOBJ))
 	$(AR) rcs $@ $^
 
-libm/libm.so: $(LIBMOBJ)
+libm/libm.so: $(patsubst %, libm/%, $(LIBMOBJ))
 	$(CC) $^ -o $@ $(DYNCFLAGS)
 
 libkbd/libkbd.so: libkbd/libkbd.o

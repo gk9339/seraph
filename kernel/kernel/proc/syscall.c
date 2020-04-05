@@ -13,11 +13,17 @@
 #include <errno.h>
 #include <stdlib.h>
 #include <fcntl.h>
+#include <stdio.h>
+#include <sys/utsname.h>
 #include <kernel/elf.h>
 #include <kernel/shm.h>
 #include <kernel/pty.h>
 #include <kernel/signal.h>
 #include <kernel/unixpipe.h>
+#include <kernel/version.h>
+
+static char hostname[256] = { 0 };
+static size_t hostname_len = 0;
 
 #define FD_INRANGE(FD) ((FD) < (int)current_process->fds->length && (FD) >= 0)
 #define FD_ENTRY(FD) (current_process->fds->entries[(FD)])
@@ -285,6 +291,69 @@ static int sys_sbrk( int size )
     spin_unlock(proc->image.lock);
 
     return ret;
+}
+
+static int sys_uname( struct utsname* name )
+{
+    PTR_VALIDATE(name);
+
+    char release[256];
+    sprintf(release, "%d.%d.%d", _kernel_version_major, _kernel_version_minor, _kernel_version_lower);
+
+    char version[256];
+    sprintf(version, "%s %s", _kernel_build_date, _kernel_build_time);
+    
+    strcpy(name->sysname, _kernel_name);
+    strcpy(name->nodename, hostname);
+    strcpy(name->release, release);
+    strcpy(name->version, version);
+    strcpy(name->machine, _kernel_arch);
+    strcpy(name->domainname, "");
+
+    return 0;
+}
+
+static int sys_sethostname( char* new_hostname, size_t len )
+{
+    if( current_process->user == USER_ROOT_UID )
+    {
+        PTR_VALIDATE(new_hostname);
+
+        size_t slen = strlen(new_hostname) + 1;
+        if( slen > 256 || len > 256 || len <= 0 )
+        {
+            return -EINVAL;
+        }
+
+        hostname_len = len;
+        memcpy(hostname, new_hostname, len);
+        
+        if( len < slen )
+        {
+            new_hostname[len] = '\0';
+        }
+
+        return 0;
+    }else
+    {
+        return -EPERM;
+    }
+}
+
+static int sys_gethostname( char* buffer, size_t len )
+{
+    PTR_VALIDATE(buffer);
+    if( len < hostname_len )
+    {
+         return -ENAMETOOLONG;
+    }
+    if( len > 256 || len <= 0 )
+    {
+        return -EINVAL;
+    }
+
+    memcpy(buffer, hostname, len);
+    return hostname_len;
 }
 
 static int sys_kill( pid_t pid, uint32_t sig )
@@ -856,6 +925,9 @@ static int (*syscalls[])() =
     [SYS_FORK] = sys_fork,
     [SYS_GETPID] = sys_getpid,
     [SYS_SBRK] = sys_sbrk,
+    [SYS_UNAME] = sys_uname,
+    [SYS_SETHOSTNAME] = sys_sethostname,
+    [SYS_GETHOSTNAME] = sys_gethostname,
     [SYS_KILL] = sys_kill,
     [SYS_SIGNAL] = sys_signal,
     [SYS_OPENPTY] = sys_openpty,

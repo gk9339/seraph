@@ -46,4 +46,7 @@ int dup2( int oldfd, int newfd );
 
 int pipe( int fd[2] );
 
+int sethostname( const char* name, size_t len );
+int gethostname( char* name, size_t len );
+
 #endif

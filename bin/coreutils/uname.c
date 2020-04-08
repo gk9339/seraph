@@ -76,13 +76,11 @@ int main( int argc, char** argv )
                 break;
             case 'e':
                 show_version();
-                __builtin_unreachable();
             case '?':
                 break;
             case 'h':
             default:
                 show_usage();
-                __builtin_unreachable();
         }
     }
 

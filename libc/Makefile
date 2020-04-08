@@ -112,6 +112,7 @@ stdlib/putenv.o \
 stdlib/setenv.o \
 stdlib/unsetenv.o \
 stdlib/atoi.o \
+stdlib/qsort.o \
 sched/sched_yield.o \
 pty/pty.o \
 signal/signal.o \

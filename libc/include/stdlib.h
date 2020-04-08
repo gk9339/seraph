@@ -3,6 +3,7 @@
 
 #include <sys/cdefs.h>
 #include <stdint.h>
+#include <stddef.h>
 
 #define EXIT_FAILURE 1
 #define EXIT_SUCCESS 0
@@ -26,5 +27,7 @@ int atoi( const char* );
 
 int atexit(void (*function)(void));
 void exit( int );
+
+void qsort( void* base, size_t nmemb, size_t size, int(*compar)(const void*, const void*));
 
 #endif

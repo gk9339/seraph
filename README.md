@@ -1,5 +1,8 @@
 # seraph
 
+![Screenshot from 2020-04-05 12-56-48](https://user-images.githubusercontent.com/5243610/78467246-22df6e80-773d-11ea-923d-d9ffc5c18c44.png)
+
+
 ### Build requirements (Archlinux)
 `automake-1.15`
 `gcc`

@@ -11,5 +11,6 @@ extern char* _kernel_arch;
 
 extern char* _kernel_build_date;
 extern char* _kernel_build_time;
+extern char* _kernel_build_timezone;
 
 #endif

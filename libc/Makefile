@@ -120,6 +120,7 @@ sys/setheap.o \
 sys/stat.o \
 sys/mmap.o \
 sys/uname.o \
+sys/reboot.o \
 libgen/basename.o \
 libgen/dirname.o \
 wchar/wcwidth.o \

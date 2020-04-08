@@ -14,15 +14,19 @@ LIBS:=$(LIBS)
 include coreutils/make.config
 
 OBJS=\
-$(patsubst %, coreutils/%, $(COREUTILSOBJ)) \
 init/init.o \
+init/reboot.o \
+init/poweroff.o \
+$(patsubst %, coreutils/%, $(COREUTILSOBJ)) \
 terminal/terminal.o \
 sh/sh.o \
 clear/clear.o \
 
 EXECS=\
-$(patsubst %, coreutils/%, $(COREUTILSEXEC)) \
 init/init \
+init/reboot \
+init/poweroff \
+$(patsubst %, coreutils/%, $(COREUTILSEXEC)) \
 terminal/terminal \
 sh/sh \
 clear/clear \

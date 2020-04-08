@@ -109,24 +109,30 @@ int main( int argc, char** argv )
                 perm[6] = (mode & S_IROTH) ? 'r' : '-';
                 perm[7] = (mode & S_IWOTH) ? 'w' : '-';
                 perm[8] = (mode & S_IXOTH) ? 'x' : '-';
-
+        
                 printf("%s %ld %ld %*zdB ", perm, entry->st.st_uid, entry->st.st_gid, size_width, entry->st.st_size);
                 if( S_ISBLK(entry->st.st_mode) )
                 {
-                    printf("\033[1;35m%s", filename); // Magenta (Block device)
+                    printf("\033[1;45m%s", filename); // Magenta BG (Block device)
                 }else if( S_ISCHR(entry->st.st_mode) )
                 {
-                    printf("\033[0;33m%s", filename); // Yellow/Orange (Character device)
-
+                    printf("\033[0;43m%s", filename); // Yellow/Orange BG (Character device)
+                
                 }else if( S_ISDIR(entry->st.st_mode) )
                 {
                     printf("\033[1;34m%s\033[1;32m/", filename); // Blue/Green (Directory)
                 }else if( S_ISFIFO(entry->st.st_mode) )
                 {
-                    printf("\033[1;31m%s", filename); // Red (FIFO)
+                    printf("\033[1;41m%s", filename); // Red BG (FIFO)
                 }else if( S_ISREG(entry->st.st_mode) )
                 {
-                    printf("%s", filename); // Default (Regular file)
+                    if( mode & S_IXUSR || mode & S_IXGRP || mode & S_IXOTH )
+                    {
+                        printf("\033[0;33m%s\033[1;32m*", filename); // Executable file
+                    }else
+                    {
+                        printf("%s", filename); // Default (Regular file)
+                    }
                 }else if( S_ISLNK(entry->st.st_mode) )
                 {
                     printf("\033[0;33m%s \033[0;34m-> ??", filename); // Default/Blue (Symlink)
@@ -163,26 +169,26 @@ int main( int argc, char** argv )
         printf("%s %ld %ld %*zdB ", perm, st.st_uid, st.st_gid, size_width, st.st_size);
         if( S_ISBLK(st.st_mode) )
         {
-            printf("\033[1;35m\t%s", filename); // Magenta (Block device)
+            printf("\033[1;105m%s", filename); // Magenta BG (Block device)
         }else if( S_ISCHR(st.st_mode) )
         {
-            printf("\033[0;33m\t%s", filename); // Yellow/Orange (Character device)
+            printf("\033[0;43m%s", filename); // Yellow/Orange BG (Character device)
 
         }else if( S_ISDIR(st.st_mode) )
         {
-            printf("\033[1;34m\t%s\033[1;32m/", filename); // Blue/Green (Directory)
+            printf("\033[1;34m%s\033[1;32m/", filename); // Blue/Green (Directory)
         }else if( S_ISFIFO(st.st_mode) )
         {
-            printf("\033[1;31m\t%s", filename); // Red (FIFO)
+            printf("\033[1;41m%s", filename); // Red BG (FIFO)
         }else if( S_ISREG(st.st_mode) )
         {
-            printf("\t%s", filename); // Default (Regular file)
+            printf("%s", filename); // Default (Regular file)
         }else if( S_ISLNK(st.st_mode) )
         {
-            printf("\033[0;33m\t%s \033[0;34m-> ??", filename); // Default/Blue (Symlink)
+            printf("\033[0;33m%s \033[0;34m-> ??", filename); // Default/Blue (Symlink)
         }else if( S_ISSOCK(st.st_mode) )
         {
-            printf("\033[0;31m\t%s", filename); // Red (Socket)
+            printf("\033[0;31m%s", filename); // Red (Socket)
         }
         printf("\033[0m\n");
     }

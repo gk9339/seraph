@@ -26,6 +26,7 @@
 #include <kernel/vga.h>
 #include <kernel/keyboard.h>
 #include <kernel/kconfig.h>
+#include <kernel/acpi.h>
 #include <sys/types.h>
 
 uintptr_t initial_esp = 0;
@@ -39,7 +40,7 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
     multiboot_module_t* mboot_mods = NULL;
 #if EARLY_KERNEL_DEBUG
     debug = 1; // Required for debug_log to output, will be unset before parsing args
-    debug_log("Start kernel_main");
+    debug_log("\nStart kernel_main");
 #endif
 
     // CPU Initialization
@@ -48,6 +49,9 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
 #endif
     gdt_initialize();
     idt_initialize();
+
+    debug_log("ACPI Initializing");
+    initialize_acpi();
 
     // Multiboot check
     if( magic != MULTIBOOT_BOOTLOADER_MAGIC )

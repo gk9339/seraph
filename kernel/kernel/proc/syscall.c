@@ -16,11 +16,13 @@
 #include <stdio.h>
 #include <sys/utsname.h>
 #include <kernel/elf.h>
+#include <kernel/idt.h>
 #include <kernel/shm.h>
 #include <kernel/pty.h>
 #include <kernel/signal.h>
 #include <kernel/unixpipe.h>
 #include <kernel/version.h>
+#include <kernel/acpi.h>
 
 static char hostname[256] = { 0 };
 static size_t hostname_len = 0;
@@ -301,7 +303,7 @@ static int sys_uname( struct utsname* name )
     sprintf(release, "%d.%d.%d", _kernel_version_major, _kernel_version_minor, _kernel_version_lower);
 
     char version[256];
-    sprintf(version, "%s %s", _kernel_build_date, _kernel_build_time);
+    sprintf(version, "%s %s %s", _kernel_build_date, _kernel_build_time, _kernel_build_timezone);
     
     strcpy(name->sysname, _kernel_name);
     strcpy(name->nodename, hostname);
@@ -537,6 +539,41 @@ static int sys_dup2( int oldfd, int newfd )
 static int sys_getuid( void )
 {
     return current_process->real_user;
+}
+
+static int sys_reboot( int type )
+{
+    if( current_process->user != USER_ROOT_UID )
+    {
+        return -EPERM;
+    }else
+    {
+        int_disable();
+        
+        if( type == 0 )
+        {
+            // 8042 reset
+            uintptr_t phys;
+            uint32_t* virt = (void*) (void*)kvmalloc_p(0x1000, &phys);
+            virt[0] = 0;
+            virt[1] = 0;
+            virt[2] = 0;
+            idt_load((uintptr_t)virt);
+        
+            uint8_t out = 0x02; // Clear all keyboard buffers
+            while( (out & 0x02) != 0 )
+            {
+                out = inportb(0x64);
+            }
+            outportb(0x64, 0xFE); // Keyboard reset command
+        }else if( type == 1 )
+        {
+            acpi_poweroff();
+        }
+        STOP;
+    }
+
+    return 0;
 }
 
 static int sys_readdir( int fd, int index, struct dirent* entry )
@@ -936,6 +973,7 @@ static int (*syscalls[])() =
     [SYS_LSTAT] = sys_lstat,
     [SYS_DUP2] = sys_dup2,
     [SYS_GETUID] = sys_getuid,
+    [SYS_REBOOT] = sys_reboot,
     [SYS_READDIR] = sys_readdir,
     [SYS_CHDIR] = sys_chdir,
     [SYS_GETGID] = sys_getgid,

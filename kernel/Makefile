@@ -57,7 +57,7 @@ kernel/bitset.o \
 kernel/cbuffer.o \
 kernel/kernel.o \
 kernel/spinlock.o \
-kernel/version.o \
+kernel/drivers/acpi.o \
 
 OBJS=\
 $(ARCHDIR)/crti.o \
@@ -77,10 +77,11 @@ $(ARCHDIR)/crtn.o \
 all: seraph.kernel
 
 seraph.kernel: $(OBJS) $(ARCHDIR)/linker.ld
-	$(CC) -T $(ARCHDIR)/linker.ld -o $@ $(CFLAGS) $(LINK_LIST)
+	$(CC) -MD -c kernel/version.c -o kernel/version.o -D__TIMEZONE__=\"$(shell date +"%z")\"
+	$(CC) -T $(ARCHDIR)/linker.ld -o $@ $(CFLAGS) $(LINK_LIST) kernel/version.o
 	$(NM) seraph.kernel -g | ./script/symbols.py > kernel/symbols.S
 	$(CC) -MD -c kernel/symbols.S -o kernel/symbols.o
-	$(CC) -T $(ARCHDIR)/linker.ld -o $@ $(CFLAGS) $(LINK_LIST) kernel/symbols.o
+	$(CC) -T $(ARCHDIR)/linker.ld -o $@ $(CFLAGS) $(LINK_LIST) kernel/version.o kernel/symbols.o
 	grub-file --is-x86-multiboot seraph.kernel
 
 .c.o:

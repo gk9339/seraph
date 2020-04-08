@@ -144,6 +144,7 @@ DECL_SYSCALL2(stat, char*, void*);
 DECL_SYSCALL2(lstat, char*, void*);
 DECL_SYSCALL2(dup2, int, int);
 DECL_SYSCALL0(getuid);
+DECL_SYSCALL1(reboot, int);
 DECL_SYSCALL3(readdir, int, int, void*);
 DECL_SYSCALL2(gethostname, char*, size_t);
 DECL_SYSCALL2(sethostname, char*, size_t);

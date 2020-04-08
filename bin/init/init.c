@@ -31,6 +31,7 @@ int main( void )
 
     while ((pid=waitpid(-1,NULL,WNOKERN))!=-1);
 
-    // TODO: Shutdown
+    sleep(1);
+    syscall_reboot(1);
     return 0;
 }

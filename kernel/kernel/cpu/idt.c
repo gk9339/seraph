@@ -4,8 +4,6 @@
 
 #define ENTRY(X)(idt.entries[(X)])
 
-extern void idt_load( uintptr_t );
-
 typedef struct
 {
     uint16_t base_low;

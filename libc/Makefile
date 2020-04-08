@@ -7,7 +7,7 @@ EXEC_PREFIX?=$(PREFIX)
 INCLUDEDIR?=$(PREFIX)/include
 LIBDIR?=$(EXEC_PREFIX)/lib
 
-CFLAGS:=$(CFLAGS) -ffreestanding -Wall -Wextra -pedantic -Wshadow -Wpointer-arith \
+CFLAGS:=$(CFLAGS) -ffreestanding -fPIC -Wall -Wextra -pedantic -Wshadow -Wpointer-arith \
 -Wcast-align -Wmissing-prototypes -Wmissing-declarations -Wredundant-decls -Wnested-externs \
 -Winline -Wconversion -Wstrict-prototypes -Wno-sign-conversion -O1
 CPPFLAGS:=$(CPPFLAGS) -Iinclude
@@ -93,6 +93,8 @@ unistd/pipe.o \
 unistd/chdir.o \
 unistd/gethostname.o \
 unistd/sethostname.o \
+unistd/getopt.o \
+unistd/getopt_long.o \
 ioctl/ioctl.o \
 stdio/fflush.o \
 stdio/fclose.o \
@@ -158,7 +160,7 @@ libc.so: $(OBJS)
 	cp crtn.o $(DESTDIR)$(LIBDIR)
 	OBJ=`$(CC) $(CFLAGS) $(LDFLAGS) -print-file-name=crtbegin.o` && cp "$$OBJ" $(DESTDIR)$(LIBDIR)
 	OBJ=`$(CC) $(CFLAGS) $(LDFLAGS) -print-file-name=crtend.o` && cp "$$OBJ" $(DESTDIR)$(LIBDIR)
-	$(CC) -nodefaultlibs -o $@ $(CFLAGS) -shared -fPIC $^ -lgcc
+	$(CC) -nodefaultlibs -o $@ $(CFLAGS) -shared $^ -lgcc
 
 libk.a: $(LIBK_OBJS)
 	$(AR) rcs $@ $^

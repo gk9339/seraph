@@ -109,7 +109,7 @@ int main( int argc, char** argv )
                 perm[6] = (mode & S_IROTH) ? 'r' : '-';
                 perm[7] = (mode & S_IWOTH) ? 'w' : '-';
                 perm[8] = (mode & S_IXOTH) ? 'x' : '-';
-        
+
                 printf("%s %ld %ld %*zdB ", perm, entry->st.st_uid, entry->st.st_gid, size_width, entry->st.st_size);
                 if( S_ISBLK(entry->st.st_mode) )
                 {

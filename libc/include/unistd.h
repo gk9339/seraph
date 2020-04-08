@@ -49,4 +49,8 @@ int pipe( int fd[2] );
 int sethostname( const char* name, size_t len );
 int gethostname( char* name, size_t len );
 
+extern char* optarg;
+extern int optind, opterr, optopt;
+int getopt( int argc, char* const argv[], const char* optstring );
+
 #endif

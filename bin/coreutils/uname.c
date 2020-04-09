@@ -4,7 +4,7 @@
 #include <getopt.h>
 #include <sys/utsname.h>
 
-#define VERSION "0.1"
+#define VERSION "0.2"
 
 #define FLAG_SYSNAME  0x01
 #define FLAG_NODENAME 0x02
@@ -14,8 +14,8 @@
 #define FLAG_OSNAME   0x20
 #define FLAG_ALL (FLAG_SYSNAME|FLAG_NODENAME|FLAG_RELEASE|FLAG_VERSION|FLAG_MACHINE|FLAG_OSNAME)
 
-void show_version( void );
-void show_usage( void );
+void show_version( void ); // Display version text and exit
+void show_usage( void ); // Display help text and exit
 
 int main( int argc, char** argv )
 {
@@ -76,11 +76,14 @@ int main( int argc, char** argv )
                 break;
             case 'e':
                 show_version();
+                __builtin_unreachable();
             case '?':
-                break;
+                fprintf(stderr,"Try 'uname --help'\n");
+                exit(EXIT_FAILURE);
             case 'h':
             default:
                 show_usage();
+                __builtin_unreachable();
         }
     }
 
@@ -88,7 +91,7 @@ int main( int argc, char** argv )
     {
         fprintf(stderr, "uname: unknown extra argument '%s'\n"
                         "Try 'uname --help'\n", argv[optind]);
-        exit(1);
+        exit(EXIT_FAILURE);
     }
 
     if( !flags )
@@ -131,29 +134,32 @@ int main( int argc, char** argv )
 
 	printf("\n");
 
-    return 0;
+    return EXIT_SUCCESS;
 }
 
+// Display version text and exit
 void show_version( void )
 {
     printf("uname (\033[0;36mseraph\033[0m coreutils) %s\n", VERSION);
 
-    exit(0);
+    exit(EXIT_SUCCESS);
 }
 
+// Display help text and exit
 void show_usage( void )
 {
-    fprintf(stderr, "Usage: uname [-asnrvmoph]\n"
-                    " -a, --all              print all other flags in order,\n"
-                    " -s, --kernel-name      print kernel name\n"
-                    " -n, --nodename         print nodename / hostname\n"
-                    " -r, --kernel-release   print kernel release\n"
-                    " -v, --kernel-version   print kernel version\n"
-                    " -m, --machine          print architecture\n"
-                    " -o, --operating-system print operating system name\n"
-                    " -p, --processor        same as -m\n"
-                    " -h, --help             display this help text and exit\n"
-                    "     --version          display version and exit\n");
+    printf("Usage: uname [OPTION(s)]\n"
+           "Print system information. No option implies -s\n\n"
+           " -a, --all              print all other flags in order,\n"
+           " -s, --kernel-name      print kernel name\n"
+           " -n, --nodename         print nodename / hostname\n"
+           " -r, --kernel-release   print kernel release\n"
+           " -v, --kernel-version   print kernel version\n"
+           " -m, --machine          print architecture\n"
+           " -o, --operating-system print operating system name\n"
+           " -p, --processor        same as -m\n"
+           " -h, --help             display this help text and exit\n"
+           "     --version          display version and exit\n");
 
-    exit(1);
+    exit(EXIT_SUCCESS);
 }

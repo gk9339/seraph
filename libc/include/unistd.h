@@ -45,6 +45,8 @@ int usleep( useconds_t usec );
 int sleep( unsigned int sec );
 
 int chdir( const char* path );
+char* getwd( char* buf );
+char* getcwd( char* buf, size_t size );
 
 int dup( int oldfd );
 int dup2( int oldfd, int newfd );
@@ -53,6 +55,8 @@ int pipe( int fd[2] );
 
 int sethostname( const char* name, size_t len );
 int gethostname( char* name, size_t len );
+
+int isatty( int fd );
 
 extern char* optarg;
 extern int optind, opterr, optopt;

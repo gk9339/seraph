@@ -95,6 +95,9 @@ unistd/gethostname.o \
 unistd/sethostname.o \
 unistd/getopt.o \
 unistd/getopt_long.o \
+unistd/isatty.o \
+unistd/getwd.o \
+unistd/getcwd.o \
 ioctl/ioctl.o \
 stdio/fflush.o \
 stdio/fclose.o \

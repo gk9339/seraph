@@ -149,6 +149,7 @@ DECL_SYSCALL3(readdir, int, int, void*);
 DECL_SYSCALL2(gethostname, char*, size_t);
 DECL_SYSCALL2(sethostname, char*, size_t);
 DECL_SYSCALL1(chdir, char*);
+DECL_SYSCALL2(getcwd, char*, size_t);
 DECL_SYSCALL1(setuid, unsigned int);
 DECL_SYSCALL0(yield);
 DECL_SYSCALL2(nanosleep, unsigned long, unsigned long);

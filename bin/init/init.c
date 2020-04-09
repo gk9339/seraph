@@ -33,5 +33,5 @@ int main( void )
 
     sleep(1);
     syscall_reboot(1);
-    return 0;
+    __builtin_unreachable();
 }

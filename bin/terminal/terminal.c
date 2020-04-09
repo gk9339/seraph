@@ -220,7 +220,8 @@ int main( void )
             }
         }
     }
-    return 0;
+
+    return EXIT_SUCCESS;
 }
 
 void sig_suspend_input( int sig __attribute__((unused)) )

@@ -36,6 +36,8 @@ static size_t hostname_len = 0;
 #define PTR_INRANGE(PTR) ((uintptr_t)(PTR) > current_process->image.entry)
 #define PTR_VALIDATE(PTR) ptr_validate((void *)(PTR), __func__)
 
+#define MIN(A, B) ((A) < (B)?(A):(B))
+
 static void ptr_validate( void* ptr, const char* syscall )
 {
     if( ptr && !PTR_INRANGE(ptr) )
@@ -617,13 +619,25 @@ static int sys_chdir( char* dirpath )
         }
         close_fs(chd);
         free(current_process->wd_name);
-        current_process->wd_name = malloc(sizeof(path) + 1);
+        current_process->wd_name = malloc(strlen(path) + 1);
         memcpy(current_process->wd_name, path, strlen(path) + 1);
         return 0;
     }else
     {
         return -ENOENT;
     }
+}
+
+static int sys_getcwd( char* buf, size_t size )
+{
+    if( buf )
+    {
+        PTR_VALIDATE(buf);
+        size_t len = strlen(current_process->wd_name) + 1;
+        return (int)memcpy(buf, current_process->wd_name, MIN(size, len));
+    }
+
+    return 0;
 }
 
 static int sys_getgid( void )
@@ -976,6 +990,7 @@ static int (*syscalls[])() =
     [SYS_REBOOT] = sys_reboot,
     [SYS_READDIR] = sys_readdir,
     [SYS_CHDIR] = sys_chdir,
+    [SYS_GETCWD] = sys_getcwd,
     [SYS_GETGID] = sys_getgid,
     [SYS_SETUID] = sys_setuid,
     [SYS_SLEEPABS] = sys_sleepabs,

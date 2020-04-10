@@ -12,7 +12,7 @@
 #include <sys/ioctl.h>
 #include <errno.h>
 
-#define VERSION "0.1"
+#define VERSION "0.2"
 
 #define FLAG_ALL        0x01
 #define FLAG_ALMOST_ALL 0x02
@@ -31,6 +31,7 @@ int multiple = 0;
 int is_tty = 0;
 size_t line_length = 80;
 
+void parse_args( int argc, char** argv ); // parse args, setting flags, or calling version/help functions
 int display_dir( char* path ); // Display all files inside a dir
 void display_files( struct ls_entry** ls_entry_array, int entries ); // Display each file in array
 void print_entry( struct ls_entry* entry, int colwidth ); // print a file
@@ -45,54 +46,9 @@ void show_usage( void ); // Display help text and exit
 int main( int argc, char** argv )
 {
     char* path;
-    int c;
     int retval = 0;
 
-    while( 1 )
-    {
-        static struct option long_options[] =
-        {
-            {"all",        no_argument, 0, 'a'},
-            {"almost-all", no_argument, 0, 'A'},
-            {"help",       no_argument, 0, 'h'},
-            {"version",    no_argument, 0, 'v'},
-            {0, 0, 0, 0}
-        };
-
-        int option_index = 0;
-
-        c = getopt_long(argc, argv, "aAl", long_options, &option_index);
-
-        if( c == -1 )
-        {
-            break;
-        }
-
-        switch( c )
-        {
-            case 'a':
-                flags |= FLAG_ALL;
-                flags &= ~FLAG_ALMOST_ALL;
-                break;
-            case 'A':
-                flags |= FLAG_ALMOST_ALL;
-                flags &= ~FLAG_ALL;
-                break;
-            case 'l':
-                flags |= FLAG_LONG;
-                break;
-            case 'v':
-                show_version();
-                __builtin_unreachable();
-            case '?':
-                fprintf(stderr, "Try 'ls --help'\n");
-                exit(EXIT_FAILURE);
-            case 'h':
-            default:
-                show_usage();
-                __builtin_unreachable();
-        }
-    }
+    parse_args(argc, argv);
 
     if( argc > optind )
     {
@@ -206,6 +162,58 @@ int main( int argc, char** argv )
     }
 
     return retval;
+}
+
+// Parse args, setting flags, or calling version/help functions
+void parse_args( int argc, char** argv )
+{
+    int c;
+
+    while( 1 )
+    {
+        static struct option long_options[] =
+        {
+            {"all",        no_argument, 0, 'a'},
+            {"almost-all", no_argument, 0, 'A'},
+            {"help",       no_argument, 0, 'h'},
+            {"version",    no_argument, 0, 'v'},
+            {0, 0, 0, 0}
+        };
+
+        int option_index = 0;
+
+        c = getopt_long(argc, argv, "aAl", long_options, &option_index);
+
+        if( c == -1 )
+        {
+            break;
+        }
+
+        switch( c )
+        {
+            case 'a':
+                flags |= FLAG_ALL;
+                flags &= ~FLAG_ALMOST_ALL;
+                break;
+            case 'A':
+                flags |= FLAG_ALMOST_ALL;
+                flags &= ~FLAG_ALL;
+                break;
+            case 'l':
+                flags |= FLAG_LONG;
+                break;
+            case 'v':
+                show_version();
+                __builtin_unreachable();
+            case '?':
+                fprintf(stderr, "Try 'ls --help'\n");
+                exit(EXIT_FAILURE);
+            case 'h':
+            default:
+                show_usage();
+                __builtin_unreachable();
+        }
+    }
 }
 
 // Display all files inside a dir
@@ -393,27 +401,49 @@ void print_entry( struct ls_entry* entry, int colwidth )
 void print_entry_long( struct ls_entry* entry, int size_width )
 {
     mode_t mode;
-    char perm[] = "---------\0";
+    char perm[] = "----------\0";
 
     mode = entry->st.st_mode;
 
-    perm[0] = (mode & S_IRUSR) ? 'r' : '-';
-    perm[1] = (mode & S_IWUSR) ? 'w' : '-';
+    if( S_ISBLK(mode) )
+    {
+        perm[0] = 'b';
+    }else if( S_ISCHR(mode) )
+    {
+        perm[0] = 'c';
+    }else if( S_ISDIR(mode) )
+    {
+        perm[0] = 'd';
+    }else if( S_ISFIFO(mode) )
+    {
+        perm[0] = 'f';
+    }else if( S_ISREG(mode) )
+    {
+        perm[0] = '-';
+    }else if( S_ISLNK(mode) )
+    {
+        perm[0] = 'l';
+    }else if( S_ISSOCK(mode) )
+    {
+        perm[0] = 's';
+    }
+    perm[1] = (mode & S_IRUSR) ? 'r' : '-';
+    perm[2] = (mode & S_IWUSR) ? 'w' : '-';
     if( mode & S_ISUID )
     {
-        perm[2] = 's';
+        perm[3] = 's';
     }else
     {
-        perm[2] = (mode & S_IXUSR) ? 'x' : '-';
+        perm[3] = (mode & S_IXUSR) ? 'x' : '-';
     }
-    perm[3] = (mode & S_IRGRP) ? 'r' : '-';
-    perm[4] = (mode & S_IWGRP) ? 'w' : '-';
-    perm[5] = (mode & S_IXGRP) ? 'x' : '-';
-    perm[6] = (mode & S_IROTH) ? 'r' : '-';
-    perm[7] = (mode & S_IWOTH) ? 'w' : '-';
-    perm[8] = (mode & S_IXOTH) ? 'x' : '-';
+    perm[4] = (mode & S_IRGRP) ? 'r' : '-';
+    perm[5] = (mode & S_IWGRP) ? 'w' : '-';
+    perm[6] = (mode & S_IXGRP) ? 'x' : '-';
+    perm[7] = (mode & S_IROTH) ? 'r' : '-';
+    perm[8] = (mode & S_IWOTH) ? 'w' : '-';
+    perm[9] = (mode & S_IXOTH) ? 'x' : '-';
 
-    printf("%c%s %ld %ld %*zdB ",S_ISDIR(entry->st.st_mode) ? 'd' : '-', perm, entry->st.st_uid, entry->st.st_gid, size_width, entry->st.st_size);
+    printf("%s %ld %ld %*zdB ", perm, entry->st.st_uid, entry->st.st_gid, size_width, entry->st.st_size);
     printname_color(entry->filename, &entry->st);
     printf("\n");
 }

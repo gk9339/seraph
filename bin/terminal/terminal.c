@@ -246,7 +246,7 @@ void sig_suspend_input( int sig __attribute__((unused)) )
 // Child process (shell) exited
 void sig_child_exit( int sig __attribute__((unused)) )
 {
-    char* message = "\n[Process completed]";
+    char* message = "\n\r[Process completed]";
     for( size_t i = 0; i < strlen(message); i++ )
     {
         terminal_write(message[i]);

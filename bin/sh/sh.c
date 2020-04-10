@@ -6,7 +6,7 @@
 #include <string.h>
 #include <getopt.h>
 
-#define VERSION "0.1"
+#define VERSION "0.2"
 
 #define RL_BUFSIZE 1024
 #define TOK_BUFSIZE 64
@@ -39,6 +39,8 @@ int (*builtin_func[])( char** ) =
     &sh_help,
     &sh_exit,
 };
+
+int exit_sh = 0;
 
 void sh_loop( void ); // Main shell loop: prompt, readline, splitline, execute
 char* sh_readline( void ); // Read line of input from stdio, replace \n with \0
@@ -109,12 +111,17 @@ void sh_loop( void )
 {
     char* line;
     char** args;
-    int status;
+    int status = 0;
     char cwd[1024];
 
     do{
         getcwd(cwd, 1023);
-        printf("\033[1;33m%s\033[1;32m$\033[0m ", cwd);
+        printf("\033[1;33m%s", cwd);
+        if( status )
+        {
+            printf("\033[0;41m\u2191%d\033[0m", WEXITSTATUS(status));
+        }
+        printf("\033[1;32m$\033[0m ");
         fflush(stdout);
         line = sh_readline(); // Read line from stdin
         args = sh_splitline(line); // Split line into tokens
@@ -122,7 +129,7 @@ void sh_loop( void )
 
         free(line);
         free(args);
-    }while( status );
+    }while( !exit_sh );
 }
 
 // Read line of input from stdio, replace \n with \0
@@ -214,7 +221,7 @@ int sh_execute( char** args )
 {
     if( args[0] == NULL )
     {
-        return 1;
+        return 0;
     }
 
     for( int i = 0; i < sh_num_builtins(); i++ )
@@ -232,7 +239,7 @@ int sh_execute( char** args )
 int sh_launch( char** args )
 {
     pid_t pid;
-    int status;
+    int status = 0;
 
     pid = fork();
     if( pid == 0 )
@@ -255,7 +262,7 @@ int sh_launch( char** args )
         }while( !WIFEXITED(status) && !WIFSIGNALED(status) );
     }
 
-    return 1;
+    return status;
 }
 
 // Number of builtin functions
@@ -278,7 +285,7 @@ int sh_cd( char** args )
         }
     }
 
-    return 1;
+    return 0;
 }
 
 // Display help text
@@ -292,12 +299,14 @@ int sh_help( char** args __attribute__((unused)) )
         printf("\t%s %s\n", builtin_str[i], builtin_desc[i]);
     }
 
-    return 1;
+    return 0;
 }
 
 // Exit shell
 int sh_exit( char** args __attribute__((unused)) )
 {
+    exit_sh = 1;
+
     return 0;
 }
 

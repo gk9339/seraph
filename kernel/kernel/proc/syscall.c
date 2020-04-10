@@ -50,7 +50,7 @@ static void ptr_validate( void* ptr, const char* syscall )
 
 static int __attribute__((noreturn)) sys_exit( int retval )
 {
-    task_exit(retval);
+    task_exit((retval & 0xFF) << 8);
     while(1);
 }
 
@@ -497,6 +497,18 @@ static int stat_node( fs_node_t* fn, uintptr_t st )
     }
 
     return 0;
+}
+
+static int sys_stat( int fd, uintptr_t st )
+{
+    PTR_VALIDATE(st);
+    
+    if( FD_CHECK(fd) )
+    {
+        return stat_node(FD_ENTRY(fd), st);
+    }
+
+    return -EBADF;
 }
 
 static int sys_statf( char* file, uintptr_t st )
@@ -983,6 +995,7 @@ static int (*syscalls[])() =
     [SYS_SIGNAL] = sys_signal,
     [SYS_OPENPTY] = sys_openpty,
     [SYS_SEEK] = sys_seek,
+    [SYS_STAT] = sys_stat,
     [SYS_STATF] = sys_statf,
     [SYS_LSTAT] = sys_lstat,
     [SYS_DUP2] = sys_dup2,

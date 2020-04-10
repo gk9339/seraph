@@ -124,6 +124,7 @@ sys/wait.o \
 sys/fswait.o \
 sys/setheap.o \
 sys/stat.o \
+sys/fstat.o \
 sys/mmap.o \
 sys/uname.o \
 sys/reboot.o \

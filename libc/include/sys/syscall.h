@@ -142,6 +142,7 @@ DECL_SYSCALL5(openpty, int*, int*, char*, void*, void*);
 DECL_SYSCALL3(lseek, int, int, int);
 DECL_SYSCALL2(stat, char*, void*);
 DECL_SYSCALL2(lstat, char*, void*);
+DECL_SYSCALL2(fstat, int, void*);
 DECL_SYSCALL2(dup2, int, int);
 DECL_SYSCALL0(getuid);
 DECL_SYSCALL1(reboot, int);

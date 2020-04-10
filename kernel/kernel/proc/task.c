@@ -10,6 +10,7 @@
 #include <kernel/mem.h>
 #include <kernel/gdt.h>
 #include <kernel/irq.h>
+#include <sys/wait.h>
 #include <sys/types.h>
 #include <sys/signals.h>
 #include <kernel/fpu.h>
@@ -328,7 +329,7 @@ void task_exit( int retval )
         return;
     }
 
-    debug_logf(debug_str, "%d - %s -> Finishing [%d]", current_process->id, current_process->name, retval);
+    debug_logf(debug_str, "%d - %s -> Finishing [%d]", current_process->id, current_process->name, WEXITSTATUS(retval));
     cleanup_process((process_t*)current_process, retval);
 
     process_t* parent = process_get_parent((process_t*)current_process);

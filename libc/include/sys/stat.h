@@ -63,5 +63,6 @@ struct stat
 
 int stat( const char* file, struct stat* st );
 int lstat( const char* path, struct stat* st );
+int fstat( int file, struct stat* st );
 
 #endif

@@ -4,7 +4,7 @@
 #include <getopt.h>
 #include <sys/utsname.h>
 
-#define VERSION "0.2"
+#define VERSION "0.3"
 
 #define FLAG_SYSNAME  0x01
 #define FLAG_NODENAME 0x02
@@ -14,15 +14,73 @@
 #define FLAG_OSNAME   0x20
 #define FLAG_ALL (FLAG_SYSNAME|FLAG_NODENAME|FLAG_RELEASE|FLAG_VERSION|FLAG_MACHINE|FLAG_OSNAME)
 
+int flags = 0;
+
+void parse_args( int argc, char** argv ); // parse args, setting flags, or calling version/help functions
 void show_version( void ); // Display version text and exit
 void show_usage( void ); // Display help text and exit
 
 int main( int argc, char** argv )
 {
     struct utsname u;
-    int c;
-    int flags = 0;
     int spaces = 0;
+
+    parse_args(argc, argv);
+
+    if( argc > optind )
+    {
+        fprintf(stderr, "uname: unknown extra argument '%s'\n"
+                        "Try 'uname --help'\n", argv[optind]);
+        exit(EXIT_FAILURE);
+    }
+
+    if( !flags )
+    {
+        flags = FLAG_SYSNAME;
+    }
+
+    uname(&u);
+    
+    if( flags & FLAG_SYSNAME )
+    {
+		if( spaces++) printf(" ");
+		printf("%s", u.sysname);
+	}
+	if( flags & FLAG_NODENAME )
+    {
+		if( spaces++) printf(" ");
+		printf("%s", u.nodename);
+	}
+	if( flags & FLAG_RELEASE )
+    {
+		if( spaces++) printf(" ");
+		printf("%s", u.release);
+	}
+	if( flags & FLAG_VERSION )
+    {
+		if( spaces++) printf(" ");
+		printf("%s", u.version);
+	}
+	if( flags & FLAG_MACHINE )
+    {
+		if( spaces++) printf(" ");
+		printf("%s", u.machine);
+	}
+	if( flags & FLAG_OSNAME )
+    {
+		if( spaces++) printf(" ");
+		printf("%s", "seraph");
+	}
+
+	printf("\n");
+
+    return EXIT_SUCCESS;
+}
+
+// parse args, setting flags, or calling version/help functions
+void parse_args( int argc, char** argv )
+{
+    int c;
 
     while( 1 )
     {
@@ -86,55 +144,6 @@ int main( int argc, char** argv )
                 __builtin_unreachable();
         }
     }
-
-    if( argc > optind )
-    {
-        fprintf(stderr, "uname: unknown extra argument '%s'\n"
-                        "Try 'uname --help'\n", argv[optind]);
-        exit(EXIT_FAILURE);
-    }
-
-    if( !flags )
-    {
-        flags = FLAG_SYSNAME;
-    }
-
-    uname(&u);
-    
-    if( flags & FLAG_SYSNAME )
-    {
-		if( spaces++) printf(" ");
-		printf("%s", u.sysname);
-	}
-	if( flags & FLAG_NODENAME )
-    {
-		if( spaces++) printf(" ");
-		printf("%s", u.nodename);
-	}
-	if( flags & FLAG_RELEASE )
-    {
-		if( spaces++) printf(" ");
-		printf("%s", u.release);
-	}
-	if( flags & FLAG_VERSION )
-    {
-		if( spaces++) printf(" ");
-		printf("%s", u.version);
-	}
-	if( flags & FLAG_MACHINE )
-    {
-		if( spaces++) printf(" ");
-		printf("%s", u.machine);
-	}
-	if( flags & FLAG_OSNAME )
-    {
-		if( spaces++) printf(" ");
-		printf("%s", "seraph");
-	}
-
-	printf("\n");
-
-    return EXIT_SUCCESS;
 }
 
 // Display version text and exit

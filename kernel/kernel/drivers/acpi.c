@@ -222,21 +222,21 @@ static int acpiEnable( void )
                 }
             if( i<300 ) 
             {
-                debug_log("enabled acpi\n");
+                debug_log("enabled acpi");
                 return 0;
             }else
             {
-                debug_log("couldn't enable acpi\n");
+                debug_log("couldn't enable acpi");
                 return -1;
             }
         }else
         {
-            debug_log("no known way to enable acpi\n");
+            debug_log("no known way to enable acpi");
             return -1;
         }
     }else
     {
-        debug_log("acpi was already enabled\n");
+        debug_log("acpi was already enabled");
         return 0;
     }
 }
@@ -323,23 +323,23 @@ int initialize_acpi( void )
                             return 0;
                         }else
                         {
-                            debug_log("\\_S5 parse error\n");
+                            debug_log("\\_S5 parse error");
                         }
                     }else
                     {
-                        debug_log("\\_S5 not present\n");
+                        debug_log("\\_S5 not present");
                     }
                 }else
                 {
-                    debug_log("DSDT invalid\n");
+                    debug_log("DSDT invalid");
                 }
             }
             ptr++;
         }
-        debug_log("no valid FACP present\n");
+        debug_log("no valid FACP present");
     }else
     {
-        debug_log("no acpi\n");
+        debug_log("no acpi");
     }
 
     return -1;
@@ -358,5 +358,5 @@ void acpi_poweroff( void )
     if( PM1bControlBlock != 0 )
         outportl(PM1bControlBlock, (uint16_t)(SLP_TYPb | SLP_EN) );
 
-    debug_log("acpi poweroff failed\n");
+    debug_log("acpi poweroff failed");
 }

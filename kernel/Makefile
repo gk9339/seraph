@@ -64,13 +64,6 @@ $(ARCHDIR)/crti.o \
 $(KERNEL_OBJS) \
 $(ARCHDIR)/crtn.o \
 
-LINK_LIST=\
-$(LDFLAGS) \
-$(ARCHDIR)/crti.o \
-$(KERNEL_OBJS) \
-$(LIBS) \
-$(ARCHDIR)/crtn.o \
-
 .PHONY: all clean install install-headers
 .SUFFIXES: .o .c .S
 
@@ -78,10 +71,10 @@ all: seraph.kernel
 
 seraph.kernel: $(OBJS) $(ARCHDIR)/linker.ld
 	$(CC) -MD -c kernel/version.c -o kernel/version.o -D__TIMEZONE__=\"$(shell date +"%z")\"
-	$(CC) -T $(ARCHDIR)/linker.ld -o $@ $(CFLAGS) $(LINK_LIST) kernel/version.o
+	$(CC) -T $(ARCHDIR)/linker.ld -o $@ $(CFLAGS)$(LDFLAGS)$(ARCHDIR)/crti.o $(KERNEL_OBJS) kernel/version.o $(LIBS) $(ARCHDIR)/crtn.o
 	$(NM) seraph.kernel -g | ./script/symbols.py > kernel/symbols.S
 	$(CC) -MD -c kernel/symbols.S -o kernel/symbols.o
-	$(CC) -T $(ARCHDIR)/linker.ld -o $@ $(CFLAGS) $(LINK_LIST) kernel/version.o kernel/symbols.o
+	$(CC) -T $(ARCHDIR)/linker.ld -o $@ $(CFLAGS)$(LDFLAGS)$(ARCHDIR)/crti.o $(KERNEL_OBJS) kernel/version.o kernel/symbols.o $(LIBS) $(ARCHDIR)/crtn.o
 	grub-file --is-x86-multiboot seraph.kernel
 
 .c.o:

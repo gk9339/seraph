@@ -34,7 +34,6 @@ stack_top:
 _start:
     # Set up the stack
     mov $stack_top, %esp
-    and $-16, %esp
 
     # Push the pointer to the stack, multiboot struct and magic value
     pushl %esp

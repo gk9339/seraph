@@ -140,7 +140,7 @@ int main( int argc, char** argv )
 // Display version text and exit
 void show_version( void )
 {
-    printf("uname (\033[0;36mseraph\033[0m coreutils) %s\n", VERSION);
+    printf("uname (\033[1;36mseraph\033[0m coreutils) %s\n", VERSION);
 
     exit(EXIT_SUCCESS);
 }

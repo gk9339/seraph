@@ -304,7 +304,7 @@ int sh_exit( char** args __attribute__((unused)) )
 // Display version text and exit
 void show_version( void )
 {
-    printf("\033[0;36mseraph\033[0m sh %s\n", VERSION);
+    printf("\033[1;36mseraph\033[0m sh %s\n", VERSION);
 
     exit(EXIT_SUCCESS);
 }

@@ -514,7 +514,7 @@ static int filenames_alphabetical( const void* c1, const void* c2 )
 // Display version text and exit
 void show_version( void )
 {
-    printf("ls (\033[0;36mseraph\033[0;m coreutils) %s\n", VERSION);
+    printf("ls (\033[1;36mseraph\033[0;m coreutils) %s\n", VERSION);
 
     exit(EXIT_SUCCESS);
 }

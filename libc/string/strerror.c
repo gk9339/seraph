@@ -124,5 +124,6 @@ char* strerror( int errnum )
 {
 	if (errnum > 255) return "unknown error";
 	if (!_error_strings[errnum]) return "unknown error";
+
 	return _error_strings[errnum];
 }

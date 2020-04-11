@@ -5,8 +5,10 @@
 #include <stdio.h>
 #include <string.h>
 #include <getopt.h>
+#include <signal.h>
+#include <unistd.h>
 
-#define VERSION "0.2"
+#define VERSION "0.3"
 
 #define RL_BUFSIZE 1024
 #define TOK_BUFSIZE 64
@@ -41,6 +43,7 @@ int (*builtin_func[])( char** ) =
 };
 
 int exit_sh = 0;
+pid_t sh_pgid;
 
 void sh_loop( void ); // Main shell loop: prompt, readline, splitline, execute
 char* sh_readline( void ); // Read line of input from stdio, replace \n with \0
@@ -99,6 +102,8 @@ int main( int argc, char** argv )
     }
     setlinebuf(stdout);
 
+    sh_pgid = getpgid(0);
+
     // Main shell loop
     sh_loop();
 
@@ -117,9 +122,12 @@ void sh_loop( void )
     do{
         getcwd(cwd, 1023);
         printf("\033[1;33m%s", cwd);
-        if( status )
+        if( status && WIFEXITED(status) )
         {
             printf("\033[0;41m\u2191%d\033[0m", WEXITSTATUS(status));
+        }else if( status && WIFSIGNALED(status) )
+        {
+            printf("\033[0;41m\u2191%s(%d)\033[0m", sys_signame[WTERMSIG(status)], WTERMSIG(status));
         }
         printf("\033[1;32m$\033[0m ");
         fflush(stdout);
@@ -245,6 +253,8 @@ int sh_launch( char** args )
     if( pid == 0 )
     {
         // Child process
+        setpgid(0, 0);
+        tcsetpgrp(STDIN_FILENO, getpid());
         if( execvp(args[0], args) == -1 )
         {
             printf("\033[0;31msh: Command not found\n"); // Red
@@ -260,6 +270,8 @@ int sh_launch( char** args )
         do{
             waitpid(pid, &status, WUNTRACED);
         }while( !WIFEXITED(status) && !WIFSIGNALED(status) );
+
+        tcsetpgrp(STDIN_FILENO, sh_pgid);
     }
 
     return status;

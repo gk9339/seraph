@@ -299,7 +299,6 @@ static void pty_fill_name( pty_t* pty, char* out )
 
 static int pty_ioctl( pty_t* pty, int request, void* argp )
 {
-    char debug_str[256];
     switch( request )
     {
         case IOCTLDTYPE:
@@ -339,7 +338,6 @@ static int pty_ioctl( pty_t* pty, int request, void* argp )
             if( !argp ) return -EINVAL;
             PTR_VALIDATE(argp);
             pty->foreground_process = *(pid_t*)argp;
-            debug_logf(debug_str, "Setting PTY group to %d", pty->foreground_process);
             return 0;
         case TIOCGPGRP:
             if( !argp ) return -EINVAL;

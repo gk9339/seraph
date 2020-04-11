@@ -174,6 +174,8 @@ int main( void )
         dup2(fd_slave, 0);
         dup2(fd_slave, 1);
         dup2(fd_slave, 2);
+
+        tcsetpgrp(STDIN_FILENO, getpid());
      
         char* arg[] = { NULL };
         execvp("/bin/sh", arg);

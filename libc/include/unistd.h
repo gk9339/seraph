@@ -50,8 +50,10 @@ char* getcwd( char* buf, size_t size );
 
 int dup( int oldfd );
 int dup2( int oldfd, int newfd );
-
 int pipe( int fd[2] );
+
+pid_t tcgetpgrp( int fd );
+int tcsetpgrp( int fd, pid_t pgrp );
 
 int sethostname( const char* name, size_t len );
 int gethostname( char* name, size_t len );

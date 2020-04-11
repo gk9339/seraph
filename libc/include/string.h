@@ -36,5 +36,6 @@ char* strncat( char*, const char*, size_t );
 void* memchr( const void*, int, size_t );
 
 char* strerror( int );
+char* strsignal( int );
 
 #endif

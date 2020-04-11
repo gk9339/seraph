@@ -59,6 +59,7 @@ string/strstr.o \
 string/memchr.o \
 string/strcat.o \
 string/strerror.o \
+string/strsignal.o \
 list/list.o \
 tree/tree.o \
 hashtable/hashtable.o \

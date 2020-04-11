@@ -28,7 +28,7 @@
 #define SIGTSTP     24 /* ^Z (suspend) */
 #define SIGCONT     25 /* Unsuspended (please, continue) */
 #define SIGTTIN     26 /* TTY input has stopped */
-#define SIGTTOUT    27 /* TTY output has stopped */
+#define SIGTTOU     27 /* TTY output has stopped */
 #define SIGVTALRM   28 /* Virtual timer has expired */
 #define SIGPROF     29 /* Profiling timer expired */
 #define SIGXCPU     30 /* CPU time limit exceeded */

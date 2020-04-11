@@ -9,6 +9,7 @@
 #include <kernel/process.h>
 #include <kernel/irq.h>
 #include <errno.h>
+#include <signal.h>
 #include <kernel/task.h>
 
 static spin_lock_t sig_lock;
@@ -213,6 +214,8 @@ void fix_signal_stacks( void )
 
 int send_signal( pid_t proc, uint32_t signal, int force_root )
 {
+    char debug_str[512];
+    debug_logf(debug_str, "signal: %s to %d", sys_signame[signal], proc);
     process_t* receiver = process_from_pid(proc);
 
     if( !receiver )
@@ -289,6 +292,9 @@ int group_send_signal( int group, uint32_t signal, int force_root )
 {
     int kill_self = 0;
     int killed_something = 0;
+
+    char debug_str[512];
+    debug_logf(debug_str, "signal: %s to group %d", sys_signame[signal], group);
 
     foreach(node, process_list)
     {

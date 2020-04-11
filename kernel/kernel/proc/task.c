@@ -329,7 +329,7 @@ void task_exit( int retval )
         return;
     }
 
-    debug_logf(debug_str, "%d - %s -> Finishing [%d]", current_process->id, current_process->name, WEXITSTATUS(retval));
+    debug_logf(debug_str, "%d - %s -> Finishing [%d]", current_process->id, current_process->name, WIFEXITED(retval) ? WEXITSTATUS(retval) : WTERMSIG(retval));
     cleanup_process((process_t*)current_process, retval);
 
     process_t* parent = process_get_parent((process_t*)current_process);

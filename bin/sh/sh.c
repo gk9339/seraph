@@ -104,6 +104,8 @@ int main( int argc, char** argv )
 
     sh_pgid = getpgid(0);
 
+    signal(SIGINT, SIG_IGN);
+
     // Main shell loop
     sh_loop();
 
@@ -127,7 +129,7 @@ void sh_loop( void )
             printf("\033[0;41m\u2191%d\033[0m", WEXITSTATUS(status));
         }else if( status && WIFSIGNALED(status) )
         {
-            printf("\033[0;41m\u2191%s(%d)\033[0m", sys_signame[WTERMSIG(status)], WTERMSIG(status));
+            printf("\033[0;41m%s(%d)\033[0m", sys_signame[WTERMSIG(status)], WTERMSIG(status));
         }
         printf("\033[1;32m$\033[0m ");
         fflush(stdout);

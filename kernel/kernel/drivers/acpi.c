@@ -347,13 +347,14 @@ int initialize_acpi( void )
 
 void acpi_poweroff( void )
 {
-    // SCI_enabled is set to 1 if acpi shutdown is possible
+    // SCI_enabled is set to 1 if acpi poweroff is possible
     if( SCI_enabled == 0 )
         return;
 
     acpiEnable();
 
-    // send the shutdown command
+    debug_log("acpi poweroff");
+    // send the poweroff command
     outportl(PM1aControlBlock, (uint16_t)(SLP_TYPa | SLP_EN) );
     if( PM1bControlBlock != 0 )
         outportl(PM1bControlBlock, (uint16_t)(SLP_TYPb | SLP_EN) );

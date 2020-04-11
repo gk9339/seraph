@@ -703,7 +703,7 @@ int waitpid( int pid, int* status, int options )
                     candidate = child;
                     break;
                 }
-                if( (options & WSTOPPED) && child->suspended )
+                if( ((options & WSTOPPED) || (options & WUNTRACED)) && child->suspended )
                 {
                     candidate = child;
                     break;

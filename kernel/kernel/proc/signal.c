@@ -114,6 +114,7 @@ void handle_signal( process_t* proc, signal_t* sig )
         {
             current_process->suspended = 1;
             current_process->status = 0x7F;
+            current_process->status |= (signum & 0xFF) << 8;
 
             process_t* parent = process_get_parent((process_t*)current_process);
 

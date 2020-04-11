@@ -74,5 +74,5 @@ char* strsignal( int sig )
     if( sig > NSIG ) return "unknown signal";
     if( !sys_siglist[sig] ) return "unknown signal";
 
-    return sys_siglist[sig];
+    return (char*)sys_siglist[sig];
 }

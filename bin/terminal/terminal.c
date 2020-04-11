@@ -11,6 +11,7 @@
 #include <sys/fswait.h>
 #include <stdint.h>
 #include <math.h>
+#include <sys/stat.h>
 #include <wchar.h>
 #include <libkbd/libkbd.h>
 #include <libansiterm/libansiterm.h>
@@ -187,6 +188,15 @@ int main( void )
         char c;
      
         terminal_clear(2);
+
+        // Clear anything in kbd buffer
+        struct stat st;
+        fstat(kfd, &st);
+        for( size_t i = 0; i < st.st_size; i++ )
+        {
+            char tmp[1];
+            read(kfd, tmp, 1);
+        }
 
         int fds[] = {fd_master, kfd};
         char buf[1024];

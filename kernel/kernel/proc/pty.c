@@ -611,7 +611,6 @@ static fs_node_t* create_dev_tty( void )
     fnode->gid  = 0;
     fnode->type = FS_FILE | FS_SYMLINK;
     fnode->readlink = readlink_dev_tty;
-    fnode->length  = 1;
     fnode->nlink   = 1;
     fnode->ctime   = now();
     fnode->mtime   = now();

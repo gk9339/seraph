@@ -164,6 +164,9 @@ int waitpid( int pid, int* status, int options );
 
 int is_valid_process( process_t* proc );
 
+int procfs_initialize( void );
+uint32_t cpuinfo_func( fs_node_t*, uint32_t, uint32_t, uint8_t* );
+
 void debug_print_proc_tree( char** );
 
 #endif

@@ -7,6 +7,7 @@
 #include <kernel/kconfig.h> // USER STACK / KERNEL HEAP values
 
 extern uintptr_t heap_end;
+extern uintptr_t kernel_heap_alloc_point;
 
 typedef struct page
 {

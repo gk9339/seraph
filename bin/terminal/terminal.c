@@ -178,7 +178,7 @@ int main( void )
 
         tcsetpgrp(STDIN_FILENO, getpid());
      
-        char* arg[] = { NULL };
+        char* arg[] = { "/bin/sh", NULL };
         execvp("/bin/sh", arg);
     }else
     {

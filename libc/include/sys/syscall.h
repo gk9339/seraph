@@ -140,6 +140,7 @@ DECL_SYSCALL2(kill, pid_t, int);
 DECL_SYSCALL2(signal, uint32_t, sighandler_t);
 DECL_SYSCALL5(openpty, int*, int*, char*, void*, void*);
 DECL_SYSCALL3(lseek, int, int, int);
+DECL_SYSCALL3(readlink, char*, char*, size_t);
 DECL_SYSCALL2(stat, char*, void*);
 DECL_SYSCALL2(lstat, char*, void*);
 DECL_SYSCALL2(fstat, int, void*);

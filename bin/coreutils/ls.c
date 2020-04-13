@@ -12,7 +12,7 @@
 #include <sys/ioctl.h>
 #include <errno.h>
 
-#define VERSION "0.2"
+#define VERSION "0.3"
 
 #define FLAG_ALL        0x01
 #define FLAG_ALMOST_ALL 0x02
@@ -36,7 +36,7 @@ int display_dir( char* path ); // Display all files inside a dir
 void display_files( struct ls_entry** ls_entry_array, int entries ); // Display each file in array
 void print_entry( struct ls_entry* entry, int colwidth ); // print a file
 void print_entry_long( struct ls_entry* entry, int size_width ); // Print a file (long / -l)
-int printname_color( char* filename, struct stat* st ); // Print filename with colour based on type
+int printname_color( struct ls_entry* entry ); // Print filename with colour based on type
 int num_places( int n ); // Count number of digits in a number
 int files_before_dirs( const void* c1, const void* c2 ); // Comparison function 
 static int filenames_alphabetical( const void* c1, const void* c2 ); // Comparison function
@@ -100,7 +100,7 @@ int main( int argc, char** argv )
                 {
                     stat(path, &entry->stlink);
                     entry->link = malloc(4096);
-                    //readlink(path, entry->link, 6096);
+                    readlink(path, entry->link, 4096);
                 }
                 list_insert(entry_list, entry);
             }
@@ -273,6 +273,12 @@ int display_dir( char* path )
                 free(entry);
                 continue;
             }
+            if( S_ISLNK(entry->st.st_mode) )
+            {
+                stat(filepath, &entry->stlink);
+                entry->link = malloc(4096);
+                readlink(filepath, entry->link, 4096);
+            }
             free(filepath);
 
             entry->filename = malloc(strlen(filename) + 1);
@@ -384,7 +390,7 @@ void print_entry( struct ls_entry* entry, int colwidth )
     int len;
     if( is_tty )
     {
-        len = printname_color(entry->filename, &entry->st);
+        len = printname_color(entry);
     }else
     {
         printf("%s", entry->filename);
@@ -405,9 +411,9 @@ void print_entry_long( struct ls_entry* entry, int size_width )
 
     mode = entry->st.st_mode;
 
-    if( S_ISBLK(mode) )
+    if( S_ISLNK(mode) )
     {
-        perm[0] = 'b';
+        perm[0] = 'l';
     }else if( S_ISCHR(mode) )
     {
         perm[0] = 'c';
@@ -420,9 +426,9 @@ void print_entry_long( struct ls_entry* entry, int size_width )
     }else if( S_ISREG(mode) )
     {
         perm[0] = '-';
-    }else if( S_ISLNK(mode) )
+    }else if( S_ISBLK(mode) )
     {
-        perm[0] = 'l';
+        perm[0] = 'b';
     }else if( S_ISSOCK(mode) )
     {
         perm[0] = 's';
@@ -444,44 +450,66 @@ void print_entry_long( struct ls_entry* entry, int size_width )
     perm[9] = (mode & S_IXOTH) ? 'x' : '-';
 
     printf("%s %ld %ld %*zdB ", perm, entry->st.st_uid, entry->st.st_gid, size_width, entry->st.st_size);
-    printname_color(entry->filename, &entry->st);
+    printname_color(entry);
     printf("\n");
 }
 
 // Print filename with colour based on type
-int printname_color( char* filename, struct stat* st )
+int printname_color( struct ls_entry* entry )
 {
-    int retval = strlen(filename);
+    int retval = strlen(entry->filename);
 
-    if( S_ISBLK(st->st_mode) )
+    if( S_ISCHR(entry->st.st_mode) )
     {
-        printf("\033[1;45m%s", filename); // Magenta BG (Block device)
-    }else if( S_ISCHR(st->st_mode) )
+        printf("\033[0;43m%s", entry->filename); // Yellow/Orange BG (Character device)
+    }else if( S_ISDIR(entry->st.st_mode) )
     {
-        printf("\033[0;43m%s", filename); // Yellow/Orange BG (Character device)
-    }else if( S_ISDIR(st->st_mode) )
-    {
-        printf("\033[1;34m%s\033[1;32m/", filename); // Blue/Green (Directory)
+        printf("\033[1;34m%s\033[1;32m/\033[1;34m", entry->filename); // Blue/Green (Directory)
         retval++;
-    }else if( S_ISFIFO(st->st_mode) )
+    }else if( S_ISFIFO(entry->st.st_mode) )
     {
-        printf("\033[1;41m%s", filename); // Red BG (FIFO)
-    }else if( S_ISREG(st->st_mode) )
+        printf("\033[1;41m%s", entry->filename); // Red BG (FIFO)
+    }else if( S_ISREG(entry->st.st_mode) )
     {
-        if( st->st_mode & S_IXUSR || st->st_mode & S_IXGRP || st->st_mode & S_IXOTH )
+        if( entry->st.st_mode & S_IXUSR || entry->st.st_mode & S_IXGRP || entry->st.st_mode & S_IXOTH )
         {
-            printf("\033[0;33m%s\033[1;32m*", filename); // Executable file
+            printf("\033[0;33m%s\033[1;32m*\033[0;33m", entry->filename); // Executable file
             retval++;
         }else
         {
-            printf("%s", filename); // Default (Regular file)
+            printf("%s", entry->filename); // Default (Regular file)
         }
-    }else if( S_ISLNK(st->st_mode) )
+    }else if( S_ISBLK(entry->st.st_mode) )
     {
-        printf("\033[0;33m%s \033[0;34m-> ??", filename); // Default/Blue (Symlink)
-    }else if( S_ISSOCK(st->st_mode) )
+        printf("\033[1;45m%s", entry->filename); // Magenta BG (Block device)
+    }else if( S_ISSOCK(entry->st.st_mode) )
     {
-        printf("\033[0;31m%s", filename); // Red (Socket)
+        printf("\033[0;31m%s", entry->filename); // Red (Socket)
+    }
+
+    if( flags & FLAG_LONG && S_ISLNK(entry->st.st_mode) )
+    {
+        struct ls_entry lnk =
+        {
+            .filename = entry->filename,
+            .st = entry->stlink,
+            .link = NULL,
+            .stlink = {0},
+        };
+        printname_color(&lnk);
+        printf(" -> ");
+        lnk.filename = entry->link;
+        printname_color(&lnk);
+    }else if( S_ISLNK(entry->st.st_mode) )
+    {
+        struct ls_entry lnk =
+        {
+            .filename = entry->filename,
+            .st = entry->stlink,
+            .link = NULL,
+            .stlink = {0},
+        };
+        printname_color(&lnk);
     }
 
     printf("\033[0m");

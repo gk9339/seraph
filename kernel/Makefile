@@ -52,6 +52,8 @@ kernel/proc/signal.o \
 kernel/proc/symbols.o \
 kernel/proc/syscall.o \
 kernel/proc/task.o \
+kernel/proc/procfs.o \
+kernel/proc/cpuinfo.o \
 kernel/args.o \
 kernel/bitset.o \
 kernel/cbuffer.o \

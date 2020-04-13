@@ -911,16 +911,16 @@ static fs_node_t* kopen_recur( char* filename, uint32_t flags, uint32_t symlink_
     do {
         /*
          * This test is a little complicated, but we basically always resolve symlinks in the
-         * of a path (like /home/symlink/file) even if O_NOFOLLOW and O_PATH are set. If we are
+         * of a path (like /home/symlink/file) even if FS_O_NOFOLLOW and FS_O_PATH are set. If we are
          * on the leaf of the path then we will look at those flags and act accordingly
          */
         if ((node_ptr->type & FS_SYMLINK) &&
-                !((flags & O_NOFOLLOW) && (flags & O_PATH) && depth == path_depth)) 
+                !((flags & FS_O_NOFOLLOW) && (flags & FS_O_PATH) && depth == path_depth)) 
         {
             /* This ensures we don't return a path when NOFOLLOW is requested but PATH
              * isn't passed.
              */
-            if ((flags & O_NOFOLLOW) && depth == path_depth - 1) 
+            if ((flags & FS_O_NOFOLLOW) && depth == path_depth - 1) 
             {
                 free((void *)path);
                 free(node_ptr);

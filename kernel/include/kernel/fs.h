@@ -4,23 +4,25 @@
 #include <sys/stat.h>
 #include <stdint.h> // intN_t
 #include <stddef.h> // size_t
+#include <tree.h> // tree_t
+#include <hashtable.h> // hashtable_t
 
 #define PATH_SEPARATOR '/'
 #define PATH_SEPARATOR_STRING "/"
 #define PATH_UP ".."
 #define PATH_DOT "."
 
-#define O_RDONLY     0x0000
-#define O_WRONLY     0x0001
-#define O_RDWR       0x0002
-#define O_APPEND     0x0008
-#define O_CREAT      0x0200
-#define O_TRUNC      0x0400
-#define O_EXCL       0x0800
-#define O_NOFOLLOW   0x1000
-#define O_PATH       0x2000
-#define O_NONBLOCK   0x4000
-#define O_DIRECTORY  0x8000
+#define FS_O_RDONLY     0x0000
+#define FS_O_WRONLY     0x0001
+#define FS_O_RDWR       0x0002
+#define FS_O_APPEND     0x0008
+#define FS_O_CREAT      0x0200
+#define FS_O_TRUNC      0x0400
+#define FS_O_EXCL       0x0800
+#define FS_O_NOFOLLOW   0x1000
+#define FS_O_PATH       0x2000
+#define FS_O_NONBLOCK   0x4000
+#define FS_O_DIRECTORY  0x8000
 
 #define FS_FILE        0x01
 #define FS_DIRECTORY   0x02
@@ -110,6 +112,8 @@ struct vfs_entry
 };
 
 extern fs_node_t* fs_root;
+extern tree_t* fs_tree;
+extern hashtable_t* fs_types;
 
 int has_permission( fs_node_t *node, int permission_bit ); // Does current process user have permission
 uint32_t read_fs( fs_node_t* node, uint32_t offset, uint32_t size, uint8_t* buffer );

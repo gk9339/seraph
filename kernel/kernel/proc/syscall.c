@@ -5,7 +5,6 @@
 #include <kernel/types.h>
 #include <kernel/process.h>
 #include <kernel/task.h>
-#include <kernel/fs.h>
 #include <kernel/serial.h>
 #include <kernel/syscall.h>
 #include <kernel/spinlock.h>
@@ -13,6 +12,7 @@
 #include <errno.h>
 #include <stdlib.h>
 #include <fcntl.h>
+#include <kernel/fs.h>
 #include <stdio.h>
 #include <sys/utsname.h>
 #include <kernel/elf.h>
@@ -59,13 +59,13 @@ static int sys_open( const char* file, int flags, uint16_t mode )
     PTR_VALIDATE(file);
     fs_node_t* node = kopen((char*)file, flags);
 
-    if( node && (flags & O_CREAT) && (flags & O_EXCL) )
+    if( node && (flags & FS_O_CREAT) && (flags & FS_O_EXCL) )
     {
         close_fs(node);
         return -EEXIST;
     }
 
-    if( !(flags & O_WRONLY) || (flags & O_RDWR) )
+    if( !(flags & FS_O_WRONLY) || (flags & FS_O_RDWR) )
     {
         if( node && !has_permission(node, S_IROTH) )
         {
@@ -74,7 +74,7 @@ static int sys_open( const char* file, int flags, uint16_t mode )
         }
     }
 
-    if( (flags & O_RDWR) || (flags & O_WRONLY) )
+    if( (flags & FS_O_RDWR) || (flags & FS_O_WRONLY) )
     {
         if( node && !has_permission(node, S_IWOTH) )
         {
@@ -88,7 +88,7 @@ static int sys_open( const char* file, int flags, uint16_t mode )
         }
     }
 
-    if( !node && (flags & O_CREAT) )
+    if( !node && (flags & FS_O_CREAT) )
     {
         int result = create_file_fs((char*)file, mode);
         if( !result )
@@ -100,7 +100,7 @@ static int sys_open( const char* file, int flags, uint16_t mode )
         }
     }
 
-    if( node && (flags & O_DIRECTORY) )
+    if( node && (flags & FS_O_DIRECTORY) )
     {
         if( !(node->type & FS_DIRECTORY) )
         {
@@ -108,7 +108,7 @@ static int sys_open( const char* file, int flags, uint16_t mode )
         }
     }
 
-    if( node && (flags & O_TRUNC) )
+    if( node && (flags & FS_O_TRUNC) )
     {
         if( !((flags & O_ACCMODE) == O_WRONLY || (flags & O_ACCMODE) == O_RDWR) ) 
         {
@@ -123,7 +123,7 @@ static int sys_open( const char* file, int flags, uint16_t mode )
         return -ENOENT;
     }
 
-    if( node && (flags & O_CREAT) && (node->type & FS_DIRECTORY) )
+    if( node && (flags & FS_O_CREAT) && (node->type & FS_DIRECTORY) )
     {
         close_fs(node);
         return -EISDIR;
@@ -131,7 +131,7 @@ static int sys_open( const char* file, int flags, uint16_t mode )
 
     int fd = process_append_fd((process_t*)current_process, node);
     FD_FLAG(fd) = flags;
-    if( flags & O_APPEND )
+    if( flags & FS_O_APPEND )
     {
         FD_OFFSET(fd) = node->length;
     }else
@@ -401,8 +401,8 @@ static int sys_openpty( int* master, int* slave, char* name __attribute__((unuse
     *master = process_append_fd((process_t*)current_process, fs_master);
     *slave = process_append_fd((process_t*)current_process, fs_slave);
 
-    FD_FLAG(*master) = O_RDWR;
-    FD_FLAG(*slave) = O_RDWR;
+    FD_FLAG(*master) = FS_O_RDWR;
+    FD_FLAG(*slave) = FS_O_RDWR;
 
     open_fs(fs_master, 0);
     open_fs(fs_slave, 0);
@@ -438,6 +438,21 @@ static int sys_seek( int fd, int offset, int whence )
     }
 
     return -EBADF;
+}
+
+static int sys_readlink( const char* path, char* ptr, size_t len )
+{
+    PTR_VALIDATE(path);
+    fs_node_t* node = kopen((char*)path, FS_O_PATH | FS_O_NOFOLLOW);
+    if( !node )
+    {
+        return -ENOENT;
+    }
+
+    int retval = readlink_fs(node, ptr, len);
+    close_fs(node);
+
+    return retval;
 }
 
 static int stat_node( fs_node_t* fn, uintptr_t st )
@@ -534,7 +549,7 @@ static int sys_lstat( char* file, uintptr_t st )
     PTR_VALIDATE(file);
     PTR_VALIDATE(st);
 
-    fs_node_t* fn = kopen(file, O_PATH | O_NOFOLLOW);
+    fs_node_t* fn = kopen(file, FS_O_PATH | FS_O_NOFOLLOW);
     result = stat_node(fn, st);
 
     if( fn )
@@ -788,8 +803,8 @@ static int sys_pipe( int fd[2] )
 
     fd[0] = process_append_fd((process_t*)current_process, outpipes[0]);
     fd[1] = process_append_fd((process_t*)current_process, outpipes[1]);
-    FD_FLAG(fd[0]) = O_RDWR;
-    FD_FLAG(fd[1]) = O_RDWR;
+    FD_FLAG(fd[0]) = FS_O_RDWR;
+    FD_FLAG(fd[1]) = FS_O_RDWR;
 
     return 0;
 }
@@ -995,6 +1010,7 @@ static int (*syscalls[])() =
     [SYS_SIGNAL] = sys_signal,
     [SYS_OPENPTY] = sys_openpty,
     [SYS_SEEK] = sys_seek,
+    [SYS_READLINK] = sys_readlink,
     [SYS_STAT] = sys_stat,
     [SYS_STATF] = sys_statf,
     [SYS_LSTAT] = sys_lstat,

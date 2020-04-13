@@ -7,6 +7,7 @@ mkdir -p isodir/boot
 mkdir -p isodir/boot/grub
 mkdir -p sysroot/boot/grub
 mkdir -p sysroot/dev
+mkdir -p sysroot/proc
 
 cat > sysroot/boot/grub/grub.cfg << EOF
 set timeout=0

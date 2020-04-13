@@ -31,12 +31,13 @@
 
 uintptr_t initial_esp = 0;
 int debug = 0;
+multiboot_info_t* mbi;
+char kcmdline[1024];
 
 void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp ) 
 {
     char debug_str[256];
     uint32_t mboot_mods_count = 0;
-    multiboot_info_t* mbi;
     multiboot_module_t* mboot_mods = NULL;
 #if EARLY_KERNEL_DEBUG
     debug = 1; // Required for debug_log to output, will be unset before parsing args
@@ -170,22 +171,24 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
     paging_finalize();
 
     // Parse cmdline
-    char cmdline[1024];
     if( CHECK_FLAG(mbi->flags, 2) ) // cmdline
     {
         size_t len = strlen((char*)mbi->cmdline);
-        memmove(cmdline, (char*)mbi->cmdline, len + 1);
+        memmove(kcmdline, (char*)mbi->cmdline, len + 1);
+    }else
+    {
+        kcmdline[0] = 0;
     }
 
     heap_install();
     
     // Parse args
-    args_parse(cmdline);
+    args_parse(kcmdline);
     if( args_present("serialdebug") )
     {
         debug = 1;
     }
-    if( args_present("verbose") )
+    if( args_present("vgadebugg") )
     {
         debug = (uint8_t)(debug + 2);
     }
@@ -274,6 +277,10 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
     map_vfs_directory("/dev");
     zero_initialize();
     null_initialize();
+
+    if( CHECK_FLAG(debug, 0) ) debug_log("Setup /proc");
+    if( CHECK_FLAG(debug, 1) ) printf("Setup /proc\n\n");
+    procfs_initialize();
 
     // Set up environment for /bin/init
     char* boot_exec = "/bin/init";

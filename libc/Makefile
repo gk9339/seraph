@@ -44,6 +44,7 @@ stdio/vsprintf.o \
 stdio/fmemopen.o \
 stdlib/abort.o \
 stdlib/malloc.o \
+stdlib/atoi.o \
 string/memcmp.o \
 string/memcpy.o \
 string/memmove.o \
@@ -99,6 +100,7 @@ unistd/getopt_long.o \
 unistd/isatty.o \
 unistd/getwd.o \
 unistd/getcwd.o \
+unistd/readlink.o \
 ioctl/ioctl.o \
 stdio/fflush.o \
 stdio/fclose.o \
@@ -115,7 +117,6 @@ stdlib/getenv.o \
 stdlib/putenv.o \
 stdlib/setenv.o \
 stdlib/unsetenv.o \
-stdlib/atoi.o \
 stdlib/qsort.o \
 sched/sched_yield.o \
 pty/pty.o \

@@ -388,12 +388,12 @@ int sh_jobs( char** args )
 
 int sh_bg( char** args )
 {
-
+    return 0;
 }
 
 int sh_fg( char** args )
 {
-
+    return 0;
 }
 
 // Exit shell

@@ -1,6 +1,7 @@
 *
 
 !/**/
+!*/make.config
 !*/*.c
 !*/*.h
 !/include/**

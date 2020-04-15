@@ -9,10 +9,11 @@ LIBDIR?=$(EXEC_PREFIX)/lib
 
 CFLAGS:=$(CFLAGS) -ffreestanding -fPIC -Wall -Wextra -pedantic -Wshadow -Wpointer-arith \
 -Wcast-align -Wmissing-prototypes -Wmissing-declarations -Wredundant-decls -Wnested-externs \
--Winline -Wconversion -Wstrict-prototypes -Wno-sign-conversion -O1
+-Winline -Wconversion -Wstrict-prototypes -Wno-sign-conversion
 CPPFLAGS:=$(CPPFLAGS) -Iinclude
-LIBK_CFLAGS:=$(CFLAGS)
+LIBK_CFLAGS:=$(CFLAGS) -O2
 LIBK_CPPFLAGS:=$(CPPFLAGS) -D__is_libk
+CFLAGS:=$(CFLAGS) -O3
 
 ARCHDIR=arch/$(HOSTARCH)
 
@@ -65,6 +66,8 @@ list/list.o \
 tree/tree.o \
 hashtable/hashtable.o \
 errno/errno.o \
+libssp/ssp.o \
+libssp/ssp_local.o \
 
 HOSTEDOBJS=\
 $(ARCH_HOSTEDOBJS) \
@@ -122,6 +125,7 @@ sched/sched_yield.o \
 pty/pty.o \
 signal/signal.o \
 signal/kill.o \
+signal/raise.o \
 sys/wait.o \
 sys/fswait.o \
 sys/setheap.o \
@@ -144,7 +148,7 @@ $(HOSTEDOBJS) \
 
 LIBK_OBJS=$(FREEOBJS:.o=.libk.o)
 
-BINARIES=libc.a libk.a libc.so
+BINARIES=libc.a libk.a libc.so libssp.a libssp.so libssp_nonshared.a libssp_nonshared.so
 
 CRTS=\
 $(ARCH_CRTS) \
@@ -167,10 +171,24 @@ libc.so: $(OBJS)
 	cp crtn.o $(DESTDIR)$(LIBDIR)
 	OBJ=`$(CC) $(CFLAGS) $(LDFLAGS) -print-file-name=crtbegin.o` && cp "$$OBJ" $(DESTDIR)$(LIBDIR)
 	OBJ=`$(CC) $(CFLAGS) $(LDFLAGS) -print-file-name=crtend.o` && cp "$$OBJ" $(DESTDIR)$(LIBDIR)
-	$(CC) -nodefaultlibs -o $@ $(CFLAGS) -shared $^ -lgcc
+	$(CC) -nodefaultlibs -o libssp.so $(CFLAGS) -shared libssp/ssp.o
+	$(CC) -nodefaultlibs -o libssp_nonshared.so $(CFLAGS) -shared libssp/ssp.o libssp/ssp_local.o
+	$(CC) -nodefaultlibs -o $@ $(CFLAGS) -shared $^ -lgcc -L. -lssp -lssp_nonshared
 
 libk.a: $(LIBK_OBJS)
 	$(AR) rcs $@ $^
+
+libssp.a: libssp/ssp.o
+	$(AR) rcs $@ $^
+
+libssp.so: libssp/ssp.o
+	$(CC) -nodefaultlibs -o $@ $(CFLAGS) -shared $^
+
+libssp_nonshared.a: libssp/ssp_local.o libssp/ssp.o
+	$(AR) rcs $@ $^
+
+libssp_nonshared.so: libssp/ssp_local.o libssp/ssp.o
+	$(CC) -nodefaultlibs -o $@ $(CFLAGS) -shared $^
 
 .c.o:
 	$(CC) -MD -c $< -o $@ -std=gnu11 $(CFLAGS)$(CPPFLAGS)

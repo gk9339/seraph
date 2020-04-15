@@ -38,7 +38,7 @@ static bitset_t pid_set;
 
 char* default_name = "[no_name]";
 
-static int _next_pid = 2;
+int _next_pid = 2;
 
 int is_valid_process( process_t* process )
 {

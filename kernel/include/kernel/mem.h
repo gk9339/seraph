@@ -6,8 +6,8 @@
 #include <stdint.h> // intN_t
 #include <kernel/kconfig.h> // USER STACK / KERNEL HEAP values
 
+extern uintptr_t placement_pointer;
 extern uintptr_t heap_end;
-extern uintptr_t kernel_heap_alloc_point;
 
 typedef struct page
 {
@@ -37,17 +37,15 @@ typedef struct page_directory
     uint32_t ref_count;
 } page_directory_t;
 
+extern page_directory_t* kernel_directory;
+extern page_directory_t* current_directory;
+
 void kmalloc_startat( uintptr_t address );
 uintptr_t kmalloc_real( size_t size, int align, uintptr_t* phys );
 uintptr_t kmalloc( size_t size );
 uintptr_t kvmalloc( size_t size );
 uintptr_t kmalloc_p( size_t size, uintptr_t* phys );
 uintptr_t kvmalloc_p( size_t size, uintptr_t* phys );
-
-extern page_directory_t* kernel_directory;
-extern page_directory_t* current_directory;
-
-extern uintptr_t placement_pointer;
 
 void paging_initialize( uint32_t memsize );
 void paging_prestart( void );

@@ -166,9 +166,11 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
 #if EARLY_KERNEL_DEBUG
     debug_log("Finalize paging / heap install\n");
     printf("\nFinalize paging / heap install\n");
-    debug = 0; // Enabled manually by EARLY_KERNEL_DEBUG earlier
 #endif
     paging_finalize();
+#if EARLY_KERNEL_DEBUG
+    debug = 0; // Enabled manually by EARLY_KERNEL_DEBUG earlier
+#endif
 
     // Parse cmdline
     if( CHECK_FLAG(mbi->flags, 2) ) // cmdline
@@ -314,9 +316,9 @@ void kpanic( char* error_message, const char* file, int line, struct regs* regs 
 
     terminal_setcolor(4);
 
-    printf("\nUNHANDLED EXCEPTION: %s ", error_message);
+    printf("\fUNHANDLED EXCEPTION: %s ", error_message);
     debug_logf(debug_str, "UNHANDLED EXCEPTION: %s ", error_message);
-    printf("pid: %d", getpid());
+    printf("pid: %d\n", getpid());
     debug_logf(debug_str, "pid: %d", getpid());
     printf("File: %s ", file);
     debug_logf(debug_str, "File: %s ", file);
@@ -327,19 +329,19 @@ void kpanic( char* error_message, const char* file, int line, struct regs* regs 
         printf("\nREGISTERS:");
         debug_logf(debug_str, "\nREGISTERS:");
         printf("eax=0x%x ebx=0x%x\n", regs->eax, regs->ebx);
-        debug_logf(debug_str, "eax=0x%x ebx=0x%x\n", regs->eax, regs->ebx);
+        debug_logf(debug_str, "eax=0x%x ebx=0x%x", regs->eax, regs->ebx);
         printf("ecx=0x%x edx=0x%x\n", regs->ecx, regs->edx);
-        debug_logf(debug_str, "ecx=0x%x edx=0x%x\n", regs->ecx, regs->edx);
+        debug_logf(debug_str, "ecx=0x%x edx=0x%x", regs->ecx, regs->edx);
         printf("esp=0x%x ebp=0x%x\n", regs->esp, regs->ebp);
-        debug_logf(debug_str, "esp=0x%x ebp=0x%x\n", regs->esp, regs->ebp);
+        debug_logf(debug_str, "esp=0x%x ebp=0x%x", regs->esp, regs->ebp);
         printf("ERRCD: 0x%x ", regs->err_code);
         debug_logf(debug_str, "ERRCD: 0x%x ", regs->err_code);
         printf("EFLAGS: 0x%x\n", regs->eflags);
-        debug_logf(debug_str, "EFLAGS: 0x%x\n", regs->eflags);
+        debug_logf(debug_str, "EFLAGS: 0x%x", regs->eflags);
         printf("User ESP: 0x%x ", regs->useresp);
         debug_logf(debug_str, "User ESP: 0x%x ", regs->useresp);
         printf("eip=0x%x\n", regs->eip);
-        debug_logf(debug_str, "eip=0x%x\n", regs->eip);
+        debug_logf(debug_str, "eip=0x%x", regs->eip);
     }
     send_signal(current_process->id, SIGKILL, 1);
 }

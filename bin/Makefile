@@ -7,11 +7,12 @@ EXEC_PREFIX?=$(PREFIX)
 BINDIR?=$(EXEC_PREFIX)/bin
 INCLUDEDIR?=$(PREFIX)/include
 
-CFLAGS:=$(CFLAGS) -Wall -Wextra -O0
+CFLAGS:=$(CFLAGS) -Wall -Wextra -O3
 LDFLAGS:=$(LDFLAGS)
 LIBS:=$(LIBS)
 
 include coreutils/make.config
+include test/make.config
 
 OBJS=\
 init/init.o \
@@ -21,6 +22,7 @@ $(patsubst %, coreutils/%, $(COREUTILSOBJ)) \
 terminal/terminal.o \
 sh/sh.o \
 clear/clear.o \
+$(patsubst %, test/%, $(TESTOBJ)) \
 
 EXECS=\
 init/init \
@@ -30,6 +32,7 @@ $(patsubst %, coreutils/%, $(COREUTILSEXEC)) \
 terminal/terminal \
 sh/sh \
 clear/clear \
+$(patsubst %, test/%, $(TESTEXEC)) \
 
 .PHONY: all clean install install-headers
 .SUFFIXES: .o .c

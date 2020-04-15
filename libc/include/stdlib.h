@@ -10,7 +10,7 @@
 
 #define ATEXIT_MAX 32
 
-__attribute__((__noreturn__)) void abort( void );
+void __attribute__((__noreturn__)) abort( void );
 
 char* getenv( const char* name );
 int putenv( char* name );

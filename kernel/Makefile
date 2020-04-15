@@ -9,7 +9,7 @@ INCLUDEDIR?=$(PREFIX)/include
 
 CFLAGS:=$(CFLAGS) -static -ffreestanding -Wall -Wextra -pedantic -Wshadow -Wpointer-arith \
 -Wcast-align -Wmissing-prototypes -Wmissing-declarations -Wredundant-decls -Wnested-externs \
--Winline -Wconversion -Wstrict-prototypes -Wno-sign-conversion -O0
+-Winline -Wconversion -Wstrict-prototypes -Wno-sign-conversion -finline-functions -fno-omit-frame-pointer -O2
 CPPFLAGS:=$(CPPFLAGS) -Iinclude
 LDFLAGS:=$(LDFLAGS)
 LIBS:=$(LIBS) -nostdlib -lk -lgcc
@@ -76,7 +76,7 @@ seraph.kernel: $(OBJS) $(ARCHDIR)/linker.ld
 	$(CC) -T $(ARCHDIR)/linker.ld -o $@ $(CFLAGS)$(LDFLAGS)$(ARCHDIR)/crti.o $(KERNEL_OBJS) kernel/version.o $(LIBS) $(ARCHDIR)/crtn.o
 	$(NM) seraph.kernel -g | ./script/symbols.py > kernel/symbols.S
 	$(CC) -MD -c kernel/symbols.S -o kernel/symbols.o
-	$(CC) -T $(ARCHDIR)/linker.ld -o $@ $(CFLAGS)$(LDFLAGS)$(ARCHDIR)/crti.o $(KERNEL_OBJS) kernel/version.o kernel/symbols.o $(LIBS) $(ARCHDIR)/crtn.o
+	$(CC) -T $(ARCHDIR)/linker.ld -o $@ $(CFLAGS)$(LDFLAGS) $(ARCHDIR)/crti.o $(KERNEL_OBJS) kernel/version.o kernel/symbols.o $(LIBS) $(ARCHDIR)/crtn.o
 	grub-file --is-x86-multiboot seraph.kernel
 
 .c.o:

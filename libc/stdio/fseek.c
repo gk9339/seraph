@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <errno.h>
 #include <sys/syscall.h>
+#include <stdlib.h>
 #include "file.h"
 
 int fseek( FILE* stream, long offset, int whence )
@@ -13,11 +14,13 @@ int fseek( FILE* stream, long offset, int whence )
 
     if( stream->available != -1 )
     {
+        free(stream->read_base);
         stream->read_base = stream->read_ptr = stream->read_end = NULL;
         stream->available = 0;
     }
     if( stream->bufmode != -1 )
     {
+        free(stream->write_base);
         stream->write_base = stream->write_ptr = stream->write_end = NULL;
     }
     stream->ungetc = -1;

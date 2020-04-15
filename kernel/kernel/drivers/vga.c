@@ -117,6 +117,11 @@ void terminal_putchar( char c )
     }else if( uc == '\r' )
     {
         terminal_column = 0;
+    
+    }else if( uc == '\f' )
+    {
+        terminal_row = 0;
+        terminal_column = 0;
     }else if( uc > 31 ) // Print only printable ascii characters
     {
         terminal_putentryat(uc, terminal_color, terminal_column, terminal_row);

@@ -2,6 +2,7 @@
 #include <string.h>
 #include <errno.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include "file.h"
 
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
@@ -34,5 +35,8 @@ int vsnprintf( char* str, size_t size, const char* fmt, va_list args )
     {
         str[retval] = '\0';
     }
+#ifndef __is_libk
+    free(file);
+#endif
     return retval;
 }

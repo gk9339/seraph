@@ -6,6 +6,7 @@
 #include <kernel/task.h>
 #include <errno.h>
 #include <kernel/irq.h>
+#include <kernel/serial.h>
 
 typedef int (*exec_func)(char* path, fs_node_t* file, int argc, char** argv, char** env, int interp);
 
@@ -91,8 +92,7 @@ static int exec_elf( char* path __attribute__((unused)), fs_node_t* file, int ar
 
     release_directory_for_exec(current_directory);
     invalidate_page_tables();
-
-
+    
     for( uintptr_t x = 0; x < (uint32_t)header.e_phentsize * header.e_phnum; x += header.e_phentsize )
     { 
         Elf32_Phdr phdr;

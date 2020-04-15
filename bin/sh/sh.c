@@ -325,7 +325,6 @@ int sh_launch( char** args )
                 bg_proc->name = strdup(args[0]);
                 list_insert(background, bg_proc);
                 char bg_status[18];
-                printf("%d\n", status);
                 bg_proc_status(bg_status, bg_proc->status, bg_proc->retval);
                 fprintf(stderr, "[%zd] %d %s %s\n", list_index_of(background, bg_proc) + 1, bg_proc->pid, bg_status, bg_proc->name);
                 break;
@@ -375,7 +374,7 @@ int sh_help( char** args __attribute__((unused)) )
     return 0;
 }
 
-int sh_jobs( char** args )
+int sh_jobs( char** args __attribute__((unused)) )
 {
     foreach(node, background)
     {
@@ -384,14 +383,16 @@ int sh_jobs( char** args )
         bg_proc_status(bg_status, bg_proc->status, bg_proc->retval);
         fprintf(stderr, "[%zd] %d %s %s\n", list_index_of(background, bg_proc) + 1, bg_proc->pid, bg_status, bg_proc->name);
     }
+
+    return 0;
 }
 
-int sh_bg( char** args )
+int sh_bg( char** args __attribute__((unused)) )
 {
     return 0;
 }
 
-int sh_fg( char** args )
+int sh_fg( char** args __attribute__((unused)) )
 {
     return 0;
 }

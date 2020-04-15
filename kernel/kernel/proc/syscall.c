@@ -582,13 +582,6 @@ static int sys_reboot( int type )
         if( type == 0 )
         {
             // 8042 reset
-            uintptr_t phys;
-            uint32_t* virt = (void*) (void*)kvmalloc_p(0x1000, &phys);
-            virt[0] = 0;
-            virt[1] = 0;
-            virt[2] = 0;
-            idt_load((uintptr_t)virt);
-        
             uint8_t out = 0x02; // Clear all keyboard buffers
             while( (out & 0x02) != 0 )
             {

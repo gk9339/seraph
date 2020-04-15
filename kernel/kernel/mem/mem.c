@@ -262,7 +262,7 @@ void paging_initialize( uint32_t memsize )
             "mov $0x277, %%ecx\n" /* IA32_MSR_PAT */
             "rdmsr\n"
             "or $0x1000000, %%edx\n" /* Set bit 56 */
-            "and $0xf9ffffff, %%edx\n" /* unser buts 57, 58 */
+            "and $0xf9ffffff, %%edx\n" /* unset bits 57, 58 */
             "wrmsr\n"
             :::"ecx", "edx", "eax"
             );
@@ -432,7 +432,6 @@ void* sbrk( uintptr_t increment )
     if( (increment % 0x1000) != 0 ) KPANIC("Kernel tried to expand heap by non-page-multiple value", NULL);
     if( (heap_end % 0x1000) != 0 ) KPANIC("Kernel heap is not page aligned", NULL);
     if( (heap_end + increment > KERNEL_HEAP_END ) ) KPANIC("Kernel tried to allocate beyond the end of the heap", NULL);
-
     uintptr_t address = heap_end;
 
     if( heap_end + increment > kernel_heap_alloc_point )

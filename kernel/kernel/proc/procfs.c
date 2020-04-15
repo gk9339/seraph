@@ -162,7 +162,7 @@ static uint32_t proc_status_func( fs_node_t* node, uint32_t offset, uint32_t siz
         return 0;
     }
 
-    char* state = proc->finished ? "F (finished)" : (proc->suspended ? "S (suspended)" : (process_is_ready(proc) ? "R (running)" : "S (sleeping)"));
+    char* state = proc->finished ? "F (finished)" : (proc->suspended ? "S (suspended)" : (proc->running ? "R (running)" : "S (sleeping)"));
     char* name = proc->name + strlen(proc->name) - 1;
 
     while( 1 )
@@ -315,7 +315,7 @@ static uint32_t meminfo_func( fs_node_t* node __attribute__((unused)), uint32_t 
     char buf[1024];
     unsigned int total = memory_total();
     unsigned int free  = total - memory_use();
-    unsigned int kheap = (kernel_heap_alloc_point - heap_end) / 1024;
+    unsigned int kheap = (heap_end - placement_pointer) / 1024;
 
     sprintf(buf,
         "MemTotal: %d kB\n"

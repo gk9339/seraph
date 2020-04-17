@@ -406,7 +406,6 @@ void page_fault( struct regs* r )
         return_from_signal_handler();
     }else if( r->eip == THREAD_RETURN )
     {
-        debug_log("Returned from thread.");
         kexit(0);
     }
 

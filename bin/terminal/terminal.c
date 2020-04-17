@@ -15,6 +15,9 @@
 #include <wchar.h>
 #include <libkbd/libkbd.h>
 #include <libansiterm/libansiterm.h>
+#include <debug.h>
+#include <spinlock.h>
+#include <pthread.h>
 #include "terminal.h"
 #include "decodeutf8.h"
 #include "ununicode.h"
@@ -59,6 +62,10 @@ FILE* terminal;
 int input_stopped = 0;
 volatile int exit_terminal = 0;
 
+volatile int input_buffer_lock = 0;
+int input_buffer_semaphore[2];
+list_t* input_buffer_queue = NULL;
+
 struct input_data
 {
     size_t len;
@@ -92,6 +99,8 @@ void insert_delete_lines( int );
 void null( int x __attribute__((unused)), int y __attribute__((unused)), char* data __attribute__((unused)) ) {}
 uint16_t null_int( void ) { return 0; }
 
+void* handle_input_buffer( void* );
+void write_input_buffer( char* data, size_t len );
 void handle_input( char );
 void write_input_buffer( char*, size_t );
 void vga_write( unsigned char c, int x, int y, int attr );
@@ -162,6 +171,12 @@ int main( void )
 
     ansi_state = ansi_init(ansi_state, terminal_width, terminal_height, &terminal_callbacks);
 
+    // Setup input buffer thread
+    pthread_t input_buffer_thread;
+    pipe(input_buffer_semaphore);
+    input_buffer_queue = list_create();
+    pthread_create(&input_buffer_thread, NULL, handle_input_buffer, NULL);
+
     // Setup signal handlers
     signal(SIGUSR2, sig_suspend_input);
     signal(SIGCHLD, sig_child_exit);
@@ -199,31 +214,31 @@ int main( void )
         }
 
         int fds[] = {fd_master, kfd};
-        char buf[1024];
+        char buf[BUFSIZ];
         key_event_state_t kbd_state = {0};
         key_event_t event;
-     
+
         while( !exit_terminal )
         {
             // Wait on keyboard/pty master, or 200ms
-            int index = fswait2(2, fds, 200);
-     
+            int res[] = {0, 0};
+            fswait3(2, fds, 1000, res);
             if( input_stopped ) continue;
     
             flip_cursor();
-            if( index == 0 )
+            if( res[0] )
             {
                 // Read data out of pty master buffer and write it
-                ret = read(fd_master, buf, 1024);
+                ret = read(fd_master, buf, BUFSIZ);
                 for( int i = 0; i < ret; i++ )
                 {
                     ansi_put(ansi_state, buf[i]);
                 }
-            }else if( index == 1 )
+            }
+            if( res[1] )
             {
                 // Read data from keyboard pipe, handle key event
                 ret = read(kfd, &c, 1);
-     
                 if( ret > 0 )
                 {
                     ret = kbd_scancode(&kbd_state, c, &event);
@@ -264,8 +279,10 @@ void sig_child_exit( int sig __attribute__((unused)) )
         terminal_write(message[i]);
     }
 
+    close(input_buffer_semaphore[1]);
     cell_redraw(csr_x, csr_y);
     exit_terminal = 1;
+    signal(SIGCHLD, SIG_IGN);
 }
 
 // Write character to screen
@@ -446,15 +463,59 @@ void terminal_scroll( int lines )
     terminal_shift_region(0, terminal_height, lines);
 }
 
+void* handle_input_buffer( void* args __attribute__((unused)) )
+{
+    while( 1 )
+    {
+        char tmp[1];
+        int c = read(input_buffer_semaphore[0], tmp, 1);
+        if( c > 0 )
+        {
+            spin_lock(&input_buffer_lock);
+            node_t* blob = list_dequeue(input_buffer_queue);
+            spin_unlock(&input_buffer_lock);
+
+            if( !blob )
+            {
+                continue;
+            }
+
+            struct input_data* value = blob->value;
+            write(fd_master, value->data, value->len);
+            free(blob->value);
+            free(blob);
+        }else
+        {
+            break;
+        }
+    }
+
+    close(input_buffer_semaphore[0]);
+    return NULL;
+}
+
+void write_input_buffer( char* data, size_t len )
+{
+    struct input_data* input_data = malloc(sizeof(struct input_data) + len);
+    input_data->len = len;
+    memcpy(&input_data->data, data, len);
+
+    spin_lock(&input_buffer_lock);
+    list_insert(input_buffer_queue, input_data);
+    spin_unlock(&input_buffer_lock);
+
+    write(input_buffer_semaphore[1], input_data, 1);
+}
+
 void handle_input( char c )
 {
-    write(fd_master, &c, 1);
+    write_input_buffer(&c, 1);
 }
 
 // Write string into pty master buffer
 void handle_input_string( char* c )
 {
-    write(fd_master, c, strlen(c));
+    write_input_buffer(c, strlen(c));
 }
 
 void set_title( char* title __attribute__((unused)) )

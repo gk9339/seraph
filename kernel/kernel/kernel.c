@@ -27,6 +27,7 @@
 #include <kernel/keyboard.h>
 #include <kernel/kconfig.h>
 #include <kernel/acpi.h>
+#include <kernel/random.h>
 #include <sys/types.h>
 
 uintptr_t initial_esp = 0;
@@ -279,6 +280,7 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
     map_vfs_directory("/dev");
     zero_initialize();
     null_initialize();
+    random_initialize();
 
     if( CHECK_FLAG(debug, 0) ) debug_log("Setup /proc");
     if( CHECK_FLAG(debug, 1) ) printf("Setup /proc\n\n");

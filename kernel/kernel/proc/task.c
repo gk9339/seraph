@@ -185,6 +185,9 @@ uint32_t clone( uintptr_t new_stack, uintptr_t thread_func, uintptr_t arg )
 
     make_process_ready(new_proc);
 
+    char debug_str[128];
+    debug_logf(debug_str, "%d - %s -> Clone (%d)", new_proc->id, new_proc->name, current_process->id);
+
     int_resume();
 
     return new_proc->id;

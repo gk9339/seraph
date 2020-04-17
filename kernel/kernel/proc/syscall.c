@@ -262,6 +262,20 @@ static int sys_fork( void )
     return (int)fork();
 }
 
+static int sys_clone( uintptr_t new_stack, uintptr_t thread_func, uintptr_t arg )
+{
+    if( !new_stack || !PTR_INRANGE(new_stack) )
+    {
+        return -EINVAL;
+    }
+    if( !thread_func || !PTR_INRANGE(thread_func) )
+    {
+        return -EINVAL;
+    }
+
+    return (int)clone(new_stack, thread_func, arg);
+}
+
 static int sys_getpid( void )
 {
     if( current_process->group )
@@ -364,14 +378,14 @@ static int sys_kill( pid_t pid, uint32_t sig )
 {
     if( pid < -1 )
     {
-		return group_send_signal(-pid, sig, 0);
-	}else if( pid == 0 )
+        return group_send_signal(-pid, sig, 0);
+    }else if( pid == 0 )
     {
-		return group_send_signal(current_process->job, sig, 0);
-	}else
+        return group_send_signal(current_process->job, sig, 0);
+    }else
     {
-		return send_signal(pid, sig, 0);
-	}
+        return send_signal(pid, sig, 0);
+    }
 }
 
 static int sys_signal( uint32_t signum, uintptr_t handler )
@@ -384,6 +398,11 @@ static int sys_signal( uint32_t signum, uintptr_t handler )
     uintptr_t old = current_process->signals.functions[signum];
     current_process->signals.functions[signum] = handler;
     return (int)old;
+}
+
+static int sys_gettid( void )
+{
+    return getpid();
 }
 
 static int sys_openpty( int* master, int* slave, char* name __attribute__((unused)), void* termios, void* winsize )
@@ -766,7 +785,43 @@ static int sys_fswait2( int c, int fds[], int timeout )
 
     int result = process_wait_nodes((process_t*)current_process, nodes, timeout);
     free(nodes);
+    return result;
+}
 
+static int sys_fswait3( int c, int fds[], int timeout, int out[] )
+{
+    PTR_VALIDATE(fds);
+    PTR_VALIDATE(out);
+
+    int has_match = -1;
+    for( int i = 0; i < c; i++ )
+    {
+        if( !FD_CHECK(fds[i]) )
+        {
+            return -EBADF;
+        }
+        if( selectcheck_fs(FD_ENTRY(fds[i])) == 0 )
+        {
+            out[i] = 1;
+            has_match = (has_match == -1) ? i : has_match;
+        }else
+        {
+            out[i] = 0;
+        }
+    }
+
+    /* Already found a match, return immediately with the first match */
+    if( has_match != -1 )
+    {
+        return has_match;
+    }
+
+    int result = sys_fswait2(c, fds, timeout);
+    if( result != -1 )
+    {
+        out[result] = 1;
+    }
+    
     return result;
 }
 
@@ -994,6 +1049,7 @@ static int (*syscalls[])() =
     [SYS_GETTIMEOFDAY] = sys_gettimeofday,
     [SYS_EXECVE] = sys_execve,
     [SYS_FORK] = sys_fork,
+    [SYS_CLONE] = sys_clone,
     [SYS_GETPID] = sys_getpid,
     [SYS_SBRK] = sys_sbrk,
     [SYS_UNAME] = sys_uname,
@@ -1001,6 +1057,7 @@ static int (*syscalls[])() =
     [SYS_GETHOSTNAME] = sys_gethostname,
     [SYS_KILL] = sys_kill,
     [SYS_SIGNAL] = sys_signal,
+    [SYS_GETTID] = sys_gettid,
     [SYS_OPENPTY] = sys_openpty,
     [SYS_SEEK] = sys_seek,
     [SYS_READLINK] = sys_readlink,
@@ -1021,6 +1078,7 @@ static int (*syscalls[])() =
     [SYS_YIELD] = sys_yield,
     [SYS_FSWAIT] = sys_fswait,
     [SYS_FSWAIT2] = sys_fswait2,
+    [SYS_FSWAIT3] = sys_fswait3,
     [SYS_WAITPID] = sys_waitpid,
     [SYS_PIPE] = sys_pipe,
     [SYS_SETSID] = sys_setsid,

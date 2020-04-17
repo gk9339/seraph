@@ -12,7 +12,7 @@
 #include <sys/ioctl.h>
 #include <errno.h>
 
-#define VERSION "0.3"
+#define VERSION "0.4"
 
 #define FLAG_ALL        0x01
 #define FLAG_ALMOST_ALL 0x02
@@ -341,7 +341,7 @@ void display_files( struct ls_entry** ls_entry_array, int entries )
             if( is_tty )
             {
                 file_len = strlen(ls_entry_array[i]->filename);
-                if( S_ISDIR(ls_entry_array[i]->st.st_mode) )
+                if( S_ISDIR(ls_entry_array[i]->st.st_mode) || (S_ISLNK(ls_entry_array[i]->st.st_mode) && (S_ISDIR(ls_entry_array[i]->stlink.st_mode))) )
                 {
                     file_len++;
                 }else if( S_ISREG(ls_entry_array[i]->st.st_mode) )
@@ -509,7 +509,7 @@ int printname_color( struct ls_entry* entry )
             .link = NULL,
             .stlink = {0},
         };
-        printname_color(&lnk);
+        retval = printname_color(&lnk);
     }
 
     printf("\033[0m");

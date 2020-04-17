@@ -3,5 +3,6 @@
 
 int fswait( int, int* );
 int fswait2( int, int*, int );
+int fswait3( int, int*, int, int* );
 
 #endif

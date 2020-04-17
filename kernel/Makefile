@@ -60,6 +60,7 @@ kernel/cbuffer.o \
 kernel/kernel.o \
 kernel/spinlock.o \
 kernel/drivers/acpi.o \
+kernel/drivers/random.o \
 
 OBJS=\
 $(ARCHDIR)/crti.o \

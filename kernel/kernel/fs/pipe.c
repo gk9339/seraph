@@ -94,7 +94,6 @@ static uint32_t read_pipe( fs_node_t*node, uint32_t offset __attribute__((unused
 {
 	/* Retreive the pipe object associated with this file node */
 	pipe_device_t* pipe = (pipe_device_t*)node->device;
-
 	if( pipe->dead )
     {
 		send_signal(getpid(), SIGPIPE, 1);

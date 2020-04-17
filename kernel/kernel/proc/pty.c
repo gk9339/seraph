@@ -360,7 +360,7 @@ static int pty_ioctl( pty_t* pty, int request, void* argp )
     }
 }
 
-static uint32_t  read_pty_master( fs_node_t* node, uint32_t offset __attribute__((unused)), uint32_t size, uint8_t* buffer )
+static uint32_t read_pty_master( fs_node_t* node, uint32_t offset __attribute__((unused)), uint32_t size, uint8_t* buffer )
 { 
     pty_t* pty = (pty_t*)node->device;
 
@@ -390,7 +390,7 @@ static void close_pty_master( fs_node_t* node __attribute__((unused)) )
     return;
 }
 
-static uint32_t  read_pty_slave( fs_node_t* node, uint32_t offset __attribute__((unused)), uint32_t size, uint8_t* buffer )
+static uint32_t read_pty_slave( fs_node_t* node, uint32_t offset __attribute__((unused)), uint32_t size, uint8_t* buffer )
 {
     pty_t* pty = (pty_t*)node->device;
 

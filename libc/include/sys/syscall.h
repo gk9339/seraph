@@ -66,6 +66,7 @@
 #define SYS_GETPPID 67
 #define SYS_GETGID 68
 #define SYS_FCNTL 69
+#define SYS_FSWAIT3 70
 #define SYS_DEBUGVFSTREE 100
 #define SYS_DEBUGPROCTREE 101
 #define SYS_DEBUGPRINT 102
@@ -138,6 +139,7 @@ DECL_SYSCALL1(sbrk, int);
 DECL_SYSCALL1(uname, void*);
 DECL_SYSCALL2(kill, pid_t, int);
 DECL_SYSCALL2(signal, uint32_t, sighandler_t);
+DECL_SYSCALL0(gettid);
 DECL_SYSCALL5(openpty, int*, int*, char*, void*, void*);
 DECL_SYSCALL3(lseek, int, int, int);
 DECL_SYSCALL3(readlink, char*, char*, size_t);
@@ -152,6 +154,7 @@ DECL_SYSCALL2(gethostname, char*, size_t);
 DECL_SYSCALL2(sethostname, char*, size_t);
 DECL_SYSCALL1(chdir, char*);
 DECL_SYSCALL2(getcwd, char*, size_t);
+DECL_SYSCALL3(clone, uintptr_t, uintptr_t, void*);
 DECL_SYSCALL1(setuid, unsigned int);
 DECL_SYSCALL0(yield);
 DECL_SYSCALL2(nanosleep, unsigned long, unsigned long);
@@ -166,6 +169,7 @@ DECL_SYSCALL1(getpgid, int);
 DECL_SYSCALL1(setheap, uintptr_t);
 DECL_SYSCALL3(fcntl, int, int, va_list);
 DECL_SYSCALL2(mmap, uintptr_t, size_t);
+DECL_SYSCALL4(fswait3, int, int*, int, int*);
 DECL_SYSCALL1(debugvfstree, char**);
 DECL_SYSCALL1(debugproctree, char**);
 DECL_SYSCALL1(debugprint, char*);

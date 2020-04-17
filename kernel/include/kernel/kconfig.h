@@ -32,6 +32,6 @@
 #define MAX_PID 32768 // Makes a 4096-byte bitmap
 
 // PTY
-#define PTY_BUFFER_SIZE 4096
+#define PTY_BUFFER_SIZE 8196
 
 #endif

@@ -11,7 +11,7 @@ CFLAGS:=$(CFLAGS) -ffreestanding -fPIC -Wall -Wextra -pedantic -Wshadow -Wpointe
 -Wcast-align -Wmissing-prototypes -Wmissing-declarations -Wredundant-decls -Wnested-externs \
 -Winline -Wconversion -Wstrict-prototypes -Wno-sign-conversion
 CPPFLAGS:=$(CPPFLAGS) -Iinclude
-LIBK_CFLAGS:=$(CFLAGS) -O2
+LIBK_CFLAGS:=$(CFLAGS) -fno-omit-frame-pointer -O2
 LIBK_CPPFLAGS:=$(CPPFLAGS) -D__is_libk
 CFLAGS:=$(CFLAGS) -O3
 
@@ -27,8 +27,6 @@ LIBK_CPPFLAGS:=$(LIBK_CPPFLAGS)$(KERNEL_ARCH_CPPFLAGS)
 FREEOBJS=\
 $(ARCH_FREEOBJS) \
 stdio/printf.o \
-stdio/fread.o \
-stdio/fseek.o \
 stdio/fwrite.o \
 stdio/perror.o \
 stdio/putc.o \
@@ -105,6 +103,8 @@ unistd/getwd.o \
 unistd/getcwd.o \
 unistd/readlink.o \
 ioctl/ioctl.o \
+stdio/fread.o \
+stdio/fseek.o \
 stdio/fflush.o \
 stdio/fclose.o \
 stdio/fopen.o \
@@ -138,6 +138,7 @@ libgen/basename.o \
 libgen/dirname.o \
 wchar/wcwidth.o \
 time/gettimeofday.o \
+pthread/pthread.o \
 debug/debugvfstree.o \
 debug/debugproctree.o \
 debug/debugprint.o \
@@ -148,7 +149,7 @@ $(HOSTEDOBJS) \
 
 LIBK_OBJS=$(FREEOBJS:.o=.libk.o)
 
-BINARIES=libc.a libk.a libc.so libssp.a libssp.so libssp_nonshared.a libssp_nonshared.so
+BINARIES=libc.a libk.a libc.so libssp.a libssp.so libssp_nonshared.a
 
 CRTS=\
 $(ARCH_CRTS) \
@@ -172,8 +173,7 @@ libc.so: $(OBJS)
 	OBJ=`$(CC) $(CFLAGS) $(LDFLAGS) -print-file-name=crtbegin.o` && cp "$$OBJ" $(DESTDIR)$(LIBDIR)
 	OBJ=`$(CC) $(CFLAGS) $(LDFLAGS) -print-file-name=crtend.o` && cp "$$OBJ" $(DESTDIR)$(LIBDIR)
 	$(CC) -nodefaultlibs -o libssp.so $(CFLAGS) -shared libssp/ssp.o
-	$(CC) -nodefaultlibs -o libssp_nonshared.so $(CFLAGS) -shared libssp/ssp.o libssp/ssp_local.o
-	$(CC) -nodefaultlibs -o $@ $(CFLAGS) -shared $^ -lgcc -L. -lssp -lssp_nonshared
+	$(CC) -nodefaultlibs -o $@ $(CFLAGS) -shared $^ -lgcc -L. -lssp
 
 libk.a: $(LIBK_OBJS)
 	$(AR) rcs $@ $^
@@ -186,9 +186,6 @@ libssp.so: libssp/ssp.o
 
 libssp_nonshared.a: libssp/ssp_local.o libssp/ssp.o
 	$(AR) rcs $@ $^
-
-libssp_nonshared.so: libssp/ssp_local.o libssp/ssp.o
-	$(CC) -nodefaultlibs -o $@ $(CFLAGS) -shared $^
 
 .c.o:
 	$(CC) -MD -c $< -o $@ -std=gnu11 $(CFLAGS)$(CPPFLAGS)

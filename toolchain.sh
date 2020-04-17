@@ -62,7 +62,7 @@ pushd binutils-build
 popd
 
 pushd gcc-build
-    $DIR/toolchain/tarballs/gcc-8.3.0/configure --target=$TARGET --prefix=$PREFIX --with-sysroot=$SYSROOT --disable-nls --enable-languages=c || exit 1
+    $DIR/toolchain/tarballs/gcc-8.3.0/configure --target=$TARGET --prefix=$PREFIX --with-sysroot=$SYSROOT --disable-nls --enable-languages=c,c++ || exit 1
     make all-gcc all-target-libgcc
     make install-gcc install-target-libgcc
 popd

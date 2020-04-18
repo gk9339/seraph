@@ -62,7 +62,7 @@ FILE* terminal;
 int input_stopped = 0;
 volatile int exit_terminal = 0;
 
-volatile int input_buffer_lock = 0;
+spin_lock_t input_buffer_lock = { 0 };
 int input_buffer_semaphore[2];
 list_t* input_buffer_queue = NULL;
 
@@ -86,7 +86,7 @@ void terminal_set_cell( int, int, uint32_t );
 void terminal_clear( int );
 void terminal_scroll( int );
 void draw_cursor( void );
-void handle_input_string( char* );
+void handle_input_string( char* ); // Write string into pty input buffer
 void set_title( char* );
 //void terminal_terminal_set_cell_contents( int, int, char* );
 //uint16_t terminal_get_cell_width( void );
@@ -99,9 +99,9 @@ void insert_delete_lines( int );
 void null( int x __attribute__((unused)), int y __attribute__((unused)), char* data __attribute__((unused)) ) {}
 uint16_t null_int( void ) { return 0; }
 
-void* handle_input_buffer( void* );
-void write_input_buffer( char* data, size_t len );
-void handle_input( char );
+void* handle_input_buffer( void* ); // When signalled, dequeue from input buffer, write to pty
+void write_input_buffer( char* data, size_t len ); // Write character to pty input buffer
+void handle_input( char ); // Write character to pty input buffer
 void write_input_buffer( char*, size_t );
 void vga_write( unsigned char c, int x, int y, int attr );
 void terminal_write_char( uint32_t val, uint16_t x, uint16_t y, uint32_t fg, uint32_t bg, uint8_t flags );
@@ -222,7 +222,7 @@ int main( void )
         {
             // Wait on keyboard/pty master, or 200ms
             int res[] = {0, 0};
-            fswait3(2, fds, 1000, res);
+            fswait3(2, fds, 200, res);
             if( input_stopped ) continue;
     
             flip_cursor();
@@ -279,10 +279,10 @@ void sig_child_exit( int sig __attribute__((unused)) )
         terminal_write(message[i]);
     }
 
-    close(input_buffer_semaphore[1]);
     cell_redraw(csr_x, csr_y);
     exit_terminal = 1;
     signal(SIGCHLD, SIG_IGN);
+    close(input_buffer_semaphore[1]);
 }
 
 // Write character to screen
@@ -325,6 +325,7 @@ void terminal_write( char c )
             draw_cursor();
         }else if( c == '\007' )
         {
+            /* Bell is really annoying c:
             uint32_t div = 1193180 / 2000;
             outportb(0x43, 0xb6);
             outportb(0x42, (uint8_t)div);
@@ -338,7 +339,7 @@ void terminal_write( char c )
             usleep(15000);
 
             tmp = inportb(0x61) & 0xFC;
-            outportb(0x61, tmp);
+            outportb(0x61, tmp);*/
         }else if( c == '\b' )
         {
             if( csr_x > 0 )
@@ -463,6 +464,7 @@ void terminal_scroll( int lines )
     terminal_shift_region(0, terminal_height, lines);
 }
 
+// When signalled, dequeue from input buffer, write to pty
 void* handle_input_buffer( void* args __attribute__((unused)) )
 {
     while( 1 )
@@ -471,9 +473,9 @@ void* handle_input_buffer( void* args __attribute__((unused)) )
         int c = read(input_buffer_semaphore[0], tmp, 1);
         if( c > 0 )
         {
-            spin_lock(&input_buffer_lock);
+            spin_lock(input_buffer_lock);
             node_t* blob = list_dequeue(input_buffer_queue);
-            spin_unlock(&input_buffer_lock);
+            spin_unlock(input_buffer_lock);
 
             if( !blob )
             {
@@ -494,25 +496,27 @@ void* handle_input_buffer( void* args __attribute__((unused)) )
     return NULL;
 }
 
+// Write data to input buffer queue, signal input buffer thread
 void write_input_buffer( char* data, size_t len )
 {
     struct input_data* input_data = malloc(sizeof(struct input_data) + len);
     input_data->len = len;
     memcpy(&input_data->data, data, len);
 
-    spin_lock(&input_buffer_lock);
+    spin_lock(input_buffer_lock);
     list_insert(input_buffer_queue, input_data);
-    spin_unlock(&input_buffer_lock);
+    spin_unlock(input_buffer_lock);
 
     write(input_buffer_semaphore[1], input_data, 1);
 }
 
+// Write character to pty input buffer
 void handle_input( char c )
 {
     write_input_buffer(&c, 1);
 }
 
-// Write string into pty master buffer
+// Write string into pty input buffer
 void handle_input_string( char* c )
 {
     write_input_buffer(c, strlen(c));

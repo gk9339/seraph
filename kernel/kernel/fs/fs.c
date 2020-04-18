@@ -64,7 +64,7 @@ int has_permission( fs_node_t* node, int permission_bit )
 {
     if( !node ) return 0;
 
-    /* Even root needs exec */
+    // Even root needs exec 
     if( current_process->user == 0 && permission_bit != S_IXOTH )
     {
         return 1;
@@ -519,56 +519,51 @@ char* canonicalize_path( char* cwd, char* input )
 {
     list_t *out = list_create();
 
-    /*
-     * If we have a relative path, we need to canonicalize
-     * the working directory and insert it into the stack.
-     */
+    // If we have a relative path, we need to canonicalize
+    // the working directory and insert it into the stack.
+     
     if (strlen(input) && input[0] != PATH_SEPARATOR) 
     {
-        /* Make a copy of the working directory */
+        // Make a copy of the working directory 
         char *path = malloc((strlen(cwd) + 1) * sizeof(char));
         memcpy(path, cwd, strlen(cwd) + 1);
 
-        /* Setup tokenizer */
+        // Setup tokenizer 
         char *pch;
         char *save;
         pch = strtok_r(path,PATH_SEPARATOR_STRING,&save);
 
-        /* Start tokenizing */
+        // Start tokenizing 
         while (pch != NULL) 
         {
-            /* Make copies of the path elements */
+            // Make copies of the path elements 
             char *s = malloc(sizeof(char) * (strlen(pch) + 1));
             memcpy(s, pch, strlen(pch) + 1);
-            /* And push them */
+            // And push them 
             list_insert(out, s);
             pch = strtok_r(NULL,PATH_SEPARATOR_STRING,&save);
         }
         free(path);
     }
 
-    /* Similarly, we need to push the elements from the new path */
+    // Similarly, we need to push the elements from the new path 
     char *path = malloc((strlen(input) + 1) * sizeof(char));
     memcpy(path, input, strlen(input) + 1);
 
-    /* Initialize the tokenizer... */
+    // Initialize the tokenizer... 
     char *pch;
     char *save;
     pch = strtok_r(path,PATH_SEPARATOR_STRING,&save);
 
-    /*
-     * Tokenize the path, this time, taking care to properly
-     * handle .. and . to represent up (stack pop) and current
-     * (do nothing)
-     */
+    // Tokenize the path, this time, taking care to properly
+    // handle .. and . to represent up (stack pop) and current dir
+     
     while (pch != NULL) 
     {
         if (!strcmp(pch,PATH_UP)) 
         {
-            /*
-             * Path = ..
-             * Pop the stack to move up a directory
-             */
+            // Path = ..
+            // Pop the stack to move up a directory
             node_t * n = list_pop(out);
             if (n) 
             {
@@ -577,16 +572,12 @@ char* canonicalize_path( char* cwd, char* input )
             }
         } else if (!strcmp(pch,PATH_DOT)) 
         {
-            /*
-             * Path = .
-             * Do nothing
-             */
+            // Path = .
+            // Do nothing
         } else 
         {
-            /*
-             * Regular path, push it
-             * XXX: Path elements should be checked for existence!
-             */
+            // Regular path, push it
+            // XXX: Path elements should be checked for existence!
             char * s = malloc(sizeof(char) * (strlen(pch) + 1));
             memcpy(s, pch, strlen(pch) + 1);
             list_insert(out, s);
@@ -595,29 +586,27 @@ char* canonicalize_path( char* cwd, char* input )
     }
     free(path);
 
-    /* Calculate the size of the path string */
+    // Calculate the size of the path string 
     size_t size = 0;
     foreach(item, out) 
     {
-        /* Helpful use of our foreach macro. */
+        // Helpful use of our foreach macro. 
         size += strlen(item->value) + 1;
     }
 
-    /* join() the list */
+    // join() the list 
     char *output = malloc(sizeof(char) * (size + 1));
     char *output_offset = output;
     if (size == 0) 
     {
-        /*
-         * If the path is empty, we take this to mean the root
-         * thus we synthesize a path of "/" to return.
-         */
+        // If the path is empty, we take this to mean the root
+        // thus we synthesize a path of "/" to return.
         output = realloc(output, sizeof(char) * 2);
         output[0] = PATH_SEPARATOR;
         output[1] = '\0';
     } else 
     {
-        /* Otherwise, append each element together */
+        // Otherwise, append each element together 
         foreach(item, out) {
             output_offset[0] = PATH_SEPARATOR;
             output_offset++;
@@ -626,12 +615,12 @@ char* canonicalize_path( char* cwd, char* input )
         }
     }
 
-    /* Clean up the various things we used to get here */
+    // Clean up the various things we used to get here 
     list_destroy(out);
     list_free(out);
     free(out);
 
-    /* And return a working, absolute path */
+    // And return a working, absolute path 
     return output;
 }
 
@@ -707,7 +696,7 @@ void* vfs_mount( char* path, fs_node_t* local_root )
 
     int path_len = strlen(p);
 
-    /* Chop the path up */
+    // Chop the path up 
     while (i < p + path_len) 
     {
         if (*i == PATH_SEPARATOR) 
@@ -716,19 +705,19 @@ void* vfs_mount( char* path, fs_node_t* local_root )
         }
         i++;
     }
-    /* Clean up */
+    // Clean up 
     p[path_len] = '\0';
     i = p + 1;
 
-    /* Root */
+    // Root 
     tree_node_t * root_node = fs_tree->root;
 
     if (*i == '\0') 
     {
-        /* Special case, we're trying to set the root node */
+        // Special case, we're trying to set the root node 
         struct vfs_entry * root = (struct vfs_entry *)root_node->value;
         root->file = local_root;
-        /* We also keep a legacy shortcut around for that */
+        // We also keep a legacy shortcut around for that 
         fs_root = local_root;
         ret_val = root_node;
     } else 
@@ -797,7 +786,7 @@ static fs_node_t* get_mount_point( char* path, unsigned int path_depth, char** o
         path += strlen(path) + 1;
     }
 
-    /* Last available node */
+    // Last available node 
     fs_node_t   * last = fs_root;
     tree_node_t * node = fs_tree->root;
 
@@ -855,33 +844,33 @@ static fs_node_t* kopen_recur( char* filename, uint32_t flags, uint32_t symlink_
         return NULL;
     }
 
-    /* Canonicalize the (potentially relative) path... */
+    // Canonicalize the (potentially relative) path... 
     char *path = canonicalize_path(relative_to, filename);
-    /* And store the length once to save recalculations */
+    // And store the length once to save recalculations 
     size_t path_len = strlen(path);
 
-    /* If strlen(path) == 1, then path = "/"; return root */
+    // If strlen(path) == 1, then path = "/"; return root 
     if (path_len == 1) 
     {
-        /* Clone the root file system node */
+        // Clone the root file system node 
         fs_node_t *root_clone = malloc(sizeof(fs_node_t));
         memcpy(root_clone, fs_root, sizeof(fs_node_t));
 
-        /* Free the path */
+        // Free the path 
         free(path);
 
         open_fs(root_clone, flags);
 
-        /* And return the clone */
+        // And return the clone 
         return root_clone;
     }
 
-    /* Otherwise, we need to break the path up and start searching */
+    // Otherwise, we need to break the path up and start searching 
     char *path_offset = path;
     uint32_t path_depth = 0;
     while (path_offset < path + path_len) 
     {
-        /* Find each PATH_SEPARATOR */
+        // Find each PATH_SEPARATOR 
         if (*path_offset == PATH_SEPARATOR) 
         {
             *path_offset = '\0';
@@ -889,37 +878,29 @@ static fs_node_t* kopen_recur( char* filename, uint32_t flags, uint32_t symlink_
         }
         path_offset++;
     }
-    /* Clean up */
+    // Clean up 
     path[path_len] = '\0';
     path_offset = path + 1;
 
-    /*
-     * At this point, the path is tokenized and path_offset points
-     * to the first token (directory) and path_depth is the number
-     * of directories in the path
-     */
+    // At this point, the path is tokenized and path_offset points
+    // to the first token (directory) and path_depth is the number
+    // of directories in the path
 
-    /*
-     * Dig through the (real) tree to find the file
-     */
+    // Dig through the (real) tree to find the file
+     
     unsigned int depth = 0;
-    /* Find the mountpoint for this file */
+    // Find the mountpoint for this file 
     fs_node_t *node_ptr = get_mount_point(path, path_depth, &path_offset, &depth);
 
     if (!node_ptr) return NULL;
 
     do {
-        /*
-         * This test is a little complicated, but we basically always resolve symlinks in the
-         * of a path (like /home/symlink/file) even if FS_O_NOFOLLOW and FS_O_PATH are set. If we are
-         * on the leaf of the path then we will look at those flags and act accordingly
-         */
-        if ((node_ptr->type & FS_SYMLINK) &&
-                !((flags & FS_O_NOFOLLOW) && (flags & FS_O_PATH) && depth == path_depth)) 
+        // This test is a little complicated, but we basically always resolve symlinks in the
+        // of a path (like /home/symlink/file) even if FS_O_NOFOLLOW and FS_O_PATH are set. If we are
+        // on the leaf of the path then we will look at those flags and act accordingly
+        if ((node_ptr->type & FS_SYMLINK) && !((flags & FS_O_NOFOLLOW) && (flags & FS_O_PATH) && depth == path_depth)) 
         {
-            /* This ensures we don't return a path when NOFOLLOW is requested but PATH
-             * isn't passed.
-             */
+            // This ensures we don't return a path when NOFOLLOW is requested but PATH isn't passed.
             if ((flags & FS_O_NOFOLLOW) && depth == path_depth - 1) 
             {
                 free((void *)path);
@@ -932,10 +913,8 @@ static fs_node_t* kopen_recur( char* filename, uint32_t flags, uint32_t symlink_
                 free(node_ptr);
                 return NULL;
             }
-            /*
-             * This may actually be big enough that we wouldn't want to allocate it on
-             * the stack, especially considering this function is called recursively
-             */
+            // This may actually be big enough that we wouldn't want to allocate it on
+            // the stack, especially considering this function is called recursively
             char symlink_buf[MAX_SYMLINK_SIZE];
             int len = readlink_fs(node_ptr, symlink_buf, sizeof(symlink_buf));
             if (len < 0) 
@@ -951,7 +930,7 @@ static fs_node_t* kopen_recur( char* filename, uint32_t flags, uint32_t symlink_
                 return NULL;
             }
             fs_node_t * old_node_ptr = node_ptr;
-            /* Rebuild our path up to this point. This is hella hacky. */
+            // Rebuild our path up to this point
             char * relpath = malloc(path_len + 1);
             char * ptr = relpath;
             memcpy(relpath, path, path_len + 1);
@@ -968,7 +947,7 @@ static fs_node_t* kopen_recur( char* filename, uint32_t flags, uint32_t symlink_
             free(old_node_ptr);
             if (!node_ptr) 
             {
-                /* Dangling symlink? */
+                // Dangling symlink? 
                 free((void *)path);
                 return NULL;
             }
@@ -981,19 +960,19 @@ static fs_node_t* kopen_recur( char* filename, uint32_t flags, uint32_t symlink_
         }
         if (depth == path_depth) 
         {
-            /* We found the file and are done, open the node */
+            // We found the file and are done, open the node 
             open_fs(node_ptr, flags);
             free((void *)path);
             return node_ptr;
         }
-        /* We are still searching... */
+        // We are still searching... 
         fs_node_t * node_next = finddir_fs(node_ptr, path_offset);
-        free(node_ptr); /* Always a clone or an unopened thing */
+        free(node_ptr); // Always a clone or an unopened thing 
         node_ptr = node_next;
-        /* Search the active directory for the requested directory */
+        // Search the active directory for the requested directory 
         if (!node_ptr) 
         {
-            /* We failed to find the requested directory */
+            // We failed to find the requested directory 
             free((void *)path);
             return NULL;
         }
@@ -1001,7 +980,7 @@ static fs_node_t* kopen_recur( char* filename, uint32_t flags, uint32_t symlink_
         ++depth;
     } while (depth < path_depth + 1);
     
-    /* We failed to find the requested file, but our loop terminated. */
+    // We failed to find the requested file, but our loop terminated. 
     free((void *)path);
     return NULL;
 }
@@ -1013,35 +992,35 @@ fs_node_t* kopen( char* filename, uint32_t flags )
 
 static void debug_print_vfs_tree_node( char** str, tree_node_t* node, size_t height )
 {
-    /* End recursion on a blank entry */
+    // End recursion on a blank entry 
 	if (!node) return;
 
     char* tmp = malloc(512);
 	memset(tmp, 0, 512);
 	char* c = tmp;
 
-    /* Indent output */
+    // Indent output 
 	for (uint32_t i = 0; i < height; ++i) {
 		c += sprintf(c, "  ");
 	}
 
-    /* Get the current process */
+    // Get the current process 
 	struct vfs_entry * fnode = (struct vfs_entry *)node->value;
 
-    /* Print the process name */
+    // Print the process name 
 	if (fnode->file) {
 		c += sprintf(c, "%s > %s 0x%x (%s, %s)\n", fnode->name, fnode->device, fnode->file, fnode->fs_type, fnode->file->name);
 	} else {
 		c += sprintf(c, "%s > (empty)\n", fnode->name);
 	}
 
-    /* Linefeed */
+    // Linefeed 
     strcat(*str, tmp);
 	free(tmp);
 
     foreach(child, node->children)
     {
-		/* Recursively print the children */
+		// Recursively print the children 
 		debug_print_vfs_tree_node(str, child->value, height + 1);
     }
 }

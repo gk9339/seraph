@@ -3,6 +3,7 @@
 
 int debugvfstree( char** );
 int debugproctree( char** );
-int debugprint( char*, const char* format, ... );
+int debugprintf( char*, const char* format, ... );
+int debugprint( char* );
 
 #endif

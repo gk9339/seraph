@@ -18,7 +18,7 @@ size_t fwrite( const void* ptr, size_t size, size_t nmemb, FILE* stream )
         return 0;
     }
 
-    if( stream->write_base == NULL )
+    if( stream->bufmode != _IONBF && stream->write_base == NULL )
     {
         stream->write_base = stream->write_ptr = malloc(BUFSIZ);
         stream->write_end = stream->write_base + BUFSIZ;

@@ -2,12 +2,15 @@
 #include <string.h>
 #include <limits.h>
 #ifdef __is_libk
-#include <kernel/kernel.h> /* KPANIC */
+#include <kernel/kernel.h> // KPANIC
 #include <kernel/mem.h>
 #include <kernel/spinlock.h>
+#include <kernel/serial.h>
 #else
+#include <spinlock.h>
 #include <unistd.h>
 #include <sys/syscall.h>
+#include <debug.h>
 #endif 
 
 #define NUM_BINS 11U
@@ -22,7 +25,7 @@
 
 #define BIN_MAGIC 0x9e928088
 
-/* Internal functions */
+// Internal functions 
 static void* __attribute__((malloc)) malloc_i( uintptr_t size );
 static void* __attribute__((malloc)) realloc_i( void* ptr, uintptr_t size );
 static void* __attribute__((malloc)) calloc_i( uintptr_t nmemb, uintptr_t size );
@@ -30,22 +33,7 @@ static void* __attribute__((malloc)) valloc_i( uintptr_t size );
 static void free_i( void* ptr );
 
 #ifndef __is_libk
-typedef volatile int spin_lock_t[2];
-
 #define KPANIC(mesg, regs) abort()
-
-static void spin_lock( volatile int* lock )
-{
-    while( __sync_lock_test_and_set(lock, 0x01) )
-    {
-        syscall_yield();
-    }
-}
-
-static void spin_unlock( volatile int* lock )
-{
-    __sync_lock_release(lock);
-}
 #endif
 
 static spin_lock_t mem_lock = { 0 };
@@ -55,6 +43,7 @@ void* __attribute__((malloc)) malloc( uintptr_t size )
     spin_lock(mem_lock);
     void* ret = malloc_i(size);
     spin_unlock(mem_lock);
+    
     return ret;
 }
 
@@ -63,6 +52,7 @@ void* __attribute__((malloc)) realloc( void* ptr, uintptr_t size )
     spin_lock(mem_lock);
     void* ret = realloc_i(ptr, size);
     spin_unlock(mem_lock);
+
     return ret;
 }
 
@@ -71,6 +61,7 @@ void* __attribute__((malloc)) calloc( uintptr_t nmemb, uintptr_t size )
     spin_lock(mem_lock);
     void* ret = calloc_i(nmemb, size);
     spin_unlock(mem_lock);
+
     return ret;
 }
 
@@ -79,6 +70,7 @@ void* __attribute__((malloc)) valloc( uintptr_t size )
     spin_lock(mem_lock);
     void* ret = valloc_i(size);
     spin_unlock(mem_lock);
+
     return ret;
 }
 
@@ -89,8 +81,8 @@ void free( void* ptr )
     spin_unlock(mem_lock);
 }
 
-/* Bin management */
-/* Adjust bin size in bin_size call to proper bounds */
+// Bin management 
+// Adjust bin size in bin_size call to proper bounds 
 inline static uintptr_t __attribute__((always_inline, pure)) malloc_i_adjust_bin( uintptr_t bin )
 {
     if( bin <= (uintptr_t)SMALLEST_BIN_LOG )
@@ -106,7 +98,7 @@ inline static uintptr_t __attribute__((always_inline, pure)) malloc_i_adjust_bin
     return bin;
 }
 
-/* Given a size value, find the correct bin to place the allocation in */
+// Given a size value, find the correct bin to place the allocation in 
 inline static uintptr_t __attribute__((always_inline, pure)) malloc_i_bin_size( uintptr_t size )
 {
     uintptr_t bin = sizeof(size) * CHAR_BIT - __builtin_clzl(size);
@@ -115,7 +107,7 @@ inline static uintptr_t __attribute__((always_inline, pure)) malloc_i_bin_size( 
     return malloc_i_adjust_bin(bin);
 }
 
-/* Bin header */
+// Bin header 
 typedef struct _malloc_i_bin_header
 {
     struct _malloc_i_bin_header* next;
@@ -124,7 +116,7 @@ typedef struct _malloc_i_bin_header
     uint32_t bin_magic;
 } malloc_i_bin_header_t;
 
-/* Big bin header, different pointers */
+// Big bin header, different pointers 
 typedef struct _malloc_i_big_bin_header
 {
     struct _malloc_i_big_bin_header* next;
@@ -135,13 +127,13 @@ typedef struct _malloc_i_big_bin_header
     struct _malloc_i_big_bin_header* forward[SKIP_MAX_LEVEL+1];
 } malloc_i_big_bin_header_t;
 
-/* List of pages in a bin */
+// List of pages in a bin 
 typedef struct _malloc_i_bin_header_head
 {
     malloc_i_bin_header_t* first;
 } malloc_i_bin_header_head_t;
 
-/* Array of available bins */
+// Array of available bins 
 static malloc_i_bin_header_head_t malloc_i_bin_head[NUM_BINS - 1];
 static struct _malloc_i_big_bins
 {
@@ -150,8 +142,8 @@ static struct _malloc_i_big_bins
 } malloc_i_big_bins;
 static malloc_i_big_bin_header_t* malloc_i_newest_big = NULL;
 
-/* Doubly-linked list */
-/* Remove an entry from a page list */
+// Doubly-linked list 
+// Remove an entry from a page list 
 inline static void __attribute__((always_inline)) malloc_i_list_decouple( malloc_i_bin_header_head_t* head, malloc_i_bin_header_t* node )
 {
     malloc_i_bin_header_t* next = node->next;
@@ -159,21 +151,21 @@ inline static void __attribute__((always_inline)) malloc_i_list_decouple( malloc
     node->next = NULL;
 }
 
-/* Insert an entry into a page list */
+// Insert an entry into a page list 
 inline static void __attribute__((always_inline)) malloc_i_list_insert( malloc_i_bin_header_head_t* head, malloc_i_bin_header_t* node )
 {
     node->next = head->first;
     head->first = node;
 }
 
-/* Get the head of a page list */
+// Get the head of a page list 
 inline static malloc_i_bin_header_t* __attribute__((always_inline)) malloc_i_list_head( malloc_i_bin_header_head_t* head )
 {
     return head->first;
 }
 
-/* Skip list */
-/* XOR shift rng */
+// Skip list 
+// XOR shift rng 
 static uint32_t __attribute__((pure)) malloc_i_skip_rand( void )
 {
     static uint32_t x = 123456789;
@@ -188,7 +180,7 @@ static uint32_t __attribute__((pure)) malloc_i_skip_rand( void )
     return w = w ^ (w >> 19) ^ t ^ (t >> 8);
 }
 
-/* Generate a random level for a skip node */
+// Generate a random level for a skip node 
 inline static int __attribute__((pure, always_inline)) malloc_i_random_level( void )
 {
     int level = 0;
@@ -200,7 +192,7 @@ inline static int __attribute__((pure, always_inline)) malloc_i_random_level( vo
     return level;
 }
 
-/* Find best fit for a given value */
+// Find best fit for a given value 
 static malloc_i_big_bin_header_t* malloc_i_skip_list_findbest( uintptr_t search_size )
 {
     malloc_i_big_bin_header_t* node = &malloc_i_big_bins.head;
@@ -223,7 +215,7 @@ static malloc_i_big_bin_header_t* malloc_i_skip_list_findbest( uintptr_t search_
     return node;
 }
 
-/* Insert a header into the skip list */
+// Insert a header into the skip list 
 static void malloc_i_skip_list_insert( malloc_i_big_bin_header_t* value )
 {
     malloc_i_big_bin_header_t* node = &malloc_i_big_bins.head;
@@ -267,7 +259,7 @@ static void malloc_i_skip_list_insert( malloc_i_big_bin_header_t* value )
     }
 }
 
-/* Delete a header from the skip list */
+// Delete a header from the skip list 
 static void malloc_i_skip_list_delete( malloc_i_big_bin_header_t* value )
 {
     malloc_i_big_bin_header_t* node = &malloc_i_big_bins.head;
@@ -324,8 +316,8 @@ static void malloc_i_skip_list_delete( malloc_i_big_bin_header_t* value )
     }
 }
 
-/* Stack */
-/* Pop an item from a block. */
+// Stack 
+// Pop an item from a block. 
 static void* malloc_i_stack_pop( malloc_i_bin_header_t* header )
 {
     void* item = header->head;
@@ -335,7 +327,7 @@ static void* malloc_i_stack_pop( malloc_i_bin_header_t* header )
     return item;
 }
 
-/* Push an item into a block */
+// Push an item into a block 
 static void malloc_i_stack_push( malloc_i_bin_header_t* header, void* ptr )
 {
     uintptr_t** item = (uintptr_t**)ptr;
@@ -343,13 +335,13 @@ static void malloc_i_stack_push( malloc_i_bin_header_t* header, void* ptr )
     header->head = item;
 }
 
-/* Is this cell stack empty */
+// Is this cell stack empty 
 inline static int __attribute__((always_inline)) malloc_i_stack_empty( malloc_i_bin_header_t* header )
 {
     return header->head == NULL;
 }
 
-/* malloc() */
+// malloc() 
 static void* __attribute__((malloc)) malloc_i( uintptr_t size )
 {
     if( __builtin_expect(size == 0, 0) )
@@ -361,11 +353,11 @@ static void* __attribute__((malloc)) malloc_i( uintptr_t size )
 
     if( bucket_id < BIG_BIN )
     {
-        /* Small Bins */
+        // Small Bins 
         malloc_i_bin_header_t* bin_header = malloc_i_list_head(&malloc_i_bin_head[bucket_id]);
         if( !bin_header )
         {
-            /* Grow the heap for the new bin */
+            // Grow the heap for the new bin 
             bin_header = (malloc_i_bin_header_t*)sbrk(PAGE_SIZE);
             bin_header->bin_magic = BIN_MAGIC;
 
@@ -393,7 +385,7 @@ static void* __attribute__((malloc)) malloc_i( uintptr_t size )
         return item;
     }else
     {
-        /* Big bins */
+        // Big bins 
         malloc_i_big_bin_header_t* bin_header = malloc_i_skip_list_findbest(size);
         if( bin_header )
         {
@@ -423,7 +415,7 @@ static void* __attribute__((malloc)) malloc_i( uintptr_t size )
     }
 }
 
-/* free() */
+// free() 
 static void free_i( void* ptr )
 {
     if( __builtin_expect(ptr == NULL, 0 ) )
@@ -461,7 +453,7 @@ static void free_i( void* ptr )
     }
 }
 
-/* valloc() */
+// valloc() 
 static void* __attribute__((malloc)) valloc_i( uintptr_t size )
 {
     uintptr_t true_size = size + PAGE_SIZE - sizeof(malloc_i_big_bin_header_t);
@@ -471,7 +463,7 @@ static void* __attribute__((malloc)) valloc_i( uintptr_t size )
     return out;
 }
 
-/* realloc() */
+// realloc() 
 static void* __attribute__((malloc)) realloc_i( void* ptr, uintptr_t size )
 {
     if( __builtin_expect(ptr == NULL, 0) )
@@ -502,7 +494,7 @@ static void* __attribute__((malloc)) realloc_i( void* ptr, uintptr_t size )
         return ptr;
     }
 
-    /* reallocate more memory */
+    // reallocate more memory 
     void* newptr = malloc_i(size);
     if( __builtin_expect(newptr != NULL, 1) )
     {

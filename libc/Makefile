@@ -172,8 +172,7 @@ libc.so: $(OBJS)
 	cp crtn.o $(DESTDIR)$(LIBDIR)
 	OBJ=`$(CC) $(CFLAGS) $(LDFLAGS) -print-file-name=crtbegin.o` && cp "$$OBJ" $(DESTDIR)$(LIBDIR)
 	OBJ=`$(CC) $(CFLAGS) $(LDFLAGS) -print-file-name=crtend.o` && cp "$$OBJ" $(DESTDIR)$(LIBDIR)
-	$(CC) -nodefaultlibs -o libssp.so $(CFLAGS) -shared libssp/ssp.o
-	$(CC) -nodefaultlibs -o $@ $(CFLAGS) -shared $^ -lgcc -L. -lssp
+	$(CC) -nodefaultlibs -o $@ $(CFLAGS) -shared $^ -lgcc
 
 libk.a: $(LIBK_OBJS)
 	$(AR) rcs $@ $^

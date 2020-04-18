@@ -25,6 +25,7 @@ static void __attribute__((constructor)) __guard_setup( void )
         if( size == sizeof(__stack_chk_guard) && __stack_chk_guard != 0 )
             return;
     }
+    close(fd);
 #endif
     p = (unsigned char*) &__stack_chk_guard;
     p[sizeof(__stack_chk_guard)-1] = 255;

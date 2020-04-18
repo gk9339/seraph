@@ -47,7 +47,7 @@ uintptr_t kmalloc_real( size_t size, int align, uintptr_t* phys )
         {
             if( align && size >= 0x3000 )
             {
-                /* Large alloc */
+                // Large alloc 
                 for( uintptr_t i = (uintptr_t)address; i < (uintptr_t)address + size; i += 0x1000 )
                 {
                     clear_frame(map_to_physical(i));
@@ -257,12 +257,12 @@ void paging_initialize( uint32_t memsize )
     kernel_directory = (page_directory_t*)kvmalloc_p(sizeof(page_directory_t), &phys);
     memset(kernel_directory, 0, sizeof(page_directory_t));
 
-    /* Set PAT 111b to Write-combining */
+    // Set PAT 111b to Write-combining 
     asm volatile(
-            "mov $0x277, %%ecx\n" /* IA32_MSR_PAT */
+            "mov $0x277, %%ecx\n" // IA32_MSR_PAT 
             "rdmsr\n"
-            "or $0x1000000, %%edx\n" /* Set bit 56 */
-            "and $0xf9ffffff, %%edx\n" /* unset bits 57, 58 */
+            "or $0x1000000, %%edx\n" // Set bit 56 
+            "and $0xf9ffffff, %%edx\n" // unset bits 57, 58 
             "wrmsr\n"
             :::"ecx", "edx", "eax"
             );

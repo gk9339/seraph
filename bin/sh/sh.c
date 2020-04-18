@@ -295,7 +295,7 @@ int sh_launch( char** args )
         {
             printf("\033[0;31msh: Command not found\n"); // Red
         }
-        exit(EXIT_FAILURE);
+        exit(127);
     }else if( pid < 0 )
     {
         // Fork error

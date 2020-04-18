@@ -301,7 +301,7 @@ process_t* spawn_process( volatile process_t* parent, int reuse_fds )
     proc->image.heap_actual = parent->image.heap_actual;
     proc->image.size = parent->image.size;
 
-    proc->image.stack = (uintptr_t)kvmalloc(KERNEL_STACK_SIZE) + KERNEL_STACK_SIZE;
+    proc->image.stack = (uintptr_t)valloc(KERNEL_STACK_SIZE) + KERNEL_STACK_SIZE;
     proc->image.user_stack = parent->image.user_stack;
     proc->image.shm_heap = SHM_START;
 

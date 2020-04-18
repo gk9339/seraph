@@ -1,11 +1,15 @@
 #ifndef _SPINLOCK_H
 #define _SPINLOCK_H
 
+#include <sched.h>
+
+typedef volatile int spin_lock_t[2];
+
 static void spin_lock( int volatile* lock )
 {
     while(__sync_lock_test_and_set(lock, 0x01))
     {
-        syscall_yield();
+        sched_yield();
     }
 }
 

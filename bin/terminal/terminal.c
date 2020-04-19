@@ -251,6 +251,12 @@ int main( void )
         }
     }
 
+    char* message = "[Process completed]";
+    for( size_t i = 0; i < strlen(message); i++ )
+    {
+        terminal_write(message[i]);
+    }
+
     return EXIT_SUCCESS;
 }
 
@@ -276,13 +282,6 @@ void sig_suspend_input( int sig __attribute__((unused)) )
 // Child process (shell) exited
 void sig_child_exit( int sig __attribute__((unused)) )
 {
-    char* message = "\n\r[Process completed]";
-    for( size_t i = 0; i < strlen(message); i++ )
-    {
-        terminal_write(message[i]);
-    }
-
-    cell_redraw(csr_x, csr_y);
     exit_terminal = 1;
     signal(SIGCHLD, SIG_IGN);
     close(input_buffer_semaphore[1]);

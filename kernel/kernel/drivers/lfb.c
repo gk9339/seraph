@@ -147,6 +147,9 @@ void terminal_writestring( const char* data )
                 terminal_x -= CHAR_WIDTH;
             }
             write_char(terminal_x, terminal_y, ' ', fg);
+        }else if( *data == '\r' )
+        {
+            terminal_x = 0;
         }else if( *data == '\f' )
         {
             terminal_x = 0;

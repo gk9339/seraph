@@ -14,7 +14,7 @@ set timeout=0
 set default=0
 
 menuentry "seraph" {
-    multiboot /boot/seraph.kernel splash serialdebug root=/dev/ram0 root_type=ustar
+    multiboot /boot/seraph.kernel serialdebug root=/dev/ram0 root_type=ustar
     module /boot/seraph.initrd
 }
 EOF

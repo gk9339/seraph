@@ -156,7 +156,7 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
                     if( mmap->addr + i > 0xFFFFFFFF ) break;
 #if EARLY_KERNEL_DEBUG
                     debug_logf(debug_str, "\033[F(%d)", ++memory_mark_counter);
-                    printf("(%d)", ++memory_mark_counter);
+                    printf("\r(%d)", ++memory_mark_counter);
 #endif
                     paging_mark_system((mmap->addr + i) & 0xFFFFF000);
                 }
@@ -346,6 +346,8 @@ void kpanic( char* error_message, const char* file, int line, struct regs* regs 
         debug_logf(debug_str, "User ESP: 0x%x ", regs->useresp);
         printf("eip=0x%x\n", regs->eip);
         debug_logf(debug_str, "eip=0x%x", regs->eip);
+        printf("int_no=0x%x\n", regs->int_no);
+        debug_logf(debug_str, "int_no=0x%x", regs->int_no);
     }
     send_signal(current_process->id, SIGKILL, 1);
 }

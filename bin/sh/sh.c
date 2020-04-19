@@ -354,6 +354,7 @@ int sh_cd( char** args )
         if( chdir(args[1]) != 0 )
         {
             perror("\033[0;31msh"); // Red
+            return 1 << 8;
         }
     }
 

@@ -15,7 +15,7 @@ LIBS:=$(LIBS)
 include libm/make.config
 
 OBJS=\
-$(patsubst %, libm/%, $(LIBMOBJ)) \
+$(patsubst %,libm/% , $(LIBMOBJ))\
 libkbd/libkbd.o \
 libansiterm/libansiterm.o \
 

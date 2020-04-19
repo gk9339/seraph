@@ -18,21 +18,21 @@ OBJS=\
 init/init.o \
 init/reboot.o \
 init/poweroff.o \
-$(patsubst %, coreutils/%, $(COREUTILSOBJ)) \
+$(patsubst %,coreutils/% , $(COREUTILSOBJ))\
 terminal/terminal.o \
 sh/sh.o \
 clear/clear.o \
-$(patsubst %, test/%, $(TESTOBJ)) \
+$(patsubst %,test/% , $(TESTOBJ))\
 
 EXECS=\
 init/init \
 init/reboot \
 init/poweroff \
-$(patsubst %, coreutils/%, $(COREUTILSEXEC)) \
+$(patsubst %,coreutils/% , $(COREUTILSEXEC))\
 terminal/terminal \
 sh/sh \
 clear/clear \
-$(patsubst %, test/%, $(TESTEXEC)) \
+$(patsubst %,test/% , $(TESTEXEC))\
 
 .PHONY: all clean install install-headers
 .SUFFIXES: .o .c

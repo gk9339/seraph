@@ -3,7 +3,8 @@
 #define CHAR_HEIGHT 20
 #define CHAR_WIDTH 9
 
-uint16_t large_font[][20] = {
+uint16_t large_font[][20] =
+{
     /* 0 0  */
     {
         0xFFFF,

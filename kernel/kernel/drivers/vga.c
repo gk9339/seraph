@@ -6,6 +6,7 @@
 #include <kernel/serial.h>
 #include <kernel/vga.h>
 
+#ifdef __VGA_KERNEL
 static const size_t VGA_WIDTH = 80;
 static const size_t VGA_HEIGHT = 25;
 static uint16_t* const VGA_MEMORY = (uint16_t*)0xB8000;
@@ -155,3 +156,4 @@ void terminal_writestring( const char* data )
 {
 	terminal_write(data, strlen(data));
 }
+#endif

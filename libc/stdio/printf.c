@@ -3,7 +3,7 @@
 
 #ifdef __is_libk
 #include <stdlib.h>
-#include <kernel/vga.h>
+#include <kernel/lfb.h>
 #endif
 
 int printf( const char* restrict fmt, ... )

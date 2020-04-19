@@ -461,10 +461,10 @@ int printname_color( struct ls_entry* entry )
 
     if( S_ISCHR(entry->st.st_mode) )
     {
-        printf("\033[0;43m%s", entry->filename); // Yellow/Orange BG (Character device)
+        printf("\033[48;5;202m%s", entry->filename); // Yellow/Orange BG (Character device)
     }else if( S_ISDIR(entry->st.st_mode) )
     {
-        printf("\033[1;34m%s\033[1;32m/\033[1;34m", entry->filename); // Blue/Green (Directory)
+        printf("\033[38;5;30m%s\033[0;0m/", entry->filename); // Blue/Green (Directory)
         retval++;
     }else if( S_ISFIFO(entry->st.st_mode) )
     {
@@ -473,7 +473,7 @@ int printname_color( struct ls_entry* entry )
     {
         if( entry->st.st_mode & S_IXUSR || entry->st.st_mode & S_IXGRP || entry->st.st_mode & S_IXOTH )
         {
-            printf("\033[0;33m%s\033[1;32m*\033[0;33m", entry->filename); // Executable file
+            printf("\033[38;5;208m%s\033[38;5;2m*", entry->filename); // Executable file
             retval++;
         }else
         {
@@ -481,7 +481,7 @@ int printname_color( struct ls_entry* entry )
         }
     }else if( S_ISBLK(entry->st.st_mode) )
     {
-        printf("\033[1;45m%s", entry->filename); // Magenta BG (Block device)
+        printf("\033[48;5;89m%s", entry->filename); // Magenta BG (Block device)
     }else if( S_ISSOCK(entry->st.st_mode) )
     {
         printf("\033[0;31m%s", entry->filename); // Red (Socket)

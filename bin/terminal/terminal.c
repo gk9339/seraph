@@ -18,27 +18,28 @@
 #include <debug.h>
 #include <spinlock.h>
 #include <pthread.h>
-#include "terminal.h"
+#include <kernel/lfb.h>
+#include "pallete.h"
 #include "decodeutf8.h"
 #include "ununicode.h"
+#include "terminal-font.h"
 
 #define SWAP(T,a,b) { T _a = a; a = b; b = _a; }
 
-const size_t VGA_WIDTH = 80;
-const size_t VGA_HEIGHT = 25;
-uint16_t* const VGA_MEMORY = (uint16_t*)0xB8000;
-uint16_t* mirrorcopy = NULL;
+int framebuffer_fd;
+int framebuffer_width, framebuffer_height, framebuffer_stride;
+char* framebuffer;
 
-uint16_t terminal_width = VGA_WIDTH;
-uint16_t terminal_height = VGA_HEIGHT;
+uint16_t terminal_width;
+uint16_t terminal_height;
 uint16_t csr_x = 0;
 uint16_t csr_y = 0;
 uint16_t _orig_csr_x = 0;
 uint16_t _orig_csr_y = 0;
-uint32_t fg = VGA_COLOR_LIGHT_GREY;
-uint32_t bg = VGA_COLOR_BLACK;
-uint32_t _orig_fg = VGA_COLOR_LIGHT_GREY;
-uint32_t _orig_bg = VGA_COLOR_BLACK;
+uint32_t fg = TERM_DEFAULT_FG;
+uint32_t bg = TERM_DEFAULT_BG;
+uint32_t _orig_fg = TERM_DEFAULT_FG;
+uint32_t _orig_bg = TERM_DEFAULT_BG;
 uint8_t cursor_enabled = 1;
 uint8_t cursor_flipped = 0;
 uint64_t mouse_ticks = 0;
@@ -103,7 +104,6 @@ void* handle_input_buffer( void* ); // When signalled, dequeue from input buffer
 void write_input_buffer( char* data, size_t len ); // Write character to pty input buffer
 void handle_input( char ); // Write character to pty input buffer
 void write_input_buffer( char*, size_t );
-void vga_write( unsigned char c, int x, int y, int attr );
 void terminal_write_char( uint32_t val, uint16_t x, uint16_t y, uint32_t fg, uint32_t bg, uint8_t flags );
 void cell_set( uint16_t x, uint16_t y, uint32_t codepoint, uint8_t flags );
 void cell_redraw( uint16_t x, uint16_t y );
@@ -144,17 +144,23 @@ int main( void )
     // Set TERM environment variable
     putenv("TERM=seraph-term");
 
-    // Disable builtin VGA cursor
-    outportb(0x3D4, 0x0A);
-    outportb(0x3D5, 0x20);
+    framebuffer_fd = open("/dev/framebuffer", O_RDONLY);
+    ioctl(framebuffer_fd, IO_LFB_WIDTH, &framebuffer_width);
+    ioctl(framebuffer_fd, IO_LFB_HEIGHT, &framebuffer_height);
+    ioctl(framebuffer_fd, IO_LFB_STRIDE, &framebuffer_stride);
+    ioctl(framebuffer_fd, IO_LFB_ADDR, &framebuffer);
+    close(framebuffer_fd);
+    
+    terminal_width = framebuffer_width / CHAR_WIDTH;
+    terminal_height = framebuffer_height / CHAR_HEIGHT;
 
     // Open pty, setup pty slave FILE pointer
     openpty(&fd_master, &fd_slave, NULL, NULL, NULL);
     terminal = fdopen(fd_slave, "w");
 
     struct winsize pty_winsize;
-    pty_winsize.ws_row = VGA_HEIGHT;
-    pty_winsize.ws_col = VGA_WIDTH;
+    pty_winsize.ws_row = terminal_height;
+    pty_winsize.ws_col = terminal_width;
     pty_winsize.ws_xpixel = 0;
     pty_winsize.ws_ypixel = 0;
     ioctl(fd_master, TIOCSWINSZ, &pty_winsize);
@@ -166,11 +172,8 @@ int main( void )
     memset(terminal_buffer_a, 0, sizeof(term_cell_t) * terminal_width * terminal_height);
     terminal_buffer = terminal_buffer_a;
 
-    mirrorcopy = malloc(sizeof(unsigned short) * terminal_width * terminal_height);
-    memset(mirrorcopy, 0, sizeof(unsigned short) * terminal_width * terminal_height);
-
     ansi_state = ansi_init(ansi_state, terminal_width, terminal_height, &terminal_callbacks);
-
+    
     // Setup input buffer thread
     pthread_t input_buffer_thread;
     pipe(input_buffer_semaphore);
@@ -566,49 +569,40 @@ void insert_delete_lines( int lines )
     terminal_shift_region(csr_y, terminal_height - csr_y, - lines);
 }
 
-void terminal_write_char( uint32_t val, uint16_t x, uint16_t y, uint32_t vga_fg, uint32_t vga_bg, uint8_t flags __attribute__((unused)) )
+static void term_set_point(int x, int y, uint32_t value)
 {
-    if( val == L'▏' )
-    {
-        val = 179;
-    }else if( val > 128 )
-    {
-        val = ununicode(val);
-    }if( vga_fg > 256 )
-    {
-    	vga_fg = best_match(vga_fg);
-    }
-    if( vga_bg > 256 )
-    {
-    	vga_bg = best_match(vga_bg);
-    }
-    if( vga_fg > 16 )
-    {
-    	vga_fg = eightbit_to_vga[vga_fg];
-    }
-    if( vga_bg > 16 )
-    {
-    	vga_bg = eightbit_to_vga[vga_bg];
-    }
-    if( vga_fg == 16 )
-    {
-        vga_fg = 0;
-    }if( vga_bg == 16 )
-    {
-        vga_bg = 0;
-    }
-    vga_write(val, x, y, (vga_to_ansi[vga_fg] & 0xF) | (vga_to_ansi[vga_bg] << 4));
+    uint32_t * disp = (uint32_t *)framebuffer;
+    uint32_t * cell = &disp[y * (framebuffer_stride / 4) + x];
+    *cell = value;
 }
 
-void vga_write( unsigned char c, int x, int y, int attr )
+void terminal_write_char( uint32_t val, uint16_t x, uint16_t y, uint32_t c_fg, uint32_t c_bg, uint8_t flags __attribute__((unused)) )
 {
-    unsigned int where = y * terminal_width + x;
-    unsigned int att = (c | (attr << 8));
-
-    if( mirrorcopy[where] != att )
+    c_fg = term_colors[c_fg];
+    c_fg |= 0xFF << 24;
+    c_bg = term_colors[c_bg];
+    c_bg |= TERM_DEFAULT_OPAC << 24;
+    if( val > 128 )
     {
-        mirrorcopy[where] = att;
-        VGA_MEMORY[where] = att;
+        val = ununicode(val);
+    }
+
+    x *= CHAR_WIDTH;
+    y *= CHAR_HEIGHT;
+
+    uint16_t* c = large_font[val];
+    for( uint8_t i = 0; i < CHAR_HEIGHT; ++i )
+    {
+        for( uint8_t j = 0; j < CHAR_WIDTH; ++j )
+        {
+            if( (c[i] & (1 << (15-j))) )
+            {
+                term_set_point(x+j,y+i,c_fg);
+            }else
+            {
+                term_set_point(x+j,y+i,c_bg);
+            }
+        }
     }
 }
 
@@ -765,60 +759,6 @@ void flip_cursor( void )
         }
         cursor_flipped = 1 - cursor_flipped;
     }
-}
-
-static int color_distance(uint32_t a, uint32_t b) {
-    int a_r = (a & 0xFF0000) >> 16;
-    int a_g = (a & 0xFF00) >> 8;
-    int a_b = (a & 0xFF);
-
-    int b_r = (b & 0xFF0000) >> 16;
-    int b_g = (b & 0xFF00) >> 8;
-    int b_b = (b & 0xFF);
-
-    int distance = 0;
-    distance += abs(a_r - b_r) * 3;
-    distance += abs(a_g - b_g) * 6;
-    distance += abs(a_b - b_b) * 10;
-
-    return distance;
-}
-
-static uint32_t vga_base_colors[] = {
-    0x000000,
-    0xAA0000,
-    0x00AA00,
-    0xAA5500,
-    0x0000AA,
-    0xAA00AA,
-    0x00AAAA,
-    0xAAAAAA,
-    0x555555,
-    0xFF5555,
-    0x55AA55,
-    0xFFFF55,
-    0x5555FF,
-    0xFF55FF,
-    0x55FFFF,
-    0xFFFFFF,
-};
-
-int best_match( uint32_t a )
-{
-    int best_distance = INT32_MAX;
-    int best_index = 0;
-
-    for( int i = 0; i < 16; i++ )
-    {
-        int distance = color_distance(a, vga_base_colors[i]);
-        if( distance < best_distance )
-        {
-            best_index = i;
-            best_distance = distance;
-        }
-    }
-
-    return best_index;
 }
 
 int is_wide( uint32_t codepoint )

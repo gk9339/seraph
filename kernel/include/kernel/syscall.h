@@ -6,5 +6,6 @@
 typedef uint32_t (*syscall_function_t)(unsigned int, ...);
 
 void syscalls_initialize( void );
+void ptr_validate( void* ptr, const char* syscall );
 
 #endif

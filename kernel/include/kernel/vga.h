@@ -32,6 +32,7 @@ static inline uint16_t vga_entry( unsigned char uc, uint8_t color )
 	return (uint16_t)((uint16_t) uc | (uint16_t) color << 8);
 }
 
+#ifdef __VGA_KERNEL
 void terminal_initialize( void );
 void terminal_clear( void );
 void terminal_scroll( size_t rows );
@@ -39,5 +40,5 @@ void terminal_putchar( char c );
 void terminal_write( const char* data, size_t size );
 void terminal_writestring( const char* data );
 void terminal_setcolor( uint8_t );
-
+#endif
 #endif

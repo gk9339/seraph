@@ -23,12 +23,12 @@
 #include <kernel/syscall.h>
 #include <kernel/shm.h>
 #include <kernel/serial.h>
-#include <kernel/vga.h>
 #include <kernel/keyboard.h>
 #include <kernel/kconfig.h>
 #include <kernel/acpi.h>
 #include <kernel/random.h>
 #include <sys/types.h>
+#include <kernel/lfb.h>
 
 uintptr_t initial_esp = 0;
 int debug = 0;
@@ -62,10 +62,10 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
     }
     mbi = (multiboot_info_t*)addr;
     initial_esp = esp;
- 
+
     // Terminal Initialization
     debug_log("Terminal initialization");
-    terminal_initialize();
+    lfb_initialize();
     printf("Kernel Initializing\n");
 
 #if EARLY_KERNEL_DEBUG
@@ -127,7 +127,7 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
     }
     while(last_mod & 0x7FF) last_mod++;
     kmalloc_startat(last_mod);
-    
+
     // Memory initialization
     if( !CHECK_FLAG(mbi->flags, 0) ) // mem_upper/mem_lower
     {
@@ -139,7 +139,7 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
     {
 #if EARLY_KERNEL_DEBUG
         debug_log("\nParsing memory map.");
-        printf("Parsing memory map.\n");
+        printf("\nParsing memory map.\n");
 #endif
         multiboot_memory_map_t* mmap = (void*)mbi->mmap_addr;
 #if EARLY_KERNEL_DEBUG
@@ -156,7 +156,7 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
                     if( mmap->addr + i > 0xFFFFFFFF ) break;
 #if EARLY_KERNEL_DEBUG
                     debug_logf(debug_str, "\033[F(%d)", ++memory_mark_counter);
-                    printf("\r(%d)", ++memory_mark_counter);
+                    printf("(%d)", ++memory_mark_counter);
 #endif
                     paging_mark_system((mmap->addr + i) & 0xFFFFF000);
                 }
@@ -166,7 +166,7 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
     }
 #if EARLY_KERNEL_DEBUG
     debug_log("Finalize paging / heap install\n");
-    printf("\nFinalize paging / heap install\n");
+    printf("\nFinalize paging / heap install\n\n");
 #endif
     paging_finalize();
 #if EARLY_KERNEL_DEBUG
@@ -184,6 +184,7 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
     }
 
     heap_install();
+    lfb_initialize();
     
     // Parse args
     args_parse(kcmdline);
@@ -191,7 +192,7 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
     {
         debug = 1;
     }
-    if( args_present("vgadebugg") )
+    if( args_present("splash") )
     {
         debug = (uint8_t)(debug + 2);
     }
@@ -278,6 +279,7 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
     if( CHECK_FLAG(debug, 0) ) debug_log("Setup /dev");
     if( CHECK_FLAG(debug, 1) ) printf("Setup /dev\n\n");
     map_vfs_directory("/dev");
+    lfb_initialize_device();
     zero_initialize();
     null_initialize();
     random_initialize();
@@ -316,11 +318,11 @@ void kpanic( char* error_message, const char* file, int line, struct regs* regs 
     int_disable();
     char debug_str[256];
 
-    terminal_setcolor(4);
+    terminal_kpanic_color();
 
     printf("\fUNHANDLED EXCEPTION: %s ", error_message);
     debug_logf(debug_str, "UNHANDLED EXCEPTION: %s ", error_message);
-    printf("pid: %d\n", getpid());
+    printf("pid: %d ", getpid());
     debug_logf(debug_str, "pid: %d", getpid());
     printf("File: %s ", file);
     debug_logf(debug_str, "File: %s ", file);

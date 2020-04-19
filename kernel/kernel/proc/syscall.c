@@ -38,7 +38,7 @@ static size_t hostname_len = 0;
 
 #define MIN(A, B) ((A) < (B)?(A):(B))
 
-static void ptr_validate( void* ptr, const char* syscall )
+void ptr_validate( void* ptr, const char* syscall )
 {
     if( ptr && !PTR_INRANGE(ptr) )
     {

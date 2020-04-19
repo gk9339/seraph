@@ -16,10 +16,10 @@
 .long FLAGS
 .long CHECKSUM
 .long 0, 0, 0, 0, 0 # Only used in aout, set 0 for elf
-.long 1    # Video mode
-.long 80   # Width
-.long 25   # Height
-.long 16   # Depth
+.long 0    # Video mode
+.long 1920 # Width
+.long 1080 # Height
+.long 32   # Depth
 
 # Allocate the initial stack
 .section .kernel_stack, "aw", @nobits

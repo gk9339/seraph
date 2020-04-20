@@ -1,6 +1,10 @@
 #ifndef _UNISTD_H
 #define _UNISTD_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stddef.h>
 #include <stdint.h>
 #include <sys/types.h>
@@ -64,5 +68,9 @@ int isatty( int fd );
 extern char* optarg;
 extern int optind, opterr, optopt;
 int getopt( int argc, char* const argv[], const char* optstring );
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

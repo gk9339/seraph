@@ -1,6 +1,10 @@
 #ifndef _TREE_H
 #define _TREE_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <list.h>
 #include <stdint.h>
 
@@ -37,5 +41,9 @@ tree_node_t* tree_node_find( tree_node_t* node, void* search, tree_comparator_t 
 void tree_break_off(tree_t* tree, tree_node_t* node);
 void tree_remove_reparent_root( tree_t* tree, tree_node_t* node );
 size_t tree_count_children( tree_node_t* node );
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

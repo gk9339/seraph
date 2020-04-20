@@ -307,7 +307,7 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
     // Start /bin/init
     if( CHECK_FLAG(debug, 0) ) debug_log("Starting /bin/init\n");
     if( CHECK_FLAG(debug, 1) ) printf("Starting /bin/init\n");
-    system(argv[0], argc, argv, NULL);
+    sys_exec(argv[0], argc, argv, NULL);
     
     // Something went very wrong
     KPANIC("INIT FAILED", NULL);

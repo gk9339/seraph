@@ -1,6 +1,10 @@
 #ifndef _HASHTABLE_H
 #define _HASHTABLE_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <list.h>
 
 typedef unsigned int (*hashtable_hash_t)(void* key);
@@ -40,5 +44,9 @@ unsigned int hashtable_string_hash( void* key );
 int hashtable_string_comp( void* a, void* b );
 void* hashtable_string_dupe( void* key );
 int hashtable_is_empty( hashtable_t* hashtab );
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

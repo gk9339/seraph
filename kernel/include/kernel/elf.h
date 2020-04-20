@@ -158,6 +158,6 @@ typedef struct {
 } Elf32_Dyn;
 
 int exec( char *, int, char **, char **);
-int system( char *, int, char **, char **); // For launching init
+int sys_exec( char *, int, char **, char **); // For launching init
 
 #endif

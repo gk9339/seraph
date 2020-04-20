@@ -1,6 +1,10 @@
 #ifndef _TERMIOS_H
 #define _TERMIOS_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <sys/types.h> /* pid_t */
 
 #define VEOF     1 /* ^D (end of file) */
@@ -180,5 +184,9 @@ extern pid_t   tcgetsid(int);
 extern int     tcsendbreak(int, int);
 extern int     tcsetattr(int, int, struct termios *);
 extern int ioctl(int, int, void*);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

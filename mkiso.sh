@@ -8,6 +8,17 @@ mkdir -p isodir/boot/grub
 mkdir -p sysroot/boot/grub
 mkdir -p sysroot/dev
 mkdir -p sysroot/proc
+mkdir -p sysroot/src
+
+find bin \( -name '*.c' -o -name '*.h' -o -name '*.S' -o -name '*.py' -o -name '*.ld' -o -name 'Makefile' -o -name 'make.config' \) -exec cp --parents {} sysroot/src/ \;
+find kernel \( -name '*.c' -o -name '*.h' -o -name '*.S' -o -name '*.py' -o -name '*.ld' -o -name 'Makefile' -o -name 'make.config' \) -exec cp --parents {} sysroot/src/ \;
+find lib \( -name '*.c' -o -name '*.h' -o -name '*.S' -o -name '*.py' -o -name '*.ld' -o -name 'Makefile' -o -name 'make.config' \) -exec cp --parents {} sysroot/src/ \;
+find libc \( -name '*.c' -o -name '*.h' -o -name '*.S' -o -name '*.py' -o -name '*.ld' -o -name 'Makefile' -o -name 'make.config' \) -exec cp --parents {} sysroot/src/ \;
+find linker \( -name '*.c' -o -name '*.h' -o -name '*.S' -o -name '*.py' -o -name '*.ld' -o -name 'Makefile' -o -name 'make.config' \) -exec cp --parents {} sysroot/src/ \;
+find script \( -name '*.py' -o -name '*.sh' \) -exec cp --parents {} sysroot/src/ \;
+cp --parents toolchain/patches/*.patch sysroot/src
+cp *.sh sysroot/src
+cp LICENSE README.md sysroot/src
 
 cat > sysroot/boot/grub/grub.cfg << EOF
 set timeout=0

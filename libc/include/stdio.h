@@ -1,5 +1,9 @@
 #ifndef _STDIO_H
-#define _STDIO_H 1
+#define _STDIO_H
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 #include <sys/cdefs.h>
 #include <stddef.h>
@@ -66,5 +70,40 @@ int vsprintf( char*, const char*, va_list );
 int vsnprintf( char*, size_t, const char*, va_list );
 
 void perror( const char* );
+
+// STUB
+typedef long fpos_t;
+
+void clearerr( FILE* stream );
+int feof( FILE* stream );
+int ferror( FILE* stream );
+
+int fgetpos( FILE* stream, fpos_t* pos );
+int fsetpos( FILE* stream, const fpos_t* pos );
+
+char* fgets( char* s, int size, FILE* stream );
+int fputc( int c, FILE* stream );
+int fputs( const char* s, FILE* stream );
+FILE* freopen( const char* path, const char* mode, FILE* stream );
+
+int remove( const char* pathname );
+int rename( const char* oldpath, const char* newpath );
+
+void rewind( FILE* stream );
+
+int scanf( const char* fmt, ... );
+int sscanf( const char* str, const char* fmt, ... );
+int fscanf( FILE* stream, const char* fmt, ... );
+
+int vscanf( const char* fmt, va_list );
+int vsscanf( const char* str, const char* fmt, va_list );
+int vfscanf( FILE* stream, const char* fmt, va_list );
+
+FILE* tmpfile( void );
+int ungetc( int c, FILE* stream );
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

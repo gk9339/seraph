@@ -18,6 +18,7 @@ CFLAGS:=$(CFLAGS) -O3
 ARCHDIR=arch/$(HOSTARCH)
 
 include $(ARCHDIR)/make.config
+include libm/make.config
 
 CFLAGS:=$(CFLAGS)$(ARCH_CFLAGS)
 CPPFLAGS:=$(CPPFLAGS)$(ARCH_CPPFLAGS)
@@ -27,14 +28,8 @@ LIBK_CPPFLAGS:=$(LIBK_CPPFLAGS)$(KERNEL_ARCH_CPPFLAGS)
 FREEOBJS=\
 $(ARCH_FREEOBJS) \
 stdio/printf.o \
-stdio/fwrite.o \
-stdio/perror.o \
 stdio/putc.o \
-stdio/putchar.o \
-stdio/puts.o \
-stdio/setvbuf.o \
-stdio/fprintf.o \
-stdio/snprintf.o \
+stdio/fwrite.o \
 stdio/sprintf.o \
 stdio/vfprintf.o \
 stdio/vprintf.o \
@@ -64,8 +59,9 @@ list/list.o \
 tree/tree.o \
 hashtable/hashtable.o \
 errno/errno.o \
-libssp/ssp.o \
+ctype/ctype.o \
 libssp/ssp_local.o \
+libssp/ssp.o \
 
 HOSTEDOBJS=\
 $(ARCH_HOSTEDOBJS) \
@@ -109,11 +105,27 @@ stdio/fflush.o \
 stdio/fclose.o \
 stdio/fopen.o \
 stdio/fdopen.o \
+stdio/fprintf.o \
+stdio/snprintf.o \
 stdio/getchar.o \
 stdio/fgetc.o \
 stdio/getc.o \
 stdio/stdio.o \
 stdio/stub.o \
+stdio/ungetc.o \
+stdio/perror.o \
+stdio/putchar.o \
+stdio/puts.o \
+stdio/fputs.o \
+stdio/fputc.o \
+stdio/setvbuf.o \
+stdio/scanf.o \
+stdio/sscanf.o \
+stdio/fscanf.o \
+stdio/vscanf.o \
+stdio/vsscanf.o \
+stdio/vfscanf.o \
+stdlib/strtod.o \
 stdlib/exit.o \
 stdlib/atexit.o \
 stdlib/getenv.o \
@@ -121,6 +133,9 @@ stdlib/putenv.o \
 stdlib/setenv.o \
 stdlib/unsetenv.o \
 stdlib/qsort.o \
+stdlib/abs.o \
+string/strxfrm.o \
+string/strcoll.o \
 sched/sched_yield.o \
 pty/pty.o \
 signal/signal.o \
@@ -138,7 +153,10 @@ libgen/basename.o \
 libgen/dirname.o \
 wchar/wcwidth.o \
 time/gettimeofday.o \
+time/strftime.o \
 pthread/pthread.o \
+locale/setlocale.o \
+setjmp/setjmp.o \
 debug/debugvfstree.o \
 debug/debugproctree.o \
 debug/debugprint.o \
@@ -149,7 +167,7 @@ $(HOSTEDOBJS) \
 
 LIBK_OBJS=$(FREEOBJS:.o=.libk.o)
 
-BINARIES=libc.a libk.a libc.so libssp.a libssp.so libssp_nonshared.a
+BINARIES=libc.a libk.a libc.so libm.a libm.so libssp.a libssp.so libssp_nonshared.a
 
 CRTS=\
 $(ARCH_CRTS) \
@@ -162,7 +180,7 @@ all: $(BINARIES) $(CRTS)
 libc.a: $(OBJS)
 	$(AR) rcs $@ $^
 
-libc.so: $(OBJS)
+libc.so: $(OBJS) libm.a
 	mkdir -p $(DESTDIR)$(LIBDIR)
 	$(AS) $(ARCHDIR)/crt0.S -o crt0.o
 	$(AS) $(ARCHDIR)/crti.S -o crti.o
@@ -173,9 +191,16 @@ libc.so: $(OBJS)
 	OBJ=`$(CC) $(CFLAGS) $(LDFLAGS) -print-file-name=crtbegin.o` && cp "$$OBJ" $(DESTDIR)$(LIBDIR)
 	OBJ=`$(CC) $(CFLAGS) $(LDFLAGS) -print-file-name=crtend.o` && cp "$$OBJ" $(DESTDIR)$(LIBDIR)
 	$(CC) -nodefaultlibs -o $@ $(CFLAGS) -shared $^ -lgcc
+	cd ..; ./libstdcxx.sh
 
 libk.a: $(LIBK_OBJS)
 	$(AR) rcs $@ $^
+
+libm.a: $(patsubst %, libm/%, $(LIBMOBJ))
+	$(AR) rcs $@ $^
+
+libm.so: $(patsubst %, libm/%, $(LIBMOBJ))
+	$(CC) -nodefaultlibs -o $@ $(CFLAGS) -shared $^
 
 libssp.a: libssp/ssp.o
 	$(AR) rcs $@ $^

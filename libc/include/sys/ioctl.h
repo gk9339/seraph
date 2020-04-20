@@ -1,6 +1,10 @@
 #ifndef _IOCTL_H
 #define _IOCTL_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <sys/termios.h>
 
 #define IOCTLDTYPE 0x4F00
@@ -21,5 +25,9 @@ struct winsize
 	unsigned short ws_xpixel;
 	unsigned short ws_ypixel;
 };
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

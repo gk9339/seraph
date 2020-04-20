@@ -3,6 +3,7 @@
 !/**/
 !*/make.config
 !*/*.c
+!*/*.cpp
 !*/*.h
 !/include/**
 !Makefile

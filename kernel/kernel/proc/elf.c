@@ -274,7 +274,7 @@ static int matches( unsigned char* a, unsigned char* b, unsigned int len )
     return 1;
 }
 
-int system( char* path, int argc, char** argv, char** envin )
+int sys_exec( char* path, int argc, char** argv, char** envin )
 {
     char** argv_ = malloc((argc+1) * sizeof(char*));
 

@@ -1,6 +1,10 @@
 #ifndef _ERRNO_H
 #define _ERRNO_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #define EPERM 1               /* Not super-user */
 #define ENOENT 2              /* No such file or directory */
 #define ESRCH 3               /* No such process */
@@ -129,6 +133,10 @@ extern int errno;
 
 #ifndef __is_libk
 #define __sets_errno(...) int ret = __VA_ARGS__; if( ret < 0 ){ errno = -ret; ret = -1; } return ret;
+#endif
+
+#ifdef __cplusplus
+}
 #endif
 
 #endif

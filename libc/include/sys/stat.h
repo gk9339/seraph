@@ -1,6 +1,10 @@
 #ifndef _STAT_H
 #define _STAT_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdint.h>
 
 #define S_IREAD     0000400    /* read permission, owner */
@@ -64,5 +68,9 @@ struct stat
 int stat( const char* file, struct stat* st );
 int lstat( const char* path, struct stat* st );
 int fstat( int file, struct stat* st );
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

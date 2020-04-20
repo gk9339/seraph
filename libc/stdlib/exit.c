@@ -2,10 +2,10 @@
 #include <unistd.h>
 
 extern void _exit( int );
-extern void _handle_atexit( void );
+extern void __cxa_finalize( void* );
 
 void exit( int val )
 {
-    _handle_atexit();
+    __cxa_finalize(NULL);
     _exit(val);
 }

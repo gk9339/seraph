@@ -1,6 +1,10 @@
 #ifndef _UTSNAME_H
 #define _USTNAME_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #define _UTSNAME_LENGTH 128
 
 struct utsname
@@ -14,5 +18,9 @@ struct utsname
 };
 
 int uname( struct utsname* __name );
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

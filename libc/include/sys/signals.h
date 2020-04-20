@@ -1,6 +1,10 @@
 #ifndef _SYS_SIGNALS_H
 #define _SYS_SIGNALS_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* Signal names (from the Unix specification on signals) */
 #define SIGHUP      1  /* Hangup */
 #define SIGINT      2  /* Interupt */
@@ -38,5 +42,9 @@
 #define NSIG NUMSIGNALS
 
 typedef void (*sighandler_t)(int);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

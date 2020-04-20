@@ -14,6 +14,7 @@ export PATH=${TOOLCHAIN}:$PATH
 export AR=${HOST}-ar
 export AS=${HOST}-as
 export CC=${HOST}-gcc
+export CXX=${HOST}-g++
 export NM=${HOST}-nm
 
 export PREFIX=/

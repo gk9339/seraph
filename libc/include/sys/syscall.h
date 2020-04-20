@@ -1,6 +1,10 @@
 #ifndef _SYSCALL_H
 #define _SYSCALL_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stddef.h>
 #include <stdint.h>
 #include <signal.h>
@@ -173,5 +177,9 @@ DECL_SYSCALL4(fswait3, int, int*, int, int*);
 DECL_SYSCALL1(debugvfstree, char**);
 DECL_SYSCALL1(debugproctree, char**);
 DECL_SYSCALL1(debugprint, char*);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

@@ -1,6 +1,10 @@
 #ifndef _PTHREAD_H
 #define _PTHREAD_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdint.h>
 
 typedef struct
@@ -36,5 +40,9 @@ int pthread_mutex_destroy( pthread_mutex_t* mutex );
 
 int pthread_attr_init( pthread_attr_t* attr );
 int pthread_attr_destroy( pthread_attr_t* attr );
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

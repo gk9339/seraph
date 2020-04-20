@@ -1,6 +1,10 @@
 #ifndef _FCNTL_H
 #define _FCNTL_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <sys/types.h>
 
 #define FD_CLOEXEC   0x0001
@@ -32,5 +36,9 @@
 
 int open (const char *, int, ...);
 int fcntl( int fd, int cmd, ... );
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

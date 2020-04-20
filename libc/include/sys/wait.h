@@ -1,6 +1,10 @@
 #ifndef _WAIT_H
 #define _WAIT_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #define WNOHANG   0x0001
 #define WUNTRACED 0x0002
 #define WSTOPPED  0x0004
@@ -15,5 +19,9 @@
 
 int waitpid( int, int*, int );
 int wait( int* );
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

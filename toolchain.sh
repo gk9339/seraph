@@ -7,6 +7,7 @@ unset HOST
 unset AR
 unset AS
 unset CC
+unset CXX
 unset NM
 unset PREFIX
 unset CFLAGS
@@ -62,7 +63,8 @@ pushd binutils-build
 popd
 
 pushd gcc-build
-    $DIR/toolchain/tarballs/gcc-8.3.0/configure --target=$TARGET --prefix=$PREFIX --with-sysroot=$SYSROOT --disable-nls --enable-languages=c,c++ || exit 1
+    $DIR/toolchain/tarballs/gcc-8.3.0/configure --target=$TARGET --prefix=$PREFIX --with-sysroot=$SYSROOT --disable-nls --disable-libstdcxx-pch --without-multilib --enable-shared=libgcc,libstdc++ --enable-languages=c,c++ || exit 1
+    #$DIR/toolchain/tarballs/gcc-8.3.0/configure --target=$TARGET --prefix=$PREFIX --with-sysroot=$SYSROOT --disable-nls --disable-libstdcxx-pch --without-multilib --enable-languages=c,c++ --without-headers --with-newlib || exit 1
     make all-gcc all-target-libgcc
     make install-gcc install-target-libgcc
 popd

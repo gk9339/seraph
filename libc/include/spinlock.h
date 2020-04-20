@@ -1,6 +1,10 @@
 #ifndef _SPINLOCK_H
 #define _SPINLOCK_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <sched.h>
 
 typedef volatile int spin_lock_t[2];
@@ -17,5 +21,9 @@ static void spin_unlock( int volatile* lock )
 {
     __sync_lock_release(lock);
 }
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

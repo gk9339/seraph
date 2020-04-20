@@ -12,16 +12,11 @@ DYNCFLAGS:=$(CFLAGS) -shared
 LDFLAGS:=$(LDFLAGS)
 LIBS:=$(LIBS)
 
-include libm/make.config
-
 OBJS=\
-$(patsubst %,libm/% , $(LIBMOBJ))\
 libkbd/libkbd.o \
 libansiterm/libansiterm.o \
 
 LIBS=\
-libm/libm.a \
-libm/libm.so \
 libkbd/libkbd.so \
 libansiterm/libansiterm.so \
 
@@ -32,12 +27,6 @@ all: $(OBJS) $(LIBS)
 
 .c.o:
 	$(CC) -MD -c $< -o $@ -std=gnu11 $(CFLAGS)
-
-libm/libm.a: $(patsubst %, libm/%, $(LIBMOBJ))
-	$(AR) rcs $@ $^
-
-libm/libm.so: $(patsubst %, libm/%, $(LIBMOBJ))
-	$(CC) $^ -o $@ $(DYNCFLAGS)
 
 libkbd/libkbd.so: libkbd/libkbd.o
 	$(CC) $^ -o $@ $(DYNCFLAGS)

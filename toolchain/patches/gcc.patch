@@ -139,4 +139,28 @@ index cb6e3af..e1f5689 100644
 +    ;;
    arm*-*-symbianelf*)
      # This is a freestanding configuration; there is nothing to do here.
+     ;;diff --git a/configure b/configure
+index 5535bfa..6cc3d02 100755
+--- a/libstdc++-v3/configure
++++ b/libstdc++-v3/configure
+@@ -78305,7 +78305,7 @@ done
+ 
      ;;
+   *)
+-    as_fn_error "No support for this host/target combination." "$LINENO" 5
++    #as_fn_error "No support for this host/target combination." "$LINENO" 5
+    ;;
+ esac
+
+index 3ff6b14..11ee3e5 100644
+--- a/libstdc++-v3/include/bits/hashtable_policy.h
++++ b/libstdc++-v3/include/bits/hashtable_policy.h
+@@ -512,7 +512,7 @@ namespace __detail
+ #if __SIZEOF_SIZE_T__ >= 8
+     std::uint_fast64_t __x = __n;
+ #else
+-    std::uint_fast32_t __x = __n;
++    uint_fast32_t __x = __n;
+ #endif
+     // Algorithm from Hacker's Delight, Figure 3-3.
+     __x = __x - 1;

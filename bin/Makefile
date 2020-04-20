@@ -35,14 +35,23 @@ clear/clear \
 $(patsubst %,test/% , $(TESTEXEC))\
 
 .PHONY: all clean install install-headers
-.SUFFIXES: .o .c
+.SUFFIXES: .o .c .cpp
 
 all: $(OBJS) $(EXECS)
 
 .c.o:
 	$(CC) -MD -c $< -o $@ -std=gnu11 $(CFLAGS)
 
+.cpp.o:
+	$(CXX) -MD -c $< -o $@ $(CFLAGS)
+
 init/init: init/init.o
+	$(CC) $^ -o $@ $(CFLAGS)$(LIBS)
+
+init/poweroff: init/poweroff.o
+	$(CC) $^ -o $@ $(CFLAGS)$(LIBS)
+
+init/reboot: init/reboot.o
 	$(CC) $^ -o $@ $(CFLAGS)$(LIBS)
 
 terminal/terminal: terminal/terminal.o

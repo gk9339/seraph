@@ -16,7 +16,7 @@ static inline void arch_atomic_store( volatile int* p, int x )
 {
     asm(
         "movl %1, %0":"=m"(*p):"r"(x):"memory"
-       );
+        );
 }
 
 // Atomic operation to increment *x
@@ -24,7 +24,7 @@ static inline void arch_atomic_inc( volatile int* x )
 {
     asm(
         "lock; incl %0":"=m"(*x):"m"(*x):"memory"
-       );
+        );
 }
 
 // Atomic operation to decrement *x
@@ -32,7 +32,7 @@ static inline void arch_atomic_dec( volatile int* x )
 {
     asm(
         "lock; decl %0":"=m"(*x):"m"(*x):"memory"
-       );
+        );
 }
 
 // Switch task while waiting for lock

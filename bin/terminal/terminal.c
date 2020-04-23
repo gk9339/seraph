@@ -210,7 +210,7 @@ int main( void )
         // Clear anything in kbd buffer
         struct stat st;
         fstat(kfd, &st);
-        for( size_t i = 0; i < st.st_size; i++ )
+        for( off_t i = 0; i < st.st_size; i++ )
         {
             char tmp[1];
             read(kfd, tmp, 1);

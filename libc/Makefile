@@ -67,7 +67,9 @@ HOSTEDOBJS=\
 $(ARCH_HOSTEDOBJS) \
 entry.o \
 exit.o \
+assert/assert.o \
 dirent/dirent.o \
+dirent/mkdir.o \
 unistd/close.o \
 unistd/lseek.o \
 unistd/open.o \
@@ -98,6 +100,15 @@ unistd/isatty.o \
 unistd/getwd.o \
 unistd/getcwd.o \
 unistd/readlink.o \
+unistd/access.o \
+unistd/alarm.o \
+unistd/unlink.o \
+unistd/link.o \
+unistd/chmod.o \
+unistd/umask.o \
+unistd/utime.o \
+unistd/chown.o \
+unistd/rmdir.o \
 ioctl/ioctl.o \
 stdio/fread.o \
 stdio/fseek.o \
@@ -121,10 +132,17 @@ stdio/fputc.o \
 stdio/setvbuf.o \
 stdio/scanf.o \
 stdio/sscanf.o \
+stdio/ferror.o \
 stdio/fscanf.o \
 stdio/vscanf.o \
 stdio/vsscanf.o \
 stdio/vfscanf.o \
+stdio/feof.o \
+stdio/fgets.o \
+stdio/freopen.o \
+stdio/remove.o \
+stdio/clearerr.o \
+stdio/rewind.o \
 stdlib/strtod.o \
 stdlib/exit.o \
 stdlib/atexit.o \
@@ -134,8 +152,15 @@ stdlib/setenv.o \
 stdlib/unsetenv.o \
 stdlib/qsort.o \
 stdlib/abs.o \
+stdlib/strtoul.o \
+stdlib/atof.o \
+stdlib/mbstowcs.o \
+stdlib/bsearch.o \
+stdlib/atol.o \
+stdlib/mktemp.o \
 string/strxfrm.o \
 string/strcoll.o \
+string/strncpy.o \
 sched/sched_yield.o \
 pty/pty.o \
 signal/signal.o \
@@ -154,9 +179,14 @@ libgen/dirname.o \
 wchar/wcwidth.o \
 time/gettimeofday.o \
 time/strftime.o \
+time/localtime.o \
+time/time.o \
+time/ctime.o \
 pthread/pthread.o \
 locale/setlocale.o \
+locale/localeconv.o \
 setjmp/setjmp.o \
+dlfcn/dlfcn.o \
 debug/debugvfstree.o \
 debug/debugproctree.o \
 debug/debugprint.o \
@@ -191,7 +221,7 @@ libc.so: $(OBJS) libm.a
 	OBJ=`$(CC) $(CFLAGS) $(LDFLAGS) -print-file-name=crtbegin.o` && cp "$$OBJ" $(DESTDIR)$(LIBDIR)
 	OBJ=`$(CC) $(CFLAGS) $(LDFLAGS) -print-file-name=crtend.o` && cp "$$OBJ" $(DESTDIR)$(LIBDIR)
 	$(CC) -nodefaultlibs -o $@ $(CFLAGS) -shared $^ -lgcc
-	cd ..; ./libstdcxx.sh
+	#cd ..; ./libstdcxx.sh
 
 libk.a: $(LIBK_OBJS)
 	$(AR) rcs $@ $^
@@ -199,13 +229,13 @@ libk.a: $(LIBK_OBJS)
 libm.a: $(patsubst %, libm/%, $(LIBMOBJ))
 	$(AR) rcs $@ $^
 
-libm.so: $(patsubst %, libm/%, $(LIBMOBJ))
+libm.so: $(patsubst %, libm/%, $(LIBMOBJ)) | libc.so
 	$(CC) -nodefaultlibs -o $@ $(CFLAGS) -shared $^
 
 libssp.a: libssp/ssp.o
 	$(AR) rcs $@ $^
 
-libssp.so: libssp/ssp.o
+libssp.so: libssp/ssp.o | libc.so
 	$(CC) -nodefaultlibs -o $@ $(CFLAGS) -shared $^
 
 libssp_nonshared.a: libssp/ssp_local.o libssp/ssp.o

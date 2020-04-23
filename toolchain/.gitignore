@@ -1,9 +1,15 @@
 bin
 binutils-build
+binutils-port
 gcc-build
+gcc-build-2
+gcc-port
+gmp-build
 i686-seraph
 include
 lib
 libexec
+mpc-build
+mpfr-build
 share
 tarballs

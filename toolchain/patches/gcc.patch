@@ -3,7 +3,7 @@ new file mode 100644
 index 0000000..578bfba
 --- /dev/null
 +++ b/gcc/config/seraph.h
-@@ -0,0 +1,38 @@
+@@ -0,0 +1,39 @@
 +/* Changing from default /usr/lib/ */
 +#undef STANDARD_STARTFILE_PREFIX
 +#define STANDARD_STARTFILE_PREFIX "/lib/"
@@ -41,6 +41,7 @@ index 0000000..578bfba
 +    builtin_define ("__unix__");      \
 +    builtin_assert ("system=seraph");   \
 +    builtin_assert ("system=unix");   \
++    builtin_assert ("system=posix"); \
 +  } while(0);
 diff --git a/config.sub b/config.sub
 index f2632cd..ca6e387 100755
@@ -71,7 +72,7 @@ diff --git a/gcc/config.gcc b/gcc/config.gcc
 index 7af8e02..1990a9f 100644
 --- a/gcc/config.gcc
 +++ b/gcc/config.gcc
-@@ -646,6 +646,13 @@ x86_cpus="generic intel"
+@@ -646,6 +646,15 @@ x86_cpus="generic intel"
  
  # Common parts for widely ported systems.
  case ${target} in
@@ -81,6 +82,8 @@ index 7af8e02..1990a9f 100644
 +  default_use_cxa_atexit=yes
 +  use_gcc_stdint=wrap
 +  native_system_header_dir=/include
++  tmake_file="${tmake_file} t-slibgcc"
++  #thread_file='posix'
 +  ;;
  *-*-darwin*)
    tmake_file="t-darwin ${cpu_type}/t-darwin"
@@ -105,7 +108,7 @@ index 11b4aca..8279114 100644
  case ${host} in
 +i[3-7]86-*-seraph*)
 +	extra_parts="$extra_parts crtbegin.o crtend.o"
-+    tmake_file="$tmake_file i386/t-crtstuff t-crtstuff-pic t-libgcc-pic"
++    tmake_file="$tmake_file i386/t-crtstuff t-crtstuff-pic t-slibgcc t-slibgcc-gld t-slibgcc-elf-ver t-libgcc-pic"
 +    ;;
  aarch64*-*-elf | aarch64*-*-rtems*)
  	extra_parts="$extra_parts crtbegin.o crtend.o crti.o crtn.o"
@@ -164,3 +167,34 @@ index 3ff6b14..11ee3e5 100644
  #endif
      // Algorithm from Hacker's Delight, Figure 3-3.
      __x = __x - 1;
+diff --git a/libtool.m4 b/libtool.m4
+index 896676288..ace9a37a1 100644
+--- a/libtool.m4
++++ b/libtool.m4
+@@ -2494,6 +2494,15 @@ linux* | k*bsd*-gnu | kopensolaris*-gnu)
+   dynamic_linker='GNU/Linux ld.so'
+   ;;
+ 
++seraph*)
++  need_lib_prefix=no
++  #need_version=no
++  library_names_spec='$libname$shared_ext'
++  soname_spec='$libname$shared_ext'
++  shlibpath_var=LD_LIBRARY_PATH
++  hardcode_into_libs=yes
++  ;;
++
+ netbsd*)
+   version_type=sunos
+   need_lib_prefix=no
+@@ -3093,6 +3103,10 @@ linux* | k*bsd*-gnu | kopensolaris*-gnu)
+   lt_cv_deplibs_check_method=pass_all
+   ;;
+ 
++seraph*)
++  lt_cv_deplibs_check_method=pass_all
++  ;;
++
+ netbsd*)
+   if echo __ELF__ | $CC -E - | $GREP __ELF__ > /dev/null; then
+     lt_cv_dediff --git a/aclocal.m4 b/aclocal.m4

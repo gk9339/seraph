@@ -19,6 +19,8 @@ typedef long ssize_t;
 extern char** environ;
 extern int _environ_size;
 
+extern void _exit( int status );
+
 pid_t fork( void );
 
 void* sbrk( intptr_t );
@@ -41,6 +43,7 @@ int execvp( const char*, char* const argv[] );
 ssize_t write( int fd, const void* buf, size_t count );
 ssize_t read( int fd, void* buf, size_t count );
 ssize_t readlink( const char* path, char* buf, size_t bufsize );
+int unlink( const char* path );
 
 off_t lseek( int fd, off_t offset, int whence );
 
@@ -65,9 +68,24 @@ int gethostname( char* name, size_t len );
 
 int isatty( int fd );
 
+struct utimbuf
+{
+    time_t actime;
+    time_t modtime;
+};
+int utime( const char* filename, const struct utimbuf* times );
+int chown( const char* pathname, uid_t owner, gid_t group );
+int rmdir( const char* path );
+
 extern char* optarg;
 extern int optind, opterr, optopt;
 int getopt( int argc, char* const argv[], const char* optstring );
+
+int getpagesize( void );
+
+int access( const char* pathname, int mode );
+
+unsigned int alarm( unsigned int sec );
 
 #ifdef __cplusplus
 }

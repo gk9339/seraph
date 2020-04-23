@@ -42,9 +42,9 @@ void* memchr( const void*, int, size_t );
 char* strerror( int );
 char* strsignal( int );
 
+char* strncpy( char* dest, const char* src, size_t n );
 // STUB
 int strcoll( const char* s1, const char* s2 );
-char* strncpy( char* dest, const char* src, size_t n );
 size_t strxfrm( char* dest, const char* src, size_t n );
 char* strrchr( const char* s, int c );
 

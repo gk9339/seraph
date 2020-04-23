@@ -1,0 +1,11 @@
+#ifndef _SYS_PARAM_H
+#define _SYS_PARAM_H
+
+#define BYTE_ORDER __BYTE_ORDER__
+#define LITTLE_ENDIAN __ORDER_LITTLE_ENDIAN__
+#define BIG_ENDIAN __ORDER_BIG_ENDIAN__
+#define PDP_ENDIAN __ORDER_PDP_ENDIAN__
+
+#define MAXPATHLEN 4096
+
+#endif

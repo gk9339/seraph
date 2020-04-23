@@ -6,6 +6,8 @@ extern "C" {
 #endif
 
 #include <stdint.h>
+#include <sys/types.h>
+#include <time.h>
 
 #define S_IREAD     0000400    /* read permission, owner */
 #define S_IRUSR     S_IREAD
@@ -36,31 +38,43 @@ extern "C" {
 #define     _IFSOCK 0140000 /* socket */
 #define     _IFIFO  0010000 /* fifo */
 
-#define	S_ISBLK(m)	(((m)&_IFMT) == _IFBLK)
-#define	S_ISCHR(m)	(((m)&_IFMT) == _IFCHR)
-#define	S_ISDIR(m)	(((m)&_IFMT) == _IFDIR)
-#define	S_ISFIFO(m)	(((m)&_IFMT) == _IFIFO)
-#define	S_ISREG(m)	(((m)&_IFMT) == _IFREG)
-#define	S_ISLNK(m)	(((m)&_IFMT) == _IFLNK)
-#define	S_ISSOCK(m)	(((m)&_IFMT) == _IFSOCK)
+#define S_IFMT  _IFMT
+#define S_IFDIR  _IFDIR
+#define S_IFCHR  _IFCHR
+#define S_IFBLK  _IFBLK
+#define S_IFREG  _IFREG
+#define S_IFLNK  _IFLNK
+#define S_IFSOCK _IFSOCK
+#define S_IFIFO  _IFIFO
+
+#define S_ISBLK(m) (((m)&_IFMT) == _IFBLK)
+#define S_ISCHR(m) (((m)&_IFMT) == _IFCHR)
+#define S_ISDIR(m) (((m)&_IFMT) == _IFDIR)
+#define S_ISFIFO(m) (((m)&_IFMT) == _IFIFO)
+#define S_ISREG(m) (((m)&_IFMT) == _IFREG)
+#define S_ISLNK(m) (((m)&_IFMT) == _IFLNK)
+#define S_ISSOCK(m) (((m)&_IFMT) == _IFSOCK)
 
 struct stat
 {
-    uint32_t st_dev; /* Device ID of device containing file */
-    uint32_t st_ino; /* File serial number */
-    uint32_t st_mode; /* Mode of file */
-    uint32_t st_nlink; /* Number of hard links to file */
-    uint32_t st_uid; /* User ID of file */
-    uint32_t st_gid; /* Group ID of file */
-    uint32_t st_rdev; /* Device ID (if file is character of block special) */
-    uint32_t st_size; /* For regular files, size in bytes, symlink, length in bytes of the pathname in the link,
+    dev_t st_dev; /* Device ID of device containing file */
+    ino_t st_ino; /* File serial number */
+    mode_t st_mode; /* Mode of file */
+    nlink_t st_nlink; /* Number of hard links to file */
+    uid_t st_uid; /* User ID of file */
+    gid_t st_gid; /* Group ID of file */
+    dev_t st_rdev; /* Device ID (if file is character of block special) */
+    off_t st_size; /* For regular files, size in bytes, symlink, length in bytes of the pathname in the link,
                          shmem object, length in bytes, typed memory object, length in bytes */
-    uint32_t st_atime; /* Time of last access */
+    struct timespec st_atim; /* Time of last access */
     uint32_t __unused1;
-    uint32_t st_mtime; /* Time of last modification */
+    struct timespec st_mtim; /* Time of last modification */
     uint32_t __unused2;
-    uint32_t st_ctime; /* Time of last status change */
+    struct timespec st_ctim; /* Time of last status change */
     uint32_t __unused3;
+#define st_atime st_atim.tv_sec
+#define st_mtime st_mtim.tv_sec
+#define st_ctime st_ctim.tv_sec
     uint32_t st_blksize; /* Filesystem specific perferred I/O block size of the object */
     uint32_t st_blocks; /* Number of blocks allocated to this object */
 };
@@ -68,6 +82,9 @@ struct stat
 int stat( const char* file, struct stat* st );
 int lstat( const char* path, struct stat* st );
 int fstat( int file, struct stat* st );
+
+int mkdir( const char* pathname, mode_t mode );
+mode_t umask( mode_t mask );
 
 #ifdef __cplusplus
 }

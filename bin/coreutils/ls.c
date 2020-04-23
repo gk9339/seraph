@@ -449,7 +449,7 @@ void print_entry_long( struct ls_entry* entry, int size_width )
     perm[8] = (mode & S_IWOTH) ? 'w' : '-';
     perm[9] = (mode & S_IXOTH) ? 'x' : '-';
 
-    printf("%s %ld %ld %*zdB ", perm, entry->st.st_uid, entry->st.st_gid, size_width, entry->st.st_size);
+    printf("%s %d %d %*zdB ", perm, entry->st.st_uid, entry->st.st_gid, size_width, entry->st.st_size);
     printname_color(entry);
     printf("\n");
 }

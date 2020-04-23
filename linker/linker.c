@@ -150,8 +150,7 @@ int main( int argc, char** argv )
     struct stat buf;
     if( stat(file, &buf) )
     {
-        //TODO stderr
-        printf("%s: target binary '%s' not available\n", argv[0], file);
+        fprintf(stderr, "%s: target binary '%s' not available\n", argv[0], file);
     }
 
     if( buf.st_mode & S_ISUID )
@@ -164,7 +163,7 @@ int main( int argc, char** argv )
 
     if( !main_obj )
     {
-        //TODO stderr
+        fprintf(stderr, "%s: failed to open object %s\n", argv[0], file);
         return 1;
     }
 
@@ -193,17 +192,12 @@ int main( int argc, char** argv )
         }
 
         char* lib_name = item->value;
-        if( !strcmp(lib_name, "libg.so") )
-        {
-            free(item);
-            continue;
-        }
 
         elf_t* lib = open_object(lib_name);
         if( !lib )
         {
-            //TODO stderr
-            printf("Failed to load dependency '%s'\n", lib_name);
+            fprintf(stderr, "Failed to load dependency '%s'\n", lib_name);
+            return 1;
         }
 
         hashtable_set(libs, lib_name, lib);
@@ -463,7 +457,7 @@ static uintptr_t object_load( elf_t* object, uintptr_t base )
         switch( phdr.p_type )
         {
             case PT_LOAD: ;//(a label can only be part of a statement and a declaration is not a statement)
-                mmap(base + phdr.p_vaddr, phdr.p_memsz);
+                lnk_mmap(base + phdr.p_vaddr, phdr.p_memsz);
 
                 fseek(object->file, phdr.p_offset, SEEK_SET);
                 fread((void*)(base + phdr.p_vaddr), phdr.p_filesz, 1, object->file);

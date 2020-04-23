@@ -65,7 +65,7 @@ static int sys_open( const char* file, int flags, uint16_t mode )
         return -EEXIST;
     }
 
-    if( !(flags & FS_O_WRONLY) || (flags & FS_O_RDWR) )
+    if( node && (!(flags & FS_O_WRONLY) || (flags & FS_O_RDWR)) )
     {
         if( node && !has_permission(node, S_IROTH) )
         {
@@ -74,7 +74,7 @@ static int sys_open( const char* file, int flags, uint16_t mode )
         }
     }
 
-    if( (flags & FS_O_RDWR) || (flags & FS_O_WRONLY) )
+    if( node && ((flags & FS_O_RDWR) || (flags & FS_O_WRONLY)) )
     {
         if( node && !has_permission(node, S_IWOTH) )
         {
@@ -88,7 +88,7 @@ static int sys_open( const char* file, int flags, uint16_t mode )
         }
     }
 
-    if( !node && (flags & FS_O_CREAT) )
+    if( !node && (flags & O_CREAT) )
     {
         int result = create_file_fs((char*)file, mode);
         if( !result )
@@ -100,7 +100,7 @@ static int sys_open( const char* file, int flags, uint16_t mode )
         }
     }
 
-    if( node && (flags & FS_O_DIRECTORY) )
+    if( node && (flags & O_DIRECTORY) )
     {
         if( !(node->type & FS_DIRECTORY) )
         {
@@ -108,9 +108,9 @@ static int sys_open( const char* file, int flags, uint16_t mode )
         }
     }
 
-    if( node && (flags & FS_O_TRUNC) )
+    if( node && (flags & O_TRUNC) )
     {
-        if( !((flags & O_ACCMODE) == O_WRONLY || (flags & O_ACCMODE) == O_RDWR) ) 
+        if( !(flags & O_WRONLY || flags & O_RDWR) ) 
         {
             close_fs(node);
             return -EINVAL;
@@ -123,7 +123,7 @@ static int sys_open( const char* file, int flags, uint16_t mode )
         return -ENOENT;
     }
 
-    if( node && (flags & FS_O_CREAT) && (node->type & FS_DIRECTORY) )
+    if( node && (flags & O_CREAT) && (node->type & FS_DIRECTORY) )
     {
         close_fs(node);
         return -EISDIR;
@@ -170,7 +170,7 @@ static int sys_write( int fd, char* ptr, int len )
     {
         PTR_VALIDATE(ptr);
         fs_node_t* node = FD_ENTRY(fd);
-        if( (FD_FLAG(fd) & O_ACCMODE) == O_WRONLY || (FD_FLAG(fd) & O_ACCMODE) == O_RDWR ) //fd write flag
+        if( FD_FLAG(fd) &  O_WRONLY || FD_FLAG(fd) &  O_RDWR ) //fd write flag
         {
             uint32_t out = write_fs(node, (uint32_t)FD_OFFSET(fd), len, (uint8_t*)ptr);
             FD_OFFSET(fd) += out;
@@ -372,6 +372,11 @@ static int sys_gethostname( char* buffer, size_t len )
 
     memcpy(buffer, hostname, len);
     return hostname_len;
+}
+
+static int sys_mkdir( char* path, uint16_t mode )
+{
+    return mkdir_fs(path, mode);
 }
 
 static int sys_kill( pid_t pid, uint32_t sig )
@@ -730,6 +735,19 @@ static int sys_ioctl( int fd, int request, void* argp )
     return -EBADF;
 }
 
+static int sys_access( const char* file, int flags )
+{
+    PTR_VALIDATE(file);
+    
+    fs_node_t* node = kopen((char*)file, 0);
+
+    if( !node ) return -ENOENT;
+
+    close_fs(node);
+
+    return 0;
+}
+
 static int sys_yield( void )
 {
     switch_task(1);
@@ -835,6 +853,44 @@ static int sys_waitpid( int pid, int* status, int options )
     return waitpid(pid, status, options);
 }
 
+static int sys_umask( int mode )
+{
+    current_process->mask = mode & 0777;
+
+    return 0;
+}
+
+static int sys_chmod( char* file, int mode )
+{
+    int result;
+    PTR_VALIDATE(file);
+
+    fs_node_t* fn = kopen(file, 0);
+
+    if( fn )
+    {
+        if( current_process->user != 0 && current_process->user != fn->uid )
+        {
+            close_fs(fn);
+            return -EACCES;
+        }
+        result = chmod_fs(fn, mode);
+        close_fs(fn);
+
+        return result;
+    }else
+    {
+        return -ENOENT;
+    }
+}
+
+static int sys_unlink( char* file )
+{
+    PTR_VALIDATE(file);
+
+    return unlink_fs(file);
+}
+
 static int sys_pipe( int fd[2] )
 {
     if( fd && !PTR_INRANGE(fd) )
@@ -855,6 +911,30 @@ static int sys_pipe( int fd[2] )
     FD_FLAG(fd[1]) = FS_O_RDWR;
 
     return 0;
+}
+
+static int sys_chown( char* file, int uid, int gid )
+{
+    int result;
+    PTR_VALIDATE(file);
+
+    fs_node_t* fn = kopen(file, 0);
+
+    if( fn )
+    {
+        if( current_process->user != 0 || current_process->user != fn->uid )
+        {
+            close_fs(fn);
+            return -EACCES;
+        }
+        result = chown_fs(fn, uid, gid);
+        close_fs(fn);
+
+        return result;
+    }else
+    {
+        return -ENOENT;
+    }
 }
 
 static int sys_setsid( void )
@@ -1055,6 +1135,7 @@ static int (*syscalls[])() =
     [SYS_UNAME] = sys_uname,
     [SYS_SETHOSTNAME] = sys_sethostname,
     [SYS_GETHOSTNAME] = sys_gethostname,
+    [SYS_MKDIR] = sys_mkdir,
     [SYS_KILL] = sys_kill,
     [SYS_SIGNAL] = sys_signal,
     [SYS_GETTID] = sys_gettid,
@@ -1075,12 +1156,17 @@ static int (*syscalls[])() =
     [SYS_SLEEPABS] = sys_sleepabs,
     [SYS_SLEEP] = sys_sleep,
     [SYS_IOCTL] = sys_ioctl,
+    [SYS_ACCESS] = sys_access,
     [SYS_YIELD] = sys_yield,
     [SYS_FSWAIT] = sys_fswait,
     [SYS_FSWAIT2] = sys_fswait2,
     [SYS_FSWAIT3] = sys_fswait3,
     [SYS_WAITPID] = sys_waitpid,
+    [SYS_UMASK] = sys_umask,
+    [SYS_CHMOD] = sys_chmod,
+    [SYS_UNLINK] = sys_unlink,
     [SYS_PIPE] = sys_pipe,
+    [SYS_CHOWN] = sys_chown,
     [SYS_SETSID] = sys_setsid,
     [SYS_SETPGID] = sys_setpgid,
     [SYS_GETPGID] = sys_getpgid,

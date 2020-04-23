@@ -100,3 +100,53 @@ int pthread_join( pthread_t thread, void** retval )
 
     return result;
 }
+
+int pthread_mutexattr_init( pthread_mutexattr_t* attr )
+{
+    return 0;
+}
+
+int pthread_mutexattr_destroy( pthread_mutexattr_t* attr )
+{
+    return 0;
+}
+
+int pthread_mutexattr_settype( pthread_mutex_t* attr, int type )
+{
+    return 0;
+}
+
+int pthread_once( pthread_once_t* once_control, void (*init_routine)(void) )
+{
+    return 0;
+}
+
+int pthread_cond_wait( pthread_cond_t* cond, pthread_mutex_t* mutex )
+{
+    return 0;
+}
+
+int pthread_cond_broadcast( pthread_cond_t* cond )
+{
+    return 0;
+}
+
+int pthread_key_create( pthread_key_t* key, void (*destructor)(void*) )
+{
+    return 0;
+}
+
+int pthread_key_delete( pthread_key_t key )
+{
+    return 0;
+}
+
+void* pthread_getspecific( pthread_key_t key )
+{
+    return 0;
+}
+
+int pthread_setspecific( pthread_key_t key, const void* value )
+{
+    return 0;
+}

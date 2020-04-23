@@ -27,6 +27,7 @@
 #include <kernel/kconfig.h>
 #include <kernel/acpi.h>
 #include <kernel/random.h>
+#include <kernel/tmpfs.h>
 #include <sys/types.h>
 #include <kernel/lfb.h>
 
@@ -234,6 +235,7 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
     if( CHECK_FLAG(debug, 0) ) debug_log("Initialize fs types\n");
     if( CHECK_FLAG(debug, 1) ) printf("Initialize fs types\n");
     ustar_initialize();
+    tmpfs_initialize();
 
     // Load modules from bootloader
     if( CHECK_FLAG(mbi->flags, 5) ) // mods
@@ -287,6 +289,10 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
     if( CHECK_FLAG(debug, 0) ) debug_log("Setup /proc");
     if( CHECK_FLAG(debug, 1) ) printf("Setup /proc\n\n");
     procfs_initialize();
+
+    if( CHECK_FLAG(debug, 0) ) debug_log("Setup /tmp");
+    if( CHECK_FLAG(debug, 1) ) printf("Setup /tmp\n\n");
+    vfs_mount_type("tmpfs", "tmp", "/tmp");
 
     // Set up environment for /bin/init
     char* boot_exec = "/bin/init";

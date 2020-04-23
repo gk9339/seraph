@@ -64,10 +64,17 @@ void srand( unsigned int );
 double strtod( const char* nptr, char** endptr );
 float strtof( const char* nptr, char** endptr );
 long int strtol( const char* s, char** endptr, int base );
+long long int strtoll( const char* nptr, char** endptr, int base );
 unsigned long int strtoul( const char* nptr, char** endptr, int base );
+unsigned long long int strtoull( const char* nptr, char** endptr, int base );
 
 int system( const char* command );
 
+size_t mbstowcs( wchar_t* dest, const char* src, size_t n );
+size_t wcstombs( char* dest, const wchar_t* src, size_t n );
+
+char* mktemp( char* );
+int mkstemp( char* );
 
 #ifdef __cplusplus
 }

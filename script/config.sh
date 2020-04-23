@@ -26,8 +26,4 @@ export INCLUDEDIR=$PREFIX/include
 export CFLAGS='-pipe -g -mmmx -msse -msse2 -msse3 -fstack-protector-strong'
 export CPPFLAGS=''
 
-# Work around that the -elf gcc targets doesn't have a system include directory
-# because it was configured with --without-headers rather than --with-sysroot.
-if echo "$HOST" | grep -Eq -- '-elf($|-)'; then
-  export CC="$CC -isystem=$INCLUDEDIR"
-fi
+export NUMCPU=$(grep -c '^processor' /proc/cpuinfo)

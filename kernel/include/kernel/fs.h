@@ -89,7 +89,7 @@ typedef struct fs_node
 
     struct fs_node *ptr; // Alias pointer, for symlinks
     int32_t refcount;
-    uint32_t nlink;
+    nlink_t nlink;
 
     selectcheck_type_t selectcheck;
     selectwait_type_t selectwait;

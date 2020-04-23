@@ -7,7 +7,6 @@ extern void _fini( void );
 
 char** __get_argv( void );
 void _pre_main( int (*main)(int, char**, char**), int argc, char* argv[], char* env[] );
-extern void _exit( int val );
 
 char** environ = NULL;
 int _environ_size = 0;

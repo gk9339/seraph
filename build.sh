@@ -9,5 +9,5 @@ else
 fi
 
 for PROJECT in $PROJECTS; do
-  (cd $PROJECT && DESTDIR="$SYSROOT" $MAKE install)
+  (cd $PROJECT && DESTDIR="$SYSROOT" $MAKE -j$NUMCPU install)
 done

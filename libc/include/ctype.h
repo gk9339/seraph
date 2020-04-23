@@ -30,7 +30,7 @@ int isascii( int );
 int tolower( int );
 int toupper( int );
 
-extern unsigned char _ctype_[256];
+extern char _ctype_[256];
 
 #ifdef __cplusplus
 }

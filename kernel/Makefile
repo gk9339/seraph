@@ -35,6 +35,7 @@ kernel/dev/timer.o \
 kernel/drivers/ext2.o \
 kernel/drivers/keyboard.o \
 kernel/drivers/ramdisk.o \
+kernel/drivers/tmpfs.o \
 kernel/drivers/serial.o \
 kernel/drivers/ustar.o \
 kernel/drivers/vga.o \

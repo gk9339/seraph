@@ -65,6 +65,8 @@ typedef unsigned short uint_fast16_t;
 typedef unsigned long uint_fast32_t;
 typedef unsigned long uint_fast64_t;
 
+typedef unsigned int wint_t;
+
 #ifdef __cplusplus
 }
 #endif

@@ -36,6 +36,7 @@ extern "C" {
 
 int open (const char *, int, ...);
 int fcntl( int fd, int cmd, ... );
+int chmod( const char* path, mode_t mode );
 
 #ifdef __cplusplus
 }

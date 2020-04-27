@@ -5,54 +5,67 @@
 #include <stdbool.h>
 #include <ctype.h>
 
-static char* __int_str(intmax_t i, char b[], int base, bool plus_sign, bool space_no_sign, int padding_no, bool justify, bool zero_pad)
+static char* __vfprintf(intmax_t i, char b[], int base, bool plus_sign, bool space_no_sign, int padding_no, bool justify, bool zero_pad)
 {
     char digit[32] = {0};
     memset(digit, 0, 32);
     strcpy(digit, "0123456789");
 
-    if (base == 16) {
+    if( base == 16 )
+    {
         strcat(digit, "ABCDEF");
-    } else if (base == 17) {
+    }else if( base == 17 )
+    {
         strcat(digit, "abcdef");
         base = 16;
     }
 
     char* p = b;
-    if (i < 0) {
+    if( i < 0 )
+    {
         *p++ = '-';
         i *= -1;
-    } else if (plus_sign) {
+    }else if( plus_sign )
+    {
         *p++ = '+';
-    } else if (!plus_sign && space_no_sign) {
+    }else if( !plus_sign && space_no_sign )
+    {
         *p++ = ' ';
     }
 
     intmax_t shifter = i;
-    do {
+    do{
         ++p;
         shifter = shifter / base;
-    } while (shifter);
+    }while( shifter );
 
     *p = '\0';
-    do {
+    do{
         *--p = digit[i % base];
         i = i / base;
-    } while (i);
+    }while( i );
 
     int padding = padding_no - (int)strlen(b);
-    if (padding < 0) padding = 0;
+    if( padding < 0 )
+    {
+        padding = 0;
+    }
 
-    if (justify) {
-        while (padding--) {
-            if (zero_pad) {
+    if( justify )
+    {
+        while( padding-- )
+        {
+            if( zero_pad )
+            {
                 b[strlen(b)] = '0';
-            } else {
+            }else
+            {
                 b[strlen(b)] = ' ';
             }
         }
 
-    } else {
+    }else
+    {
         char a[256] = {0};
         while (padding--) {
             if (zero_pad) {
@@ -78,8 +91,8 @@ int vfprintf( FILE* f, const char* fmt, va_list args )
         char specifier = '\0';
         char length = '\0';
 
-        int length_spec = 0;
-        int prec_spec = 0;
+        int width = 0;
+        int precision = 0;
         bool left_justify = false;
         bool zero_pad = false;
         bool space_no_sign = false;
@@ -130,14 +143,14 @@ int vfprintf( FILE* f, const char* fmt, va_list args )
 
             while( isdigit(fmt[i]) )
             {
-                length_spec *= 10;
-                length_spec += fmt[i] - 48;
+                width *= 10;
+                width += fmt[i] - 48; // char to int
                 i++;
             }
 
             if( fmt[i] == '*' )
             {
-                length_spec = va_arg(args, int);
+                width = va_arg(args, int);
                 i++;
             }
 
@@ -146,19 +159,19 @@ int vfprintf( FILE* f, const char* fmt, va_list args )
                 i++;
                 while( isdigit(fmt[i]) )
                 {
-                    prec_spec *= 10;
-                    prec_spec += fmt[i] - 48;
+                    precision *= 10;
+                    precision += fmt[i] - 48; // char to int
                     i++;
                 }
 
                 if( fmt[i] == '*' )
                 {
-                    prec_spec = va_arg(args, int);
+                    precision = va_arg(args, int);
                     i++;
                 }
             }else
             {
-                prec_spec = 6;
+                precision = 6;
             }
 
             if( fmt[i] == 'h' || fmt[i] == 'l' || fmt[i] == 'j' ||
@@ -212,42 +225,42 @@ int vfprintf( FILE* f, const char* fmt, va_list args )
                     {
                         case 0: ;
                             unsigned int uint = va_arg(args, unsigned int);
-                            __int_str(uint, buffer, base, plus_sign, space_no_sign, length_spec, left_justify, zero_pad);
+                            __vfprintf(uint, buffer, base, plus_sign, space_no_sign, width, left_justify, zero_pad);
                             chars += fwrite(buffer, sizeof(char), strlen(buffer), f);
                             break;
                         case 'H': ;
                             unsigned char uchar = (unsigned char)va_arg(args, int);
-                            __int_str(uchar, buffer, base, plus_sign, space_no_sign, length_spec, left_justify, zero_pad);
+                            __vfprintf(uchar, buffer, base, plus_sign, space_no_sign, width, left_justify, zero_pad);
                             chars += fwrite(buffer, sizeof(char), strlen(buffer), f);
                             break;
                         case 'h': ;
                             unsigned short ushort = (unsigned short)va_arg(args, int);
-                            __int_str(ushort, buffer, base, plus_sign, space_no_sign, length_spec, left_justify, zero_pad);
+                            __vfprintf(ushort, buffer, base, plus_sign, space_no_sign, width, left_justify, zero_pad);
                             chars += fwrite(buffer, sizeof(char), strlen(buffer), f);
                             break;
                         case 'l': ;
                             unsigned long ulong = va_arg(args, unsigned long);
-                            __int_str(ulong, buffer, base, plus_sign, space_no_sign, length_spec, left_justify, zero_pad);
+                            __vfprintf(ulong, buffer, base, plus_sign, space_no_sign, width, left_justify, zero_pad);
                             chars += fwrite(buffer, sizeof(char), strlen(buffer), f);
                             break;
                         case 'q': ;
                             unsigned long long ulonglong = va_arg(args, unsigned long long);
-                            __int_str(ulonglong, buffer, base, plus_sign, space_no_sign, length_spec, left_justify, zero_pad);
+                            __vfprintf(ulonglong, buffer, base, plus_sign, space_no_sign, width, left_justify, zero_pad);
                             chars += fwrite(buffer, sizeof(char), strlen(buffer), f);
                             break;
                         case 'j': ;
                             uintmax_t uintmax = va_arg(args, uintmax_t);
-                            __int_str(uintmax, buffer, base, plus_sign, space_no_sign, length_spec, left_justify, zero_pad);
+                            __vfprintf(uintmax, buffer, base, plus_sign, space_no_sign, width, left_justify, zero_pad);
                             chars += fwrite(buffer, sizeof(char), strlen(buffer), f);
                             break;
                         case 'z': ;
                             size_t sizet = va_arg(args, size_t);
-                            __int_str(sizet, buffer, base, plus_sign, space_no_sign, length_spec, left_justify, zero_pad);
+                            __vfprintf(sizet, buffer, base, plus_sign, space_no_sign, width, left_justify, zero_pad);
                             chars += fwrite(buffer, sizeof(char), strlen(buffer), f);
                             break;
                         case 't': ;
                             ptrdiff_t ptrdiff = va_arg(args, ptrdiff_t);
-                            __int_str(ptrdiff, buffer, base, plus_sign, space_no_sign, length_spec, left_justify, zero_pad);
+                            __vfprintf(ptrdiff, buffer, base, plus_sign, space_no_sign, width, left_justify, zero_pad);
                             chars += fwrite(buffer, sizeof(char), strlen(buffer), f);
                             break;
                         default:
@@ -260,42 +273,42 @@ int vfprintf( FILE* f, const char* fmt, va_list args )
                     {
                         case 0: ;
                             int sint = va_arg(args, int);
-                            __int_str(sint, buffer, base, plus_sign, space_no_sign, length_spec, left_justify, zero_pad);
+                            __vfprintf(sint, buffer, base, plus_sign, space_no_sign, width, left_justify, zero_pad);
                             chars += fwrite(buffer, sizeof(char), strlen(buffer), f);
                             break;
                         case 'H': ;
                             signed char schar = (signed char)va_arg(args, int);
-                            __int_str(schar, buffer, base, plus_sign, space_no_sign, length_spec, left_justify, zero_pad);
+                            __vfprintf(schar, buffer, base, plus_sign, space_no_sign, width, left_justify, zero_pad);
                             chars += fwrite(buffer, sizeof(char), strlen(buffer), f);
                             break;
                         case 'h': ;
                             short int sshort = (short int)va_arg(args, int);
-                            __int_str(sshort, buffer, base, plus_sign, space_no_sign, length_spec, left_justify, zero_pad);
+                            __vfprintf(sshort, buffer, base, plus_sign, space_no_sign, width, left_justify, zero_pad);
                             chars += fwrite(buffer, sizeof(char), strlen(buffer), f);
                             break;
                         case 'l': ;
                             long slong = va_arg(args, long);
-                            __int_str(slong, buffer, base, plus_sign, space_no_sign, length_spec, left_justify, zero_pad);
+                            __vfprintf(slong, buffer, base, plus_sign, space_no_sign, width, left_justify, zero_pad);
                             chars += fwrite(buffer, sizeof(char), strlen(buffer), f);
                             break;
                         case 'q': ;
                             long long slonglong = va_arg(args, long long);
-                            __int_str(slonglong, buffer, base, plus_sign, space_no_sign, length_spec, left_justify, zero_pad);
+                            __vfprintf(slonglong, buffer, base, plus_sign, space_no_sign, width, left_justify, zero_pad);
                             chars += fwrite(buffer, sizeof(char), strlen(buffer), f);
                             break;
                         case 'j': ;
                             intmax_t intmax = va_arg(args, intmax_t);
-                            __int_str(intmax, buffer, base, plus_sign, space_no_sign, length_spec, left_justify, zero_pad);
+                            __vfprintf(intmax, buffer, base, plus_sign, space_no_sign, width, left_justify, zero_pad);
                             chars += fwrite(buffer, sizeof(char), strlen(buffer), f);
                             break;
                         case 'z': ;
                             size_t sizet = va_arg(args, size_t);
-                            __int_str(sizet, buffer, base, plus_sign, space_no_sign, length_spec, left_justify, zero_pad);
+                            __vfprintf(sizet, buffer, base, plus_sign, space_no_sign, width, left_justify, zero_pad);
                             chars += fwrite(buffer, sizeof(char), strlen(buffer), f);
                             break;
                         case 't': ;
                             ptrdiff_t ptrdiff = va_arg(args, ptrdiff_t);
-                            __int_str(ptrdiff, buffer, base, plus_sign, space_no_sign, length_spec, left_justify, zero_pad);
+                            __vfprintf(ptrdiff, buffer, base, plus_sign, space_no_sign, width, left_justify, zero_pad);
                             chars += fwrite(buffer, sizeof(char), strlen(buffer), f);
                             break;
                         default:
@@ -367,7 +380,7 @@ int vfprintf( FILE* f, const char* fmt, va_list args )
                         expo++;
                     }
 
-                    int form = length_spec - prec_spec - expo - (prec_spec || alt_form ? 1 : 0);
+                    int form = width - precision - expo - (precision || alt_form ? 1 : 0);
                     if( emode )
                     {
                         form -= 4;
@@ -377,23 +390,34 @@ int vfprintf( FILE* f, const char* fmt, va_list args )
                         form = 0;
                     }
 
-                    __int_str((intmax_t)floating, buffer, base, plus_sign, space_no_sign, form, left_justify, zero_pad);
+                    __vfprintf((intmax_t)floating, buffer, base, plus_sign, space_no_sign, form, left_justify, zero_pad);
 
                     chars += fwrite(buffer, sizeof(char), strlen(buffer), f);
 
                     floating -= (int)floating;
 
-                    for( int j = 0; j < prec_spec; j++ )
+                    for( int j = 0; j < precision; j++ )
                     {
                         floating *= 10;
                     }
                     intmax_t dec_places = (intmax_t)(floating + 0.5);
 
-                    if( prec_spec )
+                    if( precision )
                     {
                         chars += putc('.', f);
-                        __int_str(dec_places, buffer, 10, false, false, 0, false, false);
-                        buffer[prec_spec] = 0;
+                        __vfprintf(dec_places, buffer, 10, false, false, 0, false, false);
+
+                        if( specifier == 'g' || specifier == 'G' )
+                        {
+                            for( int j = precision; j > 0; j-- )
+                            {
+                                if( buffer[j] == '0' )
+                                {
+                                    buffer[j] = '\0';
+                                }
+                            }
+                        }
+                        buffer[precision] = '\0';
                         chars += fwrite(buffer, sizeof(char), strlen(buffer), f);
                     }else if( alt_form )
                     {
@@ -419,7 +443,7 @@ int vfprintf( FILE* f, const char* fmt, va_list args )
 
             if( specifier == 'e' || specifier == 'E' )
             {
-                __int_str(expo, buffer, 10, false, false, 2, false, true);
+                __vfprintf(expo, buffer, 10, false, false, 2, false, true);
                 chars += fwrite(buffer, sizeof(char), strlen(buffer), f);
             }
         }else

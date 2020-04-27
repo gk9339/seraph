@@ -109,6 +109,7 @@ unistd/umask.o \
 unistd/utime.o \
 unistd/chown.o \
 unistd/rmdir.o \
+unistd/symlink.o \
 ioctl/ioctl.o \
 stdio/fread.o \
 stdio/fseek.o \
@@ -174,6 +175,7 @@ sys/fstat.o \
 sys/mmap.o \
 sys/uname.o \
 sys/reboot.o \
+sys/mount.o \
 libgen/basename.o \
 libgen/dirname.o \
 wchar/wcwidth.o \

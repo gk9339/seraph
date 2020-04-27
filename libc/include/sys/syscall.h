@@ -172,6 +172,8 @@ DECL_SYSCALL3(fswait2, int, int*, int);
 DECL_SYSCALL3(waitpid, int, int*, int);
 DECL_SYSCALL1(unlink, char*);
 DECL_SYSCALL1(pipe, int*);
+DECL_SYSCALL3(mount, char*, char*, char*);
+DECL_SYSCALL2(symlink, char*, char*);
 DECL_SYSCALL3(chown, char*, int, int);
 DECL_SYSCALL0(setsid);
 DECL_SYSCALL2(setpgid, int, int);

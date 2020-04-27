@@ -64,7 +64,7 @@ static long secs_of_month( int months, int year )
     return days * SEC_DAY;
 }
 
-struct tm* localtime_r( const time_t* timep, struct tm* _timevalue )
+struct tm* localtime_r( const time_t* timep, struct tm* result )
 {
 
     long seconds = 0; // this needs to be bigger, but whatever
@@ -78,33 +78,33 @@ struct tm* localtime_r( const time_t* timep, struct tm* _timevalue )
 
         if( seconds + secs > *timep )
         {
-            _timevalue->tm_year = year - 1900;
+            result->tm_year = year - 1900;
             year_sec = seconds;
             for( int month = 1; month <= 12; ++month )
             {
                 secs = days_in_month(month, year) * SEC_DAY;
                 if( seconds + secs > *timep )
                 {
-                    _timevalue->tm_mon = month - 1;
+                    result->tm_mon = month - 1;
                     for( int day = 1; day <= days_in_month(month, year); ++day )
                     {
                         secs = 60 * 60 * 24;
                         if( seconds + secs > *timep )
                         {
-                            _timevalue->tm_mday = day;
+                            result->tm_mday = day;
                             for( int hour = 1; hour <= 24; ++hour )
                             {
                                 secs = 60 * 60;
                                 if( seconds + secs > *timep )
                                 {
                                     long remaining = *timep - seconds;
-                                    _timevalue->tm_hour = hour - 1;
-                                    _timevalue->tm_min = remaining / 60;
-                                    _timevalue->tm_sec = remaining % 60; // can be 60 on a leap second, ignore that
-                                    _timevalue->tm_wday = day_of_week(*timep); // oh shit
-                                    _timevalue->tm_yday = (*timep - year_sec) / SEC_DAY;
-                                    _timevalue->tm_isdst = 0; // never because UTC
-                                    return _timevalue;
+                                    result->tm_hour = hour - 1;
+                                    result->tm_min = remaining / 60;
+                                    result->tm_sec = remaining % 60; // can be 60 on a leap second, ignore that
+                                    result->tm_wday = day_of_week(*timep); // oh shit
+                                    result->tm_yday = (*timep - year_sec) / SEC_DAY;
+                                    result->tm_isdst = 0; // never because UTC
+                                    return result;
                                 }else
                                 {
                                     seconds += secs;
@@ -129,7 +129,7 @@ struct tm* localtime_r( const time_t* timep, struct tm* _timevalue )
         }
     }
 
-    return (void *)0; /// uh what
+    return (void *)0;
 }
 
 static unsigned int secs_of_years( int years )

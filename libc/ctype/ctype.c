@@ -1,5 +1,8 @@
 #include <ctype.h>
 
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Woverflow"
 char _ctype_[256] =
 {
     _C, _C, _C, _C, _C, _C, _C, _C,
@@ -19,6 +22,7 @@ char _ctype_[256] =
     _L, _L, _L, _L, _L, _L, _L, _L,
     _L, _L, _L, _P, _P, _P, _P, _C
 };
+#pragma GCC diagnostic pop
 
 int isalnum( int c )
 {

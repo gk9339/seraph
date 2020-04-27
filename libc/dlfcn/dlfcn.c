@@ -3,17 +3,17 @@
 
 static char* error = "dlopen functions not available";
 
-void* __attribute__((weak)) dlopen( const char* filename, int flags )
+void* __attribute__((weak)) dlopen( const char* filename __attribute__((unused)) , int flags __attribute__((unused)) )
 {
 	return NULL;
 }
 
-int __attribute__((weak)) dlclose( void* handle )
+int __attribute__((weak)) dlclose( void* handle __attribute__((unused)) )
 {
 	return -1;
 }
 
-void* dlsym( void* handle, const char* symbol )
+void* dlsym( void* handle __attribute__((unused)), const char* symbol __attribute__((unused)) )
 {
 	return NULL;
 }

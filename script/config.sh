@@ -24,6 +24,7 @@ export LIBDIR=$EXEC_PREFIX/lib
 export INCLUDEDIR=$PREFIX/include
 
 export CFLAGS='-pipe -g -mmmx -msse -msse2 -msse3 -fstack-protector-strong'
+export CXXFLAGS='-pipe -g -mmmx -msse -msse2 -msse3 -fstack-protector-strong'
 export CPPFLAGS=''
 
 export NUMCPU=$(grep -c '^processor' /proc/cpuinfo)

@@ -16,8 +16,8 @@ TARGET=i686-seraph
 DIR=$(pwd)
 PREFIX=$DIR/toolchain
 
-export CFLAGS=-O2
-export CXXFLAGS=-O2
+export CFLAGS='-O2'
+export CXXFLAGS='-O2'
 
 mkdir -p "$PREFIX"
 cd "$PREFIX"
@@ -72,7 +72,7 @@ pushd binutils-build
 popd
 
 pushd gcc-build
-    $DIR/toolchain/tarballs/gcc-8.3.0/configure --target=$TARGET --prefix=$PREFIX --with-sysroot=$SYSROOT --disable-nls --disable-libstdcxx-pch --disable-multilib --disable-shared --disable-hosted-libstdcxx --enable-languages=c,c++ || exit 1
+    $DIR/toolchain/tarballs/gcc-8.3.0/configure --target=$TARGET --prefix=$PREFIX --with-sysroot=$SYSROOT --disable-nls --disable-libstdcxx-pch --disable-multilib --enable-initfini-array --disable-shared --enable-languages=c,c++ || exit 1
     make -j$NUMCPU inhibit_libc=true all-gcc
     make install-gcc
     make -j$NUMCPU inhibit_libc=true all-target-libgcc
@@ -82,7 +82,7 @@ popd
 cd "$DIR"
 
 . ./script/config.sh
-cd libc && DESTDIR="$SYSROOT" $MAKE install
+cd libc && DESTDIR="$SYSROOT" $MAKE -j$NUMCPU install
 
 cd "$DIR"
 
@@ -107,7 +107,7 @@ cd "$PREFIX"
 
 mkdir -p gcc-build-2
 pushd gcc-build-2
-    $DIR/toolchain/tarballs/gcc-8.3.0/configure --target=$TARGET --prefix=$PREFIX --with-sysroot=$SYSROOT --disable-nls --disable-libstdcxx-pch --disable-multilib --enable-languages=c,c++ || exit 1
+    $DIR/toolchain/tarballs/gcc-8.3.0/configure --target=$TARGET --prefix=$PREFIX --with-sysroot=$SYSROOT --disable-nls --disable-libstdcxx-pch --disable-multilib --enable-initfini-array --enable-languages=c,c++ || exit 1
     make -j$NUMCPU all-gcc
     make install-gcc
     make -j$NUMCPU all-target-libgcc

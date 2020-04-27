@@ -8,7 +8,7 @@ char* fgets( char* s, int size, FILE* stream )
 
 	while( (c = fgetc(stream)) > 0 )
     {
-		*s++ = c;
+		*s++ = (char)c;
 		size--;
 		if( size == 0 )
         {

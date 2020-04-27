@@ -1,5 +1,8 @@
 #include <math.h>
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-parameter"
+
 double sinh( double x )
 {
     return 0;
@@ -84,3 +87,5 @@ double sqrt( double x )
 {
     return 0;
 }
+
+#pragma GCC diagnostic pop

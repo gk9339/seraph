@@ -65,6 +65,16 @@ typedef unsigned short uint_fast16_t;
 typedef unsigned long uint_fast32_t;
 typedef unsigned long uint_fast64_t;
 
+typedef signed char int_least8_t;
+typedef signed short int_least16_t;
+typedef signed long int_least32_t;
+typedef signed long int_least64_t;
+
+typedef unsigned char uint_least8_t;
+typedef unsigned short uint_least16_t;
+typedef unsigned long uint_least32_t;
+typedef unsigned long uint_least64_t;
+
 typedef unsigned int wint_t;
 
 #ifdef __cplusplus

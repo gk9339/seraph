@@ -31,7 +31,9 @@ time_t time( time_t* out );
 char* asctime( const struct tm* tm );
 char* ctime( const time_t* timep );
 struct tm* gmtime( const time_t* timep );
+struct tm* gmtime_r( const time_t* timep, struct tm* result );
 struct tm* localtime( const time_t* timep );
+struct tm* localtime_r( const time_t* timep, struct tm* result );
 size_t strftime( char* s, size_t max, const char* fmt, const struct tm* tm );
 
 #ifdef __cplusplus

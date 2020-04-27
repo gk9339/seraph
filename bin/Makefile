@@ -43,7 +43,7 @@ all: $(OBJS) $(EXECS)
 	$(CC) -MD -c $< -o $@ -std=gnu11 $(CFLAGS)
 
 .cpp.o:
-	$(CXX) -MD -c $< -o $@ $(CFLAGS)
+	$(CXX) -MD -c $< -o $@ $(CXXFLAGS)
 
 init/init: init/init.o
 	$(CC) $^ -o $@ $(CFLAGS)$(LIBS)

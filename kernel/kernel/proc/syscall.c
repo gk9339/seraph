@@ -739,7 +739,7 @@ static int sys_access( const char* file, int flags )
 {
     PTR_VALIDATE(file);
     
-    fs_node_t* node = kopen((char*)file, 0);
+    fs_node_t* node = kopen((char*)file, flags);
 
     if( !node ) return -ENOENT;
 
@@ -911,6 +911,33 @@ static int sys_pipe( int fd[2] )
     FD_FLAG(fd[1]) = FS_O_RDWR;
 
     return 0;
+}
+
+static int sys_mount( char* arg, char* mountpoint, char* type )
+{
+    PTR_VALIDATE(arg);
+    PTR_VALIDATE(mountpoint);
+    PTR_VALIDATE(type);
+
+    if( current_process->user != USER_ROOT_UID )
+    {
+        return -EPERM;
+    }
+
+    if( PTR_INRANGE(arg) && PTR_INRANGE(mountpoint) && PTR_INRANGE(type) )
+    {
+        return vfs_mount_type(type, arg, mountpoint);
+    }
+
+    return -EFAULT;
+}
+
+static int sys_symlink( char* target, char* name )
+{
+    PTR_VALIDATE(target);
+    PTR_VALIDATE(name);
+
+    return symlink_fs(target, name);
 }
 
 static int sys_chown( char* file, int uid, int gid )
@@ -1166,6 +1193,8 @@ static int (*syscalls[])() =
     [SYS_CHMOD] = sys_chmod,
     [SYS_UNLINK] = sys_unlink,
     [SYS_PIPE] = sys_pipe,
+    [SYS_MOUNT] = sys_mount,
+    [SYS_SYMLINK] = sys_symlink,
     [SYS_CHOWN] = sys_chown,
     [SYS_SETSID] = sys_setsid,
     [SYS_SETPGID] = sys_setpgid,

@@ -121,7 +121,7 @@ static int readlink_tmpfs( fs_node_t* node, char* buf, size_t size )
     }
 }
 
-static struct tmpfs_dir* tmpfs_dir_new( char* name, struct tmpfs_dir* parent )
+static struct tmpfs_dir* tmpfs_dir_new( char* name, struct tmpfs_dir* parent __attribute__((unused)) )
 {
     spin_lock(tmpfs_lock);
 
@@ -188,7 +188,7 @@ static char* tmpfs_file_getset_block( struct tmpfs_file* t, size_t blockid, int 
     page_t* page = get_page((uintptr_t)buf_space,0,current_directory);
     page->rw = 1;
     page->user = 0;
-    page->frame = (uintptr_t)t->blocks[blockid];
+    page->frame = (uintptr_t)t->blocks[blockid] & 0xfffff;
     page->present = 1;
     invalidate_tables_at((uintptr_t)buf_space);
 
@@ -336,7 +336,7 @@ static void truncate_tmpfs( fs_node_t* node )
     t->mtime = node->atime;
 }
 
-static void open_tmpfs( fs_node_t* node, unsigned int flags )
+static void open_tmpfs( fs_node_t* node, unsigned int flags __attribute__((unused)) )
 {
     struct tmpfs_file * t = (struct tmpfs_file *)(node->device);
 
@@ -598,7 +598,7 @@ fs_node_t* tmpfs_create( char* name )
     return tmpfs_from_dir(tmpfs_root);
 }
 
-static fs_node_t* tmpfs_mount( char* device, char* mount_path )
+static fs_node_t* tmpfs_mount( char* device, char* mount_path __attribute__((unused)) )
 {
     char* arg = strdup(device);
     char* argv[10];

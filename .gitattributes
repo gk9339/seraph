@@ -1,10 +1,2 @@
 # Auto detect text files and perform LF normalization
 * text=auto
-
-*.h linguist-language=C
-*.c linguist-language=C
-*.S linguist-language=Assembly
-Makefile linguist-language=Makefile
-make.config linguist-language=Makefile
-*.sh linguist-language=Shell
-*.py linguist-language=Python

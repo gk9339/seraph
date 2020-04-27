@@ -5,8 +5,6 @@
 #include <stdlib.h>
 #include "file.h"
 
-#define MIN(a, b) ((a) < (b) ? (a) : (b))
-
 int vsnprintf( char* str, size_t size, const char* fmt, va_list args )
 {
     int retval;

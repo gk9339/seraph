@@ -2,26 +2,38 @@ name: build
 
 on:
   push:
-    branches: [ master ]
-  pull_request:
-    branches: [ master ]
+    paths: 
+      - bin/**
+      - kernel/**
+      - lib/**
+      - libc/**
+      - linker/**
+      - script/**
+      - headers.sh
+      - build.sh
+      - mkiso.sh
 
 jobs:
   seraph:
     runs-on: ubuntu-latest
     steps:
-    
     - uses: actions/checkout@v2
+      
     - name: apt-update
       run: sudo apt-get update
+      
     - name: apt-install
       run: sudo apt-get -y install bison flex libgmp3-dev libmpc-dev libmpfr-dev grub2 mtools
+      
     - name: build toolchain
       run: ./toolchain.sh
+      
     - name: build seraph
       run: ./buils.sh
+      
     - name: create iso
       run: ./mkiso.sh
+      
     - name: Upload seraph.iso
       uses: actions/upload-artifact@v1
       with:

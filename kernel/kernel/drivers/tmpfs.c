@@ -605,6 +605,7 @@ static fs_node_t* tmpfs_mount( char* device, char* mount_path __attribute__((unu
     int argc = tokenize(arg, ",", argv);
 
     fs_node_t* fs = tmpfs_create(argv[0]);
+    strcpy(device, argv[0]);
 
     if( argc > 1 )
     {

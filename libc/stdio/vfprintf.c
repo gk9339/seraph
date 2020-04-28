@@ -144,7 +144,7 @@ int vfprintf( FILE* f, const char* fmt, va_list args )
             while( isdigit(fmt[i]) )
             {
                 width *= 10;
-                width += fmt[i] - 48; // char to int
+                width += fmt[i] - '0'; // char to int
                 i++;
             }
 
@@ -160,7 +160,7 @@ int vfprintf( FILE* f, const char* fmt, va_list args )
                 while( isdigit(fmt[i]) )
                 {
                     precision *= 10;
-                    precision += fmt[i] - 48; // char to int
+                    precision += fmt[i] - '0'; // char to int
                     i++;
                 }
 
@@ -174,8 +174,7 @@ int vfprintf( FILE* f, const char* fmt, va_list args )
                 precision = 6;
             }
 
-            if( fmt[i] == 'h' || fmt[i] == 'l' || fmt[i] == 'j' ||
-                fmt[i] == 'z' || fmt[i] == 't' || fmt[i] == 'L' )
+            if( fmt[i] == 'h' || fmt[i] == 'l' || fmt[i] == 'j' || fmt[i] == 'z' || fmt[i] == 't' || fmt[i] == 'L' )
             {
                 length = fmt[i];
                 i++;
@@ -205,7 +204,7 @@ int vfprintf( FILE* f, const char* fmt, va_list args )
             {
                 base = 16;
                 length = 'z';
-                specifier = 'u';
+                specifier = 'x';
             }
             switch( specifier )
             {

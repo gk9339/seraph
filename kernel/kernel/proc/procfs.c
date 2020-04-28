@@ -398,7 +398,7 @@ static void mount_recurse( char* buf, tree_node_t* node, size_t height )
     // Print the process name
     if( fnode->file )
     {
-        c += sprintf(c, "%s → %s 0x%x (%s, %s)", fnode->name, fnode->device, fnode->file, fnode->fs_type, fnode->file->name);
+        c += sprintf(c, "%s → %s %#p (%s, %s)", fnode->name, fnode->device, fnode->file, fnode->fs_type, fnode->file->name);
     }else
     {
         c += sprintf(c, "%s → (empty)", fnode->name);
@@ -671,12 +671,12 @@ static fs_node_t* finddir_procfs_root( fs_node_t* node __attribute__((unused)), 
     return NULL;
 }
 
-static fs_node_t* procfs_create( void )
+static fs_node_t* procfs_create( char* device, char* mount_point __attribute__((unused)) )
 {
     fs_node_t* fnode = malloc(sizeof(fs_node_t));
     memset(fnode, 0x00, sizeof(fs_node_t));
     fnode->inode = 0;
-    strcpy(fnode->name, "proc");
+    strcpy(fnode->name, device);
     fnode->mask = 0555;
     fnode->uid  = 0;
     fnode->gid  = 0;
@@ -696,7 +696,7 @@ static fs_node_t* procfs_create( void )
 
 int procfs_initialize( void )
 {
-    vfs_mount("/proc", procfs_create());
+    vfs_register("procfs", procfs_create);
 
     return 0;
 }

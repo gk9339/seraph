@@ -26,7 +26,7 @@
 #define RESYNC_TIME 1
 
 // Debug
-#define EARLY_KERNEL_DEBUG 0 // Log to serial during early boot
+#define EARLY_KERNEL_DEBUG 1 // Log to serial during early boot
 
 // Process
 #define MAX_PID 32768 // Makes a 4096-byte bitmap

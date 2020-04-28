@@ -73,7 +73,8 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
     // Multiboot boot device
     if (CHECK_FLAG (mbi->flags, 1))
     {
-        debug_logf(debug_str, "boot_device = 0x%x\n", (unsigned) mbi->boot_device);
+        debug_logf(debug_str, "boot_device = %#p\n", (unsigned) mbi->boot_device);
+        printf("boot_device = %#p\n", (unsigned) mbi->boot_device);
     }
 #endif
 
@@ -82,10 +83,12 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
     if( CHECK_FLAG(mbi->flags, 5) ) /* mods */
     {
 #if EARLY_KERNEL_DEBUG
-        debug_logf(debug_str, "There %s %d module%s starting at 0x%x", mbi->mods_count == 1 ? "is" : "are", mbi->mods_count, mbi->mods_count == 1 ? "" : "s", mbi->mods_addr);
-        printf("There %s %d module%s starting at 0x%x\n", mbi->mods_count == 1 ? "is" : "are", mbi->mods_count, mbi->mods_count == 1 ? "" : "s", mbi->mods_addr);
-        debug_logf(debug_str, "Current kernel heap start point would be 0x%x", &_kernel_end);
-        printf("Current kernel heap start point would be 0x%x\n", &_kernel_end);
+        debug_logf(debug_str, "Parsing multiboot modules");
+        printf("Parsing multiboot modules\n");
+        debug_logf(debug_str, "There %s %d module%s starting at %#p", mbi->mods_count == 1 ? "is" : "are", mbi->mods_count, mbi->mods_count == 1 ? "" : "s", mbi->mods_addr);
+        printf("There %s %d module%s starting at %#p\n", mbi->mods_count == 1 ? "is" : "are", mbi->mods_count, mbi->mods_count == 1 ? "" : "s", mbi->mods_addr);
+        debug_logf(debug_str, "Current kernel heap start point would be %#p", &_kernel_end);
+        printf("Current kernel heap start point would be %#p\n", &_kernel_end);
 #endif
         if( mbi->mods_count > 0 )
         {
@@ -103,13 +106,13 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
                 {
                     last_mod = (uintptr_t)mod + sizeof(multiboot_module_t);
 #if EARLY_KERNEL_DEBUG
-                    debug_logf(debug_str, "moving forward to 0x%x", last_mod);
-                    printf(debug_str, "moving forward to 0x%x\n", last_mod);
+                    debug_logf(debug_str, "moving forward to %#p", last_mod);
+                    printf(debug_str, "moving forward to %#p\n", last_mod);
 #endif
                 }
 #if EARLY_KERNEL_DEBUG
-                debug_logf(debug_str, "Module %d is at 0x%x:0x%x", i, module_start, module_end);
-                printf("Module %d is at 0x%x:0x%x\n", i, module_start, module_end);
+                debug_logf(debug_str, "Module %d is at %#p:%#p", i, module_start, module_end);
+                printf("Module %d is at %#p:%#p\n", i, module_start, module_end);
 #endif
                 if( last_mod < module_end )
                 {
@@ -117,8 +120,8 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
                 }
             }
 #if EARLY_KERNEL_DEBUG
-            debug_logf(debug_str, "Moving kernel heap start to 0x%x", last_mod);
-            printf("Moving kernel heap start to 0x%x\n", last_mod);
+            debug_logf(debug_str, "Moving kernel heap start to %#p", last_mod);
+            printf("Moving kernel heap start to %#p\n", last_mod);
 #endif
         }
     }
@@ -139,8 +142,8 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
     if( CHECK_FLAG(mbi->flags, 6) ) // mmap
     {
 #if EARLY_KERNEL_DEBUG
-        debug_log("\nParsing memory map.");
-        printf("\nParsing memory map.\n");
+        debug_log("\nParsing memory map");
+        printf("Parsing memory map\n");
 #endif
         multiboot_memory_map_t* mmap = (void*)mbi->mmap_addr;
 #if EARLY_KERNEL_DEBUG
@@ -155,24 +158,22 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
                 for( unsigned long int i = 0; i < mmap->len; i+= 0x1000 )
                 {
                     if( mmap->addr + i > 0xFFFFFFFF ) break;
-#if EARLY_KERNEL_DEBUG
-                    debug_logf(debug_str, "\033[F(%d)", ++memory_mark_counter);
-                    printf("\r(%d)", ++memory_mark_counter);
-#endif
+                    memory_mark_counter++;
                     paging_mark_system((mmap->addr + i) & 0xFFFFF000);
                 }
             }
             mmap = (multiboot_memory_map_t*)((uintptr_t)mmap + mmap->size + sizeof(uintptr_t));
         }
+#if EARLY_KERNEL_DEBUG
+                    debug_logf(debug_str, "\033[F(%d)", memory_mark_counter);
+                    printf("\r(%d) marked pages", memory_mark_counter);
+#endif
     }
 #if EARLY_KERNEL_DEBUG
-    debug_log("Finalize paging / heap install\n");
-    printf("\nFinalize paging / heap install\n\n");
+    debug_log("Finalize paging\n");
+    printf("\nFinalize paging\n");
 #endif
     paging_finalize();
-#if EARLY_KERNEL_DEBUG
-    debug = 0; // Enabled manually by EARLY_KERNEL_DEBUG earlier
-#endif
 
     // Parse cmdline
     if( CHECK_FLAG(mbi->flags, 2) ) // cmdline
@@ -186,6 +187,14 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
 
     heap_install();
     lfb_initialize();
+#if EARLY_KERNEL_DEBUG
+    debug_log("Heap install\n");
+    printf("Heap install\n");
+#endif
+
+#if EARLY_KERNEL_DEBUG
+    debug = 0; // Enabled manually by EARLY_KERNEL_DEBUG earlier
+#endif
     
     // Parse args
     args_parse(kcmdline);
@@ -235,13 +244,14 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
     if( CHECK_FLAG(debug, 0) ) debug_log("Initialize fs types\n");
     if( CHECK_FLAG(debug, 1) ) printf("Initialize fs types\n");
     ustar_initialize();
+    procfs_initialize();
     tmpfs_initialize();
 
     // Load modules from bootloader
     if( CHECK_FLAG(mbi->flags, 5) ) // mods
     {
-        if( CHECK_FLAG(debug, 0) ) debug_logf(debug_str, "%d modules to load", mboot_mods_count);
-        if( CHECK_FLAG(debug, 1) ) printf("%d modules to load\n", mboot_mods_count);
+        if( CHECK_FLAG(debug, 0) ) debug_logf(debug_str, "Loading multiboot modules - %d modules to load", mboot_mods_count);
+        if( CHECK_FLAG(debug, 1) ) printf("Loading multiboot modules - %d modules to load\n", mboot_mods_count);
         for( unsigned int i = 0; i < mbi->mods_count; ++i )
         {
             multiboot_module_t* mod = &mboot_mods[i];
@@ -249,15 +259,15 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
             uint32_t module_end = mod->mod_end;
             size_t   module_size = module_end - module_start;
 
-            if( CHECK_FLAG(debug, 0) ) debug_logf(debug_str, "Loading ramdisk: 0x%x:0x%x", module_start, module_end);
-            if( CHECK_FLAG(debug, 1) ) printf("Loading ramdisk: 0x%x:0x%x\n", module_start, module_end);
+            if( CHECK_FLAG(debug, 0) ) debug_logf(debug_str, "Loading ramdisk: %#p:%#p", module_start, module_end);
+            if( CHECK_FLAG(debug, 1) ) printf("Loading ramdisk: %#p:%#p\n", module_start, module_end);
             ramdisk_mount(module_start, module_size);
         }
     }
     
     // Root mount
     if( CHECK_FLAG(debug, 0) ) debug_log("\nSetup root mount");
-    if( CHECK_FLAG(debug, 1) ) printf("\nSetup root mount\n");
+    if( CHECK_FLAG(debug, 1) ) printf("Setup root mount\n");
     if( args_present("root") )
     {
         char* root_type = "ext2";
@@ -279,7 +289,7 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
     
     // Virtual dev filesystem
     if( CHECK_FLAG(debug, 0) ) debug_log("Setup /dev");
-    if( CHECK_FLAG(debug, 1) ) printf("Setup /dev\n\n");
+    if( CHECK_FLAG(debug, 1) ) printf("Setup /dev\n");
     map_vfs_directory("/dev");
     lfb_initialize_device();
     zero_initialize();
@@ -287,11 +297,11 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
     random_initialize();
 
     if( CHECK_FLAG(debug, 0) ) debug_log("Setup /proc");
-    if( CHECK_FLAG(debug, 1) ) printf("Setup /proc\n\n");
-    procfs_initialize();
+    if( CHECK_FLAG(debug, 1) ) printf("Setup /proc\n");
+    vfs_mount_type("procfs", "proc", "/proc");
 
     if( CHECK_FLAG(debug, 0) ) debug_log("Setup /tmp");
-    if( CHECK_FLAG(debug, 1) ) printf("Setup /tmp\n\n");
+    if( CHECK_FLAG(debug, 1) ) printf("Setup /tmp\n");
     vfs_mount_type("tmpfs", "tmp", "/tmp");
 
     // Set up environment for /bin/init

@@ -15,8 +15,13 @@ jobs:
     - name: apt-update
       run: sudo apt-get update
     - name: apt-install
-      run: sudo apt-get -y install automake-1.15 libtool build-essential wget bison flex libgmp3-dev libmpc-dev libmpfr-dev grub2 xorriso python3 qemu-system-x86
+      run: sudo apt-get -y install bison flex libgmp3-dev libmpc-dev libmpfr-dev grub2 mtools
     - name: build
       run: ./build.sh
     - name: iso
       run: ./mkiso.sh
+    - name: Upload seraph.iso
+      uses: actions/upload-artifact@v1
+      with:
+        name: seraph.iso
+        path: seraph.iso

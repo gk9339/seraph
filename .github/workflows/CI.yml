@@ -13,7 +13,7 @@ jobs:
     
     - uses: actions/checkout@v2
     - name: apt
-      run: sudo apt-get -y automake-1.15 libtool build-essential wget bison flex libgmp3-dev libmpc-dev libmpfr-dev grub2 xorriso python3 qemu-system-x86
+      run: sudo apt-get -y install automake-1.15 libtool build-essential wget bison flex libgmp3-dev libmpc-dev libmpfr-dev grub2 xorriso python3 qemu-system-x86
     - name: build
       run: ./build.sh
     - name: iso

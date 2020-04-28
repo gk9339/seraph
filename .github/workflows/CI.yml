@@ -7,12 +7,14 @@ on:
     branches: [ master ]
 
 jobs:
-  build:
+  seraph:
     runs-on: ubuntu-latest
     steps:
     
     - uses: actions/checkout@v2
-    - name: apt
+    - name: apt-update
+      run: sudo apt-get update
+    - name: apt-install
       run: sudo apt-get -y install automake-1.15 libtool build-essential wget bison flex libgmp3-dev libmpc-dev libmpfr-dev grub2 xorriso python3 qemu-system-x86
     - name: build
       run: ./build.sh

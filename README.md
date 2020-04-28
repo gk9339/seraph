@@ -1,6 +1,7 @@
 # seraph
+![build](https://github.com/gk9339/seraph/workflows/build/badge.svg)
 
-![Screenshot from 2020-04-09 17-18-11](https://user-images.githubusercontent.com/5243610/78879842-0ddd4500-7a87-11ea-8dbb-ace2b1790205.png)
+![Screenshot from 2020-04-19 15-27-29](https://user-images.githubusercontent.com/5243610/79682192-d9ba0f00-8252-11ea-8ba1-a384f5b35ae8.png)
 
 ### Build requirements (Archlinux)
 `automake-1.15`
@@ -30,6 +31,7 @@
 `xorriso`
 `python3`
 `qemu-system-x86`
+`mtools`
 
 ### Build
 `./build.sh` - Build all parts of the project (Including toolchain)

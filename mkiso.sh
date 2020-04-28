@@ -30,7 +30,7 @@ set default=0
 
 menuentry "seraph" {
     multiboot /boot/seraph.kernel serialdebug root=/dev/ram0 root_type=ustar splash
-    set gfxpayload=1920x1080x32
+    #set gfxpayload=1920x1080x32
     module /boot/seraph.initrd
 }
 EOF

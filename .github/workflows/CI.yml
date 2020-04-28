@@ -1,4 +1,4 @@
-name: C/C++ CI
+name: build
 
 on:
   push:
@@ -16,9 +16,11 @@ jobs:
       run: sudo apt-get update
     - name: apt-install
       run: sudo apt-get -y install bison flex libgmp3-dev libmpc-dev libmpfr-dev grub2 mtools
-    - name: build
-      run: ./build.sh
-    - name: iso
+    - name: build toolchain
+      run: ./toolchain.sh
+    - name: build seraph
+      run: ./buils.sh
+    - name: create iso
       run: ./mkiso.sh
     - name: Upload seraph.iso
       uses: actions/upload-artifact@v1

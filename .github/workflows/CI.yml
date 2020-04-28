@@ -29,7 +29,7 @@ jobs:
       run: ./toolchain.sh
       
     - name: build seraph
-      run: ./buils.sh
+      run: ./build.sh
       
     - name: create iso
       run: ./mkiso.sh

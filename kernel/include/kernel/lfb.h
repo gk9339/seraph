@@ -15,11 +15,11 @@ struct vid_size
     uint32_t height;
 };
 
+extern uint8_t* lfb_address;
 extern uint16_t lfb_resolution_x;
 extern uint16_t lfb_resolution_y;
-extern uint16_t lfb_resolution_b;
-extern uint8_t* lfb_vid_memory;
-extern const char* lfb_driver_name;
+extern uint16_t lfb_bpp;
+extern uint16_t lfb_stride;
 
 void lfb_initialize_device( void );
 void lfb_initialize( void );

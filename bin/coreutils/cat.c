@@ -7,10 +7,10 @@
 #include <stdlib.h>
 #include <sys/stat.h>
 
-#define VERSION "0.1"
+#define VERSION "0.2"
 
 void parse_args( int argc, char** argv ); // parse args, calling version/help functions
-void cat( int fd, char* filename ); // Concatenate file to stdout
+void cat( FILE* file, char* filename ); // Concatenate file to stdout
 void show_version( void ); // Display version text and exit
 void show_usage( void ); // Display help text and exit
 
@@ -24,7 +24,7 @@ int main( int argc, char** argv )
     if( argc == 1 )
     {
         filename = "stdin";
-        cat(STDIN_FILENO, filename);
+        cat(stdin, filename);
     }
 
     for( int i = 1; i < argc; i++ )
@@ -32,32 +32,32 @@ int main( int argc, char** argv )
         if( !strcmp(argv[i], "-") )
         {
             filename = "stdin";
-            cat(STDIN_FILENO, filename);
+            cat(stdin, filename);
             continue;
         }
 
         filename = argv[i];
-        int fd = open(filename, O_RDONLY);
-        if( fd < 0 )
+        FILE* file = fopen(filename, "r");
+        if( file == NULL )
         {
             fprintf(stderr, "%s: %s: %s\n", argv[0], argv[i], strerror(errno));
-            retval = 1;
+            retval = EXIT_FAILURE;
             continue;
         }
 
         struct stat st;
-        fstat(fd, &st);
+        fstat(fileno(file), &st);
 
         if( S_ISDIR(st.st_mode) )
         {
             fprintf(stderr, "%s: %s: Is a directory\n", argv[0], argv[i]);
-            close(fd);
-            retval = 1;
+            fclose(file);
+            retval = EXIT_FAILURE;
             continue;
         }
 
-        cat(fd, filename);
-        close(fd);
+        cat(file, filename);
+        fclose(file);
     }
 
     return retval;
@@ -92,7 +92,7 @@ void parse_args( int argc, char** argv )
                 show_version();
                 __builtin_unreachable();
             case '?':
-                fprintf(stderr, "Try 'uname --help'\n");
+                fprintf(stderr, "Try 'cat --help'\n");
                 exit(EXIT_FAILURE);
             case 'h':
             default:
@@ -103,14 +103,14 @@ void parse_args( int argc, char** argv )
 }
 
 // Concatenate file to stdout
-void cat( int fd, char* filename )
+void cat( FILE* file, char* filename )
 {
     while( 1 )
     {
         char buf[BUFSIZ];
         memset(buf, 0, BUFSIZ);
 
-        ssize_t r = read(fd, buf, BUFSIZ);
+        ssize_t r = fread(buf, sizeof(char), BUFSIZ, file);
         if( !r )
         {
             return;
@@ -121,7 +121,7 @@ void cat( int fd, char* filename )
             return;
         }
 
-        write(STDOUT_FILENO, buf, r);
+        fwrite(buf, sizeof(char), r, stdout);
     }
 }
 

@@ -11,6 +11,7 @@
 #include <kernel/shm.h>
 #include <kernel/timer.h>
 #include <kernel/irq.h>
+#include <kernel/lfb.h>
 
 struct procfs_entry
 {
@@ -77,7 +78,7 @@ static uint32_t proc_cmdline_func(fs_node_t* node, uint32_t offset, uint32_t siz
         _buf += strlen(_buf);
         if( *(args+1) )
         {
-            strcpy(_buf, "\036");
+            strcpy(_buf, "\0");
             _buf += strlen(_buf);
         }
         args++;
@@ -515,17 +516,41 @@ static uint32_t irq_func( fs_node_t* node __attribute__((unused)), uint32_t offs
     return size;
 }
 
+static uint32_t framebuffer_func( fs_node_t* node __attribute__((unused)), uint32_t offset, uint32_t size, uint8_t* buffer )
+{
+    char* buf = malloc(4096);
+
+    sprintf(buf, "XRes:%d\n"
+                 "YRes:%d\n"
+                 "BPP:%d\n"
+                 "Stride:%d\n"
+                 "Address:%#p\n",
+                 lfb_resolution_x,
+                 lfb_resolution_y,
+                 lfb_bpp,
+                 lfb_stride,
+                 lfb_address);
+    
+    size_t _bsize = strlen(buf);
+    if( offset > _bsize ) return 0;
+    if( size > _bsize - offset ) size = _bsize - offset;
+
+    memcpy(buffer, buf + offset, size);
+    return size;
+}
+
 static struct procfs_entry std_entries[] =
 {
-    {-1, "cpuinfo",  cpuinfo_func},
-    {-2, "meminfo",  meminfo_func},
-    {-3, "uptime",   uptime_func},
-    {-4, "cmdline",  cmdline_func},
-    {-5, "version",  version_func},
-    {-6, "mounts",   mounts_func},
-    {-7, "filesystems", filesystems_func},
-    {-8, "loader",   loader_func},
-    {-9, "irq",      irq_func},
+    {-1,  "cpuinfo",     cpuinfo_func},
+    {-2,  "meminfo",     meminfo_func},
+    {-3,  "uptime",      uptime_func},
+    {-4,  "cmdline",     cmdline_func},
+    {-5,  "version",     version_func},
+    {-6,  "mounts",      mounts_func},
+    {-7,  "filesystems", filesystems_func},
+    {-8,  "loader",      loader_func},
+    {-9,  "irq",         irq_func},
+    {-10, "framebuffer", framebuffer_func},
 };
 
 static struct dirent* readdir_procfs_root( fs_node_t* node __attribute__((unused)), uint32_t index )

@@ -3,6 +3,7 @@ name: build
 on:
   push:
     paths: 
+      - .github/workflows/CI.yml
       - bin/**
       - kernel/**
       - lib/**
@@ -12,28 +13,33 @@ on:
       - headers.sh
       - build.sh
       - mkiso.sh
-
+env:
+  READ_TOKEN: ${{ secrets.READ_PKG }} 
 jobs:
   seraph:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v2
+    - name: docker setup
+      run: echo $READ_TOKEN | docker login docker.pkg.github.com -u gk9339 --password-stdin
+
+    - name: docker pull
+      run: docker pull docker.pkg.github.com/gk9339/seraph/seraph-toolchain:latest
+
+    - name: start container
+      run: docker run -d docker.pkg.github.com/gk9339/seraph/seraph-toolchain tail -f /dev/null
       
-    - name: apt-update
-      run: sudo apt-get update
-      
-    - name: apt-install
-      run: sudo apt-get -y install bison flex libgmp3-dev libmpc-dev libmpfr-dev grub2 mtools
-      
-    - name: build toolchain
-      run: ./toolchain.sh
-      
+    - name: git clone
+      run: docker exec `docker ps -alq` git clone https://github.com/gk9339/seraph seraph-build
+
     - name: build seraph
-      run: ./build.sh
-      
+      run: docker exec `docker ps -alq` bash -c "cd seraph-build && ./build.sh"
+
     - name: create iso
-      run: ./mkiso.sh
-      
+      run: docker exec `docker ps -alq` bash -c "cd seraph-build && ./mkiso.sh"
+
+    - name: copy iso to host
+      run: docker cp `docker ps -alq`:/seraph-build/seraph.iso .
+
     - name: Upload seraph.iso
       uses: actions/upload-artifact@v1
       with:

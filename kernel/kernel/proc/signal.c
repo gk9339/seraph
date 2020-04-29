@@ -216,7 +216,7 @@ void fix_signal_stacks( void )
 int send_signal( pid_t proc, uint32_t signal, int force_root )
 {
     char debug_str[512];
-    debug_logf(debug_str, "%d - %s -> signal: %s to %d", current_process->id, current_process->name, sys_signame[signal], proc);
+    debug_logf(debug_str, "%d - %s -> Signal: %s to %d", current_process->id, current_process->name, sys_signame[signal], proc);
     process_t* receiver = process_from_pid(proc);
 
     if( !receiver )
@@ -295,7 +295,7 @@ int group_send_signal( int group, uint32_t signal, int force_root )
     int killed_something = 0;
 
     char debug_str[512];
-    debug_logf(debug_str, "%d - %s -> signal: %s to group %d", current_process->id, current_process->name, sys_signame[signal], group);
+    debug_logf(debug_str, "%d - %s -> Signal: %s to group %d", current_process->id, current_process->name, sys_signame[signal], group);
 
     foreach(node, process_list)
     {

@@ -17,7 +17,7 @@ on:
 jobs:
   seraph:
     runs-on: ubuntu-latest
-    container: seraph-toolchain
+    container: docker.pkg.github.com/gk9339/seraph/seraph-toolchain:latest
     steps:
     - name: build seraph
       run: ./build.sh

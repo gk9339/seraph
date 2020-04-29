@@ -26,7 +26,7 @@ mkdir -p tarballs
 
 pushd tarballs
     if [ ! -e "binutils-2.32.tar.gz" ]; then
-        wget "http://ftp.gnu.org/gnu/binutils/binutils-2.32.tar.gz"
+        wget "https://ftp.gnu.org/gnu/binutils/binutils-2.32.tar.gz"
     fi
     if [ ! -e "gcc-8.3.0.tar.gz" ]; then
         wget "https://ftp.gnu.org/gnu/gcc/gcc-8.3.0/gcc-8.3.0.tar.gz"
@@ -37,7 +37,7 @@ pushd tarballs
         pushd "binutils-2.32"
             patch -p1 < $PREFIX/patches/binutils.patch
             pushd "ld"
-                automake-1.15
+                automake-1.15 &> /dev/null
             popd
         popd
     fi
@@ -46,15 +46,15 @@ pushd tarballs
         tar -xf "gcc-8.3.0.tar.gz"
         pushd "gcc-8.3.0"
             patch -p1 < $PREFIX/patches/gcc.patch
-            autoconf
+            autoconf &> /dev/null
             pushd "gcc"
-                autoconf
+                autoconf &> /dev/null
             popd
             pushd "libgcc"
-                autoconf
+                autoconf &> /dev/null
             popd
             pushd "libstdc++-v3"
-                autoconf
+                autoconf &> /dev/null
             popd
         popd
     fi
@@ -117,3 +117,7 @@ pushd gcc-build-2
 popd
 
 cd "$DIR"
+
+. ./script/config.sh
+cd libc && $MAKE clean
+rm -rf sysroot

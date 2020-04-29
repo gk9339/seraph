@@ -126,11 +126,11 @@ index b5ce654..d3e815b 100644
  
  dnl Test for the exact version when AC_INIT is expanded.
  dnl This allows to update the tree in steps (for testing)
-diff --git a/crossconfig.m4 b/crossconfig.m4
-index cb6e3af..e1f5689 100644
+diff --git a/libstdc++-v3/crossconfig.m4 b/libstdc++-v3/crossconfig.m4
+index cb6e3af..1408d0f 100644
 --- a/libstdc++-v3/crossconfig.m4
 +++ b/libstdc++-v3/crossconfig.m4
-@@ -5,6 +5,12 @@ dnl
+@@ -5,6 +5,13 @@ dnl
  AC_DEFUN([GLIBCXX_CROSSCONFIG],[
  # Base decisions on target environment.
  case "${host}" in
@@ -140,9 +140,10 @@ index cb6e3af..e1f5689 100644
 +    GLIBCXX_CHECK_MATH_SUPPORT
 +    GLIBCXX_CHECK_STDLIB_SUPPORT
 +    ;;
++
    arm*-*-symbianelf*)
      # This is a freestanding configuration; there is nothing to do here.
-     ;;diff --git a/configure b/configure
+     ;;
 index 5535bfa..6cc3d02 100755
 --- a/libstdc++-v3/configure
 +++ b/libstdc++-v3/configure
@@ -187,7 +188,11 @@ index 896676288..ace9a37a1 100644
  netbsd*)
    version_type=sunos
    need_lib_prefix=no
-@@ -3093,6 +3103,10 @@ linux* | k*bsd*-gnu | kopensolaris*-gnu)
+diff --git a/libtool.m4 b/libtool.m4
+index 3602fc4..7d968b9 100644
+--- a/libtool.m4
++++ b/libtool.m4
+@@ -3102,6 +3102,10 @@ linux* | k*bsd*-gnu | kopensolaris*-gnu)
    lt_cv_deplibs_check_method=pass_all
    ;;
  
@@ -197,4 +202,5 @@ index 896676288..ace9a37a1 100644
 +
  netbsd*)
    if echo __ELF__ | $CC -E - | $GREP __ELF__ > /dev/null; then
-     lt_cv_dediff --git a/aclocal.m4 b/aclocal.m4
+     lt_cv_deplibs_check_method='match_pattern /lib[[^/]]+(\.so\.[[0-9]]+\.[[0-9]]+|_pic\.a)$'
+

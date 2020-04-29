@@ -32,7 +32,7 @@ jobs:
       run: docker exec `docker ps -alq` git clone https://github.com/gk9339/seraph seraph-build
 
     - name: symlink toolchain/sysroot
-      run: docker exec `docker ps -alq` bash -c "mkdir seraph-build/sysroot && ln -sv /seraph-build/sysroot /seraph/sysroot && mv seraph-build/toolchain/patches/ seraph/toolchain/ && rm -rf seraph/toolchain/ && ln -sv /seraph/toolchain/ /seraph-build/toolchain"
+      run: docker exec `docker ps -alq` bash -c "mkdir seraph-build/sysroot && ln -sv /seraph-build/sysroot /seraph/sysroot && mv seraph-build/toolchain/patches/ seraph/toolchain/ && rm -rf seraph-build/toolchain/ && ln -sv /seraph/toolchain/ /seraph-build/toolchain"
 
     - name: build seraph
       run: docker exec `docker ps -alq` bash -c "cd seraph-build && ./build.sh"

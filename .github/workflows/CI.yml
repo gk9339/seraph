@@ -25,17 +25,14 @@ jobs:
     - name: docker pull
       run: docker pull docker.pkg.github.com/gk9339/seraph/seraph-toolchain:latest
 
-    - name: docker images
-      run: docker images
-
     - name: git pull
-      run: docker run seraph-toolchain git clone https://github.com/gk9339/seraph seraph-build
+      run: docker run docker.pkg.github.com/gk9339/seraphseraph-toolchain git clone https://github.com/gk9339/seraph seraph-build
 
     - name: build seraph
-      run: docker run seraph-toolchain cd seraph-build && ./build.sh
+      run: docker run docker.pkg.github.com/gk9339/seraphseraph-toolchain cd seraph-build && ./build.sh
 
     - name: create iso
-      run: docker run seraph-toolchain cd seraph-build && ./mkiso.sh
+      run: docker run docker.pkg.github.com/gk9339/seraphseraph-toolchain cd seraph-build && ./mkiso.sh
 
     - name: copy iso to host
       run: docker cp `docker ps -alq`:/seraph-build/seraph.iso .

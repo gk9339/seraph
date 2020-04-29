@@ -23,7 +23,10 @@ jobs:
       run: echo $READ_TOKEN | docker login docker.pkg.github.com -u gk9339 --password-stdin
 
     - name: docker pull
-      run: docker pull docker.pkg.github.com/gk9339/seraph/seraph-toolchain:latest; docker images
+      run: docker pull docker.pkg.github.com/gk9339/seraph/seraph-toolchain:latest
+
+    - name: docker images
+      run: docker images
 
     - name: git pull
       run: docker run seraph-toolchain git clone https://github.com/gk9339/seraph seraph-build

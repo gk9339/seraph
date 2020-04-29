@@ -29,10 +29,10 @@ jobs:
       run: docker run docker.pkg.github.com/gk9339/seraph/seraph-toolchain git clone https://github.com/gk9339/seraph seraph-build
 
     - name: build seraph
-      run: docker run docker.pkg.github.com/gk9339/seraph/seraph-toolchain cd seraph-build && ./build.sh
+      run: docker run docker.pkg.github.com/gk9339/seraph/seraph-toolchain bash -c "cd seraph-build && ./build.sh"
 
     - name: create iso
-      run: docker run docker.pkg.github.com/gk9339/seraph/seraph-toolchain cd seraph-build && ./mkiso.sh
+      run: docker run docker.pkg.github.com/gk9339/seraph/seraph-toolchain bash -c "cd seraph-build && ./mkiso.sh"
 
     - name: copy iso to host
       run: docker cp `docker ps -alq`:/seraph-build/seraph.iso .

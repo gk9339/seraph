@@ -26,7 +26,7 @@ jobs:
       run: docker pull docker.pkg.github.com/gk9339/seraph/seraph-toolchain:latest
 
     - name: start container
-      run: docker run -d docker.pkg.github.com/gk9339/seraph/seraph-toolchaintail -f /dev/null
+      run: docker run -d docker.pkg.github.com/gk9339/seraph/seraph-toolchain tail -f /dev/null
       
     - name: git clone
       run: docker exec `docker ps -alq` git clone https://github.com/gk9339/seraph seraph-build

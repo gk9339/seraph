@@ -17,7 +17,7 @@ on:
 jobs:
   seraph:
     runs-on: ubuntu-latest
-    container: docker.pkg.github.com/gk9339/seraph/seraph-toolchain:latest
+    container: echo ${{ secrets.READ_PKG }} | docker login docker.pkg.github.com -u gk9339 --password-stdin; docker pull docker.pkg.github.com/gk9339/seraph/seraph-toolchain:latest
     steps:
     - name: build seraph
       run: ./build.sh

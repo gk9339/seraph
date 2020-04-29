@@ -3,6 +3,7 @@ name: build
 on:
   push:
     paths: 
+      - .github/workflows/CI.yml
       - bin/**
       - kernel/**
       - lib/**
@@ -16,18 +17,8 @@ on:
 jobs:
   seraph:
     runs-on: ubuntu-latest
+    container: seraph-toolchain
     steps:
-    - uses: actions/checkout@v2
-      
-    - name: apt-update
-      run: sudo apt-get update
-      
-    - name: apt-install
-      run: sudo apt-get -y install bison flex libgmp3-dev libmpc-dev libmpfr-dev grub2 mtools
-      
-    - name: build toolchain
-      run: ./toolchain.sh
-      
     - name: build seraph
       run: ./build.sh
       

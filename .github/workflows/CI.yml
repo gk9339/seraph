@@ -31,6 +31,9 @@ jobs:
     - name: git clone
       run: docker exec `docker ps -alq` git clone https://github.com/gk9339/seraph seraph-build
 
+    - name: move prebuilt toolchain
+      run: docker exec `docker ps -alq` bash -c "rm -rf seraph-build/toolchain && mv seraph/toolchain seraph-build"
+
     - name: build seraph
       run: docker exec `docker ps -alq` bash -c "cd seraph-build && ./build.sh"
 

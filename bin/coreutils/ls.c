@@ -266,7 +266,7 @@ int display_dir( char* path )
             sprintf(filepath, "%s/%s", path, filename);
             entry = malloc(sizeof(struct ls_entry));
 
-            if( stat(filepath, &entry->st) < 0 )
+            if( lstat(filepath, &entry->st) < 0 )
             {
                 // lstat failed
                 free(filepath);

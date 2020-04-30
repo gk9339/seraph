@@ -894,7 +894,7 @@ static fs_node_t* kopen_recur( char* filename, uint32_t flags, uint32_t symlink_
         if( (node_ptr->type & FS_SYMLINK) && !((flags & FS_O_NOFOLLOW) && (flags & FS_O_PATH) && depth == path_depth) )
         {
             // This ensures we don't return a path when NOFOLLOW is requested but PATH isn't passed.
-            if( (flags & FS_O_NOFOLLOW) && depth == path_depth - 1 )
+            if( (flags & FS_O_NOFOLLOW) && !(flags & FS_O_PATH) && depth == path_depth - 1 )
             {
                 free((void*)path);
                 free(node_ptr);

@@ -57,10 +57,11 @@ In seperate terminals:
 ├── bin               - normal programs - dynamically linked  
 │   ├── include       - normal program headers  
 │   ├── clear         - send terminal clear command
-│   ├── init          - pid 1
 │   ├── coreutils     - rewriting of GNU coreutils
+│   ├── init          - pid 1
 │   ├── sh            - shell  
-│   └── terminal      - VGA terminal  
+│   ├── terminal      - framebuffer terminal
+│   └── test          - testing binaries  
 ├── kernel            - kernel source  
 │   ├── include       
 │   │   └── kernel    - kernel headers
@@ -79,7 +80,6 @@ In seperate terminals:
 │   └── script        - scripts for kernel compilation  
 ├── lib               - other shared libraries 
 │   ├── include       - other library headers
-│   ├── libm          - C math library 
 │   ├── libansiterm   - processing ANSI escape characters etc
 │   ├── libkbd        - conversion of keyboard scancodes
 ├── libc              - C library  
@@ -87,15 +87,23 @@ In seperate terminals:
 │   │   └── sys  
 │   ├── arch          - arch specific code (asm)  
 │   │   └── i386  
+│   ├── assert
+│   ├── ctype
 │   ├── debug         - special debug functions  
 │   ├── dirent
+│   ├── dlfcn
 │   ├── errno  
 │   ├── hashtable     - hashtable ADT functions  
 │   ├── ioctl  
 │   ├── libgen   
+│   ├── libm          - C math library
+│   ├── libssp
 │   ├── list          - linked list functions  
+│   ├── locale
+│   ├── pthread
 │   ├── pty           - pty system calls  
 │   ├── sched  
+│   ├── setjmp
 │   ├── signal  
 │   ├── stdio  
 │   ├── stdlib  
@@ -106,7 +114,8 @@ In seperate terminals:
 │   ├── unistd
 │   └── wchar 
 ├── linker            - dynamic linker  
-└── script            - other scripts for OS compilation  
+├── ports             - porting software, gmp, mpfr, mpc, binutils, gcc (early testing)
+├── script            - other scripts for OS compilation  
 └── toolchain         - seraph specific gcc/binutils  
     └── patches       - gcc/binutils patches  
 ```

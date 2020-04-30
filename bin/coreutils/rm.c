@@ -28,7 +28,11 @@ int main( int argc, char** argv )
     
     for( int i = optind; i < argc; i++ )
     {
-        retval |= rm(argv[i]);
+        if( rm(argv[i]) )
+        {
+            fprintf(stderr, "%s: %s: %s\n", argv[0], argv[i], strerror(errno));
+            retval = EXIT_FAILURE;
+        }
     }
 
     return retval;

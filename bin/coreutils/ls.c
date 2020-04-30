@@ -135,7 +135,7 @@ int main( int argc, char** argv )
  
         for( int i = 0; i < index; i++ )
         {
-            if( S_ISDIR(ls_entry_array[i]->st.st_mode) )
+            if( S_ISDIR(ls_entry_array[i]->st.st_mode) || (S_ISLNK(ls_entry_array[i]->st.st_mode) && S_ISDIR(ls_entry_array[i]->stlink.st_mode)) )
             {
                 first_dir = i;
                 break;
@@ -266,7 +266,7 @@ int display_dir( char* path )
             sprintf(filepath, "%s/%s", path, filename);
             entry = malloc(sizeof(struct ls_entry));
 
-            if( lstat(filepath, &entry->st) < 0 )
+            if( stat(filepath, &entry->st) < 0 )
             {
                 // lstat failed
                 free(filepath);

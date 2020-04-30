@@ -1011,7 +1011,7 @@ static void debug_print_vfs_tree_node( char** str, tree_node_t* node, size_t hei
     // Print the process name 
 	if( fnode->file )
     {
-		c += sprintf(c, "%s > %s 0x%x (%s, %s)\n", fnode->name, fnode->device, fnode->file, fnode->fs_type, fnode->file->name);
+		c += sprintf(c, "%s > %s %#p (%s, %s)\n", fnode->name, fnode->device, fnode->file, fnode->fs_type, fnode->file->name);
 	}else
     {
 		c += sprintf(c, "%s > (empty)\n", fnode->name);

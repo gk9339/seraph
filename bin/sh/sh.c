@@ -160,12 +160,12 @@ void sh_loop( void )
         printf("\033[1;33m%s", cwd);
         if( status && WIFEXITED(status) )
         {
-            printf("\033[0;41m<\u255d%d\033[0m", WEXITSTATUS(status));
+            printf("\033[0;41m<\u255d%d", WEXITSTATUS(status));
         }else if( status && WIFSIGNALED(status) )
         {
-            printf("\033[0;41m%s(%d)\033[0m", sys_signame[WTERMSIG(status)], WTERMSIG(status));
+            printf("\033[0;41m%s(%d)", sys_signame[WTERMSIG(status)], WTERMSIG(status));
         }
-        printf("\033[38;5;2m$\033[0m ");
+        printf("\033[0m\033[38;5;2m$\033[0m ");
         fflush(stdout);
         line = sh_readline(); // Read line from stdin
         args = sh_splitline(line); // Split line into tokens

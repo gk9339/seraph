@@ -76,7 +76,7 @@ process_t* next_ready_process( void )
 
     if( process_queue->head->owner != process_queue )
     {
-        sprintf(debug_str, "ERROR: process queue head node 0x%x has owner 0x%x but process queue is 0x%x", 
+        sprintf(debug_str, "ERROR: process queue head node %#p has owner %#p but process queue is %#p", 
                 process_queue->head, process_queue->head->owner, process_queue);
         debug_log(debug_str);
 

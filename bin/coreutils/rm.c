@@ -11,6 +11,7 @@
 #define VERSION "0.1"
 
 int force = 0;
+int prompt = 0;
 int recursive = 0;
 int verbose = 0;
 
@@ -57,7 +58,7 @@ void parse_args( int argc, char** argv )
 
         int option_index = 0;
 
-        c = getopt_long(argc, argv, "frRv", long_options, &option_index);
+        c = getopt_long(argc, argv, "firRv", long_options, &option_index);
 
         if( c == -1 )
         {
@@ -68,6 +69,9 @@ void parse_args( int argc, char** argv )
         {
             case 'f':
                 force = 1;
+                break;
+            case 'i':
+                prompt = 1;
                 break;
             case 'r':
             case 'R':
@@ -98,7 +102,6 @@ int rm( char* name )
     {
         if( !force )
         {
-            fprintf(stderr, "%s: %s: %s\n", "rm", name, strerror(errno));
             return EXIT_FAILURE;
         }else
         {
@@ -109,12 +112,31 @@ int rm( char* name )
     {
         if( !recursive )
         {
-            fprintf(stderr, "%s: %s: is a directory\n", "rm", name);
+            errno = EISDIR;
             return EXIT_FAILURE;
         }
         return rm_dir(name);
     }else
     {
+        if( prompt )
+        {
+            prompt = 2;
+            char input[64];
+            while( prompt == 2 )
+            {
+                printf("%s: remove file '%s'? ", "rm", name);
+                fflush(stdout);
+                fgets(input, 64, stdin);
+                if( !strcmp(input, "y") || !strcmp(input, "y\n") )
+                {
+                    prompt = 1;
+                }else if( !strcmp(input, "n") || !strcmp(input, "n\n") )
+                {
+                    prompt = 1;
+                    return EXIT_SUCCESS;
+                }
+            }
+        }
         if( verbose )
         {
             printf("removed %s\n", name);
@@ -131,7 +153,6 @@ int rm_dir( char* name )
     {
         if( !force )
         {
-            fprintf(stderr, "%s: %s: %s\n", "rm", name, strerror(errno));
             return EXIT_FAILURE;
         }else
         {
@@ -169,6 +190,25 @@ int rm_dir( char* name )
         free(file);
     }
 
+    if( prompt )
+    {
+        prompt = 2;
+        char input[64];
+        while( prompt == 2 )
+        {
+            printf("%s: remove directory '%s'? ", "rm", name);
+            fflush(stdout);
+            fgets(input, 64, stdin);
+            if( !strcmp(input, "y") || !strcmp(input, "y\n") )
+            {
+                prompt = 1;
+            }else if( !strcmp(input, "n") || !strcmp(input, "n\n") )
+            {
+                prompt = 1;
+                return EXIT_SUCCESS;
+            }
+        }
+    }
     if( verbose )
     {
         printf("removed directory %s\n", name);
@@ -190,6 +230,7 @@ void show_usage( void )
     printf("Usage: rm [OPTION(s)] FILE(s)\n"
            "Remove (unlink) FILE(s).\n\n"
            " -f, --force     ignore nonexistant files and arguments, never prompt\n"
+           " -i              prompt before every removal\n"
            " -r,\n"
            " -R, --recursive remove directories and their contents recursivley\n"
            " -v, --verbose   output actions being performed\n"

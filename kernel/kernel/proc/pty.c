@@ -20,7 +20,7 @@ static void ptr_validate( void* ptr, const char* syscall )
     if( ptr && !PTR_INRANGE(ptr) )
     {
         char debug_str[256];
-        debug_logf(debug_str, "SEGFAULT: invalid pointer passsed to %s (0x%x < 0x%x)", syscall, (uintptr_t)ptr, current_process->image.entry);
+        debug_logf(debug_str, "SEGFAULT: invalid pointer passsed to %s (%#p < %#p)", syscall, (uintptr_t)ptr, current_process->image.entry);
         KPANIC("Segmentation fault", NULL);
     }
 }

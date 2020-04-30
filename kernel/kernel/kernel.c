@@ -348,22 +348,22 @@ void kpanic( char* error_message, const char* file, int line, struct regs* regs 
     {
         printf("\nREGISTERS:");
         debug_logf(debug_str, "\nREGISTERS:");
-        printf("eax=0x%x ebx=0x%x\n", regs->eax, regs->ebx);
-        debug_logf(debug_str, "eax=0x%x ebx=0x%x", regs->eax, regs->ebx);
-        printf("ecx=0x%x edx=0x%x\n", regs->ecx, regs->edx);
-        debug_logf(debug_str, "ecx=0x%x edx=0x%x", regs->ecx, regs->edx);
-        printf("esp=0x%x ebp=0x%x\n", regs->esp, regs->ebp);
-        debug_logf(debug_str, "esp=0x%x ebp=0x%x", regs->esp, regs->ebp);
-        printf("ERRCD: 0x%x ", regs->err_code);
-        debug_logf(debug_str, "ERRCD: 0x%x ", regs->err_code);
-        printf("EFLAGS: 0x%x\n", regs->eflags);
-        debug_logf(debug_str, "EFLAGS: 0x%x", regs->eflags);
-        printf("User ESP: 0x%x ", regs->useresp);
-        debug_logf(debug_str, "User ESP: 0x%x ", regs->useresp);
-        printf("eip=0x%x\n", regs->eip);
-        debug_logf(debug_str, "eip=0x%x", regs->eip);
-        printf("int_no=0x%x\n", regs->int_no);
-        debug_logf(debug_str, "int_no=0x%x", regs->int_no);
+        printf("eax=%#p ebx=%#p\n", regs->eax, regs->ebx);
+        debug_logf(debug_str, "eax=%#p ebx=%#p", regs->eax, regs->ebx);
+        printf("ecx=%#p edx=%#p\n", regs->ecx, regs->edx);
+        debug_logf(debug_str, "ecx=%#p edx=%#p", regs->ecx, regs->edx);
+        printf("esp=%#p ebp=%#p\n", regs->esp, regs->ebp);
+        debug_logf(debug_str, "esp=%#p ebp=%#p", regs->esp, regs->ebp);
+        printf("ERRCD: %#p ", regs->err_code);
+        debug_logf(debug_str, "ERRCD: %#p ", regs->err_code);
+        printf("EFLAGS: %#p\n", regs->eflags);
+        debug_logf(debug_str, "EFLAGS: %#p", regs->eflags);
+        printf("User ESP: %#p ", regs->useresp);
+        debug_logf(debug_str, "User ESP: %#p ", regs->useresp);
+        printf("eip=%#p\n", regs->eip);
+        debug_logf(debug_str, "eip=%#p", regs->eip);
+        printf("int_no=%#p\n", regs->int_no);
+        debug_logf(debug_str, "int_no=%#p", regs->int_no);
     }
     send_signal(current_process->id, SIGKILL, 1);
 }

@@ -183,26 +183,26 @@ static uint32_t proc_status_func( fs_node_t* node, uint32_t offset, uint32_t siz
     int mem_permille = 1000 * (mem_usage + shm_usage) / memory_total();
 
     sprintf(buf,
-            "Name:\t%s\n" // name
-            "State:\t%s\n" // yeah, do this at some point
-            "Tgid:\t%d\n" // group ? group : pid
-            "Pid:\t%d\n" // pid
-            "PPid:\t%d\n" // parent pid
-            "Pgid:\t%d\n" // progress group id
-            "Sid:\t%d\n" // session id
-            "Uid:\t%d\n"
-            "Ueip:\t0x%x\n"
-            "SCid:\t%d\n"
-            "SC0:\t0x%x\n"
-            "SC1:\t0x%x\n"
-            "SC2:\t0x%x\n"
-            "SC3:\t0x%x\n"
-            "SC4:\t0x%x\n"
-            "UserStack:\t0x%x\n"
-            "Path:\t%s\n"
-            "VmSize:\t %d kB\n"
-            "RssShmem:\t %d kB\n"
-            "MemPermille:\t %d\n",
+            "Name:\t\t%s\n" // name
+            "State:\t\t%s\n" // yeah, do this at some point
+            "Tgid:\t\t%d\n" // group ? group : pid
+            "Pid:\t\t%d\n" // pid
+            "PPid:\t\t%d\n" // parent pid
+            "Pgid:\t\t%d\n" // progress group id
+            "Sid:\t\t%d\n" // session id
+            "Uid:\t\t%d\n"
+            "Ueip:\t\t%#p\n"
+            "SCid:\t\t%d\n"
+            "SC0:\t\t%#p\n"
+            "SC1:\t\t%#p\n"
+            "SC2:\t\t%#p\n"
+            "SC3:\t\t%#p\n"
+            "SC4:\t\t%#p\n"
+            "UserStack:\t%#p\n"
+            "Path:\t\t%s\n"
+            "VmSize:\t\t%d kB\n"
+            "RssShmem:\t%d kB\n"
+            "MemPermille:\t%d\n",
             name,
             state,
             proc->group ? proc->group : proc->id,

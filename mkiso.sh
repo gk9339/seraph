@@ -25,7 +25,7 @@ cp *.sh sysroot/src
 cp LICENSE README.md sysroot/src
 
 cat > sysroot/boot/grub/grub.cfg << EOF
-set timeout=2
+set timeout=1
 set default=0
 
 menuentry "seraph" {

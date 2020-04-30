@@ -170,7 +170,7 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
 #endif
     }
 #if EARLY_KERNEL_DEBUG
-    debug_log("Finalize paging\n");
+    debug_log("Finalize paging");
     printf("\nFinalize paging\n");
 #endif
     paging_finalize();

@@ -205,6 +205,8 @@ int vfprintf( FILE* f, const char* fmt, va_list args )
                 base = 16;
                 length = 'z';
                 specifier = 'x';
+                width = 8;
+                zero_pad = 1;
             }
             switch( specifier )
             {

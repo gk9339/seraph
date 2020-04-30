@@ -12,7 +12,7 @@
 #include <sys/ioctl.h>
 #include <errno.h>
 
-#define VERSION "0.4"
+#define VERSION "0.5"
 
 #define FLAG_ALL        0x01
 #define FLAG_ALMOST_ALL 0x02
@@ -485,7 +485,7 @@ int printname_color( struct ls_entry* entry )
     }else if( S_ISSOCK(entry->st.st_mode) )
     {
         printf("\033[0;31m%s", entry->filename); // Red (Socket)
-    }
+    }else
 
     if( flags & FLAG_LONG && S_ISLNK(entry->st.st_mode) )
     {
@@ -510,6 +510,9 @@ int printname_color( struct ls_entry* entry )
             .stlink = {0},
         };
         retval = printname_color(&lnk);
+    }else
+    {
+        printf("\033[1;41m%s", entry->filename); // Red BG (broken symlink)
     }
 
     printf("\033[0m");

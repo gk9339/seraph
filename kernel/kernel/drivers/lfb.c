@@ -13,7 +13,7 @@
 uint16_t lfb_resolution_x = 0;
 uint16_t lfb_resolution_y = 0;
 uint16_t lfb_bpp = 0;
-uint16_t lfb_stride = 0;
+uint32_t lfb_stride = 0;
 uint8_t* lfb_address = (uint8_t*)0xE0000000;
 
 static fs_node_t * lfb_device = NULL;

@@ -8,8 +8,6 @@
 #include <string.h>
 #include <errno.h>
 
-#include <kernel/serial.h>
-
 // 4KB
 #define BLOCKSIZE 0x1000
 

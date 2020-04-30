@@ -3,7 +3,5 @@
 
 int rmdir( const char* pathname )
 {
-    errno = ENOTSUP;
-
-    return -1;
+    return unlink(pathname);
 }

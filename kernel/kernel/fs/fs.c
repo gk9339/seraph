@@ -460,15 +460,15 @@ fs_node_t* clone_fs( fs_node_t* source )
 
 int symlink_fs( char* target, char* name )
 {    
-    fs_node_t * parent;
-    char *cwd = (char *)(current_process->wd_name);
-    char *path = canonicalize_path(cwd, name);
+    fs_node_t* parent;
+    char* cwd = (char*)(current_process->wd_name);
+    char* path = canonicalize_path(cwd, name);
 
-    char * parent_path = malloc(strlen(path) + 4);
+    char* parent_path = malloc(strlen(path) + 4);
     sprintf(parent_path, "%s/..", path);
 
-    char * f_path = path + strlen(path) - 1;
-    while (f_path > path) 
+    char* f_path = path + strlen(path) - 1;
+    while (f_path >= path) 
     {
         if (*f_path == '/') 
         {

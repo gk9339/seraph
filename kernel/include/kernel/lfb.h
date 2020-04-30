@@ -19,7 +19,7 @@ extern uint8_t* lfb_address;
 extern uint16_t lfb_resolution_x;
 extern uint16_t lfb_resolution_y;
 extern uint16_t lfb_bpp;
-extern uint16_t lfb_stride;
+extern uint32_t lfb_stride;
 
 void lfb_initialize_device( void );
 void lfb_initialize( void );

@@ -8,6 +8,8 @@
 #include <string.h>
 #include <errno.h>
 
+#include <kernel/serial.h>
+
 // 4KB
 #define BLOCKSIZE 0x1000
 
@@ -142,11 +144,10 @@ static struct tmpfs_dir* tmpfs_dir_new( char* name, struct tmpfs_dir* parent __a
 
 static void tmpfs_file_free( struct tmpfs_file* t )
 {
-    if( t->type == TMPFS_TYPE_LINK )
+    if( t->type == TMPFS_TYPE_LINK || t->type == TMPFS_TYPE_DIR )
     {
         free(t->target);
-    }
-    for( size_t i = 0; i < t->block_count; ++i )
+    }else for( size_t i = 0; i < t->block_count; ++i )
     {
         clear_frame((uintptr_t)t->blocks[i] * 0x1000);
     }

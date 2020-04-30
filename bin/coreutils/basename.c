@@ -5,7 +5,7 @@
 #include <libgen.h>
 #include <string.h>
 
-#define VERSION "0.1"
+#define VERSION "0.2"
 
 char* suffix = NULL;
 int multiple = 0;
@@ -40,6 +40,7 @@ int main( int argc, char** argv )
         }
     }else
     {
+        suffix = argv[optind + 1]; // Either suffix, or still NULL
         basename_func(argv[optind], zero);
     }
 
@@ -99,29 +100,20 @@ void parse_args( int argc, char** argv )
 
 void basename_func( char* string, int zero )
 {
-    char* name = basename(string);
-
     if( suffix )
     {
-        char* np;
-        const char* sp;
-
-        np = name + strlen(name);
-        sp = suffix + strlen(suffix);
-
-        while( np > name && sp > suffix )
+        size_t suffixlen = strlen(suffix);
+        size_t stringlen = strlen(string);
+        if( suffixlen < stringlen )
         {
-            if( *--np != *--sp )
+            if( strncmp(string + stringlen - suffixlen, suffix, suffixlen) == 0 )
             {
-                break;
+                *(string + stringlen - suffixlen) = '\0';
             }
         }
-
-        if( np > name )
-        {
-            *np = '\0';
-        }
     }
+    
+    char* name = basename(string);
 
     fputs(name, stdout);
     putchar(zero ? '\0' : '\n');

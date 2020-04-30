@@ -9,7 +9,7 @@ char** __get_argv( void );
 void _pre_main( int (*main)(int, char**, char**), int argc, char* argv[], char* env[] );
 
 char** environ = NULL;
-int _environ_size = 0;
+int _environ_size;
 char* _argv_0 = NULL;
 char** __argv = NULL;
 
@@ -32,6 +32,7 @@ void _pre_main( int (*main)(int, char**, char**), int argc, char* argv[], char* 
 
 __attribute__((constructor)) static void _libc_init( void )
 {
+    _environ_size = 0;
     unsigned int x = 0;
     unsigned int nulls = 0;
     

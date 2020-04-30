@@ -13,13 +13,18 @@ int putenv( char* string )
         return 1;
     }
     *c = '\0';
-
+    
+    int i = 0;
+    _environ_size = 1;
+    while( environ[i] )
+    {
+        _environ_size++;
+        i++;
+    }
     int s = strlen(name);
-
-    int i;
     for( i = 0; i < (_environ_size - 1) && environ[i]; i++ )
     {
-        if( !strnstr(name, environ[i], s) && environ[i][s] == '=' )
+        if( !strncmp(name, environ[i], s) && environ[i][s] == '=' )
         {
             environ[i] = string;
             return 0;
@@ -37,6 +42,7 @@ int putenv( char* string )
             new_environ[j] = environ[j];
             j++;
         }
+        free(environ);
 
         while( j < _new_environ_size )
         {

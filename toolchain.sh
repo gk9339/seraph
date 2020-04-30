@@ -72,7 +72,7 @@ pushd binutils-build
 popd
 
 pushd gcc-build
-    $DIR/toolchain/tarballs/gcc-8.3.0/configure --target=$TARGET --prefix=$PREFIX --with-sysroot=$SYSROOT --disable-nls --disable-libstdcxx-pch --disable-multilib --enable-initfini-array --disable-shared --enable-languages=c,c++ || exit 1
+    $DIR/toolchain/tarballs/gcc-8.3.0/configure --target=$TARGET --prefix=$PREFIX --with-sysroot=$SYSROOT --disable-nls --disable-libstdcxx-pch --disable-multilib --disable-shared --enable-languages=c,c++ || exit 1
     make -j$NUMCPU inhibit_libc=true all-gcc
     make install-gcc
     make -j$NUMCPU inhibit_libc=true all-target-libgcc
@@ -107,7 +107,7 @@ cd "$PREFIX"
 
 mkdir -p gcc-build-2
 pushd gcc-build-2
-    $DIR/toolchain/tarballs/gcc-8.3.0/configure --target=$TARGET --prefix=$PREFIX --with-sysroot=$SYSROOT --disable-nls --disable-libstdcxx-pch --disable-multilib --enable-initfini-array --enable-languages=c,c++ || exit 1
+    $DIR/toolchain/tarballs/gcc-8.3.0/configure --target=$TARGET --prefix=$PREFIX --with-sysroot=$SYSROOT --disable-nls --disable-libstdcxx-pch --disable-multilib --enable-languages=c,c++ || exit 1
     make -j$NUMCPU all-gcc
     make install-gcc
     make -j$NUMCPU all-target-libgcc
@@ -120,4 +120,5 @@ cd "$DIR"
 
 . ./script/config.sh
 cd libc && $MAKE clean
+cd "$DIR"
 rm -rf sysroot

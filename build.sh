@@ -3,7 +3,7 @@ set -e
 
 . ./script/config.sh
 
-if [ ! -x $(which i686-seraph-gcc) ]; then
+if [ ! $(command -v i686-seraph-gcc) ]; then
     . ./toolchain.sh
 else
     . ./headers.sh

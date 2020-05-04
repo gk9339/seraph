@@ -30,6 +30,7 @@ char* strpbrk( const char*, const char* );
 
 char* strchr( const char*, int );
 char* strchrnul( const char*, int );
+char* strrchr( const char* s, int c );
 
 char* strstr( const char*, const char* );
 char* strnstr( const char*, const char*, size_t );
@@ -38,6 +39,7 @@ char* strcat( char*, const char* );
 char* strncat( char*, const char*, size_t );
 
 void* memchr( const void*, int, size_t );
+void* memrchr( const void*, int, size_t );
 
 char* strerror( int );
 char* strsignal( int );
@@ -46,7 +48,6 @@ char* strncpy( char* dest, const char* src, size_t n );
 // STUB
 int strcoll( const char* s1, const char* s2 );
 size_t strxfrm( char* dest, const char* src, size_t n );
-char* strrchr( const char* s, int c );
 
 #ifdef __cplusplus
 }

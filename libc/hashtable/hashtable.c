@@ -3,6 +3,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef __is_libk
+#include <kernel/mem.h>
+#undef malloc
+#define malloc (void*)kmalloc
+#endif
+
 unsigned int hashtable_string_hash(void* _key) 
 {
     unsigned int hash = 0;
@@ -47,7 +53,6 @@ static void hashtable_int_free(void* ptr)
     (void)ptr;
     return;
 }
-
 
 hashtable_t* hashtable_create(int size) \
 {

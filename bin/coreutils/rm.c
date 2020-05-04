@@ -98,6 +98,7 @@ void parse_args( int argc, char** argv )
 int rm( char* name )
 {
     struct stat st;
+
     if( lstat(name, &st) < 0 )
     {
         if( !force )
@@ -108,6 +109,7 @@ int rm( char* name )
             return EXIT_SUCCESS;
         }
     }
+
     if( S_ISDIR(st.st_mode) )
     {
         if( !recursive )
@@ -137,10 +139,12 @@ int rm( char* name )
                 }
             }
         }
+
         if( verbose )
         {
             printf("removed %s\n", name);
         }
+
         return unlink(name);
     }
 }
@@ -149,6 +153,7 @@ int rm( char* name )
 int rm_dir( char* name )
 {
     DIR* dirp = opendir(name);
+
     if( dirp == NULL )
     {
         if( !force )
@@ -209,10 +214,12 @@ int rm_dir( char* name )
             }
         }
     }
+
     if( verbose )
     {
         printf("removed directory %s\n", name);
     }
+
     return unlink(name);
 }
 

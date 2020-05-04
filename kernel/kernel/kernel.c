@@ -41,20 +41,6 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
     char debug_str[256];
     uint32_t mboot_mods_count = 0;
     multiboot_module_t* mboot_mods = NULL;
-#if EARLY_KERNEL_DEBUG
-    debug = 1; // Required for debug_log to output, will be unset before parsing args
-    debug_log("\nStart kernel_main");
-#endif
-
-    // CPU Initialization
-#if EARLY_KERNEL_DEBUG
-    debug_log("GDT / IDT initialization");
-#endif
-    gdt_initialize();
-    idt_initialize();
-
-    debug_log("ACPI Initializing");
-    initialize_acpi();
 
     // Multiboot check
     if( magic != MULTIBOOT_BOOTLOADER_MAGIC )
@@ -63,33 +49,62 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
     }
     mbi = (multiboot_info_t*)addr;
     initial_esp = esp;
+    
+    // Parse cmdline
+    if( CHECK_FLAG(mbi->flags, 2) ) // cmdline
+    {
+        size_t len = strlen((char*)mbi->cmdline);
+        memmove(kcmdline, (char*)mbi->cmdline, len + 1);
+    }else
+    {
+        kcmdline[0] = 0;
+    }
+    
+    // Parse args
+    args_parse(kcmdline);
+    if( args_present("serialdebug") )
+    {
+        debug = 1;
+    }
+    
+    if( CHECK_FLAG(debug, 0) ) debug_log("\nStart kernel_main");
+
+    // CPU Initialization
+    if( CHECK_FLAG(debug, 0) ) debug_log("GDT / IDT initialization");
+    gdt_initialize();
+    idt_initialize();
+
+    if( CHECK_FLAG(debug, 0) ) debug_log("ACPI Initializing");
+    initialize_acpi();
 
     // Terminal Initialization
-    debug_log("Terminal initialization");
+    if( CHECK_FLAG(debug, 0) ) debug_log("Terminal initialization");
     lfb_initialize();
-    printf("Kernel Initializing\n");
+    // Check if output to lfb is requested
+    if( args_present("splash") )
+    {
+        debug = (uint8_t)(debug + 2);
+    }
+    if( CHECK_FLAG(debug, 1) ) printf("Kernel Initializing\n");
 
-#if EARLY_KERNEL_DEBUG
     // Multiboot boot device
     if (CHECK_FLAG (mbi->flags, 1))
     {
-        debug_logf(debug_str, "boot_device = %#p\n", (unsigned) mbi->boot_device);
-        printf("boot_device = %#p\n", (unsigned) mbi->boot_device);
+        if( CHECK_FLAG(debug, 0) ) debug_logf(debug_str, "boot_device = %#p\n", (unsigned) mbi->boot_device);
+        if( CHECK_FLAG(debug, 1) ) printf("boot_device = %#p\n", (unsigned) mbi->boot_device);
     }
-#endif
 
     // Multiboot modules
     uintptr_t last_mod = (uintptr_t)&_kernel_end;
     if( CHECK_FLAG(mbi->flags, 5) ) /* mods */
     {
-#if EARLY_KERNEL_DEBUG
-        debug_logf(debug_str, "Parsing multiboot modules");
-        printf("Parsing multiboot modules\n");
-        debug_logf(debug_str, "There %s %d module%s starting at %#p", mbi->mods_count == 1 ? "is" : "are", mbi->mods_count, mbi->mods_count == 1 ? "" : "s", mbi->mods_addr);
-        printf("There %s %d module%s starting at %#p\n", mbi->mods_count == 1 ? "is" : "are", mbi->mods_count, mbi->mods_count == 1 ? "" : "s", mbi->mods_addr);
-        debug_logf(debug_str, "Current kernel heap start point would be %#p", &_kernel_end);
-        printf("Current kernel heap start point would be %#p\n", &_kernel_end);
-#endif
+        if( CHECK_FLAG(debug, 0) ) debug_logf(debug_str, "Parsing multiboot modules");
+        if( CHECK_FLAG(debug, 1) ) printf("Parsing multiboot modules\n");
+        if( CHECK_FLAG(debug, 0) ) debug_logf(debug_str, "There %s %d module%s starting at %#p", mbi->mods_count == 1 ? "is" : "are", mbi->mods_count, mbi->mods_count == 1 ? "" : "s", mbi->mods_addr);
+        if( CHECK_FLAG(debug, 1) ) printf("There %s %d module%s starting at %#p\n", mbi->mods_count == 1 ? "is" : "are", mbi->mods_count, mbi->mods_count == 1 ? "" : "s", mbi->mods_addr);
+        if( CHECK_FLAG(debug, 0) ) debug_logf(debug_str, "Current kernel heap start point would be %#p", &_kernel_end);
+        if( CHECK_FLAG(debug, 1) ) printf("Current kernel heap start point would be %#p\n", &_kernel_end);
+
         if( mbi->mods_count > 0 )
         {
             uint32_t i;
@@ -98,38 +113,34 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
             for( i = 0; i < mbi->mods_count; ++i )
             {
                 multiboot_module_t* mod = &mboot_mods[i];
-#if EARLY_KERNEL_DEBUG
                 uint32_t module_start = mod->mod_start;
-#endif
                 uint32_t module_end   = mod->mod_end;
                 if( (uintptr_t)mod + sizeof(multiboot_module_t) > last_mod )
                 {
                     last_mod = (uintptr_t)mod + sizeof(multiboot_module_t);
-#if EARLY_KERNEL_DEBUG
-                    debug_logf(debug_str, "moving forward to %#p", last_mod);
-                    printf(debug_str, "moving forward to %#p\n", last_mod);
-#endif
+                    if( CHECK_FLAG(debug, 0) ) debug_logf(debug_str, "moving forward to %#p", last_mod);
+                    if( CHECK_FLAG(debug, 1) ) printf(debug_str, "moving forward to %#p\n", last_mod);
                 }
-#if EARLY_KERNEL_DEBUG
-                debug_logf(debug_str, "Module %d is at %#p:%#p", i, module_start, module_end);
-                printf("Module %d is at %#p:%#p\n", i, module_start, module_end);
-#endif
+                if( CHECK_FLAG(debug, 0) ) debug_logf(debug_str, "Module %d is at %#p:%#p", i, module_start, module_end);
+                if( CHECK_FLAG(debug, 1) ) printf("Module %d is at %#p:%#p\n", i, module_start, module_end);
                 if( last_mod < module_end )
                 {
                     last_mod = module_end;
                 }
             }
-#if EARLY_KERNEL_DEBUG
-            debug_logf(debug_str, "Moving kernel heap start to %#p", last_mod);
-            printf("Moving kernel heap start to %#p\n", last_mod);
-#endif
+            if( CHECK_FLAG(debug, 0) ) debug_logf(debug_str, "Moving kernel heap start to %#p", last_mod);
+            if( CHECK_FLAG(debug, 1) ) printf("Moving kernel heap start to %#p\n", last_mod);
         }
     }
+
     if( (uintptr_t)mbi > last_mod )
     {
         last_mod = (uintptr_t)mbi + sizeof(multiboot_info_t);
     }
-    while(last_mod & 0x7FF) last_mod++;
+    while(last_mod & 0x7FF)
+    {
+        last_mod++;
+    }
     kmalloc_startat(last_mod);
 
     // Memory initialization
@@ -141,16 +152,14 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
 
     if( CHECK_FLAG(mbi->flags, 6) ) // mmap
     {
-#if EARLY_KERNEL_DEBUG
-        debug_log("\nParsing memory map");
-        printf("Parsing memory map\n");
-#endif
+        if( CHECK_FLAG(debug, 0) ) debug_log("\nParsing memory map");
+        if( CHECK_FLAG(debug, 1) ) printf("Parsing memory map\n");
         multiboot_memory_map_t* mmap = (void*)mbi->mmap_addr;
-#if EARLY_KERNEL_DEBUG
+        
         int memory_mark_counter = 0;
-        debug_log("(0)");
-        printf("(0)");
-#endif
+        if( CHECK_FLAG(debug, 0) ) debug_log("(0)");
+        if( CHECK_FLAG(debug, 1) ) printf("(0)");
+        
         while( (uintptr_t)mmap < mbi->mmap_addr + mbi->mmap_length )
         {
             if(mmap->type == 2)
@@ -164,48 +173,19 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
             }
             mmap = (multiboot_memory_map_t*)((uintptr_t)mmap + mmap->size + sizeof(uintptr_t));
         }
-#if EARLY_KERNEL_DEBUG
-                    debug_logf(debug_str, "\033[F(%d)", memory_mark_counter);
-                    printf("\r(%d) marked pages", memory_mark_counter);
-#endif
+        
+        if( CHECK_FLAG(debug, 0) ) debug_logf(debug_str, "\033[F(%d)", memory_mark_counter);
+        if( CHECK_FLAG(debug, 1) ) printf("\r(%d) marked pages", memory_mark_counter);
     }
-#if EARLY_KERNEL_DEBUG
-    debug_log("Finalize paging");
-    printf("\nFinalize paging\n");
-#endif
+    
+    if( CHECK_FLAG(debug, 0) ) debug_log("Finalize paging");
+    if( CHECK_FLAG(debug, 1) ) printf("\nFinalize paging\n");
     paging_finalize();
-
-    // Parse cmdline
-    if( CHECK_FLAG(mbi->flags, 2) ) // cmdline
-    {
-        size_t len = strlen((char*)mbi->cmdline);
-        memmove(kcmdline, (char*)mbi->cmdline, len + 1);
-    }else
-    {
-        kcmdline[0] = 0;
-    }
 
     heap_install();
     lfb_initialize();
-#if EARLY_KERNEL_DEBUG
-    debug_log("Heap install\n");
-    printf("Heap install\n");
-#endif
-
-#if EARLY_KERNEL_DEBUG
-    debug = 0; // Enabled manually by EARLY_KERNEL_DEBUG earlier
-#endif
-    
-    // Parse args
-    args_parse(kcmdline);
-    if( args_present("serialdebug") )
-    {
-        debug = 1;
-    }
-    if( args_present("splash") )
-    {
-        debug = (uint8_t)(debug + 2);
-    }
+    if( CHECK_FLAG(debug, 0) ) debug_log("Heap install\n");
+    if( CHECK_FLAG(debug, 1) ) printf("Heap install\n");
 
     // Interrupts Initialization
     if( CHECK_FLAG(debug, 0) ) debug_log("Interrupts initialization");
@@ -275,6 +255,7 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
         {
             root_type = args_value("root_type");
         }
+
         if( CHECK_FLAG(debug, 0) ) debug_logf(debug_str, "Root type = %s", root_type);
         if( CHECK_FLAG(debug, 1) ) printf("Root type = %s\n", root_type);
         vfs_mount_type(root_type, args_value("root"), "/");

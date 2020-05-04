@@ -14,11 +14,11 @@ mkdir -p sysroot/src
 cp toolchain/i686-seraph/lib/libstdc++.so toolchain/i686-seraph/lib/libgcc_s.so.1 sysroot/lib
 cd sysroot/lib && ln -svf libgcc_s.so.1 libgcc_s.so && cd ../..
 
-find bin \( -name '*.c' -o -name '*.h' -o -name '*.S' -o -name '*.py' -o -name '*.ld' -o -name 'Makefile' -o -name 'make.config' \) -exec cp --parents {} sysroot/src/ \;
-find kernel \( -name '*.c' -o -name '*.h' -o -name '*.S' -o -name '*.py' -o -name '*.ld' -o -name 'Makefile' -o -name 'make.config' \) -exec cp --parents {} sysroot/src/ \;
-find lib \( -name '*.c' -o -name '*.h' -o -name '*.S' -o -name '*.py' -o -name '*.ld' -o -name 'Makefile' -o -name 'make.config' \) -exec cp --parents {} sysroot/src/ \;
-find libc \( -name '*.c' -o -name '*.h' -o -name '*.S' -o -name '*.py' -o -name '*.ld' -o -name 'Makefile' -o -name 'make.config' \) -exec cp --parents {} sysroot/src/ \;
-find linker \( -name '*.c' -o -name '*.h' -o -name '*.S' -o -name '*.py' -o -name '*.ld' -o -name 'Makefile' -o -name 'make.config' \) -exec cp --parents {} sysroot/src/ \;
+find bin \( -name '*.c' -o -name '*.cpp' -o -name '*.h' -o -name '*.S' -o -name '*.py' -o -name '*.ld' -o -name 'Makefile' -o -name 'make.config' \) -exec cp --parents {} sysroot/src/ \;
+find kernel \( -name '*.c' -o -name '*.cpp' -o -name '*.h' -o -name '*.S' -o -name '*.py' -o -name '*.ld' -o -name 'Makefile' -o -name 'make.config' \) -exec cp --parents {} sysroot/src/ \;
+find lib \( -name '*.c' -o -name '*.cpp' -o -name '*.h' -o -name '*.S' -o -name '*.py' -o -name '*.ld' -o -name 'Makefile' -o -name 'make.config' \) -exec cp --parents {} sysroot/src/ \;
+find libc \( -name '*.c' -o -name '*.cpp' -o -name '*.h' -o -name '*.S' -o -name '*.py' -o -name '*.ld' -o -name 'Makefile' -o -name 'make.config' \) -exec cp --parents {} sysroot/src/ \;
+find linker \( -name '*.c' -o -name '*.cpp' -o -name '*.h' -o -name '*.S' -o -name '*.py' -o -name '*.ld' -o -name 'Makefile' -o -name 'make.config' \) -exec cp --parents {} sysroot/src/ \;
 find script \( -name '*.py' -o -name '*.sh' \) -exec cp --parents {} sysroot/src/ \;
 cp --parents toolchain/patches/*.patch sysroot/src
 cp *.sh sysroot/src
@@ -29,8 +29,25 @@ set timeout=1
 set default=0
 
 menuentry "seraph" {
+    multiboot /boot/seraph.kernel root=/dev/ram0 root_type=ustar
+    module /boot/seraph.initrd
+}
+
+menuentry "seraph - splash/serial" {
     multiboot /boot/seraph.kernel serialdebug root=/dev/ram0 root_type=ustar splash
     #set gfxpayload=1920x1080x32
+    module /boot/seraph.initrd
+}
+
+menuentry "seraph - splash/serial - 720" {
+    multiboot /boot/seraph.kernel serialdebug root=/dev/ram0 root_type=ustar splash
+    set gfxpayload=1280x720x32
+    module /boot/seraph.initrd
+}
+
+menuentry "seraph - splash/serial - 1080" {
+    multiboot /boot/seraph.kernel serialdebug root=/dev/ram0 root_type=ustar splash
+    set gfxpayload=1920x1080x32
     module /boot/seraph.initrd
 }
 EOF

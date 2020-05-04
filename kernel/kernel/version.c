@@ -8,7 +8,7 @@ char* _kernel_name = "seraph";
 
 int _kernel_version_major = 0;
 int _kernel_version_minor = 0;
-int _kernel_version_lower = 4;
+int _kernel_version_lower = 5;
 
 char* _kernel_arch = "i686";
 

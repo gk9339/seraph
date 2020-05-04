@@ -40,42 +40,59 @@ $(patsubst %,test/% , $(TESTEXEC))\
 all: $(OBJS) $(EXECS)
 
 .c.o:
-	$(CC) -MD -c $< -o $@ -std=gnu11 $(CFLAGS)
+	@echo "CC $@"
+	@$(CC) -MD -c $< -o $@ -std=gnu11 $(CFLAGS)
 
 .cpp.o:
-	$(CXX) -MD -c $< -o $@ $(CXXFLAGS)
+	@echo "CXX $@"
+	@$(CXX) -MD -c $< -o $@ $(CXXFLAGS)
 
 init/init: init/init.o
-	$(CC) $^ -o $@ $(CFLAGS)$(LIBS)
+	@echo "CC $@"
+	@$(CC) $^ -o $@ $(CFLAGS)$(LIBS)
 
 init/poweroff: init/poweroff.o
-	$(CC) $^ -o $@ $(CFLAGS)$(LIBS)
+	@echo "CC $@"
+	@$(CC) $^ -o $@ $(CFLAGS)$(LIBS)
 
 init/reboot: init/reboot.o
-	$(CC) $^ -o $@ $(CFLAGS)$(LIBS)
+	@echo "CC $@"
+	@$(CC) $^ -o $@ $(CFLAGS)$(LIBS)
 
 terminal/terminal: terminal/terminal.o
-	$(CC) $^ -o $@ $(CFLAGS)$(LIBS) -lansiterm -lkbd -lm
+	@echo "CC $@"
+	@$(CC) $^ -o $@ $(CFLAGS)$(LIBS) -lansiterm -lkbd -lm
 
 sh/sh: sh/sh.o
-	$(CC) $^ -o $@ $(CFLAGS)$(LIBS)
+	@echo "CC $@"
+	@$(CC) $^ -o $@ $(CFLAGS)$(LIBS)
 
 clear/clear: clear/clear.o
-	$(CC) $^ -o $@ $(CFLAGS)$(LIBS)
+	@echo "CC $@"
+	@$(CC) $^ -o $@ $(CFLAGS)$(LIBS)
 
 clean:
-	rm -f $(EXECS)
-	rm -f $(OBJS) */*.d
+	@echo "RM $(EXECS)"
+	@rm -f $(EXECS)
+	@echo "RM $(OBJS)"
+	@rm -f $(OBJS)
+	@echo "RM $(OBJS:.o=.d)"
+	@rm -f $(OBJS:.o=.d)
 
 include:
-	mkdir -p include
+	@echo "MKDIR include"
+	@mkdir -p include
 
 install-headers: include
-	mkdir -p $(DESTDIR)$(INCLUDEDIR)
-	cp -R --preserve=timestamps include/. $(DESTDIR)$(INCLUDEDIR)/.
+	@echo "MKDIR $(DESTDIR)$(INCLUDEDIR)"
+	@mkdir -p $(DESTDIR)$(INCLUDEDIR)
+	@echo "CP include"
+	@cp -R --preserve=timestamps include/. $(DESTDIR)$(INCLUDEDIR)/.
 
 install: $(EXECS)
-	mkdir -p $(DESTDIR)$(BINDIR)
-	cp $(EXECS) $(DESTDIR)$(BINDIR)
+	@echo "MKDIR $(DESTDIR)$(BINDIR)"
+	@mkdir -p $(DESTDIR)$(BINDIR)
+	@echo "CP $(EXECS)"
+	@cp $(EXECS) $(DESTDIR)$(BINDIR)
 
 -include $(OBJS:.o=.d)

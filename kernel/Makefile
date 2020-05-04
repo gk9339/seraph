@@ -75,30 +75,45 @@ $(ARCHDIR)/crtn.o \
 all: seraph.kernel
 
 seraph.kernel: $(OBJS) $(ARCHDIR)/linker.ld
-	$(CC) -MD -c kernel/version.c -o kernel/version.o -D__TIMEZONE__=\"$(shell date +"%z")\"
-	$(CC) -T $(ARCHDIR)/linker.ld -o $@ $(CFLAGS)$(LDFLAGS)$(ARCHDIR)/crti.o $(KERNEL_OBJS) kernel/version.o $(LIBS) $(ARCHDIR)/crtn.o
-	$(NM) seraph.kernel -g | ./script/symbols.py > kernel/symbols.S
-	$(CC) -MD -c kernel/symbols.S -o kernel/symbols.o
-	$(CC) -T $(ARCHDIR)/linker.ld -o $@ $(CFLAGS)$(LDFLAGS) $(ARCHDIR)/crti.o $(KERNEL_OBJS) kernel/version.o kernel/symbols.o $(LIBS) $(ARCHDIR)/crtn.o
-	grub-file --is-x86-multiboot seraph.kernel
+	@echo "CC kernel/version.o"
+	@$(CC) -MD -c kernel/version.c -o kernel/version.o -D__TIMEZONE__=\"$(shell date +"%z")\"
+	@echo "CC $(ARCHDIR)/crti.o"
+	@$(CC) -T $(ARCHDIR)/linker.ld -o $@ $(CFLAGS)$(LDFLAGS) $(ARCHDIR)/crti.o $(KERNEL_OBJS) kernel/version.o $(LIBS) $(ARCHDIR)/crtn.o
+	@echo "NM kernel/symbols.S"
+	@$(NM) seraph.kernel -g | ./script/symbols.py > kernel/symbols.S
+	@echo "CC kernel/symbols.o"
+	@$(CC) -MD -c kernel/symbols.S -o kernel/symbols.o
+	@echo "CC $@"
+	@$(CC) -T $(ARCHDIR)/linker.ld -o $@ $(CFLAGS)$(LDFLAGS) $(ARCHDIR)/crti.o $(KERNEL_OBJS) kernel/version.o kernel/symbols.o $(LIBS) $(ARCHDIR)/crtn.o
+	@echo "GRUB-FILE seraph.kernel"
+	@grub-file --is-x86-multiboot seraph.kernel
 
 .c.o:
-	$(CC) -MD -c $< -o $@ -std=gnu11 $(CFLAGS)$(CPPFLAGS)
+	@echo "CC $@"
+	@$(CC) -MD -c $< -o $@ -std=gnu11 $(CFLAGS)$(CPPFLAGS)
 
 .S.o:
-	$(CC) -MD -c $< -o $@ $(CFLAGS)$(CPPFLAGS)
+	@echo "CC $@"
+	@$(CC) -MD -c $< -o $@ $(CFLAGS)$(CPPFLAGS)
 
 clean:
-	rm -f seraph.kernel
-	rm -f $(OBJS) *.o */*.o */*/*.o
-	rm -f $(OBJS:.o=.d) *.d */*.d */*/*.d
+	@echo "RM seraph.kernel"
+	@rm -f seraph.kernel
+	@echo "RM $(OBJS)"
+	@rm -f $(OBJS)
+	@echo "RM $(OBJS:.o=.d)"
+	@rm -f $(OBJS:.o=.d)
 
 install-headers:
-	mkdir -p $(DESTDIR)$(INCLUDEDIR)
-	cp -R --preserve=timestamps include/. $(DESTDIR)$(INCLUDEDIR)/.
+	@echo "MKDIR $(DESTDIR)$(INCLUDEDIR)"
+	@mkdir -p $(DESTDIR)$(INCLUDEDIR)
+	@echo "CP include"
+	@cp -R --preserve=timestamps include/. $(DESTDIR)$(INCLUDEDIR)/.
 
 install: seraph.kernel
-	mkdir -p $(DESTDIR)$(BOOTDIR)
-	cp seraph.kernel $(DESTDIR)$(BOOTDIR)
+	@echo "MKDIR $(DESTDIR)$(BOOTDIR)"
+	@mkdir -p $(DESTDIR)$(BOOTDIR)
+	@echo "CP seraph.kernel"
+	@cp seraph.kernel $(DESTDIR)$(BOOTDIR)
 
 -include $(OBJS:.o=.d)

@@ -18,13 +18,15 @@ ld.so \
 all: $(LIBS)
 
 ld.so: linker.c linker.ld ../libc/libc.a
-	$(CC) $(CFLAGS)$(LDFLAGS) -o $@ $<
+	@$(CC) $(CFLAGS)$(LDFLAGS) -o $@ $<
+	@echo "CC $@"
 
 clean:
-	rm -f $(LIBS)
-
-install-headers:
+	@rm -f $(LIBS)
+	@echo "RM $(LIBS)"
 
 install: $(LIBS)
-	mkdir -p $(DESTDIR)$(LIBDIR)
-	cp $(LIBS) $(DESTDIR)$(LIBDIR)
+	@mkdir -p $(DESTDIR)$(LIBDIR)
+	@echo "MKDIR $(DESTDIR)$(LIBDIR)"
+	@cp $(LIBS) $(DESTDIR)$(LIBDIR)
+	@echo "CP $(LIBS)"

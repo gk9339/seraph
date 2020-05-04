@@ -2,8 +2,6 @@
 
 import tarfile
 
-print("generating initrd.");
-
 restricted_files = {
         'bin/init' : 0o700,
         }

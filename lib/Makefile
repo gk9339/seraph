@@ -26,27 +26,39 @@ libansiterm/libansiterm.so \
 all: $(OBJS) $(LIBS)
 
 .c.o:
-	$(CC) -MD -c $< -o $@ -std=gnu11 $(CFLAGS)
+	@echo "CC $@"
+	@$(CC) -MD -c $< -o $@ -std=gnu11 $(CFLAGS)
 
 libkbd/libkbd.so: libkbd/libkbd.o
-	$(CC) $^ -o $@ $(DYNCFLAGS)
+	@echo "CC $@"
+	@$(CC) $^ -o $@ $(DYNCFLAGS)
 
 libansiterm/libansiterm.so: libansiterm/libansiterm.o
-	$(CC) $^ -o $@ $(DYNCFLAGS)
+	@echo "CC $@"
+	@$(CC) $^ -o $@ $(DYNCFLAGS)
 
 clean:
-	rm -f $(LIBS)
-	rm -f $(OBJS) */*.d
+	@echo "RM $(LIBS)"
+	@rm -f $(LIBS)
+	@echo "RM $(OBJS)"
+	@rm -f $(OBJS)
+	@echo "RM $(OBJS:.o=.d)"
+	@rm -f $(OBJS:.o=.d)
 
 include:
-	mkdir -p include
+	@echo "MKDIR include"
+	@mkdir -p include
 
 install-headers: include
-	mkdir -p $(DESTDIR)$(INCLUDEDIR)
-	cp -R --preserve=timestamps include/. $(DESTDIR)$(INCLUDEDIR)/.
+	@echo "MKDIR $(DESTDIR)$(INCLUDEDIR)"
+	@mkdir -p $(DESTDIR)$(INCLUDEDIR)
+	@echo "CP include"
+	@cp -R --preserve=timestamps include/. $(DESTDIR)$(INCLUDEDIR)/.
 
 install: $(LIBS)
-	mkdir -p $(DESTDIR)$(LIBDIR)
-	cp $(LIBS) $(DESTDIR)$(LIBDIR)
+	@echo "MKDIR $(DESTDIR)$(LIBDIR)"
+	@mkdir -p $(DESTDIR)$(LIBDIR)
+	@echo "CP $(LIBS)"
+	@cp $(LIBS) $(DESTDIR)$(LIBDIR)
 
 -include $(OBJS:.o=.d)

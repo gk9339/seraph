@@ -210,64 +210,94 @@ $(ARCH_CRTS) \
 all: $(BINARIES) $(CRTS)
 
 libc.a: $(OBJS)
-	$(AR) rcs $@ $^
+	@echo "AR $@"
+	@$(AR) rcs $@ $^
 
 libc.so: $(OBJS) libm.a
-	mkdir -p $(DESTDIR)$(LIBDIR)
-	$(AS) $(ARCHDIR)/crt0.S -o crt0.o
-	$(AS) $(ARCHDIR)/crti.S -o crti.o
-	$(AS) $(ARCHDIR)/crtn.S -o crtn.o
-	cp crt0.o $(DESTDIR)$(LIBDIR)
-	cp crti.o $(DESTDIR)$(LIBDIR)
-	cp crtn.o $(DESTDIR)$(LIBDIR)
-	OBJ=`$(CC) $(CFLAGS) $(LDFLAGS) -print-file-name=crtbegin.o` && cp "$$OBJ" $(DESTDIR)$(LIBDIR)
-	OBJ=`$(CC) $(CFLAGS) $(LDFLAGS) -print-file-name=crtend.o` && cp "$$OBJ" $(DESTDIR)$(LIBDIR)
-	$(CC) -nodefaultlibs -o $@ $(CFLAGS) -shared $^ -lgcc
-	#cd ..; ./libstdcxx.sh
+	@echo "MKDIR $(DESTDIR)$(LIBDIR)"
+	@mkdir -p $(DESTDIR)$(LIBDIR)
+	@echo "AS $(ARCHDIR)/crt0.o"
+	@$(AS) $(ARCHDIR)/crt0.S -o $(ARCHDIR)/crt0.o
+	@echo "AS $(ARCHDIR)/crti.o"
+	@$(AS) $(ARCHDIR)/crti.S -o $(ARCHDIR)/crti.o
+	@echo "AS $(ARCHDIR)/crtn.o"
+	@$(AS) $(ARCHDIR)/crtn.S -o $(ARCHDIR)/crtn.o
+	@echo "CP $(ARCHDIR)/crt0.o"
+	@cp $(ARCHDIR)/crt0.o $(DESTDIR)$(LIBDIR)
+	@echo "CP $(ARCHDIR)/crti.o"
+	@cp $(ARCHDIR)/crti.o $(DESTDIR)$(LIBDIR)
+	@echo "CP $(ARCHDIR)/crtn.o"
+	@cp $(ARCHDIR)/crtn.o $(DESTDIR)$(LIBDIR)
+	@echo "CC crtbegin.o"
+	@echo "CP crtbegin.o"
+	@OBJ=`$(CC) $(CFLAGS) $(LDFLAGS) -print-file-name=crtbegin.o` && cp "$$OBJ" $(DESTDIR)$(LIBDIR)
+	@echo "CC crtend.o"
+	@echo "CP crtend.o"
+	@OBJ=`$(CC) $(CFLAGS) $(LDFLAGS) -print-file-name=crtend.o` && cp "$$OBJ" $(DESTDIR)$(LIBDIR)
+	@echo "CC $@"
+	@$(CC) -nodefaultlibs -o $@ $(CFLAGS) -shared $^ -lgcc
 
 libk.a: $(LIBK_OBJS)
-	$(AR) rcs $@ $^
+	@echo "AR $@"
+	@$(AR) rcs $@ $^
 
 libm.a: $(patsubst %, libm/%, $(LIBMOBJ))
-	$(AR) rcs $@ $^
+	@echo "AR $@"
+	@$(AR) rcs $@ $^
 
 libm.so: $(patsubst %, libm/%, $(LIBMOBJ)) | libc.so
-	$(CC) -nodefaultlibs -o $@ $(CFLAGS) -shared $^
+	@echo "CC $@"
+	@$(CC) -nodefaultlibs -o $@ $(CFLAGS) -shared $^
 
 libssp.a: libssp/ssp.o
-	$(AR) rcs $@ $^
+	@echo "AR $@"
+	@$(AR) rcs $@ $^
 
 libssp.so: libssp/ssp.o | libc.so
-	$(CC) -nodefaultlibs -o $@ $(CFLAGS) -shared $^
+	@echo "CC $@"
+	@$(CC) -nodefaultlibs -o $@ $(CFLAGS) -shared $^
 
 libssp_nonshared.a: libssp/ssp_local.o libssp/ssp.o
-	$(AR) rcs $@ $^
+	@echo "AR $@"
+	@$(AR) rcs $@ $^
 
 .c.o:
-	$(CC) -MD -c $< -o $@ -std=gnu11 $(CFLAGS)$(CPPFLAGS)
+	@echo "CC $@"
+	@$(CC) -MD -c $< -o $@ -std=gnu11 $(CFLAGS)$(CPPFLAGS)
 
-.c.S:
-	$(CC) -MD -c $< -o $@ $(CFLAGS)$(CPPFLAGS)
+.S.o:
+	@echo "CC $@"
+	@$(CC) -MD -c $< -o $@ $(CFLAGS)$(CPPFLAGS)
 
 .c.libk.o:
-	$(CC) -MD -c $< -o $@ -std=gnu11 $(LIBK_CFLAGS)$(LIBK_CPPFLAGS)
+	@echo "CC $@"
+	@$(CC) -MD -c $< -o $@ -std=gnu11 $(LIBK_CFLAGS)$(LIBK_CPPFLAGS)
 
 .S.libk.o:
-	$(CC) -MD -c $< -o $@ $(LIBK_CFLAGS)$(LIBK_CPPFLAGS)
+	@echo "CC $@"
+	@$(CC) -MD -c $< -o $@ $(LIBK_CFLAGS)$(LIBK_CPPFLAGS)
 
 clean:
-	rm -f $(BINARIES) *.a
-	rm -f $(CRTS) *.o
-	rm -f $(OBJS) $(LIBK_OBJS) *.o */*.o */*/*.o
-	rm -f $(OBJS:.o=.d) $(LIBK_OBJS:.o=.d) *.d */*.d */*/*.d
+	@echo "RM $(BINARIES)"
+	@rm -f $(BINARIES)
+	@echo "RM $(CRTS)"
+	@rm -f $(CRTS)
+	@echo "RM $(OBJS:.o=.o) $(LIBK_OBJS:.o=.o) $(patsubst %, libm/%, $(LIBMOBJ:.o=.o))"
+	@rm -f $(OBJS:.o=.o) $(LIBK_OBJS:.o=.o) $(patsubst %, libm/%, $(LIBMOBJ:.o=.o))
+	@echo "RM $(OBJS:.o=.d) $(LIBK_OBJS:.o=.d) $(patsubst %, libm/%, $(LIBMOBJ:.o=.d))"
+	@rm -f $(OBJS:.o=.d) $(LIBK_OBJS:.o=.d) $(patsubst %, libm/%, $(LIBMOBJ:.o=.d))
 
 install-headers:
-	mkdir -p $(DESTDIR)$(INCLUDEDIR)
-	cp -R --preserve=timestamps include/. $(DESTDIR)$(INCLUDEDIR)/.
+	@echo "MKDIR $(DESTDIR)$(INCLUDEDIR)"
+	@mkdir -p $(DESTDIR)$(INCLUDEDIR)
+	@echo "CP include"
+	@cp -R --preserve=timestamps include/. $(DESTDIR)$(INCLUDEDIR)/.
 
 install: $(BINARIES)
-	mkdir -p $(DESTDIR)$(LIBDIR)
-	cp $(BINARIES) $(DESTDIR)$(LIBDIR)
+	@echo "MKDIR $(DESTDIR)$(LIBDIR)"
+	@mkdir -p $(DESTDIR)$(LIBDIR)
+	@echo "CP $(BINARIES)"
+	@cp $(BINARIES) $(DESTDIR)$(LIBDIR)
 
 -include $(OBJS:.o=.d)
 -include $(LIBK_OBJS:.o=.d)

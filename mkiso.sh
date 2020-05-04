@@ -6,13 +6,16 @@ mkdir -p isodir
 mkdir -p isodir/boot
 mkdir -p isodir/boot/grub
 mkdir -p sysroot/boot/grub
+mkdir -p sysroot/conf
 mkdir -p sysroot/dev
 mkdir -p sysroot/proc
 mkdir -p sysroot/tmp
 mkdir -p sysroot/src
 
+cp -r conf/* sysroot/conf
+
 cp toolchain/i686-seraph/lib/libstdc++.so toolchain/i686-seraph/lib/libgcc_s.so.1 sysroot/lib
-cd sysroot/lib && ln -svf libgcc_s.so.1 libgcc_s.so && cd ../..
+cd sysroot/lib && ln -sf libgcc_s.so.1 libgcc_s.so && cd ../..
 
 find bin \( -name '*.c' -o -name '*.cpp' -o -name '*.h' -o -name '*.S' -o -name '*.py' -o -name '*.ld' -o -name 'Makefile' -o -name 'make.config' \) -exec cp --parents {} sysroot/src/ \;
 find kernel \( -name '*.c' -o -name '*.cpp' -o -name '*.h' -o -name '*.S' -o -name '*.py' -o -name '*.ld' -o -name 'Makefile' -o -name 'make.config' \) -exec cp --parents {} sysroot/src/ \;

@@ -157,7 +157,7 @@ static int sys_read( int fd, char* ptr, int len )
             return (int)out;
         }else
         {
-
+            return -EACCES;
         }
     }
 

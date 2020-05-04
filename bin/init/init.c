@@ -24,7 +24,8 @@ int main( void )
         printf("Init already started.\nExiting\n");
         exit(0);
     }     
-    
+
+    // Remount ramdisk fs as tmpfs
     mount("/dev/ram0", "/dev/base", "ustar");
     mount("root,755", "/", "tmpfs");
  
@@ -37,6 +38,17 @@ int main( void )
     syscall_open("/dev/null", 0, 0);
     syscall_open("/dev/null", 1, 0);
     syscall_open("/dev/null", 1, 0);
+    
+    // Set initial hostname to /conf/hostname
+    char hostname[256] = { 0 };
+    int hostname_fd = open("/conf/hostname", O_RDONLY);
+    if( hostname_fd > 0 )
+    {
+        read(hostname_fd, &hostname, 256);
+        close(hostname_fd);
+        strtok(hostname, "\n"); // Remove \n from the hostname
+        sethostname(hostname, strlen(hostname));
+    }
     
     // TODO: use /etc/init.d or similar for this
     pid_t pid = fork();

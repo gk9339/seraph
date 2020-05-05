@@ -1,13 +1,13 @@
 # seraph
 ![build](https://github.com/gk9339/seraph/workflows/build/badge.svg)
 
-![Screenshot from 2020-04-19 15-27-29](https://user-images.githubusercontent.com/5243610/79682192-d9ba0f00-8252-11ea-8ba1-a384f5b35ae8.png)
+![Screenshot from 2020-05-04 14-45-39](https://user-images.githubusercontent.com/5243610/80942024-5e418b80-8e16-11ea-9da7-94a18f2c6e22.png)
 
 ### Build requirements (Archlinux)
 `automake-1.15`
 `gcc`
 `make`
-`wget`
+`curl`
 `bison`
 `flex`
 `gmp`
@@ -21,7 +21,7 @@
 `automake-1.15`
 `libtool`
 `build-essential`
-`wget`
+`curl`
 `bison`
 `flex`
 `libgmp3-dev`

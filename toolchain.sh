@@ -39,11 +39,11 @@ echo "PUSHD tarballs"
 pushd tarballs > /dev/null
     if [ ! -e "binutils-2.32.tar.gz" ]; then
         echo "CURL binutils-2.32.tar.gz"
-        curl "https://ftp.gnu.org/gnu/binutils/binutils-2.32.tar.gz"
+        curl "https://ftp.gnu.org/gnu/binutils/binutils-2.32.tar.gz" -o binutils-2.32.tar.gz
     fi
     if [ ! -e "gcc-8.3.0.tar.gz" ]; then
         echo "CURL gcc-8.3.0.tar.gz"
-        curl "https://ftp.gnu.org/gnu/gcc/gcc-8.3.0/gcc-8.3.0.tar.gz"
+        curl "https://ftp.gnu.org/gnu/gcc/gcc-8.3.0/gcc-8.3.0.tar.gz" -o gcc-8.3.0.tar.gz
     fi
 
     if [ ! -d "binutils-2.32" ]; then

@@ -126,7 +126,7 @@ popd > /dev/null
 echo "CD $DIR"
 cd "$DIR"
 
-. ./script/config.sh
+. ./headers.sh
 echo -e " \033[38;5;3m=> MAKE libc\033[0m"
 cd libc && DESTDIR="$SYSROOT" $MAKE -j$NUMCPU install
 

@@ -206,6 +206,15 @@ int main( int argc, char** argv )
         object_postload(lib);
         object_relocate(lib);
 
+        foreach(node, lib->dependencies)
+        {
+            char* lib_name = node->value;
+            if( !list_find(main_obj->dependencies, lib_name) && !hashtable_has(libs, lib_name) )
+            {
+                list_insert(main_obj->dependencies, lib_name);
+            }
+        }
+
         fclose(lib->file);
 
         if( lib->init_array )

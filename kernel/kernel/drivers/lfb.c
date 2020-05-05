@@ -8,7 +8,7 @@
 #include <stdlib.h>
 #include <kernel/mem.h>
 #include <errno.h>
-#include "terminal-font.h"
+#include <terminal-font.h>
 
 uint16_t lfb_resolution_x = 0;
 uint16_t lfb_resolution_y = 0;
@@ -110,7 +110,7 @@ static void write_char(int x, int y, int val, uint32_t color) {
     {
         val = 4;
     }
-    uint16_t * c = large_font[val];
+    const uint16_t* c = large_font[val];
     for (uint8_t i = 0; i < CHAR_HEIGHT; ++i)
     {
         for (uint8_t j = 0; j < CHAR_WIDTH; ++j)

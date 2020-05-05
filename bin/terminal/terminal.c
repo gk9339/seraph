@@ -22,7 +22,7 @@
 #include "pallete.h"
 #include "decodeutf8.h"
 #include "ununicode.h"
-#include "terminal-font.h"
+#include <terminal-font.h>
 
 #define SWAP(T,a,b) { T _a = a; a = b; b = _a; }
 
@@ -589,7 +589,7 @@ void terminal_write_char( uint32_t val, uint16_t x, uint16_t y, uint32_t c_fg, u
     x *= CHAR_WIDTH;
     y *= CHAR_HEIGHT;
 
-    uint16_t* c = large_font[val];
+    const uint16_t* c = large_font[val];
     for( uint8_t i = 0; i < CHAR_HEIGHT; ++i )
     {
         for( uint8_t j = 0; j < CHAR_WIDTH; ++j )

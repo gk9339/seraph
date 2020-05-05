@@ -12,6 +12,7 @@
 #include <kernel/timer.h>
 #include <kernel/irq.h>
 #include <kernel/lfb.h>
+#include <terminal-font.h>
 
 struct procfs_entry
 {
@@ -524,12 +525,16 @@ static uint32_t framebuffer_func( fs_node_t* node __attribute__((unused)), uint3
                  "YRes:%d\n"
                  "BPP:%d\n"
                  "Stride:%d\n"
-                 "Address:%#p\n",
+                 "Address:%#p\n"
+                 "CharWidth:%d\n"
+                 "CharHeight:%d\n",
                  lfb_resolution_x,
                  lfb_resolution_y,
                  lfb_bpp,
                  lfb_stride,
-                 lfb_address);
+                 lfb_address,
+                 lfb_resolution_x / CHAR_WIDTH,
+                 lfb_resolution_y / CHAR_HEIGHT);
     
     size_t _bsize = strlen(buf);
     if( offset > _bsize ) return 0;

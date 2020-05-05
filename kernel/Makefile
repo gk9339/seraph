@@ -99,10 +99,10 @@ seraph.kernel: $(OBJS) $(ARCHDIR)/linker.ld
 clean:
 	@echo "RM seraph.kernel"
 	@rm -f seraph.kernel
-	@echo "RM $(OBJS)"
-	@rm -f $(OBJS)
-	@echo "RM $(OBJS:.o=.d)"
-	@rm -f $(OBJS:.o=.d)
+	@echo "RM $(OBJS) kernel/symbols.o kernel/version.o"
+	@rm -f $(OBJS) kernel/symbols.o kernel/version.o
+	@echo "RM $(OBJS:.o=.d) kernel/symbols.d kernel/version.d"
+	@rm -f $(OBJS:.o=.d) kernel/symbols.d kernel/version.d
 
 install-headers:
 	@echo "MKDIR $(DESTDIR)$(INCLUDEDIR)"

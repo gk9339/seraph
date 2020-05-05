@@ -1,9 +1,12 @@
+#ifndef TERMINAL_FONT_H
+#define TERMINAL_FONT_H
+
 #include <stdint.h>
 
 #define CHAR_HEIGHT 20
 #define CHAR_WIDTH 9
 
-uint16_t large_font[][20] =
+static const uint16_t large_font[][20] =
 {
     /* 0 0  */
     {
@@ -981,13 +984,13 @@ uint16_t large_font[][20] =
         0x0000, /*                  */
         0x0000, /*                  */
         0x0000, /*                  */
+        0x0000, /*                  */
         0x2200, /*   #   #          */
         0x1400, /*    # #           */
-        0x0800, /*     #            */
         0x7F00, /*  #######         */
-        0x0800, /*     #            */
         0x1400, /*    # #           */
         0x2200, /*   #   #          */
+        0x0000, /*                  */
         0x0000, /*                  */
         0x0000, /*                  */
         0x0000, /*                  */
@@ -5894,3 +5897,5 @@ uint16_t large_font[][20] =
         0x0000, /*                  */
     },
 };
+
+#endif

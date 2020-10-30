@@ -215,11 +215,13 @@ static int acpiEnable( void )
                     break;
             }
             if( PM1bControlBlock != 0 )
+            {
                 for (; i<300; i++ )
                 {
                     if( (inportl((unsigned int) PM1bControlBlock) &SCI_enabled) == 1 )
                         break;
                 }
+            }
             if( i<300 ) 
             {
                 debug_log("enabled acpi");

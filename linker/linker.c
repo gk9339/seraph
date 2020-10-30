@@ -125,6 +125,16 @@ static void free( void* ptr )
 
 int main( int argc, char** argv )
 {
+    if( argc < 2 )
+    {
+
+        printf("ld.so (\033[1;36mseraph\033[0m dynamic linker)\n"
+               "usage: %s [-e] [EXECUTABLE PATH]\n"
+               " -e adjust argument offset\n", argv[0]);
+
+        return EXIT_SUCCESS;
+    }
+
     char* file = argv[1];
     size_t argc_offset = 1;
 
@@ -168,7 +178,7 @@ int main( int argc, char** argv )
     }
 
     // Load the main object
-    uintptr_t end_addr = object_load(main_obj, 0x0);
+    uintptr_t end_addr = object_load(main_obj, 0);
     object_postload(main_obj);
     object_find_copy_relocations(main_obj);
 

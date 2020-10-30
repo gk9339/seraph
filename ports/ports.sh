@@ -12,7 +12,7 @@ pushd binutils-port
     make all-binutils all-gas all-ld
     make DESTDIR=$SYSROOT install-binutils install-gas install-ld
 popd
-exit 3
+
 mkdir -p gmp-port
 pushd gmp-port
     $TOOLCHAIN/../tarballs/gmp-6.2.0/configure --host=$HOST --prefix=/ || exit 1

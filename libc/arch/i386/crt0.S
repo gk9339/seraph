@@ -1,3 +1,4 @@
+# libc entry point
 .global _start
 
 _start:

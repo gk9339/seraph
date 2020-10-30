@@ -22,6 +22,7 @@ $(patsubst %,coreutils/% , $(COREUTILSOBJ))\
 terminal/terminal.o \
 sh/sh.o \
 clear/clear.o \
+edit/edit.o \
 $(patsubst %,test/% , $(TESTOBJ))\
 
 EXECS=\
@@ -32,6 +33,7 @@ $(patsubst %,coreutils/% , $(COREUTILSEXEC))\
 terminal/terminal \
 sh/sh \
 clear/clear \
+edit/edit \
 $(patsubst %,test/% , $(TESTEXEC))\
 
 .PHONY: all clean install install-headers
@@ -68,6 +70,10 @@ sh/sh: sh/sh.o
 	@$(CC) $^ -o $@ $(CFLAGS)$(LIBS)
 
 clear/clear: clear/clear.o
+	@echo "CC $@"
+	@$(CC) $^ -o $@ $(CFLAGS)$(LIBS)
+
+edit/edit: edit/edit.o
 	@echo "CC $@"
 	@$(CC) $^ -o $@ $(CFLAGS)$(LIBS)
 

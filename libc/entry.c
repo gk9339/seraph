@@ -27,7 +27,7 @@ void _pre_main( int (*main)(int, char**, char**), int argc, char* argv[], char* 
     environ = env;
 
     _init();
-    _exit(main(argc, argv, environ));
+    exit(main(argc, argv, environ));
 }
 
 __attribute__((constructor)) static void _libc_init( void )

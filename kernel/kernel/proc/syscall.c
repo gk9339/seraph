@@ -615,6 +615,14 @@ static int sys_reboot( int type )
         }else if( type == 1 )
         {
             acpi_poweroff();
+            debug_log("acpi poweroff failed - trying QEMU poweroff");
+            outports(0x604, 0x0 | 0x2000);
+            debug_log("QEMU poweroff failed - trying Bochs poweroff");
+            outports(0xB004, 0x0 | 0x2000);
+            debug_log("Bochs poweroff failed - trying Virtualbox poweroff");
+            outports(0x4004, 0x0 | 0x3400);
+            debug_log("Virtualbox poweroff failed - rebooting...");
+            sys_reboot(0);
         }
         STOP;
     }

@@ -6,6 +6,7 @@ extern "C" {
 #endif
 
 #include <sys/cdefs.h>
+#include <sys/types.h>
 #include <stddef.h>
 #include <stdarg.h>
 
@@ -56,6 +57,8 @@ int puts( const char* );
 int getc( FILE* );
 int getchar( void );
 int fgetc( FILE* );
+
+ssize_t getline( char**, size_t*, FILE* );
 
 int printf( const char*, ... );
 int fprintf( FILE*, const char*, ... );

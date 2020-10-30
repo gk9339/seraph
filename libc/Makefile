@@ -144,6 +144,7 @@ stdio/freopen.o \
 stdio/remove.o \
 stdio/clearerr.o \
 stdio/rewind.o \
+stdio/getline.o \
 stdlib/strtod.o \
 stdlib/exit.o \
 stdlib/atexit.o \

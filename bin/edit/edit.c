@@ -11,11 +11,19 @@
 
 #define CTRL_KEY(k) ((k) & 0x1f)
 
+typedef struct edit_row
+{
+    int size;
+    char* chars;
+}edit_row;
+
 struct config_struct
 {
     int cx, cy;
-    int rows;
-    int cols;
+    int term_rows;
+    int term_cols;
+    int numrows;
+    edit_row* rows;
     struct termios prev_termios;
 };
 struct config_struct config;
@@ -47,19 +55,28 @@ int read_key( void );
 void move_cursor( int key );
 
 void refresh_screen( void );
-void draw_rows( struct abuf* ab );
+void draw_term_rows( struct abuf* ab );
 void abuf_append( struct abuf* ab, const char* s, int len );
 
-int get_term_size( int* rows, int* cols );
+void open_file( char* filename );
 
-int main( void )
+int get_term_size( int* term_rows, int* term_cols );
+
+int main( int argc, char** argv )
 {
     enable_raw_mode();
     write(STDOUT_FILENO, "\033[H\033[2J", 7);
 
     config.cx = 0;
     config.cy = 0;
-    get_term_size(&config.rows, &config.cols);
+    config.numrows = 0;
+    config.rows = NULL;
+    get_term_size(&config.term_rows, &config.term_cols);
+
+    if( argc >= 2 )
+    {
+        open_file(argv[1]);
+    }
 
     while( 1 )
     {
@@ -102,11 +119,11 @@ void process_keypress( void )
             config.cx = 0;
             break;
         case END_KEY:
-            config.cx = config.cols - 1;
+            config.cx = config.term_cols - 1;
             break;
         case PAGE_UP:
         case PAGE_DOWN:;
-            int times = config.rows;
+            int times = config.term_rows;
             while( times-- )
             {
                 move_cursor( c == PAGE_UP? ARROW_UP : ARROW_DOWN );
@@ -200,7 +217,7 @@ void move_cursor( int key )
             }
             break;
         case ARROW_DOWN:
-            if( config.cy != config.rows - 1 )
+            if( config.cy != config.term_rows - 1 )
             {
                 config.cy++;
             }
@@ -212,7 +229,7 @@ void move_cursor( int key )
             }
             break;
         case ARROW_RIGHT:
-            if( config.cx != config.cols - 1 )
+            if( config.cx != config.term_cols - 1 )
             {
                 config.cx++;
             }
@@ -226,7 +243,7 @@ void refresh_screen( void )
 
     abuf_append(&ab, "\033[?25l\033[H", 9);
 
-    draw_rows(&ab);
+    draw_term_rows(&ab);
     
     char buf[32];
     snprintf(buf, sizeof(buf), "\033[%d;%dH", config.cy + 1, config.cx + 1);
@@ -239,60 +256,71 @@ void refresh_screen( void )
     free(ab.buf);
 }
 
-void draw_rows( struct abuf* ab )
+void draw_term_rows( struct abuf* ab )
 {
-    for( int y = 0; y < config.rows; y++ )
+    for( int y = 0; y < config.term_rows; y++ )
     {
-        if( y == config.rows / 3 )
+        if( y >= config.numrows )
         {
-            char welcome[80];
-            int welcomelen = snprintf(welcome, sizeof(welcome), "seraph editor -- version %s", VERSION);
-            if( welcomelen > config.cols ) 
+            if( config.numrows == 0 && y == config.term_rows / 3 )
             {
-                welcomelen = config.cols;
-            }
-            int padding = (config.cols - welcomelen) / 2;
-            if( padding )
+                char welcome[80];
+                int welcomelen = snprintf(welcome, sizeof(welcome), "seraph editor -- version %s", VERSION);
+                if( welcomelen > config.term_cols ) 
+                {
+                    welcomelen = config.term_cols;
+                }
+                int padding = (config.term_cols - welcomelen) / 2;
+                if( padding )
+                {
+                    abuf_append(ab, "~", 1);
+                    padding--;
+                }
+        
+                while(padding--)
+                {
+                    abuf_append(ab, " ", 1);
+                }
+        
+                abuf_append(ab, welcome, welcomelen);
+            }else if( config.numrows == 0 && y == (config.term_rows / 3) + 1 )
+            {
+                char welcome[80];
+                int welcomelen = snprintf(welcome, sizeof(welcome), "CTRL+Q to quit");
+                if( welcomelen > config.term_cols ) 
+                {
+                    welcomelen = config.term_cols;
+                }
+                int padding = (config.term_cols - welcomelen) / 2;
+                if( padding )
+                {
+                    abuf_append(ab, "~", 1);
+                    padding--;
+                }
+        
+                while(padding--)
+                {
+                    abuf_append(ab, " ", 1);
+                }
+        
+                abuf_append(ab, welcome, welcomelen);
+            }else
             {
                 abuf_append(ab, "~", 1);
-                padding--;
             }
-
-            while(padding--)
-            {
-                abuf_append(ab, " ", 1);
-            }
-
-            abuf_append(ab, welcome, welcomelen);
-        }else if( y == (config.rows / 3) + 1 )
-        {
-            char welcome[80];
-            int welcomelen = snprintf(welcome, sizeof(welcome), "CTRL+Q to quit");
-            if( welcomelen > config.cols ) 
-            {
-                welcomelen = config.cols;
-            }
-            int padding = (config.cols - welcomelen) / 2;
-            if( padding )
-            {
-                abuf_append(ab, "~", 1);
-                padding--;
-            }
-
-            while(padding--)
-            {
-                abuf_append(ab, " ", 1);
-            }
-
-            abuf_append(ab, welcome, welcomelen);
         }else
         {
-            abuf_append(ab, "~", 1);
+            int len = config.rows[y].size;
+            if( len > config.term_rows )
+            {
+                len = config.term_rows;
+            }
+            abuf_append(ab, config.rows[y].chars, len);
         }
 
         abuf_append(ab, "\033[K", 3);
         
-        if( y < config.rows - 1 )
+        if( y < config.term_rows - 1 )
         {
             abuf_append(ab, "\n", 1);
         }
@@ -312,7 +340,44 @@ void abuf_append( struct abuf* ab, const char* s, int len )
     ab->len += len;
 }
 
-int get_term_size( int* rows, int* cols )
+void append_row( char* s, size_t len )
+{
+    config.rows = realloc(config.rows, sizeof(edit_row) * (config.numrows + 1));
+
+    config.rows[config.numrows].size = len;
+    config.rows[config.numrows].chars = malloc(len + 1);
+    memcpy(config.rows[config.numrows].chars, s, len);
+    config.rows[config.numrows].chars[len] = '\0';
+    config.numrows++;
+}
+
+void open_file( char* filename )
+{
+    FILE* fp = fopen(filename, "r");
+    if( !fp )
+    {
+        perror("fopen");
+    }
+
+    char* line = NULL;
+    size_t linecap = 0;
+    ssize_t linelen;
+
+    while( (linelen = getline(&line, &linecap, fp)) != -1 )
+    {
+        while( linelen > 0 && (line[linelen - 1] == '\n' ||
+                               line[linelen - 1] == '\r') )
+        {
+            linelen--;
+        }
+        append_row(line, linelen);
+    }
+
+    free(line);
+    fclose(fp);
+}
+
+int get_term_size( int* term_rows, int* term_cols )
 {
     struct winsize ws;
 
@@ -321,8 +386,8 @@ int get_term_size( int* rows, int* cols )
         return -1;
     }else
     {
-        *rows = ws.ws_row;
-        *cols = ws.ws_col;
+        *term_rows = ws.ws_row;
+        *term_cols = ws.ws_col;
         return 0;
     }
 }

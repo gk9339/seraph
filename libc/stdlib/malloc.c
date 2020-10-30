@@ -468,7 +468,7 @@ static void* __attribute__((malloc)) realloc_i( void* ptr, uintptr_t size )
 {
     if( __builtin_expect(ptr == NULL, 0) )
     {
-        return NULL;
+        return malloc_i(size);
     }
 
     if( __builtin_expect(size == 0, 0) )

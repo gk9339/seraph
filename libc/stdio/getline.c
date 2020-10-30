@@ -6,34 +6,45 @@
 ssize_t getline( char** lineptr, size_t* n, FILE* stream )
 {
     static char line[256];
-    char *ptr;
+    char* ptr;
     unsigned int len;
 
-    if (lineptr == NULL || n == NULL)
+    if( lineptr == NULL || n == NULL )
     {
        errno = EINVAL;
        return -1;
     }
 
-    if (ferror (stream))
+    if( ferror (stream) )
+    {
        return -1;
+    }
 
-    if (feof(stream))
+    if( feof(stream) )
+    {
        return -1;
+    }
 
-    fgets(line,256,stream);
+    if( !fgets(line,256,stream) )
+    {
+        return -1;
+    }
 
     ptr = strchr(line,'\n');
-    if (ptr)
+    if( ptr )
+    {
        *ptr = '\0';
+    }
 
     len = strlen(line);
 
-    if ((len+1) < 256)
+    if( (len+1) < 256 )
     {
        ptr = realloc(*lineptr, 256);
-       if (ptr == NULL)
+       if( ptr == NULL )
+       {
           return(-1);
+       }
        *lineptr = ptr;
        *n = 256;
     }

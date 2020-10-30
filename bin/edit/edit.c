@@ -20,6 +20,7 @@ typedef struct edit_row
 struct config_struct
 {
     int cx, cy;
+    int scroll_rows;
     int term_rows;
     int term_cols;
     int numrows;
@@ -49,6 +50,7 @@ enum editor_key
 
 void enable_raw_mode( void );
 void disable_raw_mode( void );
+void error( const char* s );
 
 void process_keypress( void );
 int read_key( void );
@@ -56,6 +58,7 @@ void move_cursor( int key );
 
 void refresh_screen( void );
 void draw_term_rows( struct abuf* ab );
+void scroll( void );
 void abuf_append( struct abuf* ab, const char* s, int len );
 
 void open_file( char* filename );
@@ -69,6 +72,7 @@ int main( int argc, char** argv )
 
     config.cx = 0;
     config.cy = 0;
+    config.scroll_rows = 0;
     config.numrows = 0;
     config.rows = NULL;
     get_term_size(&config.term_rows, &config.term_cols);
@@ -104,6 +108,14 @@ void enable_raw_mode( void )
 void disable_raw_mode( void )
 {
     tcsetattr(STDIN_FILENO, TCSAFLUSH, &config.prev_termios);
+}
+
+void error( const char* s )
+{
+    write(STDOUT_FILENO, "\033[H\033[2J", 7);
+
+    perror(s);
+    exit(1);
 }
 
 void process_keypress( void )
@@ -149,8 +161,7 @@ int read_key( void )
     {
         if( nread == -1 && errno != EAGAIN )
         {
-            perror("read");
-            exit(1);
+            error("read");
         }
     }
 
@@ -217,7 +228,7 @@ void move_cursor( int key )
             }
             break;
         case ARROW_DOWN:
-            if( config.cy != config.term_rows - 1 )
+            if( config.cy < config.numrows )
             {
                 config.cy++;
             }
@@ -241,12 +252,14 @@ void refresh_screen( void )
 {
     struct abuf ab = {NULL, 0};
 
+    scroll();
+
     abuf_append(&ab, "\033[?25l\033[H", 9);
 
     draw_term_rows(&ab);
     
     char buf[32];
-    snprintf(buf, sizeof(buf), "\033[%d;%dH", config.cy + 1, config.cx + 1);
+    snprintf(buf, sizeof(buf), "\033[%d;%dH", (config.cy - config.scroll_rows) + 1, config.cx + 1);
     abuf_append(&ab, buf, strlen(buf));
 
     abuf_append(&ab, "\033[?25h", 6);
@@ -260,7 +273,8 @@ void draw_term_rows( struct abuf* ab )
 {
     for( int y = 0; y < config.term_rows; y++ )
     {
-        if( y >= config.numrows )
+        int file_row = y + config.scroll_rows;
+        if( file_row >= config.numrows )
         {
             if( config.numrows == 0 && y == config.term_rows / 3 )
             {
@@ -310,12 +324,12 @@ void draw_term_rows( struct abuf* ab )
             }
         }else
         {
-            int len = config.rows[y].size;
-            if( len > config.term_rows )
+            int len = config.rows[file_row].size;
+            if( len > config.term_cols )
             {
-                len = config.term_rows;
+                len = config.term_cols;
             }
-            abuf_append(ab, config.rows[y].chars, len);
+            abuf_append(ab, config.rows[file_row].chars, len);
         }
 
         abuf_append(ab, "\033[K", 3);
@@ -324,6 +338,19 @@ void draw_term_rows( struct abuf* ab )
         {
             abuf_append(ab, "\n", 1);
         }
+    }
+}
+
+void scroll( void )
+{
+    if( config.cy < config.scroll_rows )
+    {
+        config.scroll_rows = config.cy;
+    }
+
+    if( config.cy >= config.scroll_rows + config.term_rows )
+    {
+        config.scroll_rows = config.cy - config.term_rows + 1;
     }
 }
 
@@ -356,7 +383,7 @@ void open_file( char* filename )
     FILE* fp = fopen(filename, "r");
     if( !fp )
     {
-        perror("fopen");
+        error("fopen");
     }
 
     char* line = NULL;

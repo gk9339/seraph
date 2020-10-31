@@ -352,7 +352,7 @@ void terminal_write( char c )
             draw_cursor();
         }else if( c == '\t' )
         {
-            csr_x += ( 8 - csr_x % 8 );
+            csr_x += ( 4 - csr_x % 4 );
             draw_cursor();
         }else
         {

@@ -5,7 +5,7 @@
 
 ssize_t getline( char** lineptr, size_t* n, FILE* stream )
 {
-    static char line[256];
+    static char line[BUFSIZ];
     char* ptr;
     unsigned int len;
 
@@ -25,7 +25,7 @@ ssize_t getline( char** lineptr, size_t* n, FILE* stream )
        return -1;
     }
 
-    if( !fgets(line,256,stream) )
+    if( !fgets(line,BUFSIZ,stream) )
     {
         return -1;
     }
@@ -38,15 +38,15 @@ ssize_t getline( char** lineptr, size_t* n, FILE* stream )
 
     len = strlen(line);
 
-    if( (len+1) < 256 )
+    if( (len+1) < BUFSIZ )
     {
-       ptr = realloc(*lineptr, 256);
+       ptr = realloc(*lineptr, BUFSIZ);
        if( ptr == NULL )
        {
           return(-1);
        }
        *lineptr = ptr;
-       *n = 256;
+       *n = BUFSIZ;
     }
 
     strcpy(*lineptr,line);

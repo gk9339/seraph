@@ -68,7 +68,7 @@ void error( const char* s );
 void process_keypress( void );
 int read_key( void );
 void move_cursor( int key );
-char* status_prompt( char* prompt );
+char* status_prompt( char* prompt, void(*callback)( char*, int ) );
 
 void refresh_screen( void );
 void draw_term_rows( struct abuf* ab );
@@ -87,6 +87,8 @@ void del_char( void );
 void open_file( char* filename );
 void save_file( void );
 char* rows_to_string( int* buflen );
+void find( void );
+void find_callback( char* query, int key );
 
 int get_term_size( int* term_rows, int* term_cols );
 
@@ -113,8 +115,6 @@ int main( int argc, char** argv )
     {
         open_file(argv[1]);
     }
-
-    set_statusmsg("^Q - Quit ^S - Save");
     
     while( 1 )
     {
@@ -182,6 +182,9 @@ void process_keypress( void )
             {
                 config.cx = config.rows[config.cy].size;
             }
+            break;
+        case CTRL_KEY('f'):
+            find();
             break;
         case BACKSPACE:
         case CTRL_KEY('h'):
@@ -342,7 +345,7 @@ void move_cursor( int key )
     }
 }
 
-char* status_prompt( char* prompt )
+char* status_prompt( char* prompt, void(*callback)( char*, int ) )
 {
     size_t bufsize = 128;
     char* buf = malloc(bufsize);
@@ -365,6 +368,10 @@ char* status_prompt( char* prompt )
         }else if( c == '\033' )
         {
             set_statusmsg("");
+            if( callback )
+            {
+                callback(buf, c);
+            }
             free(buf);
             return NULL;
         }else if( c == '\r' )
@@ -372,6 +379,10 @@ char* status_prompt( char* prompt )
             if( buflen != 0 )
             {
                 set_statusmsg("");
+                if( callback )
+                {
+                    callback(buf, c);
+                }
                 return buf;
             }
         }else if( !iscntrl(c) && c < 128 )
@@ -383,6 +394,11 @@ char* status_prompt( char* prompt )
             }
             buf[buflen++] = c;
             buf[buflen] = '\0';
+        }
+
+        if( callback )
+        {
+            callback(buf, c);
         }
     }
 }
@@ -505,6 +521,9 @@ void draw_term_message_bar( struct abuf* ab )
     if( msglen && time(NULL) - config.statusmsg_time < 5 )
     {
         abuf_append(ab, config.statusmsg, msglen);
+    }else
+    {
+        abuf_append(ab, "^Q - Quit | ^S - Save | ^F - Find", 34);
     }
 }
 
@@ -573,6 +592,27 @@ int cx_to_rx( edit_row* row, int cx )
     }
 
     return rx;
+}
+
+int rx_to_cx( edit_row* row, int rx )
+{
+    int cur_rx = 0;
+    int cx;
+    for( cx = 0; cx < row ->size; cx++ )
+    {
+        if( row->chars[cx] == '\t' )
+        {
+            cur_rx += (TABSTOP - 1)  - (cur_rx % TABSTOP);
+        }
+        cur_rx++;
+
+        if( cur_rx > rx )
+        {
+            return cx;
+        }
+    }
+
+    return cx;
 }
 
 void update_row( edit_row* row )
@@ -784,7 +824,7 @@ void save_file( void )
 {
     if( config.filename == NULL )
     {
-        config.filename = status_prompt("Save as: %s");
+        config.filename = status_prompt("Save as: %s", NULL);
         if( config.filename == NULL )
         {
             set_statusmsg("Save cancelled");
@@ -831,6 +871,79 @@ char* rows_to_string( int* buflen )
     }
 
     return buf;
+}
+
+void find( void )
+{
+    int save_cx = config.cx;
+    int save_cy = config.cy;
+    int save_scroll_rows = config.scroll_rows;
+    int save_scroll_cols = config.scroll_cols;
+
+    char* query = status_prompt("Search: %s", find_callback);
+    
+    if( query )
+    {
+        free(query);
+    }else
+    {
+        config.cx = save_cx;
+        config.cy = save_cy;
+        config.scroll_rows = save_scroll_rows;
+        config.scroll_cols = save_scroll_cols;
+    }
+}
+
+void find_callback( char* query, int key )
+{
+    static int last_match = -1;
+    static int direction = 1;
+
+    if( key == '\r' || key == '\033' )
+    {
+        last_match = -1;
+        direction = 1;
+        return;
+    }else if( key == ARROW_RIGHT || key == ARROW_DOWN )
+    {
+        direction = 1;
+    }else if( key == ARROW_LEFT || key == ARROW_UP)
+    {
+        direction = -1;
+    }else
+    {
+        last_match = -1;
+        direction = 1;
+    }
+
+    if( last_match == -1 )
+    {
+        direction = 1;
+    }
+    int current = last_match;
+    int i;
+    for( i = 0; i < config.numrows; i++ )
+    {
+        current += direction;
+        if( current == -1 )
+        {
+            current = config.numrows - 1;
+        }else if( current == config.numrows )
+        {
+            current = 0;
+        }
+
+        edit_row* row = &config.rows[current];
+        char* match = strstr(row->render, query);
+        if( match )
+        {
+            last_match = current;
+            config.cy = current;
+            config.cx = rx_to_cx(row, match - row->render);
+            config.scroll_rows = config.numrows;
+            break;
+        }
+    }
 }
 
 int get_term_size( int* term_rows, int* term_cols )

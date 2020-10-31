@@ -2,14 +2,14 @@
 
 void* bsearch( const void* key, const void* base, size_t nmemb, size_t size, int (*compar)(const void*, const void*))
 {
-	const char* b = base;
-	size_t i = 0;
-	while( i < nmemb )
+    const char* b = base;
+    size_t i = 0;
+    while( i < nmemb )
     {
-		const void * a = b;
-		if( !compar(a,key) ) return (void*)a;
-		i++;
-		b += size;
-	}
-	return NULL;
+        const void * a = b;
+        if( !compar(a,key) ) return (void*)a;
+        i++;
+        b += size;
+    }
+    return NULL;
 }

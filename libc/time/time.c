@@ -15,5 +15,5 @@ time_t time( time_t* out )
 
 double difftime( time_t a, time_t b )
 {
-	return (double)(a - b);
+    return (double)(a - b);
 }

@@ -12,23 +12,23 @@ static void enable_fpu( void )
     asm volatile (
                 "clts"
                 );
-	
+    
     size_t t;
 
     asm volatile (
                 "mov %%cr0, %0" : "=r"(t)
                 );
-	
+    
     t &= ~(1 << 2);
-	t |= (1 << 1);
+    t |= (1 << 1);
     asm volatile (
                 "mov %0, %%cr0" :: "r"(t)
                 );
-	asm volatile (
+    asm volatile (
                 "mov %%cr4, %0" : "=r"(t)
                 );
 
-	t |= 3 << 9;
+    t |= 3 << 9;
     asm volatile (
                 "mov %0, %%cr4" :: "r"(t)
                 );

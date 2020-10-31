@@ -2,6 +2,6 @@
 .global _start
 
 _start:
-	pop %eax
-	push $main
-	call _pre_main
+    pop %eax
+    push $main
+    call _pre_main

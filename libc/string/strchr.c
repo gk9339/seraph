@@ -18,25 +18,25 @@ char* strchr( const char* s, int c )
 char* strchrnul( const char* s, int c )
 {
     size_t * w;
-	size_t k;
+    size_t k;
 
-	c = (unsigned char)c;
-	if( !c )
+    c = (unsigned char)c;
+    if( !c )
     {
-		return (char *)s + strlen(s);
-	}
+        return (char *)s + strlen(s);
+    }
 
-	for(; (uintptr_t)s % ALIGN; s++ )
+    for(; (uintptr_t)s % ALIGN; s++ )
     {
-		if( !*s || *(unsigned char *)s == c )
+        if( !*s || *(unsigned char *)s == c )
         {
-			return (char *)s;
-		}
-	}
+            return (char *)s;
+        }
+    }
 
-	k = ONES * c;
-	for(w = (void *)s; !HASZERO(*w) && !HASZERO(*w^k); w++ );
-	for(s = (void *)w; *s && *(unsigned char *)s != c; s++ );
+    k = ONES * c;
+    for(w = (void *)s; !HASZERO(*w) && !HASZERO(*w^k); w++ );
+    for(s = (void *)w; *s && *(unsigned char *)s != c; s++ );
     
     return (char *)s;
 }

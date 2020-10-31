@@ -14,6 +14,6 @@ void __attribute__((__noreturn__)) abort( void )
     raise(SIGABRT);
     syscall_exit(-1);
 #endif
-	while (1) { }
-	__builtin_unreachable();
+    while (1) { }
+    __builtin_unreachable();
 }

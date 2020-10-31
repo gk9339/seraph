@@ -3,35 +3,35 @@
 
 char* fgets( char* s, int size, FILE* stream )
 {
-	int c;
-	char* out = s;
+    int c;
+    char* out = s;
 
-	while( (c = fgetc(stream)) > 0 )
+    while( (c = fgetc(stream)) > 0 )
     {
-		*s++ = (char)c;
-		size--;
-		if( size == 0 )
+        *s++ = (char)c;
+        size--;
+        if( size == 0 )
         {
-			return out;
-		}
-		*s = '\0';
-		if( c == '\n' )
+            return out;
+        }
+        *s = '\0';
+        if( c == '\n' )
         {
-			return out;
-		}
-	}
+            return out;
+        }
+    }
 
-	if( c == EOF )
+    if( c == EOF )
     {
-		stream->eof = 1;
-		if( out == s )
+        stream->eof = 1;
+        if( out == s )
         {
-			return NULL;
-		}else
+            return NULL;
+        }else
         {
-			return out;
-		}
-	}
+            return out;
+        }
+    }
 
-	return NULL;
+    return NULL;
 }

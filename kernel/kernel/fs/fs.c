@@ -993,42 +993,42 @@ fs_node_t* kopen( char* filename, uint32_t flags )
 static void debug_print_vfs_tree_node( char** str, tree_node_t* node, size_t height )
 {
     // End recursion on a blank entry 
-	if (!node) return;
+    if (!node) return;
 
     char* tmp = malloc(512);
-	memset(tmp, 0, 512);
-	char* c = tmp;
+    memset(tmp, 0, 512);
+    char* c = tmp;
 
     // Indent output 
-	for( uint32_t i = 0; i < height; i++ )
+    for( uint32_t i = 0; i < height; i++ )
     {
-		c += sprintf(c, "  ");
-	}
+        c += sprintf(c, "  ");
+    }
 
     // Get the current process 
-	struct vfs_entry* fnode = (struct vfs_entry*)node->value;
+    struct vfs_entry* fnode = (struct vfs_entry*)node->value;
 
     // Print the process name 
-	if( fnode->file )
+    if( fnode->file )
     {
-		c += sprintf(c, "%s > %s %#p (%s, %s)\n", fnode->name, fnode->device, fnode->file, fnode->fs_type, fnode->file->name);
-	}else
+        c += sprintf(c, "%s > %s %#p (%s, %s)\n", fnode->name, fnode->device, fnode->file, fnode->fs_type, fnode->file->name);
+    }else
     {
-		c += sprintf(c, "%s > (empty)\n", fnode->name);
-	}
+        c += sprintf(c, "%s > (empty)\n", fnode->name);
+    }
 
     // Linefeed 
     strcat(*str, tmp);
-	free(tmp);
+    free(tmp);
 
     foreach(child, node->children)
     {
-		// Recursively print the children 
-		debug_print_vfs_tree_node(str, child->value, height + 1);
+        // Recursively print the children 
+        debug_print_vfs_tree_node(str, child->value, height + 1);
     }
 }
 
 void debug_print_vfs_tree( char** str )
 {
-	debug_print_vfs_tree_node(str, fs_tree->root, 0);
+    debug_print_vfs_tree_node(str, fs_tree->root, 0);
 }

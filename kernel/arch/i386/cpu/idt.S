@@ -5,7 +5,7 @@
 .type idt_load, @function
 idt_load:
     # Get pointer to the IDT
-	mov 4(%esp), %eax
+    mov 4(%esp), %eax
     # Load new IDT
-	lidt (%eax)
-	ret
+    lidt (%eax)
+    ret

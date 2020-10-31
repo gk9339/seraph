@@ -3,9 +3,9 @@
 .section .init
 _init:
     # Preserve current frame pointer
-	push %ebp
+    push %ebp
     # Create new frame pointer
-	mov %esp, %ebp
+    mov %esp, %ebp
     # Compiler puts crtbegin.o .init section here
 
 # Function prologue for _fini
@@ -13,15 +13,15 @@ _init:
 .section .fini
 _fini:
     # Preserve current frame pointer
-	push %ebp
+    push %ebp
     # Create new frame pointer
-	mov %esp, %ebp
+    mov %esp, %ebp
     # Compiler puts crtend.o .init section here
 
 # Dynamic shared object handle for global destruction (C++)
 .section .data
-	.global __dso_handle
-	.weak __dso_handle
-	.hidden __dso_handle
+    .global __dso_handle
+    .weak __dso_handle
+    .hidden __dso_handle
 __dso_handle:
-	.long 0
+    .long 0

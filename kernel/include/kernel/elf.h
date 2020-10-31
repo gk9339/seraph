@@ -82,79 +82,79 @@ typedef uint16_t Elf32_Half;
 
 // ELF Header
 typedef struct {
-	unsigned char e_ident[EI_NIDENT]; // Identification flags
-	Elf32_Half    e_type; // Type of executable
-	Elf32_Half    e_machine; // Architecture
-	Elf32_Word    e_version; // Object file version
-	Elf32_Addr    e_entry; // Entry point
-	Elf32_Off     e_phoff; // File offset of the Program Header table
-	Elf32_Off     e_shoff; // File offset of the Section Header table
-	Elf32_Word    e_flags; // Processor-specific flags
-	Elf32_Half    e_ehsize; // ELF header size
-	Elf32_Half    e_phentsize; // Program Header entry size
-	Elf32_Half    e_phnum; // Number of entries in Program Header
-	Elf32_Half    e_shentsize; // Section Header entry size
-	Elf32_Half    e_shnum; // Number of entries in Section Header
-	Elf32_Half    e_shstrndx; // Index in Section Header holding section names
+    unsigned char e_ident[EI_NIDENT]; // Identification flags
+    Elf32_Half    e_type; // Type of executable
+    Elf32_Half    e_machine; // Architecture
+    Elf32_Word    e_version; // Object file version
+    Elf32_Addr    e_entry; // Entry point
+    Elf32_Off     e_phoff; // File offset of the Program Header table
+    Elf32_Off     e_shoff; // File offset of the Section Header table
+    Elf32_Word    e_flags; // Processor-specific flags
+    Elf32_Half    e_ehsize; // ELF header size
+    Elf32_Half    e_phentsize; // Program Header entry size
+    Elf32_Half    e_phnum; // Number of entries in Program Header
+    Elf32_Half    e_shentsize; // Section Header entry size
+    Elf32_Half    e_shnum; // Number of entries in Section Header
+    Elf32_Half    e_shstrndx; // Index in Section Header holding section names
 } Elf32_Header;
 
 // Program Header
 typedef struct {
-	Elf32_Word p_type; // Segment type
-	Elf32_Off  p_offset; // Segment offset on disk
-	Elf32_Addr p_vaddr; // Virtual address of segment
-	Elf32_Addr p_paddr; // Physical address of segment
-	Elf32_Word p_filesz; // Segment size on disk
-	Elf32_Word p_memsz; // Segment size in memory
-	Elf32_Word p_flags; // Segment flags
-	Elf32_Word p_align; // Segment alignment in memory
+    Elf32_Word p_type; // Segment type
+    Elf32_Off  p_offset; // Segment offset on disk
+    Elf32_Addr p_vaddr; // Virtual address of segment
+    Elf32_Addr p_paddr; // Physical address of segment
+    Elf32_Word p_filesz; // Segment size on disk
+    Elf32_Word p_memsz; // Segment size in memory
+    Elf32_Word p_flags; // Segment flags
+    Elf32_Word p_align; // Segment alignment in memory
 } Elf32_Phdr;
 
 
 // Section Header
 typedef struct {
-	Elf32_Word sh_name; // Index of section name in section header string table
-	Elf32_Word sh_type; // Section type
-	Elf32_Word sh_flags; // Section attributes
-	Elf32_Addr sh_addr; // Virtual address of seciont
-	Elf32_Off  sh_offset; // Section offset on disk
-	Elf32_Word sh_size; // Section size
-	Elf32_Word sh_link; // Section link index
-	Elf32_Word sh_info; // Section extra information
-	Elf32_Word sh_addralign; // Section alignment
-	Elf32_Word sh_entsize; // Size of entries in section
+    Elf32_Word sh_name; // Index of section name in section header string table
+    Elf32_Word sh_type; // Section type
+    Elf32_Word sh_flags; // Section attributes
+    Elf32_Addr sh_addr; // Virtual address of seciont
+    Elf32_Off  sh_offset; // Section offset on disk
+    Elf32_Word sh_size; // Section size
+    Elf32_Word sh_link; // Section link index
+    Elf32_Word sh_info; // Section extra information
+    Elf32_Word sh_addralign; // Section alignment
+    Elf32_Word sh_entsize; // Size of entries in section
 } Elf32_Shdr;
 
 // Auxiliary Vectors
 typedef struct {
-	uint32_t  id;
-	uintptr_t ptr;
+    uint32_t  id;
+    uintptr_t ptr;
 } Elf32_auxv;
 
 // Symbol
 typedef struct {
-	Elf32_Word st_name;
-	Elf32_Addr st_value;
-	Elf32_Word st_size;
-	unsigned char st_info;
-	unsigned char st_other;
-	Elf32_Half st_shndx;
+    Elf32_Word st_name;
+    Elf32_Addr st_value;
+    Elf32_Word st_size;
+    unsigned char st_info;
+    unsigned char st_other;
+    Elf32_Half st_shndx;
 } Elf32_Sym;
 
 // Relocation
 typedef struct {
-	Elf32_Addr r_offset;
-	Elf32_Word r_info;
+    Elf32_Addr r_offset;
+    Elf32_Word r_info;
 } Elf32_Rel;
 
 // Dynamic
 typedef struct {
-	Elf32_Sword d_tag;
-	union {
-		Elf32_Word      d_val;
-		Elf32_Addr      d_ptr;
-		Elf32_Off       d_off;
-	} d_un;
+    Elf32_Sword d_tag;
+    union {
+        Elf32_Word      d_val;
+        Elf32_Addr      d_ptr;
+        Elf32_Off       d_off;
+    } d_un;
 } Elf32_Dyn;
 
 int exec( char *, int, char **, char **);

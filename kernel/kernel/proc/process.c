@@ -870,36 +870,36 @@ int process_alert_node( process_t* process, void* value )
 static void debug_print_proc_tree_node( char** str, tree_node_t* node, size_t height )
 {
     /* End recursion on a blank entry */
-	if (!node) return;
+    if (!node) return;
 
     char* tmp = calloc(512, sizeof(char));
-	char* c = tmp;
+    char* c = tmp;
 
     /* Indent output */
-	for (uint32_t i = 0; i < height; ++i) {
-		c += sprintf(c, "  ");
-	}
+    for (uint32_t i = 0; i < height; ++i) {
+        c += sprintf(c, "  ");
+    }
 
     /* Get the current process */
-	process_t* proc = (process_t*)node->value;
+    process_t* proc = (process_t*)node->value;
 
     /* Print the process name */
-	if (proc) {
-		c += sprintf(c, "%s - %d\n", proc->name, proc->id);
-	}
+    if (proc) {
+        c += sprintf(c, "%s - %d\n", proc->name, proc->id);
+    }
 
     /* Linefeed */
     strcat(*str, tmp);
-	free(tmp);
+    free(tmp);
 
     foreach(child, node->children)
     {
-		/* Recursively print the children */
-		debug_print_proc_tree_node(str, child->value, height + 1);
+        /* Recursively print the children */
+        debug_print_proc_tree_node(str, child->value, height + 1);
     }
 }
 
 void debug_print_proc_tree( char** str )
 {
-	debug_print_proc_tree_node(str, process_tree->root, 0);
+    debug_print_proc_tree_node(str, process_tree->root, 0);
 }

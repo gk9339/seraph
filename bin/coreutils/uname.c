@@ -43,36 +43,36 @@ int main( int argc, char** argv )
     
     if( flags & FLAG_SYSNAME )
     {
-		if( spaces++) printf(" ");
-		printf("%s", u.sysname);
-	}
-	if( flags & FLAG_NODENAME )
+        if( spaces++) printf(" ");
+        printf("%s", u.sysname);
+    }
+    if( flags & FLAG_NODENAME )
     {
-		if( spaces++) printf(" ");
-		printf("%s", u.nodename);
-	}
-	if( flags & FLAG_RELEASE )
+        if( spaces++) printf(" ");
+        printf("%s", u.nodename);
+    }
+    if( flags & FLAG_RELEASE )
     {
-		if( spaces++) printf(" ");
-		printf("%s", u.release);
-	}
-	if( flags & FLAG_VERSION )
+        if( spaces++) printf(" ");
+        printf("%s", u.release);
+    }
+    if( flags & FLAG_VERSION )
     {
-		if( spaces++) printf(" ");
-		printf("%s", u.version);
-	}
-	if( flags & FLAG_MACHINE )
+        if( spaces++) printf(" ");
+        printf("%s", u.version);
+    }
+    if( flags & FLAG_MACHINE )
     {
-		if( spaces++) printf(" ");
-		printf("%s", u.machine);
-	}
-	if( flags & FLAG_OSNAME )
+        if( spaces++) printf(" ");
+        printf("%s", u.machine);
+    }
+    if( flags & FLAG_OSNAME )
     {
-		if( spaces++) printf(" ");
-		printf("%s", "seraph");
-	}
+        if( spaces++) printf(" ");
+        printf("%s", "seraph");
+    }
 
-	printf("\n");
+    printf("\n");
 
     return EXIT_SUCCESS;
 }

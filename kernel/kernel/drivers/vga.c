@@ -19,9 +19,9 @@ static uint16_t* terminal_buffer;
 void terminal_initialize( void ) 
 {
     // Initialize global variables
-	terminal_row = 0;
-	terminal_column = 0;
-	terminal_color = vga_entry_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
+    terminal_row = 0;
+    terminal_column = 0;
+    terminal_color = vga_entry_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
     terminal_buffer = VGA_MEMORY;
 
     // Clear current screen (from bootloader)
@@ -33,12 +33,12 @@ void terminal_clear( void )
 {
     for (size_t y = 0; y < VGA_HEIGHT; y++) 
     {
-		for (size_t x = 0; x < VGA_WIDTH; x++) 
+        for (size_t x = 0; x < VGA_WIDTH; x++) 
         {
-			const size_t index = y * VGA_WIDTH + x;
-			terminal_buffer[index] = vga_entry(' ', terminal_color);
-		}
-	}
+            const size_t index = y * VGA_WIDTH + x;
+            terminal_buffer[index] = vga_entry(' ', terminal_color);
+        }
+    }
     terminal_row = 0;
     terminal_column = 0;
 }
@@ -60,34 +60,34 @@ void terminal_scroll( size_t rows )
 // Set terminal text colour
 void terminal_setcolor( uint8_t color ) 
 {
-	terminal_color = color;
+    terminal_color = color;
 }
 
 // Put char at position in VGA buffer
 static void terminal_putentryat( unsigned char c, uint8_t color, size_t x, size_t y ) 
 {
-	const size_t index = y * VGA_WIDTH + x;
-	terminal_buffer[index] = vga_entry(c, color);
+    const size_t index = y * VGA_WIDTH + x;
+    terminal_buffer[index] = vga_entry(c, color);
 }
 
 // Update VGA text mode cursor to position
 static void update_cursor( int x, int y )
 {
-	uint32_t pos = y * VGA_WIDTH + x;
+    uint32_t pos = y * VGA_WIDTH + x;
  
-	outportb(0x3D4, 0x0F);
-	outportb(0x3D5, (uint8_t)(pos & 0xFF));
-	outportb(0x3D4, 0x0E);
-	outportb(0x3D5, (uint8_t)((pos >> 8) & 0xFF));
+    outportb(0x3D4, 0x0F);
+    outportb(0x3D5, (uint8_t)(pos & 0xFF));
+    outportb(0x3D4, 0x0E);
+    outportb(0x3D5, (uint8_t)((pos >> 8) & 0xFF));
 }
 
 // Handle input character, special characters do things, normal characters printed to terminal
 void terminal_putchar( char c ) 
 {
-	unsigned char uc = (unsigned char)c;
+    unsigned char uc = (unsigned char)c;
 
     // Handle special characters
-	if( uc == '\n' )
+    if( uc == '\n' )
     {
         terminal_column = 0;
         if( terminal_row != VGA_HEIGHT - 1 )
@@ -129,10 +129,10 @@ void terminal_putchar( char c )
     
         if (++terminal_column == VGA_WIDTH) 
         {
-	    	terminal_column = 0;
-    		if ( terminal_row != VGA_HEIGHT - 1 )
+            terminal_column = 0;
+            if ( terminal_row != VGA_HEIGHT - 1 )
             {
-		    	terminal_row++;
+                terminal_row++;
             }else
             {
                 terminal_scroll(1);
@@ -144,9 +144,9 @@ void terminal_putchar( char c )
 // Write data with known size to terminal, then update cursor after write
 void terminal_write( const char* data, size_t size ) 
 {
-	for (size_t i = 0; i < size; i++)
+    for (size_t i = 0; i < size; i++)
     {
-		terminal_putchar(data[i]);
+        terminal_putchar(data[i]);
     }
     update_cursor(terminal_column, terminal_row);
 }
@@ -154,6 +154,6 @@ void terminal_write( const char* data, size_t size )
 // Wrapper function for terminal_write, for strings
 void terminal_writestring( const char* data ) 
 {
-	terminal_write(data, strlen(data));
+    terminal_write(data, strlen(data));
 }
 #endif

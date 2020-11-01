@@ -3,9 +3,8 @@ set -e
 
 if [ ! -f "./toolchain/bin/i686-seraph-gcc" ]; then
     . ./toolchain.sh
-else
-    . ./headers.sh
 fi
+. ./headers.sh
 
 echo -e "    \033[1m\033[38;5;14m:: Building\033[0m"
 

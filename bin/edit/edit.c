@@ -34,6 +34,7 @@ struct edit_struct
     int numrows;
     edit_row* rows;
     int dirty;
+    int newfile;
     char* filename;
     char statusmsg[80];
     time_t statusmsg_time;
@@ -255,6 +256,7 @@ void process_keypress( void )
             move_cursor(c);
             break;
         case CTRL_KEY('l'):
+        case CTRL_KEY('j'):
         case '\033':
             break;
         default:
@@ -343,7 +345,7 @@ void move_cursor( int key )
             }
             break;
         case ARROW_DOWN:
-            if( edit.cy < edit.numrows )
+            if( edit.cy < edit.numrows - 1 )
             {
                 edit.cy++;
             }
@@ -477,7 +479,7 @@ void draw_text_rows( struct edit_buf* eb )
                 int padding = (edit.term_cols - (welcomelen - 12)) / 2;
                 if( padding )
                 {
-                    edit_buf_append(eb, "~", 1);
+                    edit_buf_append(eb, "\033[38;5;33m~\033[0;m", 16);
                     padding--;
                 }
         
@@ -487,9 +489,9 @@ void draw_text_rows( struct edit_buf* eb )
                 }
         
                 edit_buf_append(eb, welcome, welcomelen);
-            }else
+            }else if( y != 0 )
             {
-                edit_buf_append(eb, "~", 1);
+                edit_buf_append(eb, "\033[38;5;33m~\033[0;m", 16);
             }
         }else
         {
@@ -512,10 +514,10 @@ void draw_text_rows( struct edit_buf* eb )
 
 void draw_status_bar( struct edit_buf* eb )
 {
-    edit_buf_append(eb, "\033[7m", 4);
+    edit_buf_append(eb, "\033[48;5;242m", 11);
 
     char status[80], rstatus[80];
-    int len = snprintf(status, sizeof(status), "%.20s - %d lines %s", edit.filename? edit.filename : "[No Name]", edit.numrows, edit.dirty? "(modified)" : "");
+    int len = snprintf(status, sizeof(status), "%.20s - %d lines%s%s", edit.filename? edit.filename : "[No Name]", edit.numrows, edit.newfile? " [New]" : "", edit.dirty? " [Modified]" : "");
     int rlen = snprintf(rstatus, sizeof(rstatus), "%d/%d", edit.cy + 1, edit.numrows);
 
     if( len > edit.term_cols )
@@ -524,11 +526,13 @@ void draw_status_bar( struct edit_buf* eb )
     }
 
     edit_buf_append(eb, status, len);
+    edit_buf_append(eb, "\033[48;5;238m", 11);
 
     while( len < edit.term_cols )
     {
         if( edit.term_cols - len == rlen )
         {
+            edit_buf_append(eb, "\033[48;5;242m", 11);
             edit_buf_append(eb, rstatus, rlen);
             break;
         }else
@@ -830,7 +834,8 @@ void open_file( char* filename )
     FILE* fp = fopen(filename, "r");
     if( !fp )
     {
-        error("fopen");
+        edit.newfile = 1;
+        return;
     }
 
     char* line = NULL;
@@ -873,6 +878,7 @@ void save_file( void )
     {
         write(fd, buf, len);
         close(fd);
+        edit.newfile = 0;
         edit.dirty = 0;
         set_statusmsg("%d bytes written", len);
     }else

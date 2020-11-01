@@ -3,7 +3,7 @@
 
 ![Screenshot from 2020-05-04 14-45-39](https://user-images.githubusercontent.com/5243610/80942024-5e418b80-8e16-11ea-9da7-94a18f2c6e22.png)
 
-### Build requirements (Archlinux)
+### Build requirements (Arch)
 `automake-1.15`
 `gcc`
 `make`
@@ -34,7 +34,7 @@
 `mtools`
 
 ### Build
-`./build.sh` - Build all parts of the project (Including toolchain)
+`./build.sh` - Build all parts of the project (Including toolchain if not built)
 
 `./toolchain.sh` - Build the toolchain used for the rest of the build
 
@@ -45,9 +45,15 @@
 ### Debug
 In seperate terminals:
 
+1:
+
 `qemu-system-i386 -s -S -serial stdio -cdrom seraph.iso`
 
-`gdb -ex 'tar rem :1234'` 
+2:
+
+`gdb -ex 'tar rem :1234'`
+
+`file <path>` and / or `add-symbol-file <path>`
 
 ### Cleanup
 `./clean.sh` - Removes all build files
@@ -58,6 +64,7 @@ In seperate terminals:
 │   ├── include       - normal program headers  
 │   ├── clear         - send terminal clear command
 │   ├── coreutils     - rewriting of GNU coreutils
+│   ├── edit          - text editor
 │   ├── init          - pid 1
 │   ├── sh            - shell  
 │   ├── terminal      - framebuffer terminal

@@ -10,7 +10,7 @@
 #include <stdarg.h>
 #include <fcntl.h>
 
-#define VERSION "0.1"
+#define VERSION "0.2"
 #define TABSTOP 4
 
 #define CTRL_KEY(k) ((k) & 0x1f)
@@ -23,7 +23,7 @@ typedef struct edit_row
     char* render;
 }edit_row;
 
-struct config_struct
+struct edit_struct
 {
     int cx, cy;
     int rx;
@@ -39,15 +39,15 @@ struct config_struct
     time_t statusmsg_time;
     struct termios prev_termios;
 };
-struct config_struct config;
+struct edit_struct edit;
 
-struct abuf
+struct edit_buf
 {
     char* buf;
     int len;
 };
 
-enum editor_key
+enum edit_key
 {
     BACKSPACE = 127,
     ARROW_UP = 1000,
@@ -61,55 +61,54 @@ enum editor_key
     DEL_KEY
 };
 
+// Initialization / Shutdown
+void init( void );
+int get_term_size( int* term_rows, int* term_cols );
 void enable_raw_mode( void );
 void disable_raw_mode( void );
 void error( const char* s );
 
+// Input
 void process_keypress( void );
 int read_key( void );
 void move_cursor( int key );
-char* status_prompt( char* prompt, void(*callback)( char*, int ) );
+char* status_bar_prompt( char* prompt, void(*callback)( char*, int ) );
 
+// Output
 void refresh_screen( void );
-void draw_term_rows( struct abuf* ab );
-void draw_term_status_bar( struct abuf* ab );
-void draw_term_message_bar( struct abuf* ab );
+void draw_text_rows( struct edit_buf* eb );
+void draw_status_bar( struct edit_buf* eb );
+void draw_message_bar( struct edit_buf* eb );
 void set_statusmsg( const char* fmt, ... );
 void scroll( void );
-void abuf_append( struct abuf* ab, const char* s, int len );
+void edit_buf_append( struct edit_buf* eb, const char* s, int len );
 int cx_to_rx( edit_row* row, int cx );
+int rx_to_cx( edit_row* row, int rx );
+void update_row( edit_row* row );
+void insert_row( int at, char* s, size_t len );
+void free_row( edit_row* row );
+void del_row( int at );
 void row_insert_char( edit_row* row, int at, int c );
+void row_append_string( edit_row* row, char* s, size_t len );
 void row_del_char( edit_row* row, int at );
 void insert_char( int c );
 void insert_newline( void );
 void del_char( void );
 
+// File I/O
 void open_file( char* filename );
 void save_file( void );
 char* rows_to_string( int* buflen );
+
+// Search
 void find( void );
 void find_callback( char* query, int key );
 
-int get_term_size( int* term_rows, int* term_cols );
 
 int main( int argc, char** argv )
 {
     enable_raw_mode();
-    write(STDOUT_FILENO, "\033[H\033[2J", 7);
-
-    config.cx = 0;
-    config.cy = 0;
-    config.rx = 0;
-    config.scroll_rows = 0;
-    config.scroll_cols = 0;
-    config.numrows = 0;
-    config.rows = NULL;
-    config.dirty = 0;
-    config.filename = NULL;
-    config.statusmsg[0] = '\0';
-    config.statusmsg_time = 0;
-    get_term_size(&config.term_rows, &config.term_cols);
-    config.term_rows -= 2;
+    init();
 
     if( argc >= 2 )
     {
@@ -125,12 +124,46 @@ int main( int argc, char** argv )
     return 0;
 }
 
+void init( void )
+{
+    write(STDOUT_FILENO, "\033[H\033[2J", 7);
+
+    edit.cx = 0;
+    edit.cy = 0;
+    edit.rx = 0;
+    edit.scroll_rows = 0;
+    edit.scroll_cols = 0;
+    edit.numrows = 0;
+    edit.rows = NULL;
+    edit.dirty = 0;
+    edit.filename = NULL;
+    edit.statusmsg[0] = '\0';
+    edit.statusmsg_time = 0;
+    get_term_size(&edit.term_rows, &edit.term_cols);
+    edit.term_rows -= 2;
+}
+
+int get_term_size( int* term_rows, int* term_cols )
+{
+    struct winsize ws;
+
+    if( ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == -1 || ws.ws_col == 0)
+    {
+        return -1;
+    }else
+    {
+        *term_rows = ws.ws_row;
+        *term_cols = ws.ws_col;
+        return 0;
+    }
+}
+
 void enable_raw_mode( void )
 {
     struct termios new_termios;
 
-    tcgetattr(STDIN_FILENO, &config.prev_termios);
-    new_termios = config.prev_termios;
+    tcgetattr(STDIN_FILENO, &edit.prev_termios);
+    new_termios = edit.prev_termios;
     atexit(disable_raw_mode);
 
     new_termios.c_iflag &= ~(ICRNL | IXON);
@@ -141,7 +174,7 @@ void enable_raw_mode( void )
 
 void disable_raw_mode( void )
 {
-    tcsetattr(STDIN_FILENO, TCSAFLUSH, &config.prev_termios);
+    tcsetattr(STDIN_FILENO, TCSAFLUSH, &edit.prev_termios);
 }
 
 void error( const char* s )
@@ -163,7 +196,7 @@ void process_keypress( void )
             insert_newline();
             break;
         case CTRL_KEY('q'):
-            if( config.dirty && quit_tries > 0 )
+            if( edit.dirty && quit_tries > 0 )
             {
                 set_statusmsg("UNSAVED CHANGES: ^Q again to quit");
                 quit_tries--;
@@ -175,12 +208,12 @@ void process_keypress( void )
             save_file();
             break;
         case HOME_KEY:
-            config.cx = 0;
+            edit.cx = 0;
             break;
         case END_KEY:
-            if( config.cy < config.numrows )
+            if( edit.cy < edit.numrows )
             {
-                config.cx = config.rows[config.cy].size;
+                edit.cx = edit.rows[edit.cy].size;
             }
             break;
         case CTRL_KEY('f'):
@@ -199,17 +232,17 @@ void process_keypress( void )
         case PAGE_DOWN:
             if( c == PAGE_UP )
             {
-                config.cy = config.scroll_rows;
+                edit.cy = edit.scroll_rows;
             }else if( c == PAGE_DOWN )
             {
-                config.cy = config.scroll_rows + config.term_rows - 1;
-                if( config.cy > config.numrows )
+                edit.cy = edit.scroll_rows + edit.term_rows - 1;
+                if( edit.cy > edit.numrows )
                 {
-                    config.cy = config.numrows;
+                    edit.cy = edit.numrows;
                 }
             }
 
-            int times = config.term_rows;
+            int times = edit.term_rows;
             while( times-- )
             {
                 move_cursor( c == PAGE_UP? ARROW_UP : ARROW_DOWN );
@@ -299,53 +332,53 @@ int read_key( void )
 
 void move_cursor( int key )
 {
-    edit_row* row = (config.cy >= config.numrows)? NULL : &config.rows[config.cy];
+    edit_row* row = (edit.cy >= edit.numrows)? NULL : &edit.rows[edit.cy];
 
     switch( key )
     {
         case ARROW_UP:
-            if( config.cy != 0 )
+            if( edit.cy != 0 )
             {
-                config.cy--;
+                edit.cy--;
             }
             break;
         case ARROW_DOWN:
-            if( config.cy < config.numrows )
+            if( edit.cy < edit.numrows )
             {
-                config.cy++;
+                edit.cy++;
             }
             break;
         case ARROW_LEFT:
-            if( config.cx != 0 )
+            if( edit.cx != 0 )
             {
-                config.cx--;
-            }else if( config.cy > 0 )
+                edit.cx--;
+            }else if( edit.cy > 0 )
             {
-                config.cy--;
-                config.cx = config.rows[config.cy].size;
+                edit.cy--;
+                edit.cx = edit.rows[edit.cy].size;
             }
             break;
         case ARROW_RIGHT:
-            if( row && config.cx < row->size )
+            if( row && edit.cx < row->size )
             {
-                config.cx++;
-            }else if( row && config.cx == row->size )
+                edit.cx++;
+            }else if( row && edit.cx == row->size )
             {
-                config.cy++;
-                config.cx = 0;
+                edit.cy++;
+                edit.cx = 0;
             }
             break;
     }
 
-    row = (config.cy >= config.numrows)? NULL : &config.rows[config.cy];
+    row = (edit.cy >= edit.numrows)? NULL : &edit.rows[edit.cy];
     int rowlen = row? row->size : 0;
-    if( config.cx > rowlen )
+    if( edit.cx > rowlen )
     {
-        config.cx = rowlen;
+        edit.cx = rowlen;
     }
 }
 
-char* status_prompt( char* prompt, void(*callback)( char*, int ) )
+char* status_bar_prompt( char* prompt, void(*callback)( char*, int ) )
 {
     size_t bufsize = 128;
     char* buf = malloc(bufsize);
@@ -405,125 +438,125 @@ char* status_prompt( char* prompt, void(*callback)( char*, int ) )
 
 void refresh_screen( void )
 {
-    struct abuf ab = {NULL, 0};
+    struct edit_buf eb = {NULL, 0};
 
     scroll();
 
-    abuf_append(&ab, "\033[?25l\033[H", 9);
+    edit_buf_append(&eb, "\033[?25l\033[H", 9);
 
-    draw_term_rows(&ab);
-    draw_term_status_bar(&ab);
-    draw_term_message_bar(&ab);
+    draw_text_rows(&eb);
+    draw_status_bar(&eb);
+    draw_message_bar(&eb);
 
     char buf[32];
-    snprintf(buf, sizeof(buf), "\033[%d;%dH", (config.cy - config.scroll_rows) + 1, (config.rx - config.scroll_cols) + 1);
-    abuf_append(&ab, buf, strlen(buf));
+    snprintf(buf, sizeof(buf), "\033[%d;%dH", (edit.cy - edit.scroll_rows) + 1, (edit.rx - edit.scroll_cols) + 1);
+    edit_buf_append(&eb, buf, strlen(buf));
 
-    abuf_append(&ab, "\033[?25h", 6);
+    edit_buf_append(&eb, "\033[?25h", 6);
 
-    write(STDOUT_FILENO, ab.buf, ab.len);
+    write(STDOUT_FILENO, eb.buf, eb.len);
     
-    free(ab.buf);
+    free(eb.buf);
 }
 
-void draw_term_rows( struct abuf* ab )
+void draw_text_rows( struct edit_buf* eb )
 {
-    for( int y = 0; y < config.term_rows; y++ )
+    for( int y = 0; y < edit.term_rows; y++ )
     {
-        int file_row = y + config.scroll_rows;
-        if( file_row >= config.numrows )
+        int file_row = y + edit.scroll_rows;
+        if( file_row >= edit.numrows )
         {
-            if( config.numrows == 0 && y == config.term_rows / 3 )
+            if( edit.numrows == 0 && y == edit.term_rows / 3 )
             {
                 char welcome[80];
                 int welcomelen = snprintf(welcome, sizeof(welcome), "\033[1;36mseraph\033[0;m editor -- version %s", VERSION);
-                if( welcomelen > config.term_cols ) 
+                if( welcomelen > edit.term_cols ) 
                 {
-                    welcomelen = config.term_cols;
+                    welcomelen = edit.term_cols;
                 }
-                int padding = (config.term_cols - (welcomelen - 12)) / 2;
+                int padding = (edit.term_cols - (welcomelen - 12)) / 2;
                 if( padding )
                 {
-                    abuf_append(ab, "~", 1);
+                    edit_buf_append(eb, "~", 1);
                     padding--;
                 }
         
                 while(padding--)
                 {
-                    abuf_append(ab, " ", 1);
+                    edit_buf_append(eb, " ", 1);
                 }
         
-                abuf_append(ab, welcome, welcomelen);
+                edit_buf_append(eb, welcome, welcomelen);
             }else
             {
-                abuf_append(ab, "~", 1);
+                edit_buf_append(eb, "~", 1);
             }
         }else
         {
-            int len = config.rows[file_row].rsize - config.scroll_cols;
+            int len = edit.rows[file_row].rsize - edit.scroll_cols;
             if( len < 0 )
             {
                 len = 0;
             }
-            if( len > config.term_cols )
+            if( len > edit.term_cols )
             {
-                len = config.term_cols;
+                len = edit.term_cols;
             }
-            abuf_append(ab, &config.rows[file_row].render[config.scroll_cols], len);
+            edit_buf_append(eb, &edit.rows[file_row].render[edit.scroll_cols], len);
         }
 
-        abuf_append(ab, "\033[K", 3);   
-        abuf_append(ab, "\r\n", 2);
+        edit_buf_append(eb, "\033[K", 3);   
+        edit_buf_append(eb, "\r\n", 2);
     }
 }
 
-void draw_term_status_bar( struct abuf* ab )
+void draw_status_bar( struct edit_buf* eb )
 {
-    abuf_append(ab, "\033[7m", 4);
+    edit_buf_append(eb, "\033[7m", 4);
 
     char status[80], rstatus[80];
-    int len = snprintf(status, sizeof(status), "%.20s - %d lines %s", config.filename? config.filename : "[No Name]", config.numrows, config.dirty? "(modified)" : "");
-    int rlen = snprintf(rstatus, sizeof(rstatus), "%d/%d", config.cy + 1, config.numrows);
+    int len = snprintf(status, sizeof(status), "%.20s - %d lines %s", edit.filename? edit.filename : "[No Name]", edit.numrows, edit.dirty? "(modified)" : "");
+    int rlen = snprintf(rstatus, sizeof(rstatus), "%d/%d", edit.cy + 1, edit.numrows);
 
-    if( len > config.term_cols )
+    if( len > edit.term_cols )
     {
-        len = config.term_cols;
+        len = edit.term_cols;
     }
 
-    abuf_append(ab, status, len);
+    edit_buf_append(eb, status, len);
 
-    while( len < config.term_cols )
+    while( len < edit.term_cols )
     {
-        if( config.term_cols - len == rlen )
+        if( edit.term_cols - len == rlen )
         {
-            abuf_append(ab, rstatus, rlen);
+            edit_buf_append(eb, rstatus, rlen);
             break;
         }else
         {
-            abuf_append(ab, " ", 1);
+            edit_buf_append(eb, " ", 1);
             len++;
         }
     }
 
-    abuf_append(ab, "\033[m\r\n", 5);
+    edit_buf_append(eb, "\033[m\r\n", 5);
 }
 
-void draw_term_message_bar( struct abuf* ab )
+void draw_message_bar( struct edit_buf* eb )
 {
-    abuf_append(ab, "\033[K", 3);
+    edit_buf_append(eb, "\033[K", 3);
 
-    int msglen = strlen(config.statusmsg);
-    if( msglen > config.term_cols )
+    int msglen = strlen(edit.statusmsg);
+    if( msglen > edit.term_cols )
     {
-        msglen = config.term_cols;
+        msglen = edit.term_cols;
     }
 
-    if( msglen && time(NULL) - config.statusmsg_time < 5 )
+    if( msglen && time(NULL) - edit.statusmsg_time < 5 )
     {
-        abuf_append(ab, config.statusmsg, msglen);
+        edit_buf_append(eb, edit.statusmsg, msglen);
     }else
     {
-        abuf_append(ab, "^Q - Quit | ^S - Save | ^F - Find", 34);
+        edit_buf_append(eb, "^Q - Quit | ^S - Save | ^F - Find", 34);
     }
 }
 
@@ -531,51 +564,51 @@ void set_statusmsg( const char* fmt, ... )
 {
     va_list ap;
     va_start(ap, fmt);
-    vsnprintf(config.statusmsg, sizeof(config.statusmsg), fmt, ap);
+    vsnprintf(edit.statusmsg, sizeof(edit.statusmsg), fmt, ap);
     va_end(ap);
-    config.statusmsg_time = time(NULL);
+    edit.statusmsg_time = time(NULL);
 }
 
 void scroll( void )
 {
-    config.rx = 0;
-    if( config.cy < config.numrows )
+    edit.rx = 0;
+    if( edit.cy < edit.numrows )
     {
-        config.rx = cx_to_rx(&config.rows[config.cy], config.cx);
+        edit.rx = cx_to_rx(&edit.rows[edit.cy], edit.cx);
     }
 
-    if( config.cy < config.scroll_rows )
+    if( edit.cy < edit.scroll_rows )
     {
-        config.scroll_rows = config.cy;
+        edit.scroll_rows = edit.cy;
     }
 
-    if( config.cy >= config.scroll_rows + config.term_rows )
+    if( edit.cy >= edit.scroll_rows + edit.term_rows )
     {
-        config.scroll_rows = config.cy - config.term_rows + 1;
+        edit.scroll_rows = edit.cy - edit.term_rows + 1;
     }
 
-    if( config.rx < config.scroll_cols )
+    if( edit.rx < edit.scroll_cols )
     {
-        config.scroll_cols = config.rx;
+        edit.scroll_cols = edit.rx;
     }
 
-    if( config.rx >= config.scroll_cols + config.term_cols )
+    if( edit.rx >= edit.scroll_cols + edit.term_cols )
     {
-        config.scroll_cols = config.rx - config.term_cols + 1;
+        edit.scroll_cols = edit.rx - edit.term_cols + 1;
     }
 }
 
-void abuf_append( struct abuf* ab, const char* s, int len )
+void edit_buf_append( struct edit_buf* eb, const char* s, int len )
 {
-    char* new = realloc(ab->buf, ab->len + len);
+    char* new = realloc(eb->buf, eb->len + len);
 
     if( new == NULL )
     {
         return;
     }
-    memcpy(&new[ab->len], s, len);
-    ab->buf = new;
-    ab->len += len;
+    memcpy(&new[eb->len], s, len);
+    eb->buf = new;
+    eb->len += len;
 }
 
 int cx_to_rx( edit_row* row, int cx )
@@ -654,25 +687,25 @@ void update_row( edit_row* row )
 
 void insert_row( int at, char* s, size_t len )
 {
-    if( at < 0 || at > config.numrows )
+    if( at < 0 || at > edit.numrows )
     {
         return;
     }
 
-    config.rows = realloc(config.rows, sizeof(edit_row) * (config.numrows + 1));
-    memmove(&config.rows[at + 1], &config.rows[at], sizeof(edit_row) * (config.numrows - at));
+    edit.rows = realloc(edit.rows, sizeof(edit_row) * (edit.numrows + 1));
+    memmove(&edit.rows[at + 1], &edit.rows[at], sizeof(edit_row) * (edit.numrows - at));
 
-    config.rows[at].size = len;
-    config.rows[at].chars = malloc(len + 1);
-    memcpy(config.rows[at].chars, s, len);
-    config.rows[at].chars[len] = '\0';
+    edit.rows[at].size = len;
+    edit.rows[at].chars = malloc(len + 1);
+    memcpy(edit.rows[at].chars, s, len);
+    edit.rows[at].chars[len] = '\0';
 
-    config.rows[at].rsize = 0;
-    config.rows[at].render = NULL;
-    update_row(&config.rows[at]);
+    edit.rows[at].rsize = 0;
+    edit.rows[at].render = NULL;
+    update_row(&edit.rows[at]);
 
-    config.numrows++;
-    config.dirty++;
+    edit.numrows++;
+    edit.dirty++;
 }
 
 void free_row( edit_row* row )
@@ -683,14 +716,14 @@ void free_row( edit_row* row )
 
 void del_row( int at )
 {
-    if( at < 0 || at >= config.numrows )
+    if( at < 0 || at >= edit.numrows )
     {
         return;
     }
-    free_row(&config.rows[at]);
-    memmove(&config.rows[at], &config.rows[at+1], sizeof(edit_row) * (config.numrows - at - 1));
-    config.numrows--;
-    config.dirty++;
+    free_row(&edit.rows[at]);
+    memmove(&edit.rows[at], &edit.rows[at+1], sizeof(edit_row) * (edit.numrows - at - 1));
+    edit.numrows--;
+    edit.dirty++;
 }
 
 void row_insert_char( edit_row* row, int at, int c )
@@ -707,7 +740,7 @@ void row_insert_char( edit_row* row, int at, int c )
     row->chars[at] = c;
 
     update_row(row);
-    config.dirty++;
+    edit.dirty++;
 }
 
 void row_append_string( edit_row* row, char* s, size_t len )
@@ -718,7 +751,7 @@ void row_append_string( edit_row* row, char* s, size_t len )
     row->chars[row->size] = '\0';
     update_row(row);
 
-    config.dirty++;
+    edit.dirty++;
 }
 
 void row_del_char( edit_row* row, int at )
@@ -732,67 +765,67 @@ void row_del_char( edit_row* row, int at )
     row->size--;
     update_row(row);
 
-    config.dirty++;
+    edit.dirty++;
 }
 
 void insert_char( int c )
 {
-    if( config.cy == config.numrows )
+    if( edit.cy == edit.numrows )
     {
-        insert_row(config.numrows, "", 0);
+        insert_row(edit.numrows, "", 0);
     }
 
-    row_insert_char(&config.rows[config.cy], config.cx, c);
-    config.cx++;
+    row_insert_char(&edit.rows[edit.cy], edit.cx, c);
+    edit.cx++;
 }
 
 void insert_newline()
 {
-    if( config.cx == 0 )
+    if( edit.cx == 0 )
     {
-        insert_row(config.cy, "", 0);
+        insert_row(edit.cy, "", 0);
     }else
     {
-        edit_row* row = &config.rows[config.cy];
-        insert_row(config.cy + 1, &row->chars[config.cx], row->size - config.cx);
-        row = &config.rows[config.cy];
-        row->size = config.cx;
+        edit_row* row = &edit.rows[edit.cy];
+        insert_row(edit.cy + 1, &row->chars[edit.cx], row->size - edit.cx);
+        row = &edit.rows[edit.cy];
+        row->size = edit.cx;
         row->chars[row->size] = '\0';
         update_row(row);
     }
-    config.cy++;
-    config.cx = 0;
+    edit.cy++;
+    edit.cx = 0;
 }
 
 void del_char()
 {
-    if( config.cy == config.numrows )
+    if( edit.cy == edit.numrows )
     {
         return;
     }
-    if( config.cx == 0 && config.cy == 0 )
+    if( edit.cx == 0 && edit.cy == 0 )
     {
         return;
     }
 
-    edit_row* row = &config.rows[config.cy];
-    if( config.cx > 0 )
+    edit_row* row = &edit.rows[edit.cy];
+    if( edit.cx > 0 )
     {
-        row_del_char(row, config.cx - 1);
-        config.cx--;
+        row_del_char(row, edit.cx - 1);
+        edit.cx--;
     }else
     {
-        config.cx = config.rows[config.cy - 1].size;
-        row_append_string(&config.rows[config.cy - 1], row->chars, row->size);
-        del_row(config.cy);
-        config.cy--;
+        edit.cx = edit.rows[edit.cy - 1].size;
+        row_append_string(&edit.rows[edit.cy - 1], row->chars, row->size);
+        del_row(edit.cy);
+        edit.cy--;
     }
 }
 
 void open_file( char* filename )
 {
-    free(config.filename);
-    config.filename = strdup(filename);
+    free(edit.filename);
+    edit.filename = strdup(filename);
 
     FILE* fp = fopen(filename, "r");
     if( !fp )
@@ -811,21 +844,21 @@ void open_file( char* filename )
         {
             linelen--;
         }
-        insert_row(config.numrows, line, linelen);
+        insert_row(edit.numrows, line, linelen);
     }
 
     free(line);
     fclose(fp);
 
-    config.dirty = 0;
+    edit.dirty = 0;
 }
 
 void save_file( void )
 {
-    if( config.filename == NULL )
+    if( edit.filename == NULL )
     {
-        config.filename = status_prompt("Save as: %s", NULL);
-        if( config.filename == NULL )
+        edit.filename = status_bar_prompt("Save as: %s", NULL);
+        if( edit.filename == NULL )
         {
             set_statusmsg("Save cancelled");
             return;
@@ -835,12 +868,12 @@ void save_file( void )
     int len;
     char* buf = rows_to_string(&len);
 
-    int fd = open(config.filename, O_RDWR | O_CREAT | O_TRUNC, 0644);
+    int fd = open(edit.filename, O_RDWR | O_CREAT | O_TRUNC, 0644);
     if( fd != -1 )
     {
         write(fd, buf, len);
         close(fd);
-        config.dirty = 0;
+        edit.dirty = 0;
         set_statusmsg("%d bytes written", len);
     }else
     {
@@ -854,18 +887,18 @@ char* rows_to_string( int* buflen )
 {
     int len = 0;
     int j;
-    for( j = 0; j < config.numrows; j++ )
+    for( j = 0; j < edit.numrows; j++ )
     {
-        len += config.rows[j].size + 1;
+        len += edit.rows[j].size + 1;
     }
     *buflen = len;
 
     char* buf = malloc(len);
     char* p = buf;
-    for( j = 0; j < config.numrows; j++ )
+    for( j = 0; j < edit.numrows; j++ )
     {
-        memcpy(p, config.rows[j].chars, config.rows[j].size);
-        p += config.rows[j].size;
+        memcpy(p, edit.rows[j].chars, edit.rows[j].size);
+        p += edit.rows[j].size;
         *p = '\n';
         p++;
     }
@@ -875,22 +908,22 @@ char* rows_to_string( int* buflen )
 
 void find( void )
 {
-    int save_cx = config.cx;
-    int save_cy = config.cy;
-    int save_scroll_rows = config.scroll_rows;
-    int save_scroll_cols = config.scroll_cols;
+    int save_cx = edit.cx;
+    int save_cy = edit.cy;
+    int save_scroll_rows = edit.scroll_rows;
+    int save_scroll_cols = edit.scroll_cols;
 
-    char* query = status_prompt("Search: %s", find_callback);
+    char* query = status_bar_prompt("Search: %s", find_callback);
     
     if( query )
     {
         free(query);
     }else
     {
-        config.cx = save_cx;
-        config.cy = save_cy;
-        config.scroll_rows = save_scroll_rows;
-        config.scroll_cols = save_scroll_cols;
+        edit.cx = save_cx;
+        edit.cy = save_cy;
+        edit.scroll_rows = save_scroll_rows;
+        edit.scroll_cols = save_scroll_cols;
     }
 }
 
@@ -922,41 +955,26 @@ void find_callback( char* query, int key )
     }
     int current = last_match;
     int i;
-    for( i = 0; i < config.numrows; i++ )
+    for( i = 0; i < edit.numrows; i++ )
     {
         current += direction;
         if( current == -1 )
         {
-            current = config.numrows - 1;
-        }else if( current == config.numrows )
+            current = edit.numrows - 1;
+        }else if( current == edit.numrows )
         {
             current = 0;
         }
 
-        edit_row* row = &config.rows[current];
+        edit_row* row = &edit.rows[current];
         char* match = strstr(row->render, query);
         if( match )
         {
             last_match = current;
-            config.cy = current;
-            config.cx = rx_to_cx(row, match - row->render);
-            config.scroll_rows = config.numrows;
+            edit.cy = current;
+            edit.cx = rx_to_cx(row, match - row->render);
+            edit.scroll_rows = edit.numrows;
             break;
         }
-    }
-}
-
-int get_term_size( int* term_rows, int* term_cols )
-{
-    struct winsize ws;
-
-    if( ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == -1 || ws.ws_col == 0)
-    {
-        return -1;
-    }else
-    {
-        *term_rows = ws.ws_row;
-        *term_cols = ws.ws_col;
-        return 0;
     }
 }

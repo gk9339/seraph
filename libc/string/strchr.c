@@ -43,5 +43,5 @@ char* strchrnul( const char* s, int c )
 
 char* strrchr( const char* s, int c )
 {
-    return memchr(s, c, strlen(s) + 1);
+    return memrchr(s, c, strlen(s) + 1);
 }

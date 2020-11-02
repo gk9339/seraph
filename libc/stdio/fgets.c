@@ -6,7 +6,7 @@ char* fgets( char* s, int size, FILE* stream )
     int c;
     char* out = s;
 
-    while( (c = fgetc(stream)) > 0 )
+    while( (c = fgetc(stream)) != EOF )
     {
         *s++ = (char)c;
         size--;

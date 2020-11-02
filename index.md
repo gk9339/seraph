@@ -1,37 +1,29 @@
-## Welcome to GitHub Pages
+## SERAPH
+seraph is an under development x86 operating system, created for learning purposes.
 
-You can use the [editor on GitHub](https://github.com/gk9339/seraph/edit/gh-pages/index.md) to maintain and preview the content for your website in Markdown files.
+The kernel is multiboot2 compatible, supports multitasking, interprocess signalling, the ELF executable format, minimal I/O and fs drivers, VGA text and graphics mode output, and basic tty/terminal support.
 
-Whenever you commit to this repository, GitHub Pages will run [Jekyll](https://jekyllrb.com/) to rebuild the pages in your site, from the content in your Markdown files.
+The C library supports a minimal range of functions, and includes additional libraries such as hashtable, linked list and tree ADTs
 
-### Markdown
+The userland currently includes a VGA graphics mode terminal, a basic shell, minimal set of core utilities, and a text editor.
 
-Markdown is a lightweight and easy-to-use syntax for styling your writing. It includes conventions for
+## Building
+`./mkiso.sh` - will build the toolchain (if not already built), build the kernel, c library, and user programs, and then create an iso with the GRUB2 bootloader, which can the be burnt to a disk / USB, or run in a virtual machine. (seraph.iso)
 
-```markdown
-Syntax highlighted code block
+`./qemu.sh` - will run 'seraph.iso' in qemu-system-i386 with preset hardware, and will rebuild the OS if any changes occurred beforehand
 
-# Header 1
-## Header 2
-### Header 3
+## Debugging
+Create an iso file, then open it with `qemu-system-i386 -s -S -serial stdio -cdrom seraph.iso`
 
-- Bulleted
-- List
+In another terminal open gdb and connect to the suspended qemu session with `gdb -ex 'tar rem :1234'`, select the executable to be debugged with `file <path>`, either `./kernel/seraph.kernel`, `./bin/something/something`, and add additional executable symbols with `add-symbol-file <path>` for more advanced debugging.
 
-1. Numbered
-2. List
+Resume the VM with `continue` after setting breakpoints / watchpoints
 
-**Bold** and _Italic_ and `Code` text
+## Prerequisites
+Arch (and derivatives):
 
-[Link](url) and ![Image](src)
-```
+`sudo pacman -S automake-1.15 gcc make curl bison flex gmp grub libisoburn python mtools qemu-arch-extra`
 
-For more details see [GitHub Flavored Markdown](https://guides.github.com/features/mastering-markdown/).
+Ubuntu (and similar):
 
-### Jekyll Themes
-
-Your Pages site will use the layout and styles from the Jekyll theme you have selected in your [repository settings](https://github.com/gk9339/seraph/settings). The name of this theme is saved in the Jekyll `_config.yml` configuration file.
-
-### Support or Contact
-
-Having trouble with Pages? Check out our [documentation](https://docs.github.com/categories/github-pages-basics/) or [contact support](https://github.com/contact) and we’ll help you sort it out.
+`sudo apt-get install automake-1.15 libtool build-essential curl bison flex libgmp3-dev libmpc-dev libmpfr-dev grub2 xorriso python3 qemu-system-x86 mtools`

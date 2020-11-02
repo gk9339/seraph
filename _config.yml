@@ -1,1 +1,5 @@
 theme: jekyll-theme-minimal
+title: seraph
+description: x86 OS
+logo: seraph.png
+show_downloads: true

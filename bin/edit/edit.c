@@ -364,7 +364,7 @@ void move_cursor( int key )
             if( row && edit.cx < row->size )
             {
                 edit.cx++;
-            }else if( row && edit.cx == row->size )
+            }else if( row && edit.cx == row->size && edit.cy != edit.numrows - 1 )
             {
                 edit.cy++;
                 edit.cx = 0;
@@ -514,11 +514,13 @@ void draw_text_rows( struct edit_buf* eb )
 
 void draw_status_bar( struct edit_buf* eb )
 {
-    edit_buf_append(eb, "\033[48;5;242m", 11);
+    edit_buf_append(eb, "\033[48;5;252m", 11);
+    edit_buf_append(eb, "\033[30m", 5);
 
-    char status[80], rstatus[80];
-    int len = snprintf(status, sizeof(status), "%.20s - %d lines%s%s", edit.filename? edit.filename : "[No Name]", edit.numrows, edit.newfile? " [New]" : "", edit.dirty? " [Modified]" : "");
-    int rlen = snprintf(rstatus, sizeof(rstatus), "%d/%d", edit.cy + 1, edit.numrows);
+    char status[80], r1status[80], r2status[80];
+    int len = snprintf(status, sizeof(status), " %.20s - %d lines%s%s ", edit.filename? edit.filename : "[No Name]", edit.numrows, edit.newfile? " [New]" : "", edit.dirty? " [Modified]" : "");
+    int r1len = snprintf(r1status, sizeof(r1status), " %.0f%% ", edit.numrows != 0? ((float)(edit.cy + 1) / (float)edit.numrows)*100 : 100);
+    int r2len = snprintf(r2status, sizeof(r2status), " %d/%d ", edit.cy + 1, edit.numrows);
 
     if( len > edit.term_cols )
     {
@@ -526,14 +528,15 @@ void draw_status_bar( struct edit_buf* eb )
     }
 
     edit_buf_append(eb, status, len);
-    edit_buf_append(eb, "\033[48;5;238m", 11);
-
+    edit_buf_append(eb, "\033[48;5;240m", 11);
     while( len < edit.term_cols )
     {
-        if( edit.term_cols - len == rlen )
+        if( edit.term_cols - len == r1len + r2len )
         {
-            edit_buf_append(eb, "\033[48;5;242m", 11);
-            edit_buf_append(eb, rstatus, rlen);
+            edit_buf_append(eb, "\033[48;5;248m", 11);
+            edit_buf_append(eb, r1status, r1len);
+            edit_buf_append(eb, "\033[48;5;252m", 11);
+            edit_buf_append(eb, r2status, r2len);
             break;
         }else
         {
@@ -560,7 +563,7 @@ void draw_message_bar( struct edit_buf* eb )
         edit_buf_append(eb, edit.statusmsg, msglen);
     }else
     {
-        edit_buf_append(eb, "^Q - Quit | ^S - Save | ^F - Find", 34);
+        edit_buf_append(eb, " ^Q - Quit | ^S - Save | ^F - Find", 34);
     }
 }
 
@@ -797,7 +800,11 @@ void insert_newline()
         row->chars[row->size] = '\0';
         update_row(row);
     }
-    edit.cy++;
+
+    if( edit.numrows != 1 )
+    {
+        edit.cy++;
+    }
     edit.cx = 0;
 }
 

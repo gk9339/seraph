@@ -148,6 +148,11 @@ int vfprintf( FILE* f, const char* fmt, va_list args )
                 i++;
             }
 
+            if( fmt[i] == '%' )
+            {
+                chars += fwrite("%", sizeof(char), 1, f);
+            }
+
             if( fmt[i] == '*' )
             {
                 width = va_arg(args, int);

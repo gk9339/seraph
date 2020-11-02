@@ -28,17 +28,17 @@ int main( void )
     // Remount ramdisk fs as tmpfs
     mount("/dev/ram0", "/dev/base", "ustar");
     mount("root,755", "/", "tmpfs");
- 
+
     copy_directory("/dev/base","/",0660,0,0);
     mount("root,755", "/dev/base", "tmpfs");
- 
+
     free_ramdisk("/dev/ram0");
 
     // Setup standard streams to point to /dev/null
     syscall_open("/dev/null", 0, 0);
     syscall_open("/dev/null", 1, 0);
     syscall_open("/dev/null", 1, 0);
-    
+
     // Set initial hostname to /conf/hostname
     char hostname[256] = { 0 };
     int hostname_fd = open("/conf/hostname", O_RDONLY);
@@ -49,7 +49,7 @@ int main( void )
         strtok(hostname, "\n"); // Remove \n from the hostname
         sethostname(hostname, strlen(hostname));
     }
-    
+
     // TODO: use /etc/init.d or similar for this
     pid_t pid = fork();
 

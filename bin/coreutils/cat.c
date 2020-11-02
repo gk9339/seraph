@@ -6,8 +6,11 @@
 #include <getopt.h>
 #include <stdlib.h>
 #include <sys/stat.h>
+#include <ctype.h>
 
 #define VERSION "0.2"
+
+int nonprinting = 0;
 
 void parse_args( int argc, char** argv ); // parse args, calling version/help functions
 void cat( FILE* file, char* filename ); // Concatenate file to stdout
@@ -27,7 +30,7 @@ int main( int argc, char** argv )
         cat(stdin, filename);
     }
 
-    for( int i = 1; i < argc; i++ )
+    for( int i = optind; i < argc; i++ )
     {
         if( !strcmp(argv[i], "-") )
         {
@@ -72,14 +75,15 @@ void parse_args( int argc, char** argv )
     {
         static struct option long_options[] =
         {
+            {"show-nonprinting", no_argument, 0, 'v'},
             {"help", no_argument, 0, 'h'},
-            {"version", no_argument, 0, 'v'},
+            {"version", no_argument, 0, 'V'},
             {0, 0, 0, 0}
         };
 
         int option_index = 0;
 
-        c = getopt_long(argc, argv, "", long_options, &option_index);
+        c = getopt_long(argc, argv, "vh", long_options, &option_index);
 
         if( c == -1 )
         {
@@ -88,9 +92,12 @@ void parse_args( int argc, char** argv )
 
         switch( c )
         {
-            case 'v':
+            case 'V':
                 show_version();
                 __builtin_unreachable();
+            case 'v':
+                nonprinting = 1;
+                break;
             case '?':
                 fprintf(stderr, "Try 'cat --help'\n");
                 exit(EXIT_FAILURE);
@@ -108,6 +115,7 @@ void cat( FILE* file, char* filename )
     while( 1 )
     {
         char buf[BUFSIZ];
+        char npbuf[BUFSIZ * 2];
         memset(buf, 0, BUFSIZ);
 
         ssize_t r = fread(buf, sizeof(char), BUFSIZ, file);
@@ -121,7 +129,33 @@ void cat( FILE* file, char* filename )
             return;
         }
 
-        fwrite(buf, sizeof(char), r, stdout);
+        if( !nonprinting )
+        {
+            fwrite(buf, sizeof(char), r, stdout);
+        }else
+        {
+            int j = 0;
+            for( int i = 0; i < r; i++ )
+            {
+                if( iscntrl(buf[i]) && buf[i] != '\n' && buf[i] != '\t' )
+                {
+                    if( buf[i] < 26 )
+                    {
+                        npbuf[j++] = '^';
+                        npbuf[j++] = '@' + buf[i];
+                    }else
+                    {
+                        npbuf[j++] = '^';
+                        npbuf[j++] = '@';
+                    }
+                }else
+                {
+                    npbuf[j++] = buf[i];
+                }
+            }
+            
+            fwrite(npbuf, sizeof(char), r, stdout);
+        }
     }
 }
 
@@ -138,8 +172,9 @@ void show_usage( void )
 {
     printf("Usage: cat [FILE(s)]\n"
            "Concatenate FILE(s) to standard output.\n\n"
-           "     --help    display this help text and exit\n"
-           "     --version display version and exit\n");
+           " -v, --show-nonprinting print control characters with ^ notation\n"
+           " -h, --help             display this help text and exit\n"
+           "     --version          display version and exit\n");
 
     exit(EXIT_SUCCESS);
 }

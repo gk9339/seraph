@@ -594,6 +594,11 @@ static int sys_getuid( void )
     return current_process->real_user;
 }
 
+static int sys_geteuid( void )
+{
+    return current_process->user;
+}
+
 static int sys_reboot( int type )
 {
     if( current_process->user != USER_ROOT_UID )
@@ -1182,6 +1187,7 @@ static int (*syscalls[])() =
     [SYS_LSTAT] = sys_lstat,
     [SYS_DUP2] = sys_dup2,
     [SYS_GETUID] = sys_getuid,
+    [SYS_GETEUID] = sys_geteuid,
     [SYS_REBOOT] = sys_reboot,
     [SYS_READDIR] = sys_readdir,
     [SYS_CHDIR] = sys_chdir,

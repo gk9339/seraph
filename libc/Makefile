@@ -83,6 +83,7 @@ unistd/fcntl.o \
 unistd/getpid.o \
 unistd/getppid.o \
 unistd/getuid.o \
+unistd/geteuid.o \
 unistd/setuid.o \
 unistd/getgid.o \
 unistd/setpgid.o \
@@ -191,6 +192,15 @@ locale/setlocale.o \
 locale/localeconv.o \
 setjmp/setjmp.o \
 dlfcn/dlfcn.o \
+pwd/getpwent.o \
+pwd/fgetpwent.o \
+pwd/getpwuid.o \
+pwd/getpwnam.o \
+grp/getgrent.o \
+grp/fgetgrent.o \
+grp/getgrgid.o \
+grp/getgrnam.o \
+grp/getgrouplist.o \
 debug/debugvfstree.o \
 debug/debugproctree.o \
 debug/debugprint.o \

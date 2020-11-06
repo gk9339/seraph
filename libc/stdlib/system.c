@@ -23,5 +23,6 @@ int system( const char* command )
         waitpid(pid, &status, 0);
         return status;
     }
+    __builtin_unreachable();
 }
 

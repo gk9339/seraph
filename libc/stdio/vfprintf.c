@@ -4,6 +4,7 @@
 #include <string.h>
 #include <stdbool.h>
 #include <ctype.h>
+#include <stdlib.h>
 
 static char* __vfprintf(intmax_t i, char b[], int base, bool plus_sign, bool space_no_sign, int padding_no, bool justify, bool zero_pad)
 {
@@ -91,8 +92,8 @@ int vfprintf( FILE* f, const char* fmt, va_list args )
         char specifier = '\0';
         char length = '\0';
 
-        int width = 0;
-        int precision = 0;
+        unsigned int width = 0;
+        unsigned int precision = 0;
         bool left_justify = false;
         bool zero_pad = false;
         bool space_no_sign = false;
@@ -319,7 +320,6 @@ int vfprintf( FILE* f, const char* fmt, va_list args )
                             break;
                         default:
                             break;
-
                     }
                     break;
                 case 'c':
@@ -337,7 +337,18 @@ int vfprintf( FILE* f, const char* fmt, va_list args )
                     {
                         tmp = "(null)";
                     }
-                    chars += fwrite(tmp, sizeof(char), strlen(tmp), f);
+                    if( width > strlen(tmp) )
+                    {
+                        char* ntmp = calloc((width + 1), sizeof(char));
+                        width -= strlen(tmp);
+                        memset(ntmp, ' ', width);
+                        strcat(ntmp, tmp);
+                        chars += fwrite(ntmp, sizeof(char), strlen(ntmp), f);
+                        free(ntmp);
+                    }else
+                    {
+                        chars += fwrite(tmp, sizeof(char), strlen(tmp), f);
+                    }
                     break;
                 case 'n':
                     switch( length )
@@ -402,7 +413,7 @@ int vfprintf( FILE* f, const char* fmt, va_list args )
 
                     floating -= (int)floating;
 
-                    for( int j = 0; j < precision; j++ )
+                    for( unsigned int j = 0; j < precision; j++ )
                     {
                         floating *= 10;
                     }

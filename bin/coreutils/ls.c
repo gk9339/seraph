@@ -11,12 +11,15 @@
 #include <getopt.h>
 #include <sys/ioctl.h>
 #include <errno.h>
+#include <pwd.h>
+#include <grp.h>
 
-#define VERSION "0.5"
+#define VERSION "0.6"
 
 #define FLAG_ALL        0x01
 #define FLAG_ALMOST_ALL 0x02
 #define FLAG_LONG       0x04
+#define FLAG_HUMAN_SIZE 0x08
 
 struct ls_entry
 {
@@ -24,6 +27,7 @@ struct ls_entry
     struct stat st;
     char* link;
     struct stat stlink;
+    char* human_size;
 };
 
 int flags = 0;
@@ -33,6 +37,7 @@ size_t line_length = 80;
 
 void parse_args( int argc, char** argv ); // parse args, setting flags, or calling version/help functions
 int display_dir( char* path ); // Display all files inside a dir
+char* human_size( uint64_t st_size ); // Convert size in bytes into hman readable format
 void display_files( struct ls_entry** ls_entry_array, int entries ); // Display each file in array
 void print_entry( struct ls_entry* entry, int colwidth ); // print a file
 void print_entry_long( struct ls_entry* entry, int size_width ); // Print a file (long / -l)
@@ -161,6 +166,9 @@ int main( int argc, char** argv )
         }
     }
 
+    endpwent();
+    endgrent();
+
     return retval;
 }
 
@@ -173,16 +181,17 @@ void parse_args( int argc, char** argv )
     {
         static struct option long_options[] =
         {
-            {"all",        no_argument, 0, 'a'},
-            {"almost-all", no_argument, 0, 'A'},
-            {"help",       no_argument, 0, 'h'},
-            {"version",    no_argument, 0, 'v'},
+            {"all",            no_argument, 0, 'a'},
+            {"almost-all",     no_argument, 0, 'A'},
+            {"human-readable", no_argument, 0, 'h'},
+            {"help",           no_argument, 0, 'H'},
+            {"version",        no_argument, 0, 'v'},
             {0, 0, 0, 0}
         };
 
         int option_index = 0;
 
-        c = getopt_long(argc, argv, "aAl", long_options, &option_index);
+        c = getopt_long(argc, argv, "aAhl", long_options, &option_index);
 
         if( c == -1 )
         {
@@ -199,6 +208,9 @@ void parse_args( int argc, char** argv )
                 flags |= FLAG_ALMOST_ALL;
                 flags &= ~FLAG_ALL;
                 break;
+            case 'h':
+                flags |= FLAG_HUMAN_SIZE;
+                break;
             case 'l':
                 flags |= FLAG_LONG;
                 break;
@@ -208,7 +220,7 @@ void parse_args( int argc, char** argv )
             case '?':
                 fprintf(stderr, "Try 'ls --help'\n");
                 exit(EXIT_FAILURE);
-            case 'h':
+            case 'H':
             default:
                 show_usage();
                 __builtin_unreachable();
@@ -312,6 +324,40 @@ int display_dir( char* path )
     return 0;
 }
 
+// Convert size in bytes into hman readable format
+char* human_size( uint64_t st_size )
+{
+    char* output;
+
+    if( st_size != 0 )
+    {
+        char* suffix[] = { "B", "K", "M", "G", "T" };
+        char length = sizeof(suffix) / sizeof(suffix[0]);
+ 
+        int i = 0;
+        double fp_size = st_size;
+ 
+        if( st_size > 1024 )
+        {
+            for( i = 0; (st_size / 1024) > 0 && i < length - 1; i++, st_size /= 1024 )
+            {
+                fp_size = st_size / 1024.0;
+            }
+        }
+ 
+        char fmt[64];
+        output = malloc((1 + sprintf(fmt, "%4.2lf %s", fp_size, suffix[i])) * sizeof(char));
+        strcpy(output, fmt);
+    }else
+    {
+        char fmt[64];
+        output = malloc((1 + sprintf(fmt, "0 B")) * sizeof(char));
+        strcpy(output, fmt);
+    }
+
+    return output;
+}
+
 // Display each file in array
 void display_files( struct ls_entry** ls_entry_array, int entries )
 {
@@ -319,13 +365,27 @@ void display_files( struct ls_entry** ls_entry_array, int entries )
     {
         int size_width = 0;
 
-        for( int i = 0; i < entries; i++ )
+        if( flags & FLAG_HUMAN_SIZE )
         {
-            int width = num_places(ls_entry_array[i]->st.st_size);
-            if( width > size_width )
+            for( int i = 0; i < entries; i++ )
             {
-                size_width = width;
+                ls_entry_array[i]->human_size = human_size(ls_entry_array[i]->st.st_size);
+                int width = strlen(ls_entry_array[i]->human_size);
+                if( width > size_width )
+                {
+                    size_width = width;
+                }
             }
+        }else
+        {
+            for( int i = 0; i < entries; i++ )
+            {
+                int width = num_places(ls_entry_array[i]->st.st_size);
+                if( width > size_width )
+                {
+                    size_width = width;
+                }
+            }   
         }
 
         for( int i = 0; i < entries; i++ )
@@ -449,7 +509,16 @@ void print_entry_long( struct ls_entry* entry, int size_width )
     perm[8] = (mode & S_IWOTH) ? 'w' : '-';
     perm[9] = (mode & S_IXOTH) ? 'x' : '-';
 
-    printf("%s %d %d %*zdB ", perm, entry->st.st_uid, entry->st.st_gid, size_width, entry->st.st_size);
+    printf("%s %s %s ", perm, getpwuid(entry->st.st_uid)->pw_name, getgrgid(entry->st.st_gid)->gr_name);
+    if( flags & FLAG_HUMAN_SIZE )
+    {
+        printf("%*s ", size_width, entry->human_size);
+        free(entry->human_size);
+    }else
+    {
+        printf("%*zdB ", size_width, entry->st.st_size);
+    }
+
     printname_color(entry);
     printf("\n");
 }

@@ -160,6 +160,7 @@ DECL_SYSCALL1(umask, int);
 DECL_SYSCALL2(chmod, char*, int);
 DECL_SYSCALL2(dup2, int, int);
 DECL_SYSCALL0(getuid);
+DECL_SYSCALL0(geteuid);
 DECL_SYSCALL1(reboot, int);
 DECL_SYSCALL3(readdir, int, int, void*);
 DECL_SYSCALL2(gethostname, char*, size_t);

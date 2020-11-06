@@ -26,6 +26,7 @@ void* sbrk( intptr_t );
 pid_t getpid( void );
 pid_t getppid( void );
 uid_t getuid( void );
+uid_t geteuid( void );
 gid_t getgid( void );
 
 pid_t setsid( void );

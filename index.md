@@ -1,4 +1,4 @@
-## seraph
+## About
 seraph is an under development x86 operating system, created for learning purposes.
 
 The kernel is multiboot2 compatible, supports multitasking, interprocess signalling, the ELF executable format, minimal I/O and fs drivers, VGA text and graphics mode output, and basic tty/terminal support.

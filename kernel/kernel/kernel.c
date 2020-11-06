@@ -96,7 +96,7 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
 
     // Multiboot modules
     uintptr_t last_mod = (uintptr_t)&_kernel_end;
-    if( CHECK_FLAG(mbi->flags, 5) ) /* mods */
+    if( CHECK_FLAG(mbi->flags, 5) ) // mods
     {
         if( CHECK_FLAG(debug, 0) ) debug_logf(debug_str, "Parsing multiboot modules");
         if( CHECK_FLAG(debug, 1) ) printf("Parsing multiboot modules\n");

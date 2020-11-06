@@ -11,6 +11,7 @@
 
 #define VERSION "0.1"
 
+int interactive = 0;
 int recursive = 0;
 int follow = 1;
 int verbose = 0;
@@ -59,6 +60,7 @@ int main( int argc, char** argv )
     }else
     {
         fprintf(stderr, "%s: not enough arguments\n", argv[0]);
+        return EXIT_FAILURE;
     }
 
     return EXIT_SUCCESS;
@@ -73,6 +75,7 @@ void parse_args( int argc, char** argv )
     {
         static struct option long_options[] =
         {
+            {"interactive", no_argument, 0, 'i'},
             {"recursive", no_argument, 0, 'r'},
             {"no-dereference", no_argument, 0, 'P'},
             {"verbose", no_argument, 0, 'v'},
@@ -83,7 +86,7 @@ void parse_args( int argc, char** argv )
 
         int option_index = 0;
 
-        c = getopt_long(argc, argv, "rRPv", long_options, &option_index);
+        c = getopt_long(argc, argv, "irRPv", long_options, &option_index);
 
         if( c == -1 )
         {
@@ -92,6 +95,9 @@ void parse_args( int argc, char** argv )
 
         switch( c )
         {
+            case 'i':
+                interactive = 1;
+                break;
             case 'r':
             case 'R':
                 recursive = 1;
@@ -156,8 +162,35 @@ int cp( char* source, char* dest )
 
 int cp_directory( char* source, char* dest, int mode, int uid, int gid )
 {
-    DIR* dirp= opendir(source);
+    DIR* dirp;
+    
+    if( interactive )
+    {
+        dirp = opendir(dest);
+        if( dirp )
+        {
+            interactive = 2;
+            char input[64];
+            while( interactive == 2 )
+            {
+                printf("%s: overwrite directory '%s'? ", "cp", dest);
+                fflush(stdout);
+                fgets(input, 64, stdin);
+                if( !strcmp(input, "y") || !strcmp(input, "y\n") )
+                {
+                    interactive = 1;
+                    closedir(dirp);
+                }else if( !strcmp(input, "n") || !strcmp(input, "n\n") )
+                {
+                    interactive = 1;
+                    return EXIT_SUCCESS;
+                    closedir(dirp);
+                }
+            }
+        }
+    }
 
+    dirp= opendir(source);
     if( dirp == NULL )
     {
         fprintf(stderr, "Failed to open directory %s\n", source);
@@ -199,7 +232,27 @@ int cp_directory( char* source, char* dest, int mode, int uid, int gid )
 
 int cp_file( char* source, char* dest, int mode, int uid, int gid )
 {
-    int dest_fd = open(dest, O_WRONLY | O_CREAT, mode);
+    if( interactive && (access(dest, F_OK) != -1) )
+    {
+        interactive = 2;
+        char input[64];
+        while( interactive == 2 )
+        {
+            printf("%s: overwrite file '%s'? ", "cp", dest);
+            fflush(stdout);
+            fgets(input, 64, stdin);
+            if( !strcmp(input, "y") || !strcmp(input, "y\n") )
+            {
+                interactive = 1;
+            }else if( !strcmp(input, "n") || !strcmp(input, "n\n") )
+            {
+                interactive = 1;
+                return EXIT_SUCCESS;
+            }
+        }   
+    }
+
+    int dest_fd = open(dest, O_WRONLY | O_CREAT | O_TRUNC, mode);
     int src_fd = open(source, O_RDONLY);
 
     ssize_t length;
@@ -229,6 +282,26 @@ int cp_file( char* source, char* dest, int mode, int uid, int gid )
 
 int cp_symlink( char* source, char* dest, int mode, int uid, int gid )
 {
+    if( interactive && (access(dest, F_OK) != -1) )
+    {
+        interactive = 2;
+        char input[64];
+        while( interactive == 2 )
+        {
+            printf("%s: overwrite file '%s'? ", "cp", dest);
+            fflush(stdout);
+            fgets(input, 64, stdin);
+            if( !strcmp(input, "y") || !strcmp(input, "y\n") )
+            {
+                interactive = 1;
+            }else if( !strcmp(input, "n") || !strcmp(input, "n\n") )
+            {
+                interactive = 1;
+                return EXIT_SUCCESS;
+            }
+        }   
+    }
+
     char src_link[1024];
 
     readlink(source, src_link, 1024);
@@ -254,6 +327,7 @@ void show_usage( void )
 {
     printf("Usage: cp SOURCE DEST\n"
            "Copy files and directories.\n\n"
+           " -i, --interactive    prompt before overwriting\n"
            " -r,\n"
            " -R, --recursive      copy directories recursivley\n"
            " -P, --no-dereference never follow symbolic links in SOURCE\n"

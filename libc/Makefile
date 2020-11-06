@@ -160,6 +160,7 @@ stdlib/mbstowcs.o \
 stdlib/bsearch.o \
 stdlib/atol.o \
 stdlib/mktemp.o \
+stdlib/system.o \
 string/strxfrm.o \
 string/strcoll.o \
 string/strncpy.o \

@@ -11,7 +11,7 @@
 #define VERSION "0.1"
 
 int force = 0;
-int prompt = 0;
+int interactive = 0;
 int recursive = 0;
 int verbose = 0;
 
@@ -48,6 +48,7 @@ void parse_args( int argc, char** argv )
     {
         static struct option long_options[] =
         {
+            {"interactive", no_argument, 0, 'i'},
             {"force", no_argument, 0, 'f'},
             {"recursive", no_argument, 0, 'r'},
             {"verbose", no_argument, 0, 'v'},
@@ -71,7 +72,7 @@ void parse_args( int argc, char** argv )
                 force = 1;
                 break;
             case 'i':
-                prompt = 1;
+                interactive = 1;
                 break;
             case 'r':
             case 'R':
@@ -120,21 +121,21 @@ int rm( char* name )
         return rm_dir(name);
     }else
     {
-        if( prompt )
+        if( interactive )
         {
-            prompt = 2;
+            interactive = 2;
             char input[64];
-            while( prompt == 2 )
+            while( interactive == 2 )
             {
                 printf("%s: remove file '%s'? ", "rm", name);
                 fflush(stdout);
                 fgets(input, 64, stdin);
                 if( !strcmp(input, "y") || !strcmp(input, "y\n") )
                 {
-                    prompt = 1;
+                    interactive = 1;
                 }else if( !strcmp(input, "n") || !strcmp(input, "n\n") )
                 {
-                    prompt = 1;
+                    interactive = 1;
                     return EXIT_SUCCESS;
                 }
             }
@@ -195,21 +196,21 @@ int rm_dir( char* name )
         free(file);
     }
 
-    if( prompt )
+    if( interactive )
     {
-        prompt = 2;
+        interactive = 2;
         char input[64];
-        while( prompt == 2 )
+        while( interactive == 2 )
         {
             printf("%s: remove directory '%s'? ", "rm", name);
             fflush(stdout);
             fgets(input, 64, stdin);
             if( !strcmp(input, "y") || !strcmp(input, "y\n") )
             {
-                prompt = 1;
+                interactive = 1;
             }else if( !strcmp(input, "n") || !strcmp(input, "n\n") )
             {
-                prompt = 1;
+                interactive = 1;
                 return EXIT_SUCCESS;
             }
         }
@@ -236,13 +237,13 @@ void show_usage( void )
 {
     printf("Usage: rm [OPTION(s)] FILE(s)\n"
            "Remove (unlink) FILE(s).\n\n"
-           " -f, --force     ignore nonexistant files and arguments, never prompt\n"
-           " -i              prompt before every removal\n"
+           " -f, --force       ignore nonexistant files and arguments, never prompt\n"
+           " -i  --interactive prompt before every removal\n"
            " -r,\n"
-           " -R, --recursive remove directories and their contents recursivley\n"
-           " -v, --verbose   output actions being performed\n"
-           "     --help      display this help text and exit\n"
-           "     --version   display version and exit\n");
+           " -R, --recursive   remove directories and their contents recursivley\n"
+           " -v, --verbose     output actions being performed\n"
+           "     --help        display this help text and exit\n"
+           "     --version     display version and exit\n");
 
     exit(EXIT_SUCCESS);
 }

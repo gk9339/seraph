@@ -104,7 +104,7 @@ void parse_args( int argc, char** argv )
                 show_version();
                 __builtin_unreachable();
             case '?':
-                fprintf(stderr, "Try 'cp --help'\n");
+                fprintf(stderr, "Try 'mv --help'\n");
                 exit(EXIT_FAILURE);
             case 'h':
             default:

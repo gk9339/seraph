@@ -7,6 +7,9 @@ The C library supports a minimal range of functions, and includes additional lib
 
 The userland currently includes a VGA graphics mode terminal, a basic shell, minimal set of core utilities, and a text editor.
 
+## Download
+[Latest release ISO](https://github.com/gk9339/seraph/releases/latest/download/seraph.iso)
+
 ## Building
 `./mkiso.sh` - will build the toolchain (if not already built), build the kernel, c library, and user programs, and then create an iso with the GRUB2 bootloader, which can the be burnt to a disk / USB, or run in a virtual machine. (seraph.iso)
 

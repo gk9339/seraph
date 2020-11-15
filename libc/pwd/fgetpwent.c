@@ -48,7 +48,10 @@ struct passwd* fgetpwent( FILE* stream )
     }
 
     memset(pw_blob, 0, BUFSIZ);
-    fgets(pw_blob, BUFSIZ, stream);
+    if( !fgets(pw_blob, BUFSIZ, stream) )
+    {
+        return NULL;
+    }
 
     if( pw_blob[strlen(pw_blob) - 1] == '\n' )
     {

@@ -80,8 +80,8 @@ void show_usage( void )
 {
     printf("Usage: whoami\n"
            "Print the username of the current effective user ID\n\n"
-           "     --help           display this help text and exit\n"
-           "     --version        display version and exit\n");
+           "     --help    display this help text and exit\n"
+           "     --version display version and exit\n");
 
     exit(EXIT_SUCCESS);
 }

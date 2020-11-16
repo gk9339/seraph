@@ -285,17 +285,6 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
     if( CHECK_FLAG(debug, 1) ) printf("Setup /tmp\n");
     vfs_mount_type("tmpfs", "tmp", "/tmp");
 
-#include <pwd.h>
-while( 1 )
-{
-    struct passwd* entry = getpwent();
-    if( !entry )
-    {
-        break;
-    }
-    debug_log(entry->pw_name);
-}
-
     // Set up environment for /bin/init
     char* boot_exec = "/bin/init";
     char* boot_arg = NULL;

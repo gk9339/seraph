@@ -60,6 +60,15 @@ tree/tree.o \
 hashtable/hashtable.o \
 errno/errno.o \
 ctype/ctype.o \
+pwd/getpwent.o \
+pwd/fgetpwent.o \
+pwd/getpwuid.o \
+pwd/getpwnam.o \
+grp/getgrent.o \
+grp/fgetgrent.o \
+grp/getgrgid.o \
+grp/getgrnam.o \
+grp/getgrouplist.o \
 libssp/ssp_local.o \
 libssp/ssp.o \
 
@@ -192,15 +201,6 @@ locale/setlocale.o \
 locale/localeconv.o \
 setjmp/setjmp.o \
 dlfcn/dlfcn.o \
-pwd/getpwent.o \
-pwd/fgetpwent.o \
-pwd/getpwuid.o \
-pwd/getpwnam.o \
-grp/getgrent.o \
-grp/fgetgrent.o \
-grp/getgrgid.o \
-grp/getgrnam.o \
-grp/getgrouplist.o \
 debug/debugvfstree.o \
 debug/debugproctree.o \
 debug/debugprint.o \

@@ -2,6 +2,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef __is_libk
+#include <kernel/fs.h>
+#endif
+
 static struct passwd* pw_ent;
 static char* pw_blob;
 
@@ -48,10 +52,29 @@ struct passwd* fgetpwent( FILE* stream )
     }
 
     memset(pw_blob, 0, BUFSIZ);
+#ifdef __is_libk
+    fs_node_t* pwdb = (fs_node_t*)stream;
+    static int pwoff = 0;
+    int i = 0;
+    while( read_fs(pwdb, pwoff, 1, (uint8_t*)(pw_blob + i)) == 1 )
+    {
+        pwoff++;
+        if( pw_blob[i] == '\n' )
+        {
+            break;
+        }
+        i++;
+    }
+    if( !i )
+    {
+        return NULL;
+    }
+#else
     if( !fgets(pw_blob, BUFSIZ, stream) )
     {
         return NULL;
     }
+#endif
 
     if( pw_blob[strlen(pw_blob) - 1] == '\n' )
     {

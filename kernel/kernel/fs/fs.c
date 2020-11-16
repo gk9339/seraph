@@ -7,6 +7,8 @@
 #include <string.h>
 #include <errno.h>
 #include <tree.h>
+#include <pwd.h>
+#include <grp.h>
 #include <kernel/process.h>
 #include <kernel/cmos.h>
 #include <kernel/serial.h>
@@ -75,14 +77,41 @@ int has_permission( fs_node_t* node, int permission_bit )
     
     if( current_process->user == node->uid )
     {
-        return permission_bit & ((node->mask & S_IRWXU) >> 6);
+        if( permission_bit & ((node->mask & S_IRWXU) >> 6) )
+        {
+            return 1;
+        }
     }else if( current_process->user_group == node->gid )
     {
-        return permission_bit & ((node->mask & S_IRWXG) >> 3);
+        if( permission_bit & ((node->mask & S_IRWXG) >> 3) )
+        {
+            return 1;
+        }
     }else
     {
-        return permission_bit & (node->mask & S_IRWXO);
+        int ngroups = 128;
+        gid_t groups[ngroups];
+
+        getgrouplist(getpwuid(current_process->user)->pw_name, current_process->user_group, groups, &ngroups);
+
+        for( int i = 0; i < ngroups; i++ )
+        {
+            if( (uint32_t)groups[i] == node->gid )
+            {
+                if( permission_bit & ((node->mask & S_IRWXG) >> 3) )
+                {
+                    return 1;
+                }
+            }
+        }
     }
+
+    if( permission_bit & (node->mask & S_IRWXO) )
+    {
+        return 1;
+    }
+
+    return 0;
 }
 
 static fs_node_t* vfs_mapper( void )

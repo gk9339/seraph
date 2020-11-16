@@ -2,6 +2,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef __is_libk
+#include <kernel/fs.h>
+#endif
+
 static struct group* gr_ent;
 static char* gr_blob;
 
@@ -36,6 +40,8 @@ static char *xstrtok( char* line, char* delims)
 
 struct group* fgetgrent( FILE* stream )
 {
+    int i = 0;
+
     if( !stream )
     {
         return NULL;
@@ -48,10 +54,28 @@ struct group* fgetgrent( FILE* stream )
     }
 
     memset(gr_blob, 0, BUFSIZ);
+#ifdef __is_libk
+    fs_node_t* grdb = (fs_node_t*)stream;
+    static int groff = 0;
+    while( read_fs(grdb, groff, 1, (uint8_t*)(gr_blob + i)) == 1 )
+    {
+        groff++;
+        if( gr_blob[i] == '\n' )
+        {
+            break;
+        }
+        i++;
+    }
+    if( !i )
+    {
+        return NULL;
+    }
+#else
     if( !fgets(gr_blob, BUFSIZ, stream) )
     {
         return NULL;
     }
+#endif
 
     if( gr_blob[strlen(gr_blob) - 1] == '\n' )
     {
@@ -60,7 +84,7 @@ struct group* fgetgrent( FILE* stream )
 
     char *p, *tok[64] = { NULL };
     p = xstrtok(gr_blob, ":");
-    int i = 0;
+    i = 0;
     tok[i] = p;
     while( (p = xstrtok(NULL, ":")) )
     {

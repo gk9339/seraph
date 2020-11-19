@@ -40,6 +40,8 @@ static char *xstrtok( char* line, char* delims)
 
 struct passwd* fgetpwent( FILE* stream )
 {
+    int i = 0;
+
     if( !stream )
     {
         return NULL;
@@ -55,7 +57,7 @@ struct passwd* fgetpwent( FILE* stream )
 #ifdef __is_libk
     fs_node_t* pwdb = (fs_node_t*)stream;
     static int pwoff = 0;
-    int i = 0;
+    i = 0;
     while( read_fs(pwdb, pwoff, 1, (uint8_t*)(pw_blob + i)) == 1 )
     {
         pwoff++;
@@ -83,7 +85,7 @@ struct passwd* fgetpwent( FILE* stream )
 
     char *p, *tok[7];
     p = xstrtok(pw_blob, ":");
-    for( int i = 0; i < 7; i++ )
+    for( i = 0; i < 7; i++ )
     {
         tok[i] = p;
         p = xstrtok(NULL, ":");

@@ -166,6 +166,7 @@ void find_callback( char* query, int key );
 
 // Syntax Highlighting
 void update_syntax( edit_row* row );
+int row_has_open_comment( edit_row* row );
 int syntax_to_color( int highlight );
 int is_seperator( int c );
 void syntax_from_file_extension( void );
@@ -1155,20 +1156,25 @@ void update_syntax( edit_row* row )
 
     int prev_sep = 1;
     int in_string = 0;
-    int in_comment = (row->idx > 0 && edit.rows[row->idx - 1].highlight_open_comment);
+    int in_comment = (row->idx > 0 && row_has_open_comment(&edit.rows[row->idx - 1]));
 
     int i = 0;
-    while( i < row->rsize )
-    {
-        char c = row->render[i];
-        unsigned char prev_highlight = (i > 0)? row->highlight[i - 1] : HL_NORMAL;
+    char* p = row->render;
 
+    while( *p && isspace(*p) )
+    {
+        p++;
+        i++;
+    }
+
+    while( *p )
+    {
         if( scs_len && !in_string && !in_comment )
         {
-            if( !strncmp(&row->render[i], scs, scs_len) )
+            if( prev_sep && !strncmp(p, scs, scs_len) )
             {
-                memset(&row->highlight[i], HL_COMMENT, row->rsize - i);
-                break;
+                memset(row->highlight + i, HL_COMMENT, row->rsize - i);
+                return;
             }
         }
 
@@ -1177,23 +1183,28 @@ void update_syntax( edit_row* row )
             if( in_comment )
             {
                 row->highlight[i] = HL_MLCOMMENT;
-                if( !strncmp((const char*)&row->highlight[i], mce, mce_len) )
+                if( !strncmp(p, mce, mce_len) )
                 {
-                    memset(&row->highlight[i], HL_MLCOMMENT, mce_len);
+                    row->highlight[i + 1] = HL_MLCOMMENT;
+                    p += mce_len;
                     i += mce_len;
                     in_comment = 0;
                     prev_sep = 1;
                     continue;
                 }else
                 {
+                    prev_sep = 0;
+                    p++;
                     i++;
                     continue;
                 }
-            }else if( !strncmp(&row->render[i], mcs, mcs_len) )
+            }else if( !strncmp(p, mcs, mcs_len) )
             {
                 memset(&row->highlight[i], HL_MLCOMMENT, mcs_len);
+                p += mcs_len;
                 i += mcs_len;
                 in_comment = 1;
+                prev_sep = 0;
                 continue;
             }
         }
@@ -1210,7 +1221,7 @@ void update_syntax( edit_row* row )
                     if( !strncmp(&row->render[i], macros[j], mlen) )
                     {
                         memset(&row->highlight[i], HL_MACRO, row->rsize - i);
-                        break;
+                        return;
                     }
                 }
             }
@@ -1221,26 +1232,30 @@ void update_syntax( edit_row* row )
             if( in_string )
             {
                 row->highlight[i] = HL_STRING;
-                if( c == '\\' && i + 1 < row->rsize )
+                if( *p == '\\' && i + 1 < row->rsize )
                 {
                     row->highlight[i + 1] = HL_STRING;
+                    p += 2;
                     i += 2;
+                    prev_sep = 0;
                     continue;
                 }
-                if( c == in_string )
+                if( *p == in_string )
                 {
                     in_string = 0;
                 }
+                p++;
                 i++;
-                prev_sep = 1;
                 continue;
             }else
             {
-                if( c == '"' || c == '\'' )
+                if( *p == '"' || *p == '\'' )
                 {
-                    in_string = c;
+                    in_string = *p;
                     row->highlight[i] = HL_STRING;
+                    p++;
                     i++;
+                    prev_sep = 0;
                     continue;
                 }       
             }
@@ -1248,11 +1263,12 @@ void update_syntax( edit_row* row )
 
         if( edit.syntax->flags & HL_NUMBERS )
         {
-            if( (isdigit(c) && (prev_sep || prev_highlight == HL_NUMBER)) || 
-                (c == '.' && prev_highlight == HL_NUMBER) ||
-                (c == 'x' && prev_highlight == HL_NUMBER))
+            if( (isdigit(*p) && (prev_sep || row->highlight[i - 1] == HL_NUMBER)) || 
+                (*p == '.' && row->highlight[i - 1] == HL_NUMBER) ||
+                (*p == 'x' && row->highlight[i - 1] == HL_NUMBER))
             {
                 row->highlight[i] = HL_NUMBER;
+                p++;
                 i++;
                 prev_sep = 0;
                 continue;
@@ -1270,10 +1286,11 @@ void update_syntax( edit_row* row )
                 {
                     klen--;
                 }
-                if (!strncmp(&row->render[i], keywords[j], klen) &&
-                   is_seperator(row->render[i + klen]))
+
+                if( !strncmp(p, keywords[j], klen) && (klen < row->rsize - i) && is_seperator(*(p + klen)) )
                 {
                     memset(&row->highlight[i], kw2 ? HL_KEYWORD2 : HL_KEYWORD1, klen);
+                    p += klen;
                     i += klen;
                     break;
                 }
@@ -1285,16 +1302,23 @@ void update_syntax( edit_row* row )
             }
         }
 
-        prev_sep = is_seperator(c);
+        prev_sep = is_seperator(*p);
+        p++;
         i++;
     }
 
-    int changed = (row->highlight_open_comment != in_comment);
-    row->highlight_open_comment = in_comment;
-    if( changed && row->idx +1 < edit.numrows )
+    int open_comment = row_has_open_comment(row);
+    if( row->highlight_open_comment != open_comment && row->idx+1 < edit.numrows )
     {
-        update_syntax(&edit.rows[row->idx + 1]);
+        update_syntax(&edit.rows[row->idx+1]);
     }
+    row->highlight_open_comment = open_comment;
+}
+
+int row_has_open_comment( edit_row* row )
+{
+    return( row->highlight && row->rsize && row->highlight[row->rsize-1] == HL_MLCOMMENT && 
+            (row->rsize < 2 || (row->render[row->rsize-2] != '*' || row->render[row->rsize-1] != '/')) );
 }
 
 int syntax_to_color( int highlight )

@@ -75,7 +75,7 @@ clear/clear: clear/clear.o
 
 edit/edit: edit/edit.o
 	@echo "CC $@"
-	@$(CC) $^ -o $@ $(CFLAGS)$(LIBS)
+	@$(CC) $^ -o $@ $(CFLAGS)$(LIBS) -static
 
 clean:
 	@echo "RM $(EXECS)"

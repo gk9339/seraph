@@ -603,7 +603,7 @@ void draw_text_rows( struct edit_buf* eb )
                     if( color != current_color )
                     {
                         char buf[16];
-                        int clen = snprintf(buf, sizeof(buf), "\033[%dm", color);
+                        int clen = snprintf(buf, sizeof(buf), "\033[0m\033[%dm", color);
                         edit_buf_append(eb, buf, clen);
                         current_color = color;
                     }

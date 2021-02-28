@@ -10,6 +10,8 @@ echo "MKDIR $SYSROOT/boot/grub"
 mkdir -p $SYSROOT/boot/grub
 echo "MKDIR $SYSROOT/conf"
 mkdir -p $SYSROOT/conf
+echo "MKDIR $SYSROOT/home"
+mkdir -p $SYSROOT/home
 echo "MKDIR $SYSROOT/dev"
 mkdir -p $SYSROOT/dev
 echo "MKDIR $SYSROOT/proc"
@@ -21,6 +23,9 @@ mkdir -p $SYSROOT/src/conf
 
 echo "CP conf/*"
 cp -r conf/* $SYSROOT/conf
+
+echo "CP home/*"
+cp -r home/* $SYSROOT/home
 
 echo "CP src/bin"
 find bin \( -name '*.c' -o -name '*.cpp' -o -name '*.h' -o -name '*.S' -o -name '*.py' -o -name '*.ld' -o -name 'Makefile' -o -name 'make.config' \) -exec cp --parents {} $SYSROOT/src/ \;

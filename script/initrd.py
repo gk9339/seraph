@@ -9,11 +9,13 @@ restricted_files = {
 def file_filter(tarinfo):
     tarinfo.uid = 0
     tarinfo.gid = 0
-    tarinfo.uname = "root"
-    tarinfo.gname = "root"
 
     if tarinfo.name in restricted_files:
         tarinfo.mode = restricted_files[tarinfo.name]
+
+    elif tarinfo.name.startswith("home/gk"):
+        tarinfo.uid = 1
+        tarinfo.gid = 100
 
     return tarinfo
 

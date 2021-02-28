@@ -80,6 +80,30 @@ char* C_HL_keywords[] = { "auto", "break", "case", "const", "continue", "default
                           NULL };
 char* C_HL_macros[] = { "#include", "#pragma", "#define", "#error", "#warning", "#undef", "#if",
                         "#else", "#elif", "#endif", "#elif", "#ifdef", "#ifndef", "#line", NULL };
+
+char* PY_HL_extensions[] = { ".py", NULL };
+char* PY_HL_keywords[] = { "and", "as", "assert", "break", "class", "continue", "def", "del", "elif", 
+                           "else", "except", "exec", "finally", "for", "from", "global","if",
+                           "import", "in", "is", "lambda", "not", "or", "pass", "print", "raise",
+                           "return", "try", "while", "with", "yield", "async", "await", "nonlocal",
+                           "range", "xrange", "reduce", "map", "filter", "all", "any", "sum", "dir",
+                           "abs", "breakpoint", "compile", "delattr", "divmod", "format", "eval",
+                           "getattr", "hasattr", "hash", "help", "id", "input", "isinstance",
+                           "issubclass", "len", "locals", "max", "min", "next", "open", "pow", "repr",
+                           "reversed", "round", "setattr", "slice", "sorted", "super", "vars", "zip",
+                           "__import__", "reload", "raw_input", "execfile", "file", "cmp", "basestring",
+                           "buffer|", "bytearray|", "bytes|", "complex|", "float|", "frozenset|",
+                           "int|", "list|", "long|", "None|", "set|", "str|", "chr|", "tuple|",
+                           "bool|", "False|", "True|", "type|", "unicode|", "dict|", "ascii|", "bin|",
+                           "callable|", "classmethod|", "enumerate|", "hex|", "oct|", "ord|", "iter|",
+                           "memoryview|", "object|", "property|", "staticmethod|", "unichr|", NULL };
+
+char* SH_HL_extensions[] = { ".sh", NULL };
+char* SH_HL_keywords[] = { "echo", "read", "set", "unset", "readonly", "shift", "export", "if", "fi",
+                           "else", "while", "do", "done", "for", "until", "case", "esac", "break",
+                           "continue", "exit", "return", "trap", "wait", "eval", "exec", "ulimit",
+                           "umask", NULL };
+
 struct syntax HLDB[] =
 {
     {
@@ -89,6 +113,22 @@ struct syntax HLDB[] =
         C_HL_macros,
         "//", "/*", "*/",
         HL_STRINGS | HL_NUMBERS | HL_MACROS
+    },
+    {
+        "python",
+        PY_HL_extensions,
+        PY_HL_keywords,
+        NULL,
+        "#", NULL, NULL,
+        HL_STRINGS | HL_NUMBERS
+    },
+    {
+        "shell",
+        SH_HL_extensions,
+        SH_HL_keywords,
+        NULL,
+        "#", NULL, NULL,
+        HL_STRINGS | HL_NUMBERS
     },
 };
 

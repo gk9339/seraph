@@ -1,6 +1,6 @@
 FROM archlinux
 
-RUN pacman -Syu --noconfirm base-devel wget git grub libisoburn python mtools && useradd builduser -m && passwd -d builduser && printf 'builduser ALL=(ALL) ALL\n' | tee -a /etc/sudoers && sudo -u builduser bash -c 'cd ~ && git clone https://aur.archlinux.org/automake-1.15.git && cd automake-1.15 && makepkg -si --noconfirm'
+RUN pacman -Syu --noconfirm base-devel wget git grub libisoburn python mtools
 
 COPY . /seraph
 

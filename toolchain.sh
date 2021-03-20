@@ -37,6 +37,14 @@ mkdir -p tarballs
 
 echo "PUSHD tarballs"
 pushd tarballs > /dev/null
+    if [ ! -e "automake-1.15.1.tar.gz" ]; then
+        echo "CURL automake-1.15.1.tar.gz"
+        curl "https://ftp.gnu.org/gnu/automake/automake-1.15.1.tar.gz" -o automake-1.15.1.tar.gz
+    fi
+    if [ ! -e "autoconf-2.69.tar.gz" ]; then
+        echo "CURL autoconf-2.69.tar.gz"
+        curl "https://ftp.gnu.org/gnu/autoconf/autoconf-2.69.tar.gz" -o autoconf-2.69.tar.gz
+    fi
     if [ ! -e "binutils-2.32.tar.gz" ]; then
         echo "CURL binutils-2.32.tar.gz"
         curl "https://ftp.gnu.org/gnu/binutils/binutils-2.32.tar.gz" -o binutils-2.32.tar.gz
@@ -46,6 +54,46 @@ pushd tarballs > /dev/null
         curl "https://ftp.gnu.org/gnu/gcc/gcc-8.3.0/gcc-8.3.0.tar.gz" -o gcc-8.3.0.tar.gz
     fi
 
+    if [ ! -d "automake-1.15.1" ]; then
+        echo "UNTAR automake-1.15.1.tar.gz"
+        tar -xf "automake-1.15.1.tar.gz"
+    fi
+    if [ ! -d "autoconf-2.69" ]; then
+        echo "UNTAR autoconf-2.69.tar.gz"
+        tar -xf "autoconf-2.69.tar.gz"
+    fi
+echo "POPD toolchain"
+popd > /dev/null
+
+echo "MKDIR automake-build"
+mkdir -p automake-build
+echo "MKDIR autoconf-build"
+mkdir -p autoconf-build
+
+echo "PUSHD automake-build"
+pushd automake-build > /dev/null
+    echo -e " \033[38;5;3m=> CONFIGURE automake-1.15.1\033[0m"
+    $DIR/toolchain/tarballs/automake-1.15.1/configure --prefix=$PREFIX &> /dev/null || exit 1
+    echo -e " \033[38;5;3m=> MAKE\033[0m"
+    make -j$NUMCPU &> /dev/null
+    echo -e " \033[38;5;3m=> MAKE install\033[0m"
+    make install &> /dev/null
+echo "POPD toolchain"
+popd > /dev/null
+
+echo "PUSHD autoconf-build"
+pushd autoconf-build > /dev/null
+    echo -e " \033[38;5;3m=> CONFIGURE autoconf-2.69\033[0m"
+    $DIR/toolchain/tarballs/autoconf-2.69/configure --prefix=$PREFIX &> /dev/null || exit 1
+    echo -e " \033[38;5;3m=> MAKE\033[0m"
+    make -j$NUMCPU &> /dev/null
+    echo -e " \033[38;5;3m=> MAKE install\033[0m"
+    make install &> /dev/null
+echo "POPD toolchain"
+popd > /dev/null
+
+echo "PUSHD tarballs"
+pushd tarballs > /dev/null
     if [ ! -d "binutils-2.32" ]; then
         echo "UNTAR binutils-2.32.tar.gz"
         tar -xf "binutils-2.32.tar.gz"
@@ -55,8 +103,8 @@ pushd tarballs > /dev/null
             patch -p1 < $PREFIX/patches/binutils.patch &> /dev/null
             echo "PUSHD ld"
             pushd "ld" > /dev/null
-                echo "AUTOMAKE-1.15"
-                automake-1.15 &> /dev/null
+                echo "AUTOMAKE"
+                automake &> /dev/null
             echo "POPD binutils-2.32"
             popd > /dev/null
         echo "POPD tarballs"

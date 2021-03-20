@@ -4,7 +4,6 @@
 ![Screenshot from 2020-05-04 14-45-39](https://user-images.githubusercontent.com/5243610/80942024-5e418b80-8e16-11ea-9da7-94a18f2c6e22.png)
 
 ### Build requirements (Arch)
-`automake-1.15`
 `gcc`
 `make`
 `curl`
@@ -18,7 +17,6 @@
 `qemu-arch-extra`
 
 ### Build requirements (Ubuntu)
-`automake-1.15`
 `libtool`
 `build-essential`
 `curl`

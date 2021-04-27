@@ -357,9 +357,9 @@ void acpi_poweroff( void )
 
     debug_log("acpi poweroff");
     // send the poweroff command
-    outportl(PM1aControlBlock, (uint16_t)(SLP_TYPa | SLP_EN) );
+    outportl(PM1aControlBlock, (SLP_TYPa | SLP_EN) );
     if( PM1bControlBlock != 0 )
-        outportl(PM1bControlBlock, (uint16_t)(SLP_TYPb | SLP_EN) );
+        outportl(PM1bControlBlock, (SLP_TYPb | SLP_EN) );
 
     debug_log("acpi poweroff failed");
 }

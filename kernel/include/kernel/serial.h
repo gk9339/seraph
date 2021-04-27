@@ -14,7 +14,7 @@ static _inline unsigned int inportl( unsigned short _port )
     return rv;
 }
 
-static _inline void outportl( unsigned short _port, unsigned short _data )
+static _inline void outportl( unsigned short _port, unsigned int _data )
 {
     asm volatile ("outl %%eax, %%dx" : : "dN" (_port), "a" (_data));
 }

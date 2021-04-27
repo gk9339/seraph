@@ -40,6 +40,7 @@ kernel/drivers/serial.o \
 kernel/drivers/ustar.o \
 kernel/drivers/vga.o \
 kernel/drivers/lfb.o \
+kernel/drivers/pci.o \
 kernel/fs/fs.o \
 kernel/fs/null.o \
 kernel/fs/pipe.o \

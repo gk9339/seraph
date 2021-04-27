@@ -12,6 +12,7 @@
 #include <kernel/timer.h>
 #include <kernel/irq.h>
 #include <kernel/lfb.h>
+#include <kernel/pci.h>
 #include <terminal-font.h>
 
 struct procfs_entry
@@ -544,6 +545,71 @@ static uint32_t framebuffer_func( fs_node_t* node __attribute__((unused)), uint3
     return size;
 }
 
+struct pci_buf
+{
+    size_t offset;
+    char* buffer;
+};
+
+static void scan_hit_list( uint32_t device, uint16_t vendor_id, uint16_t device_id, void* extra )
+{
+    struct pci_buf* buf = extra;
+
+    buf->offset += sprintf(buf->buffer + buf->offset, "%2x:%2x.%d (%4x, %4x:%4x)\n",
+                           (int)pci_extract_bus(device),
+                           (int)pci_extract_slot(device),
+                           (int)pci_extract_func(device),
+                           (int)pci_find_type(device),
+                           vendor_id,
+                           device_id);
+
+    buf->offset += sprintf(buf->buffer + buf->offset, " BAR0: 0x%08x", pci_read_field(device, PCI_BAR0, 4));
+    buf->offset += sprintf(buf->buffer + buf->offset, " BAR1: 0x%08x", pci_read_field(device, PCI_BAR1, 4));
+    buf->offset += sprintf(buf->buffer + buf->offset, " BAR2: 0x%08x", pci_read_field(device, PCI_BAR2, 4));
+    buf->offset += sprintf(buf->buffer + buf->offset, " BAR3: 0x%08x", pci_read_field(device, PCI_BAR3, 4));
+    buf->offset += sprintf(buf->buffer + buf->offset, " BAR4: 0x%08x", pci_read_field(device, PCI_BAR4, 4));
+    buf->offset += sprintf(buf->buffer + buf->offset, " BAR5: 0x%08x\n", pci_read_field(device, PCI_BAR5, 4));
+
+    buf->offset += sprintf(buf->buffer + buf->offset, " IRQ Line: %d", pci_read_field(device, 0x3C, 1));
+    buf->offset += sprintf(buf->buffer + buf->offset, " IRQ Pin: %d", pci_read_field(device, 0x3D, 1));
+    buf->offset += sprintf(buf->buffer + buf->offset, " Interrupt: %d", pci_get_interrupt(device));
+    buf->offset += sprintf(buf->buffer + buf->offset, " Status: 0x%04x\n", pci_read_field(device, PCI_STATUS, 2));
+}
+
+static void scan_count( uint32_t device __attribute__((unused)), uint16_t vendor_id __attribute__((unused)), uint16_t device_id __attribute__((unused)), void* extra )
+{
+    size_t* count = extra;
+    (*count)++;
+}
+
+static uint32_t pci_func( fs_node_t* node __attribute__((unused)), uint32_t offset, uint32_t size, uint8_t* buffer )
+{
+    size_t count = 0;
+    pci_scan(&scan_count, -1, &count);
+
+    struct pci_buf buf = {0, NULL};
+    buf.buffer = malloc(count * 1024);
+
+    pci_scan(&scan_hit_list, -1, &buf);
+
+    size_t _bsize = buf.offset;
+    if( offset > _bsize )
+    {
+        free(buf.buffer);
+        return 0;
+    }
+
+    if( size > _bsize - offset )
+    {
+        size = _bsize - offset;
+    }
+
+    memcpy(buffer, buf.buffer + offset, size);
+    free(buf.buffer);
+
+    return size;
+}
+
 static struct procfs_entry std_entries[] =
 {
     {-1,  "cpuinfo",     cpuinfo_func},
@@ -556,6 +622,7 @@ static struct procfs_entry std_entries[] =
     {-8,  "loader",      loader_func},
     {-9,  "irq",         irq_func},
     {-10, "framebuffer", framebuffer_func},
+    {-11, "pci",         pci_func},
 };
 
 static struct dirent* readdir_procfs_root( fs_node_t* node __attribute__((unused)), uint32_t index )

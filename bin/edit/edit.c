@@ -675,14 +675,14 @@ void draw_status_bar( struct edit_buf* eb )
     }
 
     edit_buf_append(eb, status, len);
-    edit_buf_append(eb, "\033[48;5;240m", 11);
+    edit_buf_append(eb, "\033[48;5;236m", 11);
     while( len < edit.term_cols )
     {
         if( edit.term_cols - len == r1len + r2len + r3len )
         {
-            edit_buf_append(eb, "\033[48;5;248m", 11);
+            edit_buf_append(eb, "\033[48;5;243m", 11);
             edit_buf_append(eb, r1status, r1len);
-            edit_buf_append(eb, "\033[48;5;250m", 11);
+            edit_buf_append(eb, "\033[48;5;246m", 11);
             edit_buf_append(eb, r2status, r2len);
             edit_buf_append(eb, "\033[48;5;254m", 11);
             edit_buf_append(eb, r3status, r3len);

@@ -7,7 +7,7 @@
 #include <ctype.h>
 #include <sys/types.h>
 
-#define VERSION "0.1"
+#define VERSION "0.2"
 
 int group = 0;
 int name = 0;
@@ -22,6 +22,7 @@ void show_usage( void ); // Display help text and exit
 
 int main( int argc, char** argv )
 {
+    int retval = EXIT_SUCCESS;
     struct passwd* pw;
     parse_args(argc, argv);
 
@@ -58,10 +59,11 @@ int main( int argc, char** argv )
         }else
         {
             printf("%s: \'%s\': no such user\n", argv[0], argv[i]);
+            retval = EXIT_FAILURE;
         }
     }
 
-    return EXIT_SUCCESS;
+    return retval;
 }
 
 // parse args, calling version/help functions

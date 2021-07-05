@@ -30,6 +30,8 @@
 #include <kernel/tmpfs.h>
 #include <sys/types.h>
 #include <kernel/lfb.h>
+#include <kernel/ata.h>
+#include <kernel/mbr.h>
 
 uintptr_t initial_esp = 0;
 int debug = 0;
@@ -221,12 +223,19 @@ void kernel_main( unsigned long magic, unsigned long addr, uintptr_t esp )
     if( CHECK_FLAG(debug, 1) ) printf("Install keyboard handler\n");
     keyboard_install();
     
-    if( CHECK_FLAG(debug, 0) ) debug_log("Initialize fs types\n");
+    if( CHECK_FLAG(debug, 0) ) debug_log("Initialize fs types");
     if( CHECK_FLAG(debug, 1) ) printf("Initialize fs types\n");
     ustar_initialize();
     procfs_initialize();
     tmpfs_initialize();
 
+    if( CHECK_FLAG(debug, 0) ) debug_log("Initialize device drivers\n");
+    if( CHECK_FLAG(debug, 1) ) printf("Initialize device drivers\n");
+    ata_initialize();
+    if( CHECK_FLAG(debug, 0) ) debug_log("Initialize mbr\n");
+    if( CHECK_FLAG(debug, 1) ) printf("Initialize mbr\n");
+    mbr_initialize();
+    
     // Load modules from bootloader
     if( CHECK_FLAG(mbi->flags, 5) ) // mods
     {

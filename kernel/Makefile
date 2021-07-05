@@ -41,6 +41,8 @@ kernel/drivers/ustar.o \
 kernel/drivers/vga.o \
 kernel/drivers/lfb.o \
 kernel/drivers/pci.o \
+kernel/drivers/ata.o \
+kernel/drivers/mbr.o \
 kernel/fs/fs.o \
 kernel/fs/null.o \
 kernel/fs/pipe.o \

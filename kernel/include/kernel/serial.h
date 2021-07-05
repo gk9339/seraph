@@ -48,6 +48,11 @@ static _inline void inportsm( unsigned short port, unsigned char* data, unsigned
     asm volatile("rep insw" : "+D"(data), "+c"(size):"d"(port):"memory");
 }
 
+static _inline void outportsm( unsigned short port, unsigned char* data, unsigned long size )
+{
+    asm volatile("rep outsw" : "+S" (data), "+c" (size) : "d" (port));
+}
+
 static _inline void debug_log( const char* str )
 {
     if( !CHECK_FLAG(debug, 0) )

@@ -102,7 +102,7 @@ static int read_partition_map( char* name )
     {
         for( int i = 0; i < 4; i++ )
         {
-            if( mbr.partitions[i].status & 0x80 )
+            if( mbr.partitions[i].sector_count )
             {
                 fs_node_t* node = mbr_device_create(i, device, &mbr.partitions[i]);
 

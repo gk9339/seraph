@@ -528,8 +528,6 @@ static int atapi_device_init( struct ata_device* device )
     device->is_atapi = 1;
     
     debug_logf(debug_str, "Devname: %s", device->identity.model);
-    debug_logf(debug_str, "Sectors: %d", device->identity.sectors_48);
-    debug_logf(debug_str, "Sectors: %d", device->identity.sectors_28);
 
     atapi_command_t command;
     command.command_bytes[0] = 0x25;
@@ -646,21 +644,18 @@ static int ata_device_detect( struct ata_device* device )
     if( (cl == 0x00 && ch == 0x00) ||
         (cl == 0x3C && ch == 0xC3) )
     {
-    outportb(device->io_base + 1, 1);
-    outportb(device->control, 0);
+/*outportb(device->io_base + 1, 1);
+outportb(device->control, 0);
 
-    outportb(device->io_base + ATA_REG_HDDEVSEL, 0xA0 | (device->slave << 4));
-    ata_io_wait(device);
-
-    outportb(device->io_base + ATA_REG_COMMAND, ATA_CMD_IDENTIFY);
-    ata_io_wait(device);
-        int status = inportb(device->io_base + ATA_REG_STATUS);
-        char debug_str[512];
-        debug_logf(debug_str, "aaaaaata status: %d", status);
-        if( status == 0 )
-        {
-            return 0;
-        }
+outportb(device->io_base + ATA_REG_HDDEVSEL, 0xA0 | (device->slave << 4));
+ata_io_wait(device);
+*/
+int status = inportb(device->io_base + ATA_REG_STATUS);
+ata_io_wait(device);
+if( status == 0 )
+{
+    return 0;
+}
 
         char devname[64];
         sprintf((char*)&devname, "/dev/hd%c", ata_drive_char);
@@ -713,17 +708,16 @@ static void ata_device_read_sector( struct ata_device* device, uint64_t lba, uin
 
     outportb(device->bar4, 8);
 
-    int_enable();
-
     while( 1 )
     {
         uint8_t status = inportb(device->io_base + ATA_REG_STATUS);
+        
         if( !(status & ATA_SR_BSY) )
         {
             break;
         }
     }
-/*
+
     outportb(bus + ATA_REG_CONTROL, 0);
     outportb(bus + ATA_REG_HDDEVSEL, 0xe0 | (slave << 4));
     ata_io_wait(device);
@@ -738,21 +732,6 @@ static void ata_device_read_sector( struct ata_device* device, uint64_t lba, uin
     outportb(bus + ATA_REG_LBA0, (lba & 0xff) >> 0);
     outportb(bus + ATA_REG_LBA1, (lba & 0xff00) >> 8);
     outportb(bus + ATA_REG_LBA2, (lba & 0xff0000) >> 16);
-*/
-outportb(bus + ATA_REG_CONTROL, 0x00);
-outportb(bus + ATA_REG_HDDEVSEL, 0xe0 | slave << 4);
-ata_io_wait(device);
-outportb(bus + ATA_REG_FEATURES, 0x00);
-
-outportb(bus + ATA_REG_SECCOUNT0, 0);
-outportb(bus + ATA_REG_LBA0, (lba & 0xff000000) >> 24);
-outportb(bus + ATA_REG_LBA1, (lba & 0xff00000000) >> 32);
-outportb(bus + ATA_REG_LBA2, (lba & 0xff0000000000) >> 40);
-
-outportb(bus + ATA_REG_SECCOUNT0, 1);
-outportb(bus + ATA_REG_LBA0, (lba & 0x000000ff) >>  0);
-outportb(bus + ATA_REG_LBA1, (lba & 0x0000ff00) >>  8);
-outportb(bus + ATA_REG_LBA2, (lba & 0x00ff0000) >> 16);
 
     while( 1 )
     {
@@ -764,7 +743,13 @@ outportb(bus + ATA_REG_LBA2, (lba & 0x00ff0000) >> 16);
         }
     }
 
-    outportb(bus + ATA_REG_COMMAND, ATA_CMD_READ_DMA_EXT);
+    if( device->identity.sectors_48 )
+    {
+        outportb(bus + ATA_REG_COMMAND, ATA_CMD_READ_DMA_EXT);
+    }else
+    {
+        outportb(bus + ATA_REG_COMMAND, ATA_CMD_READ_DMA);
+    }
 
     ata_io_wait(device);
 
@@ -783,8 +768,6 @@ outportb(bus + ATA_REG_LBA2, (lba & 0x00ff0000) >> 16);
             break;
         }
     }
-
-    int_disable();
 
     memcpy(buf, device->dma_start, 512);
 
@@ -910,7 +893,13 @@ static void ata_device_write_sector( struct ata_device* device, uint64_t lba, ui
     outportb(bus + ATA_REG_LBA1, (lba & 0xff00) >> 8);
     outportb(bus + ATA_REG_LBA2, (lba & 0xff0000) >> 16);
 
-    outportb(bus + ATA_REG_COMMAND, ATA_CMD_WRITE_PIO_EXT);
+    if( device->identity.sectors_48 )
+    {
+        outportb(bus + ATA_REG_COMMAND, ATA_CMD_WRITE_PIO_EXT);
+    }else
+    {
+        outportb(bus + ATA_REG_COMMAND, ATA_CMD_WRITE_PIO);
+    }
     ata_wait(device, 0);
 
     int size = ATA_SECTOR_SIZE / 2;

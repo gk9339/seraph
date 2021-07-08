@@ -58,19 +58,18 @@ menuentry "seraph" {
 
 menuentry "seraph - splash/serial" {
     multiboot /boot/seraph.kernel serialdebug root=/dev/ram0 root_type=ustar splash
-    #set gfxpayload=1920x1080x32
     module /boot/seraph.initrd
 }
 
 menuentry "seraph - splash/serial - 720" {
     multiboot /boot/seraph.kernel serialdebug root=/dev/ram0 root_type=ustar splash
-    set gfxpayload=1280x720x32
+    set gfxpayload=1280x720x32,1024x768x32,800x600x32
     module /boot/seraph.initrd
 }
 
 menuentry "seraph - splash/serial - 1080" {
     multiboot /boot/seraph.kernel serialdebug root=/dev/ram0 root_type=ustar splash
-    set gfxpayload=1920x1080x32
+    set gfxpayload=1920x1080x32,1280x1024x32,1024x768x32,800x600x32
     module /boot/seraph.initrd
 }
 EOF

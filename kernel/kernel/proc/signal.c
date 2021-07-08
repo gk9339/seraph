@@ -108,7 +108,7 @@ void handle_signal( process_t* proc, signal_t* sig )
         char dowhat = isdeadly[signum];
         if( dowhat == 1 || dowhat == 2 )
         {
-            kexit(((128 + signum) << 8) | signum);
+            task_exit(((128 + signum) << 8) | signum);
             __builtin_unreachable();
         }else if( dowhat == 3)
         {

@@ -16,7 +16,7 @@ static _inline unsigned int inportl( unsigned short _port )
 
 static _inline void outportl( unsigned short _port, unsigned int _data )
 {
-    asm volatile ("outl %%eax, %%dx" : : "dN" (_port), "a" (_data));
+    asm volatile ("outl %1, %0" : : "dN" (_port), "a" (_data));
 }
 
 static _inline unsigned short inports( unsigned short _port )

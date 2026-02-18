@@ -138,7 +138,7 @@ are never reassigned or reused.
 31  SYS_PROCESS_KILL
 32  SYS_PROCESS_SUPERVISE
 33  SYS_MMIO_MAP
-34  SYS_IOPB_GRANT
+34  SYS_IOPORT_BIND
 35  SYS_DMA_GRANT
 36  SYS_THREAD_SET_PRIORITY
 37  SYS_THREAD_SET_AFFINITY
@@ -146,6 +146,7 @@ are never reassigned or reused.
 39  SYS_THREAD_WRITE_REGS
 40  SYS_ASPACE_QUERY
 41  SYS_IPC_BUFFER_SET
+42  SYS_SYSTEM_INFO
 ```
 
 ---
@@ -181,6 +182,9 @@ pub enum SyscallError
     AlignmentError     = -10,
     /// The requested mapping would exceed the address space's limit.
     AddressSpaceFull   = -11,
+    /// DMA was requested on a platform without IOMMU protection, and the caller
+    /// did not pass FLAG_DMA_UNSAFE to acknowledge unprotected DMA.
+    DmaUnsafe          = -12,
 }
 ```
 
@@ -424,7 +428,7 @@ Create a new thread in an existing address space.
 | 1 | `entry` | Virtual address of the thread entry point |
 | 2 | `stack_top` | Initial stack pointer |
 | 3 | `arg` | Value passed in first argument register |
-| 4 | `priority` | Scheduling priority (0 = lowest; PRIORITY_MAX = highest user level) |
+| 4 | `priority` | Scheduling priority (1–`PRIORITY_MAX`); priorities ≥ `SCHED_ELEVATED_MIN` require a SchedControl capability held by the creating process |
 
 **Return:** `rax`/`a0`: new thread capability (Control rights) on success;
 `SyscallError` on failure.
@@ -957,19 +961,25 @@ frame. The kernel records the grant in the IOMMU's device-to-domain mapping.
 |---|---|---|
 | 0 | `process_cap` | Process capability (Control rights) of the owning process |
 | 1 | `frame_cap` | Frame capability (Map rights) to grant DMA access to |
-| 2 | `device_id` | Platform-specific device identifier (PCI BDF on x86-64) |
-| 3 | `flags` | DMA direction: bit 0 = read, bit 1 = write |
+| 2 | `device_id` | Opaque, platform-specific device identifier (e.g. PCI BDF on x86-64) |
+| 3 | `flags` | Bit 0 = DMA read permitted, bit 1 = DMA write permitted, bit 2 = `FLAG_DMA_UNSAFE` |
 
 **Return:** `rax`/`a0`: 0 on success; `SyscallError` on failure.
 
-The grant is revoked automatically when `frame_cap` is revoked or deleted. On
-platforms without an IOMMU, this syscall succeeds without effect (DMA isolation
-is not enforced).
+The grant is revoked automatically when `frame_cap` is revoked or deleted.
+
+**DMA safety:** When no IOMMU is present or the IOMMU has not been configured for
+the specified device, DMA isolation cannot be enforced. In this case the syscall
+returns `DmaUnsafe` unless the caller sets bit 2 (`FLAG_DMA_UNSAFE`) in `flags`,
+explicitly acknowledging that DMA will be unprotected. This flag is not a security
+bypass — it is a declaration that the caller has made a policy decision to proceed
+without hardware isolation. Callers should use `SYS_SYSTEM_INFO(DMA_MODE)` to
+query whether IOMMU protection is available before issuing DMA grants.
 
 **Capability requirements:** `process_cap` (Control), `frame_cap` (Map).
 
 **Errors:** `InvalidCapability`, `AccessDenied`, `InvalidArgument` (unknown
-device_id or invalid flags).
+device_id or invalid flags), `DmaUnsafe` (no IOMMU and `FLAG_DMA_UNSAFE` not set).
 
 ---
 
@@ -1001,11 +1011,12 @@ delivering the notification; the driver must call `SYS_IRQ_ACK` to re-enable it.
 
 ---
 
-### `SYS_IOPB_GRANT` (34)
+### `SYS_IOPORT_BIND` (34)
 
-Grant a thread permission to access a range of x86 I/O ports directly via the
-TSS I/O Permission Bitmap (IOPB). Ports not covered by the IOPB remain inaccessible
-from userspace.
+Bind an IoPortRange capability to a thread, granting that thread permission to
+execute `in`/`out` instructions for the capability's port range via the TSS I/O
+Permission Bitmap (IOPB). Ports not authorised by a bound IoPortRange remain
+inaccessible from userspace.
 
 **x86-64 only.** On RISC-V this syscall returns `UnknownSyscall` immediately;
 there is no port I/O concept.
@@ -1015,19 +1026,22 @@ there is no port I/O concept.
 | # | Name | Description |
 |---|---|---|
 | 0 | `thread_cap` | Thread capability (Control rights) |
-| 1 | `port_base` | First port in the range to grant (0–0xFFFF) |
-| 2 | `port_count` | Number of ports to grant (1–65536; must not overflow 0xFFFF) |
+| 1 | `ioport_cap` | IoPortRange capability (Use rights) |
 
 **Return:** `rax`/`a0`: 0 on success; `SyscallError` on failure.
 
-The grant is persistent for the lifetime of the thread. Revoking the thread
-capability does not undo IOPB grants already applied; the thread is simply terminated
-if the capability is revoked.
+The kernel updates the thread's IOPB in the TSS to permit access to the port range
+described by `ioport_cap`. Multiple bindings may be made to the same thread, each
+authorising a different port range.
 
-**Capability requirement:** `thread_cap` must have Control rights.
+**Revocation:** When `ioport_cap` is revoked (or any ancestor in its derivation
+tree is revoked), port access is removed from all threads it has been bound to.
+The kernel tracks bindings and updates each affected thread's IOPB on revocation.
+Access is always revocable; there is no persistent, irrevocable grant.
 
-**Errors:** `InvalidCapability`, `AccessDenied`, `InvalidArgument` (port range
-out of bounds), `UnknownSyscall` (RISC-V).
+**Capability requirements:** `thread_cap` (Control rights), `ioport_cap` (Use rights).
+
+**Errors:** `InvalidCapability`, `AccessDenied`, `UnknownSyscall` (RISC-V).
 
 ---
 
@@ -1043,17 +1057,31 @@ Change a thread's scheduling priority after creation.
 |---|---|---|
 | 0 | `thread_cap` | Thread capability (Control rights) |
 | 1 | `priority` | New priority (1–`PRIORITY_MAX`) |
+| 2 | `sched_cap` | SchedControl capability (Elevate rights); use 0 if not needed |
 
 **Return:** `rax`/`a0`: 0 on success; `SyscallError` on failure.
+
+The priority range is divided into two tiers:
+
+- **Normal range (1–`SCHED_ELEVATED_MIN` − 1, i.e. 1–20):** `sched_cap` is ignored.
+  Any holder of the thread's Control capability may set priorities freely in this
+  range. `PRIORITY_DEFAULT = 10` is the baseline for newly created threads; processes
+  may lower or raise their own threads within this range without any special authority.
+
+- **Elevated range (`SCHED_ELEVATED_MIN`–`PRIORITY_MAX`, i.e. 21–30):** `sched_cap`
+  must be a valid SchedControl capability with Elevate rights. Without it, the call
+  returns `AccessDenied`.
 
 Priority 0 (idle) and priority 31 (reserved) cannot be requested. The change takes
 effect at the next scheduler invocation. If the thread is currently running, it
 continues to run until preempted or blocked; no immediate preemption is forced.
 
-**Capability requirement:** `thread_cap` must have Control rights.
+**Capability requirements:** `thread_cap` (Control rights); `sched_cap` (Elevate
+rights) when `priority` ≥ `SCHED_ELEVATED_MIN`.
 
-**Errors:** `InvalidCapability`, `AccessDenied`, `InvalidArgument` (priority 0 or
-priority 31).
+**Errors:** `InvalidCapability`, `AccessDenied` (insufficient rights for the
+requested priority tier), `InvalidArgument` (priority 0, priority 31, or out
+of range).
 
 ---
 
@@ -1191,6 +1219,62 @@ mapped or not writable; checked at registration time).
 
 ---
 
+## System Info Syscall
+
+### `SYS_SYSTEM_INFO` (42)
+
+Query static system information. Allows userspace to make informed policy decisions
+about hardware capabilities without requiring privileged access.
+
+**Arguments:**
+
+| # | Name | Description |
+|---|---|---|
+| 0 | `info_kind` | Which information to query (see `SystemInfoKind` below) |
+| 1 | `buf_ptr` | Pointer to a caller-supplied buffer to receive the result |
+| 2 | `buf_size` | Size of the buffer in bytes |
+
+**Return:** `rax`/`a0`: number of bytes written on success; `SyscallError` on failure.
+
+**Capability requirement:** None — this syscall requires no capability. The
+information it returns is non-sensitive platform topology data.
+
+**Errors:** `InvalidArgument` (unknown `info_kind`, buffer too small, or invalid
+pointer).
+
+### `SystemInfoKind`
+
+```rust
+#[repr(u64)]
+pub enum SystemInfoKind
+{
+    /// DMA protection status. Returns a `DmaModeInfo` struct.
+    ///
+    /// Reports whether an IOMMU is present and active. Userspace (devmgr)
+    /// uses this to decide whether to require `FLAG_DMA_UNSAFE` acknowledgement
+    /// before binding drivers that perform DMA.
+    DmaMode       = 0,
+
+    /// CPU topology. Returns a `CpuTopologyInfo` struct.
+    ///
+    /// Reports the number of online CPUs, physical core count, and SMT topology.
+    CpuTopology   = 1,
+
+    /// Platform flags. Returns a `PlatformFlagsInfo` struct.
+    ///
+    /// Reports boolean platform capabilities (e.g. IoPortRange support, IOMMU
+    /// presence, available platform resource types). The exact layout is defined
+    /// in the kernel ABI headers.
+    PlatformFlags = 2,
+}
+```
+
+The layout of each result struct is defined in the kernel ABI headers. Structs are
+versioned; the first field of each is a `u32` version number so that future additions
+can be detected by userspace.
+
+---
+
 ## Revocation Notes
 
 ### `SYS_CAP_REVOKE` targets the caller's own CSpace
@@ -1247,9 +1331,12 @@ all its descendants (including C2) but leaves C and any other children of C inta
 |---|---|---|
 | `MSG_DATA_WORDS_MAX` | TBD (≥4) | Maximum data words per message |
 | `MSG_CAP_SLOTS_MAX` | 4 | Maximum capabilities per message |
+| `PRIORITY_DEFAULT` | 10 | Default priority for newly created threads |
+| `SCHED_ELEVATED_MIN` | 21 | First priority level requiring SchedControl capability |
 | `PRIORITY_MAX` | 30 | Maximum priority for userspace threads |
+| `FLAG_DMA_UNSAFE` | bit 2 | `SYS_DMA_GRANT` flag acknowledging unprotected DMA |
 | `EVENT_QUEUE_MAX_CAPACITY` | 4096 | Maximum entries in an event queue |
-| `BOOT_PROTOCOL_VERSION` | 1 | Expected version in `BootInfo.version` |
+| `BOOT_PROTOCOL_VERSION` | 2 | Expected version in `BootInfo.version` |
 
 `MSG_DATA_WORDS_MAX` is fixed at implementation time. A value of 4–8 words balances
 message capacity against syscall overhead. The exact value becomes stable ABI.

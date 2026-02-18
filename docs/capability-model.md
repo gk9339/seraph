@@ -114,6 +114,39 @@ A capability to a wait set (see IPC design). Rights:
 - **Modify** — may add or remove members
 - **Wait** — may block on the wait set
 
+### IoPortRange (x86-64 only)
+
+A capability to a contiguous range of x86 I/O port numbers. Rights:
+- **Use** — may bind this port range to a thread, allowing that thread to execute
+  `in`/`out` instructions for those ports without a syscall
+
+IoPortRange capabilities are created at boot from `IoPortRange` entries in the
+boot-provided `platform_resources`. They are not creatable at runtime. A driver
+that needs port I/O access receives a derived IoPortRange capability from init
+(via devmgr), covering only its assigned port range.
+
+Revoking an IoPortRange capability removes port access from all threads it has
+been bound to. The kernel tracks bindings and updates each affected thread's IOPB
+in the TSS on revocation.
+
+### SchedControl
+
+A capability granting authority to assign elevated scheduling priorities. Rights:
+- **Elevate** — may set thread priorities in the elevated range (21–30)
+
+There is one SchedControl capability, created at boot. Init holds it and delegates
+derived copies to services that need real-time-ish scheduling (e.g. audio servers,
+device managers). Without a SchedControl capability, a process can only set thread
+priorities in the normal range (1–20).
+
+The priority model is:
+- `PRIORITY_DEFAULT = 10` — baseline for newly created threads
+- Normal range (1–20): any holder of the thread's Control capability may set
+  priorities freely in this range
+- Elevated range (21–30): requires SchedControl capability with Elevate rights
+
+`SCHED_ELEVATED_MIN = 21` is the first priority that requires SchedControl.
+
 ---
 
 ## Rights and Attenuation
@@ -211,15 +244,21 @@ At boot, the kernel creates the init process and populates its CSpace with an in
 set of capabilities covering all available resources:
 
 - Frame capabilities for all usable physical memory
-- MMIO region capabilities for all detected device regions
-- Interrupt capabilities for all available interrupt lines
+- MMIO region capabilities for all boot-provided platform resource regions
+  (MmioRange, PciEcam, IommuUnit entries from `BootInfo.platform_resources`)
+- Interrupt capabilities for all boot-provided interrupt lines
+- Read-only Frame capabilities for firmware table regions (PlatformTable entries),
+  allowing userspace to parse ACPI or Device Tree data
+- IoPortRange capabilities for all boot-provided I/O port ranges (x86-64 only)
+- One SchedControl capability (Elevate rights)
 - Thread and process capabilities for init itself
 
 Init is responsible for delegating appropriate subsets of this authority to each
-service it starts. A driver for a specific device receives MMIO and interrupt
-capabilities for that device only — nothing else. A filesystem server receives
-block device access capabilities only. No service starts with more authority than
-its job requires.
+service it starts. devmgr receives the platform resource capabilities and firmware
+table capabilities to perform hardware enumeration. A driver for a specific device
+receives MMIO and interrupt capabilities for that device only — nothing else. A
+filesystem server receives block device access capabilities only. No service starts
+with more authority than its job requires.
 
 This is the only point at which capabilities are created from nothing. All subsequent
 authority in the system is derived from this initial grant.

@@ -1,9 +1,11 @@
 # Kernel
 
-This directory contains the Seraph microkernel. It implements four responsibilities
-and nothing else: IPC, scheduling, memory management, and capabilities. Everything
-else runs in userspace. See [docs/architecture.md](../docs/architecture.md) for the
-design philosophy behind this boundary.
+This directory contains the Seraph microkernel. It handles four core responsibilities:
+IPC, scheduling, memory management, and capabilities — along with the minimal
+supporting mechanism they require (traps, timers, syscall entry, platform resource
+validation). Everything else runs in userspace. See
+[docs/architecture.md](../docs/architecture.md) for the design philosophy behind
+this boundary.
 
 ---
 
@@ -157,7 +159,8 @@ boot info validation
                     └─► kernel page tables (arch + mm)
                             └─► slab allocator (mm)
                                     └─► arch hardware init (arch)
-                                            └─► capability system (cap)
+                                            └─► platform resource validation
+                                                    └─► capability system (cap)
                                                     └─► scheduler (sched)
                                                             └─► init process (cap + mm + sched)
                                                                     └─► SMP bringup (arch + sched)

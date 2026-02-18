@@ -30,6 +30,31 @@ Userspace threads specify a priority in [1, `PRIORITY_MAX`] at creation time
 (`SYS_CAP_CREATE_THREAD`) or via `SYS_THREAD_SET_PRIORITY`. The kernel does not
 implement dynamic priority adjustment or aging.
 
+### Priority Authority
+
+The usable priority range is split into two tiers, controlling who may assign a
+given priority:
+
+| Range | Name | Authority required |
+|---|---|---|
+| 1–20 | Normal | Thread Control capability only |
+| 21–30 | Elevated | Thread Control + SchedControl (Elevate rights) |
+
+`PRIORITY_DEFAULT = 10` is the baseline for newly created threads. Processes may
+freely adjust their own threads within the normal range (1–20) — lowering priority
+is always permitted, and raising within the normal range requires only the thread's
+Control capability.
+
+`SCHED_ELEVATED_MIN = 21` is the first priority that requires a SchedControl
+capability. The SchedControl capability is created at boot (one for the entire
+system) and held by init, which delegates derived copies to services that need
+real-time-ish scheduling — audio servers, device managers, high-priority drivers.
+Services without a SchedControl capability cannot assign elevated priorities
+regardless of what other capabilities they hold.
+
+This replaces the earlier ungated model in which any Control-capability holder
+could set any priority in the 1–30 range.
+
 ### Run Queue Structure
 
 Each CPU has a set of 32 run queues, one per priority level:

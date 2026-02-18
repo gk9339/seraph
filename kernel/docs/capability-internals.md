@@ -135,6 +135,8 @@ pub enum CapTag
     Interrupt     = 9,
     MmioRegion    = 10,
     Reply         = 11,  // single-use; not derivable
+    IoPortRange   = 12,  // x86-64 only; created at boot from platform_resources
+    SchedControl  = 13,  // authority to set elevated scheduling priorities
 }
 ```
 
@@ -178,6 +180,12 @@ bitflags! {
         // Wait set rights
         const MODIFY     = 1 << 13;
         // (WAIT reused for wait set wait right)
+
+        // IoPortRange rights
+        const USE        = 1 << 15;  // may bind port range to a thread
+
+        // SchedControl rights
+        const ELEVATE    = 1 << 16;  // may set thread priority in elevated range (21–30)
     }
 }
 ```
@@ -333,7 +341,7 @@ derivation tree write lock is sufficient to prevent concurrent modification.
 
 ## Initial CSpace Population
 
-During Phase 6 of initialization, the root CSpace is populated as follows.
+During Phase 7 of initialization, the root CSpace is populated as follows.
 Slot assignments are fixed by convention and communicated to init via the boot
 protocol. Init must not assume specific slot numbers — the kernel passes the
 layout via a well-known structure at the top of init's stack.
@@ -346,9 +354,12 @@ layout via a well-known structure at the top of init's stack.
 | 1 | Init's own thread capability |
 | 2 | Init's own process capability |
 | 3 | Root address space capability |
-| 4..N | Frame capabilities (one per usable physical region) |
-| N+1..M | MMIO region capabilities (one per device region) |
-| M+1..K | Interrupt capabilities (one per interrupt line) |
+| 4 | SchedControl capability (Elevate rights) |
+| 5..N | Frame capabilities (one per usable physical region) |
+| N+1..M | MMIO region capabilities (one per MmioRange / PciEcam / IommuUnit entry) |
+| M+1..K | Interrupt capabilities (one per IrqLine entry) |
+| K+1..L | Read-only Frame capabilities (one per PlatformTable entry) |
+| L+1..P | IoPortRange capabilities (one per IoPortRange entry; x86-64 only) |
 
 The exact slot numbers are passed to init in the `KernelHandoff` structure placed
 on init's user stack before it begins execution.

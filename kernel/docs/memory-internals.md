@@ -420,7 +420,7 @@ buddy allocator:
 - Guard page: one unmapped page immediately below the stack (allocated but not mapped,
   so stack overflow faults immediately rather than silently corrupting adjacent memory)
 
-Stack allocation happens in Phase 7 (scheduler initialization) for idle threads and
+Stack allocation happens in Phase 8 (scheduler initialization) for idle threads and
 in `SYS_CAP_CREATE_THREAD` for user-created threads.
 
 ---

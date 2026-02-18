@@ -29,7 +29,7 @@ protocol.
 ```
 1. Verify boot_info pointer is non-null and naturally aligned for BootInfo
 2. Read boot_info.version
-3. Compare against BOOT_PROTOCOL_VERSION (currently 1)
+3. Compare against BOOT_PROTOCOL_VERSION
 4. If mismatch: halt immediately (cannot trust any other BootInfo fields)
 5. Validate memory_map.count > 0 and memory_map.entries is non-null
 6. Validate modules.count > 0 (init binary must be present)
@@ -62,7 +62,7 @@ emit diagnostic messages.
      also attempts to initialise a COM1 serial port at 115200 8N1
    - RISC-V: uses SBI console (sbi_console_putchar) as fallback;
      framebuffer initialisation same as x86-64 if present
-2. Emit: "Seraph kernel starting (protocol v1)\n"
+2. Emit a startup banner identifying the kernel and the protocol version
 3. Emit: CPU architecture identifier and core count if detectable at this stage
 ```
 
@@ -258,77 +258,78 @@ and the syscall entry mechanism is installed.
 
 ---
 
-## Phase 5.5: Platform Description Parsing
+## Phase 6: Platform Resource Validation
 
 **What happens:**
 
-Architecture-specific platform description data is parsed to produce a structured
-`PlatformDescription` consumed by Phase 6. This separates hardware enumeration from
-capability object creation.
-
-### x86-64
-
-```
-1. Locate ACPI RSDP from boot_info.acpi_rsdp (validated by bootloader)
-2. Walk RSDP → RSDT or XSDT (prefer XSDT if present)
-3. Parse MADT (Multiple APIC Description Table):
-   a. Enumerate APIC IDs for all enabled processors (for SMP bringup)
-   b. Extract interrupt source overrides (ISA IRQ → GSI mappings)
-   c. Record NMI source entries
-4. Parse MCFG (PCI Express Memory Mapped Configuration):
-   a. Extract PCIe MMIO config base address and bus range
-5. Parse SSDT/DSDT for _PRT (PCI Interrupt Routing Tables) if present
-6. Collect all device MMIO regions and their interrupt routing into PlatformDescription
-```
-
-### RISC-V
+The `platform_resources` slice from `BootInfo` is validated before Phase 7 mints
+capabilities from it. The kernel does not parse ACPI or Device Tree — the bootloader
+has already done that and produced structured descriptors. The kernel's job here is
+to reject entries that would be unsafe to use.
 
 ```
-1. Locate the Flattened Device Tree (FDT) blob from boot_info.device_tree
-2. Validate FDT magic and version
-3. Walk device nodes; for each node with a "reg" property:
-   a. Extract MMIO base address and size
-4. For each node with an "interrupts" or "interrupts-extended" property:
-   a. Record the interrupt source and parent controller
-5. Enumerate PLIC sources and hart contexts
-6. Collect results into PlatformDescription
+1. If platform_resources.count == 0: skip validation, proceed with empty set.
+2. Verify platform_resources.entries is non-null (required when count > 0).
+3. Verify the slice falls within boot-provided physical memory:
+   - The entire range [entries, entries + count * size_of::<PlatformResource>())
+     must be within regions the memory map marks as Usable or Loaded.
+4. For each PlatformResource entry:
+   a. Check resource_type is a known discriminant; skip with warning if not.
+   b. For MmioRange, PciEcam, PlatformTable, IommuUnit:
+      - Verify base is page-aligned; skip with warning if not.
+      - Verify size > 0 and size is page-aligned; skip with warning if not.
+      - Verify base + size does not wrap around; skip with warning if not.
+   c. For IoPortRange (x86-64 only):
+      - Verify base <= 0xFFFF; skip with warning if not.
+      - Verify base + size <= 0x10000; skip with warning if not.
+      - On RISC-V: skip all IoPortRange entries silently.
+   d. For IrqLine:
+      - Verify id is within the platform's interrupt number range; skip if not.
+5. Check for overlapping MmioRange and PciEcam entries (overlaps within a type
+   are invalid); skip the later entry with a warning.
+6. Emit: "platform resources: N entries validated (M skipped)"
 ```
 
-The `PlatformDescription` structure holds:
-- APIC IDs / hart IDs for all secondary processors
-- MMIO regions: `(phys_base, size, description)` triples
-- Interrupt routing: `(irq_number, target_cpu)` pairs
+Validation failures are non-fatal at the entry level — bad entries are skipped
+with a warning. The only fatal condition is a null `entries` pointer when `count > 0`,
+which indicates a corrupt BootInfo.
 
-**Failure mode:** If the ACPI RSDP or FDT blob is missing or corrupt, emit a warning
-and proceed with a minimal `PlatformDescription` (no MMIO regions, no interrupt
-routing). This is not fatal — the system can boot with degraded hardware support.
+**Failure mode:** Null `entries` when `count > 0`: halt with "fatal: platform_resources
+pointer is null with non-zero count". Individual bad entries: emit a warning and skip.
 
-**Completion criterion:** `PlatformDescription` is populated and available to Phase 6.
+**Completion criterion:** The validated platform resource list is available to Phase 7.
 
 ---
 
-## Phase 6: Capability System
+## Phase 7: Capability System
 
 **What happens:**
 
 The capability subsystem is initialised and the root CSpace (which will be given to
-init) is created.
+init) is created. Capabilities are minted from the validated `platform_resources`
+produced in Phase 6.
 
 ```
 1. Initialise the global derivation tree (initially empty)
 2. Allocate the root CSpace:
    - Initial capacity: ROOT_CSPACE_INITIAL_SLOTS (e.g. 1024 slots)
    - Slot 0 is permanently null
-3. Populate the root CSpace with initial capabilities from the PlatformDescription
-   produced in Phase 5.5:
+3. Populate the root CSpace with initial capabilities:
    a. Frame capabilities for all usable physical memory ranges
       (one capability per contiguous usable region from the memory map)
-   b. MMIO region capabilities:
-      - One capability per device region in PlatformDescription.mmio_regions
-   c. Interrupt capabilities:
-      - One per available interrupt line in PlatformDescription.interrupt_routing
-   d. (Thread and process capabilities for init are added in Phase 8)
-4. Record the root CSpace pointer in a global for use in Phase 8
+   b. Capabilities from boot-provided platform resources (one per validated entry):
+      - MmioRange entries → MmioRegion capabilities (Map rights)
+      - IrqLine entries → Interrupt capabilities
+      - PciEcam entries → MmioRegion capabilities (ECAM is an MMIO range)
+      - PlatformTable entries → read-only Frame capabilities (Map rights only;
+        no Write or Execute — these are firmware tables for userspace reading)
+      - IoPortRange entries → IoPortRange capabilities (x86-64 only; Use rights)
+      - IommuUnit entries → MmioRegion capabilities (for devmgr to configure DMA)
+   c. One SchedControl capability (Elevate rights) — allows the holder to set
+      thread priorities in the elevated range (21–30); delegated by init to
+      services that require real-time-ish scheduling priority
+   d. (Thread and process capabilities for init are added in Phase 9)
+4. Record the root CSpace pointer in a global for use in Phase 9
 5. Emit: "capability system initialised, N slots populated"
 ```
 
@@ -339,11 +340,11 @@ without a parent. All authority in the running system derives from this grant.
 "fatal: cannot initialise capability system".
 
 **Completion criterion:** Root CSpace exists and contains capabilities for all
-hardware resources visible at boot.
+boot-provided hardware resources.
 
 ---
 
-## Phase 7: Scheduler
+## Phase 8: Scheduler
 
 **What happens:**
 
@@ -377,7 +378,7 @@ for all CPUs.
 
 ---
 
-## Phase 8: Init Process Creation
+## Phase 9: Init Process Creation
 
 **What happens:**
 
@@ -411,9 +412,9 @@ a fully populated CSpace.
    a. Allocate ProcessCap and ThreadCap objects
    b. Insert into the root CSpace (these are how the kernel refers to init)
 7. Transfer the root CSpace to init:
-   a. The CSpace created in Phase 6 becomes init's CSpace
+   a. The CSpace created in Phase 7 becomes init's CSpace
    b. Init receives its own thread and process capabilities in well-known slots
-   c. Remaining slots hold the hardware capabilities from Phase 6
+   c. Remaining slots hold the hardware capabilities from Phase 7
 8. Enqueue the init TCB on the BSP's run queue at INIT_PRIORITY
 9. Reclaim boot module frames (init binary is now loaded; original mapping unneeded)
 10. Emit: "init process created, entry at 0x{entry:016x}"
@@ -426,7 +427,7 @@ segments halts with a diagnostic message indicating which step failed.
 
 ---
 
-## Phase 9: Scheduler Handoff and SMP Bringup
+## Phase 10: Scheduler Handoff and SMP Bringup
 
 **What happens:**
 
@@ -446,7 +447,7 @@ Secondary CPUs (in parallel with init startup on BSP):
    - x86-64: BSP sends INIT+SIPI to each AP's APIC ID
    - RISC-V: BSP calls SBI HSM hart_start for each secondary hart
 4. Secondary CPUs execute a minimal AP/hart startup stub:
-   a. Load the kernel stack pointer (pre-allocated in Phase 7)
+   a. Load the kernel stack pointer (pre-allocated in Phase 8)
    b. Install the kernel page table (same root as BSP)
    c. Call arch::current::Cpu::init_local() for per-CPU state
    d. Call arch::current::Interrupts::init()
@@ -492,7 +493,7 @@ fn fatal(msg: &str) -> !
 }
 ```
 
-Secondary CPU failures after Phase 9 are handled by `fatal()` on that CPU only; the
+Secondary CPU failures after Phase 10 are handled by `fatal()` on that CPU only; the
 BSP and other CPUs continue.
 
 ---
@@ -507,8 +508,8 @@ BSP and other CPUs continue.
 | 3 | Kernel page tables + direct map | Halt: OOM during PT construction |
 | 4 | Slab allocator + kernel heap | Halt: cannot init heap |
 | 5 | CPU hardware (IDT/GDT/TSS/stvec) | Halt: missing required feature |
-| 5.5 | ACPI / device tree parsing | Warning only; degraded hardware support |
-| 6 | Capability system + root CSpace | Halt: OOM |
-| 7 | Scheduler + idle threads | Halt: OOM |
-| 8 | Init process creation | Halt: invalid ELF or OOM |
-| 9 | Scheduler handoff + SMP bringup | AP failure: warning; BSP failure: halt |
+| 6 | Platform resource validation | Halt if entries pointer is null with non-zero count; bad entries skipped |
+| 7 | Capability system + root CSpace | Halt: OOM |
+| 8 | Scheduler + idle threads | Halt: OOM |
+| 9 | Init process creation | Halt: invalid ELF or OOM |
+| 10 | Scheduler handoff + SMP bringup | AP failure: warning; BSP failure: halt |

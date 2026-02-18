@@ -16,7 +16,7 @@ line of kernel code is a line that can corrupt the entire system if wrong.
 
 ## Kernel Responsibilities
 
-The kernel implements exactly four things:
+The kernel handles four core responsibilities:
 
 **IPC** — message passing between processes. The kernel delivers messages, manages
 endpoints, and delivers asynchronous notifications. It enforces that communication
@@ -24,7 +24,9 @@ only occurs through authorised channels. It has no opinion on the content of mes
 
 **Scheduling** — preemptive, priority-based scheduling across all available CPUs.
 The scheduler is SMT-aware and understands physical core topology. Userspace may
-provide priority and affinity hints; policy decisions remain with the kernel.
+provide priority and affinity hints; the kernel implements the scheduling mechanism,
+while priority policy is controlled by capability-gated interfaces — elevated
+priorities require explicit authority delegation via the SchedControl capability.
 
 **Memory management** — physical frame allocation, virtual address space management,
 and page table maintenance. The kernel enforces isolation between address spaces.
@@ -42,35 +44,6 @@ management, or any policy. These live in userspace.
 
 ## System Architecture
 
-```
-  ┌─────────────────────────────────────────────────────────────┐
-  │  Applications                                               │
-  │  (gksh, editor, user programs, network utilities, ...)      │
-  └──────────────────────┬──────────────────────────────────────┘
-                         │
-  ┌──────────────────────┴──────────────────────────────────────┐
-  │  System Services                                            │
-  │                                                             │
-  │   ┌─────────────┐   ┌─────────────┐   ┌─────────────┐     │
-  │   │     vfs     │   │     net     │   │   drivers   │     │
-  │   └─────────────┘   └─────────────┘   └─────────────┘     │
-  └──────────────────────┬──────────────────────────────────────┘
-                         │
-  ┌──────────────────────┴──────────────────────────────────────┐
-  │  init (PID 1) — service manager                             │
-  └──────────────────────┬──────────────────────────────────────┘
-                         │
-  ╔══════════════════════╧══════════════════════════════════════╗
-  ║  SERAPH KERNEL                                              ║
-  ║  IPC  |  Scheduler  |  Memory Management  |  Capabilities  ║
-  ╚══════════════════════╤══════════════════════════════════════╝
-                         │
-  ┌──────────────────────┴──────────────────────────────────────┐
-  │  Hardware                                                   │
-  │  (CPU, RAM, IOMMU, interrupt controllers, devices)          │
-  └─────────────────────────────────────────────────────────────┘
-```
-
 All inter-component communication crosses the kernel via IPC. There are no shared
 memory shortcuts between services except where explicitly established as a
 capability-granted shared mapping.
@@ -83,6 +56,14 @@ capability-granted shared mapping.
 of boot. It is the service manager and the ancestor of all other processes. It reads
 a boot configuration, starts system services in dependency order, and supervises them.
 See [boot-protocol.md](boot-protocol.md) for how the kernel hands off to init.
+
+**devmgr** is the device manager, launched by init shortly after boot. It receives
+platform resource capabilities (MMIO regions, interrupt lines, I/O port ranges,
+IOMMU units) and read-only access to firmware tables (ACPI/Device Tree) from init.
+devmgr parses the firmware tables in userspace, enumerates PCI, spawns driver
+processes, and delegates per-device capabilities to each driver. It exposes a device
+registry IPC service for other services to query. See
+[device-management.md](device-management.md) for the full design.
 
 **drivers** hosts device driver processes. Each driver runs in its own isolated
 address space. Drivers access hardware via MMIO regions mapped into their address
@@ -114,15 +95,20 @@ writes hardware registers directly with no kernel involvement. This is fast —
 no syscall per register access — and is the primary hardware access mechanism.
 
 **Port I/O (x86 only):** x86 port I/O (`in`/`out` instructions) cannot be
-memory-mapped. The kernel grants a driver access to specific port ranges via the
-I/O Permission Bitmap (IOPB) in the TSS. This allows the driver to execute port
-I/O instructions directly, without a syscall, for its authorised port range only.
+memory-mapped. A driver receives an IoPortRange capability for its assigned port
+range and binds it to a thread via `SYS_IOPORT_BIND`. The kernel updates the I/O
+Permission Bitmap (IOPB) in the TSS, allowing the thread to execute port I/O
+instructions directly for those ports without a syscall. Access is revocable: when
+the IoPortRange capability is revoked, port access is removed from all bound threads.
 RISC-V has no port I/O concept and does not need this mechanism.
 
 **DMA:** Drivers that perform DMA must have their physical access ranges authorised
 by the IOMMU (x86: VT-d; RISC-V: IOMMU extension). The kernel programs the IOMMU
 when granting DMA capabilities. A driver cannot DMA outside its authorised regions
-even if its process is compromised.
+even if its process is compromised. On platforms without an IOMMU, DMA isolation
+is not enforced; callers must explicitly acknowledge this via `FLAG_DMA_UNSAFE` when
+calling `SYS_DMA_GRANT`, and devmgr is responsible for deciding whether to proceed.
+See [device-management.md](device-management.md) for the full DMA safety model.
 
 **Interrupts:** Hardware interrupts are not delivered directly to drivers. The kernel
 receives the interrupt, masks it, and delivers an asynchronous IPC notification to

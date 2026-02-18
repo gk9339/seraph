@@ -133,10 +133,23 @@ pub struct BootInfo {
     pub framebuffer: FramebufferInfo,
 
     /// ACPI RSDP physical address (x86-64). Zero if not present.
+    ///
+    /// Passed through for userspace consumption (devmgr). The kernel does
+    /// not parse ACPI tables; it reads structured platform resources from
+    /// `platform_resources` instead.
     pub acpi_rsdp: u64,
 
     /// Device tree blob physical address (RISC-V). Zero if not present.
+    ///
+    /// Passed through for userspace consumption (devmgr). The kernel does
+    /// not parse the Device Tree; it reads structured platform resources
+    /// from `platform_resources` instead.
     pub device_tree: u64,
+
+    /// Structured platform resource descriptors extracted from firmware tables
+    /// by the bootloader. The kernel mints initial capabilities from these entries.
+    /// See `PlatformResource` for the per-entry layout.
+    pub platform_resources: PlatformResourceSlice,
 
     /// Null-terminated kernel command line string. May be empty.
     pub command_line: *const u8,
@@ -168,7 +181,7 @@ pub enum MemoryKind {
     Loaded = 1,
     /// Reserved by firmware or hardware; must not be used.
     Reserved = 2,
-    /// ACPI reclaimable after the kernel has read ACPI tables.
+    /// ACPI reclaimable after userspace firmware parsing (devmgr) is complete.
     AcpiReclaimable = 3,
     /// Persistent memory (NVDIMM or similar).
     Persistent = 4,
@@ -225,6 +238,95 @@ The framebuffer is provided on a best-effort basis. The kernel must handle the c
 where `physical_base` is zero and no framebuffer is available. This is the expected
 state in headless or virtual environments without a display.
 
+### Platform Resources
+
+```rust
+#[repr(C)]
+pub struct PlatformResourceSlice {
+    /// Pointer to the first entry. Null if `count` is zero.
+    pub entries: *const PlatformResource,
+    pub count: u64,
+}
+
+#[repr(C)]
+pub struct PlatformResource {
+    /// Discriminant identifying the kind of resource.
+    pub resource_type: ResourceType,
+
+    /// Type-specific flags (see ResourceType documentation for interpretation).
+    pub flags: u32,
+
+    /// Physical base address of the resource (zero for IrqLine).
+    pub base: u64,
+
+    /// Size of the resource in bytes (zero for IrqLine).
+    pub size: u64,
+
+    /// Opaque, type-specific identifier. Interpretation depends on `resource_type`.
+    /// Do not compare `id` values across resource types.
+    pub id: u64,
+}
+
+#[repr(u32)]
+pub enum ResourceType {
+    /// A memory-mapped I/O region.
+    ///
+    /// `base`+`size`: physical address range.
+    /// `flags` bit 0: 0 = device (uncacheable), 1 = write-combine.
+    /// `id`: opaque platform identifier (e.g. ACPI UID); zero if unknown.
+    MmioRange = 0,
+
+    /// A hardware interrupt line.
+    ///
+    /// `base`: unused (zero).
+    /// `size`: unused (zero).
+    /// `id`: interrupt number (GSI on x86-64, PLIC source on RISC-V).
+    /// `flags` bit 0: 0 = level, 1 = edge triggered.
+    /// `flags` bit 1: 0 = active-high, 1 = active-low.
+    IrqLine = 1,
+
+    /// A PCI Express ECAM (Enhanced Configuration Access Mechanism) window.
+    ///
+    /// `base`+`size`: physical ECAM MMIO range.
+    /// `flags`: encoded bus range — bits 7:0 = start bus, bits 15:8 = end bus.
+    /// `id`: segment group number (usually zero).
+    PciEcam = 2,
+
+    /// A firmware table region to be passed through to userspace as read-only.
+    ///
+    /// `base`+`size`: physical address range of the table (e.g. ACPI table body).
+    /// `flags`: reserved, zero.
+    /// `id`: opaque identifier for the table type (platform-defined).
+    PlatformTable = 3,
+
+    /// An x86 I/O port range (x86-64 only).
+    ///
+    /// `base`: first port number in the range.
+    /// `size`: number of consecutive ports.
+    /// `flags`: reserved, zero.
+    /// `id`: opaque platform identifier; zero if unknown.
+    IoPortRange = 4,
+
+    /// An IOMMU unit's register range and scope.
+    ///
+    /// `base`+`size`: physical MMIO range of the IOMMU's registers.
+    /// `flags`: reserved for future scope encoding; zero in protocol version 2.
+    /// `id`: opaque platform identifier (e.g. ACPI DMAR unit index).
+    IommuUnit = 5,
+}
+```
+
+The `platform_resources` array is sorted by `(resource_type, base)` in ascending
+order. Within a type, entries do not overlap where overlap is nonsensical (MMIO
+ranges, port ranges). `IrqLine` entries are sorted by interrupt number.
+
+`PlatformTable` entries are read-only by contract — the kernel creates read-only
+frame capabilities for these regions. Userspace must not write to them.
+
+The bootloader populates this array by parsing the UEFI memory map plus the platform
+firmware tables (ACPI/MADT/MCFG on x86-64; Device Tree on RISC-V). It must not
+include resources that are inaccessible or reserved for firmware exclusive use.
+
 ---
 
 ## Protocol Version
@@ -234,8 +336,13 @@ version does not match the expected value, the kernel must halt rather than proc
 with a potentially incompatible structure. This prevents silent corruption from
 a mismatched bootloader.
 
-The current protocol version is `1`. This value is incremented whenever the
+The current protocol version is `2`. This value is incremented whenever the
 `BootInfo` structure or CPU entry contract changes in a non-backwards-compatible way.
+
+Version history:
+- **1** — initial protocol.
+- **2** — added `platform_resources` field to `BootInfo`; clarified `acpi_rsdp`
+  and `device_tree` as userspace passthrough fields.
 
 ---
 

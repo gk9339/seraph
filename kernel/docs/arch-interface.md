@@ -1,0 +1,449 @@
+# Architecture Abstraction Layer
+
+## Overview
+
+All architecture-specific behaviour in the Seraph kernel is isolated behind a set of
+Rust traits defined in this document. Code outside `kernel/src/arch/` must interact
+with hardware exclusively through these traits. No `#[cfg(target_arch)]` guards appear
+in architecture-neutral kernel code.
+
+This boundary serves two purposes: it keeps the trusted computing base small by
+containing the blast radius of architecture-specific bugs, and it defines exactly what
+a new architecture port must implement — no more, no less.
+
+---
+
+## Module Structure
+
+```
+kernel/src/arch/
+├── mod.rs          # Re-exports the active architecture's implementations
+├── x86_64/
+│   ├── mod.rs      # Implements all arch traits for x86-64
+│   ├── paging.rs
+│   ├── context.rs
+│   ├── interrupts.rs
+│   ├── timer.rs
+│   ├── syscall.rs
+│   ├── cpu.rs
+│   └── console.rs
+└── riscv64/
+    ├── mod.rs      # Implements all arch traits for RISC-V
+    ├── paging.rs
+    ├── context.rs
+    ├── interrupts.rs
+    ├── timer.rs
+    ├── syscall.rs
+    ├── cpu.rs
+    └── console.rs
+```
+
+`arch/mod.rs` performs the conditional compilation:
+
+```rust
+#[cfg(target_arch = "x86_64")]
+pub use x86_64 as current;
+
+#[cfg(target_arch = "riscv64")]
+pub use riscv64 as current;
+```
+
+All shared kernel code uses `arch::current::*` — the only site of `#[cfg(target_arch)]`
+in the kernel outside the `arch/` directory itself.
+
+---
+
+## Trait Definitions
+
+### `Paging`
+
+Manages the hardware page tables for a single address space. One implementation exists
+per architecture; the kernel allocates and frees `PageTable` objects, then calls into
+this trait to manipulate them.
+
+```rust
+pub trait Paging: Sized
+{
+    /// The root-level page table object for this architecture.
+    type PageTable: Send;
+
+    /// Allocate a new, empty page table. Returns None on allocation failure.
+    fn new_page_table() -> Option<Box<Self::PageTable>>;
+
+    /// Map `phys` at `virt` in `table` with the given flags.
+    ///
+    /// # Safety
+    /// `phys` must be a valid, kernel-owned physical frame. `virt` must be
+    /// canonical for this architecture. The caller must invalidate TLB entries
+    /// for `virt` after this call.
+    unsafe fn map(
+        table: &mut Self::PageTable,
+        virt: VirtAddr,
+        phys: PhysAddr,
+        flags: PageFlags,
+    ) -> Result<(), MapError>;
+
+    /// Remove the mapping for `virt` from `table`. Returns the physical address
+    /// that was mapped, or None if the address was not mapped.
+    ///
+    /// # Safety
+    /// The caller must invalidate TLB entries for `virt` after this call.
+    unsafe fn unmap(
+        table: &mut Self::PageTable,
+        virt: VirtAddr,
+    ) -> Option<PhysAddr>;
+
+    /// Change the flags on an existing mapping without altering the physical
+    /// address. Returns an error if `virt` is not currently mapped.
+    ///
+    /// # Safety
+    /// The caller must invalidate TLB entries for `virt` after this call.
+    unsafe fn protect(
+        table: &mut Self::PageTable,
+        virt: VirtAddr,
+        flags: PageFlags,
+    ) -> Result<(), MapError>;
+
+    /// Walk the page table and return the physical address mapped at `virt`,
+    /// or None if unmapped.
+    fn translate(table: &Self::PageTable, virt: VirtAddr) -> Option<PhysAddr>;
+
+    /// Install `table` as the active page table for the current CPU, using
+    /// `pcid` as the hardware address-space tag (PCID on x86-64, ASID on
+    /// RISC-V). If the hardware does not support tagging, `pcid` is ignored
+    /// and a full TLB flush is performed.
+    ///
+    /// # Safety
+    /// `table` must remain valid and unmodified for the duration it is active.
+    /// Caller must ensure no conflicting TLB entries exist for the new mapping.
+    unsafe fn activate(table: &Self::PageTable, pcid: u16);
+
+    /// Flush the TLB entry for a single virtual address on the current CPU.
+    ///
+    /// # Safety
+    /// Must be called after any mapping change that could leave stale entries.
+    unsafe fn flush_page(virt: VirtAddr);
+
+    /// Flush all TLB entries on the current CPU (excluding global entries).
+    ///
+    /// # Safety
+    /// Expensive; use only when a full flush is necessary (e.g. PCID/ASID
+    /// recycling). Prefer `flush_page` for single-address invalidation.
+    unsafe fn flush_all();
+}
+```
+
+`PageFlags` is an architecture-neutral bitfield with fields `readable`, `writable`,
+`executable`, `user_accessible`, `global`, and `huge_page`. The implementation maps
+these to architecture hardware bits. W^X is enforced at the `map` and `protect` call
+sites — `writable && executable` returns `MapError::WxViolation`.
+
+---
+
+### `Context`
+
+Defines the saved register state for a thread and the mechanism to switch between
+threads. The context switch is the most performance-critical path in the kernel.
+
+```rust
+pub trait Context: Sized + Default
+{
+    /// Architecture-specific saved register state for one thread.
+    /// Stored in the thread's TCB and swapped on every context switch.
+    type SavedState: Send + Sized;
+
+    /// Construct a new `SavedState` for a freshly created thread.
+    ///
+    /// - `entry`: virtual address where the thread begins execution
+    /// - `stack_top`: initial stack pointer (top of the allocated stack)
+    /// - `arg`: value placed in the first argument register (a0 / rdi)
+    /// - `is_user`: if true, the thread begins in userspace privilege level
+    fn new_state(
+        entry: VirtAddr,
+        stack_top: VirtAddr,
+        arg: u64,
+        is_user: bool,
+    ) -> Self::SavedState;
+
+    /// Switch from `current` to `next`.
+    ///
+    /// Saves all callee-saved registers into `current`, then restores all
+    /// callee-saved registers from `next` and returns into `next`'s saved
+    /// program counter.
+    ///
+    /// # Safety
+    /// Both `current` and `next` must be valid, writable pointers to
+    /// `SavedState` that remain valid for the duration of the switch. This
+    /// function must be called from a consistent kernel-stack context.
+    unsafe fn switch(current: *mut Self::SavedState, next: *const Self::SavedState);
+
+    /// Return from an exception or syscall to userspace, restoring the full
+    /// user register state from `state`. Does not return.
+    ///
+    /// # Safety
+    /// `state` must contain a valid user-mode register file. Interrupts must
+    /// be in the desired state before this call.
+    unsafe fn return_to_user(state: &Self::SavedState) -> !;
+}
+```
+
+---
+
+### `Interrupts`
+
+Controls interrupt delivery and installs handlers for hardware exceptions and external
+interrupts. Exception handlers are registered at init time; external interrupt lines
+are registered dynamically as drivers register.
+
+```rust
+pub trait Interrupts
+{
+    /// Disable interrupts on the current CPU. Returns true if interrupts were
+    /// enabled before the call (for save/restore patterns).
+    fn disable() -> bool;
+
+    /// Enable interrupts on the current CPU.
+    ///
+    /// # Safety
+    /// Caller must ensure the interrupt handler infrastructure is initialised
+    /// and that enabling interrupts is safe at this point in execution.
+    unsafe fn enable();
+
+    /// Return true if interrupts are currently enabled on this CPU.
+    fn are_enabled() -> bool;
+
+    /// Initialise the interrupt controller hardware (IDT on x86-64, stvec on
+    /// RISC-V) and register all architecture-defined exception handlers.
+    /// Called once per CPU during initialisation.
+    ///
+    /// # Safety
+    /// Must be called before enabling interrupts. Must be called from the CPU
+    /// the state is being initialised for.
+    unsafe fn init();
+
+    /// Register `handler` as the callback for external interrupt line `irq`.
+    /// The `irq` number is the architecture's native interrupt line identifier
+    /// (APIC vector on x86-64; PLIC source ID on RISC-V).
+    ///
+    /// # Safety
+    /// `handler` must remain valid for the lifetime of the interrupt registration.
+    unsafe fn register_handler(irq: u32, handler: fn(u32));
+
+    /// Acknowledge interrupt line `irq` at the interrupt controller, allowing
+    /// further interrupts on that line. Called by the kernel after delivering
+    /// the IRQ notification to the registered driver endpoint.
+    fn acknowledge(irq: u32);
+
+    /// Mask (disable) interrupt line `irq` at the interrupt controller.
+    fn mask(irq: u32);
+
+    /// Unmask (re-enable) interrupt line `irq` at the interrupt controller.
+    fn unmask(irq: u32);
+}
+```
+
+---
+
+### `Timer`
+
+Periodic preemption timer. The timer fires a per-CPU interrupt at the configured
+interval, which the scheduler uses to enforce time slices.
+
+```rust
+pub trait Timer
+{
+    /// Initialise the per-CPU preemption timer with a period of `period_us`
+    /// microseconds. Called once per CPU during initialisation, after
+    /// `Interrupts::init()`.
+    ///
+    /// # Safety
+    /// `Interrupts::init()` must have been called first. Must be called from
+    /// the CPU being initialised.
+    unsafe fn init(period_us: u64);
+
+    /// Return the current value of the monotonic per-CPU tick counter.
+    /// Ticks are in units of timer periods — not nanoseconds or any wall-clock
+    /// unit. Used for relative time comparisons only.
+    fn current_tick() -> u64;
+
+    /// Return the number of timer ticks per second, for converting tick deltas
+    /// to real time if needed.
+    fn ticks_per_second() -> u64;
+}
+```
+
+---
+
+### `Syscall`
+
+The architecture-specific syscall entry and return glue. This trait is not directly
+called by shared kernel code — it defines what the arch module must export so that the
+`syscall/mod.rs` dispatch table can be invoked from the arch-specific trap handler.
+
+```rust
+pub trait Syscall
+{
+    /// Install the syscall entry handler on the current CPU.
+    ///
+    /// On x86-64: writes the kernel's entry point to `LSTAR`, sets up `STAR`
+    /// with the kernel/user segment selectors, and configures `SFMASK`.
+    ///
+    /// On RISC-V: ensures the trap vector (`stvec`) is configured to route
+    /// `ecall` exceptions to the shared trap handler, which dispatches to
+    /// the syscall layer.
+    ///
+    /// # Safety
+    /// Must be called once per CPU, after segment/privilege infrastructure
+    /// is initialised but before interrupts are enabled for userspace.
+    unsafe fn init();
+}
+```
+
+The arch-specific syscall entry stub saves userspace register state, calls
+`crate::syscall::dispatch(nr, args)`, restores state, and returns to userspace.
+
+---
+
+### `Cpu`
+
+CPU identification, feature detection, and per-CPU state management. Per-CPU storage
+is architecture-specific (GS-base on x86-64; `sscratch` on RISC-V).
+
+```rust
+pub trait Cpu: Sized
+{
+    /// Per-CPU data stored in architecture-managed per-CPU storage.
+    /// Accessed without locks since each CPU accesses only its own block.
+    type PerCpuData: Sized;
+
+    /// Return the unique ID of the current CPU (0-based).
+    /// On x86-64 this is derived from the APIC ID; on RISC-V from the hart ID.
+    fn current_id() -> u32;
+
+    /// Return the total number of CPUs (logical processors) in the system.
+    fn count() -> u32;
+
+    /// Initialise per-CPU state for the current CPU. Must be called once per
+    /// CPU before any code that accesses per-CPU data.
+    ///
+    /// # Safety
+    /// Must be called exactly once per CPU, from that CPU's boot path.
+    unsafe fn init_local(data: Box<Self::PerCpuData>);
+
+    /// Return a mutable reference to the current CPU's `PerCpuData`.
+    ///
+    /// # Safety
+    /// Only one reference may exist at a time. The caller must not allow the
+    /// reference to escape a non-preemptible section.
+    unsafe fn local_data<'a>() -> &'a mut Self::PerCpuData;
+
+    /// Return the number of SMT siblings sharing the same physical core as
+    /// the current CPU. Returns 1 if SMT is not present or not detectable.
+    fn smt_siblings() -> u32;
+
+    /// Spin-wait for `cycles` cycles. Used during early boot before the timer
+    /// is configured. Not a precise delay; calibration is implementation-defined.
+    fn spin_delay(cycles: u64);
+
+    /// Halt the current CPU until the next interrupt arrives.
+    /// On x86-64: executes `hlt`. On RISC-V: executes `wfi`.
+    /// Must be called with interrupts enabled; if interrupts are disabled the
+    /// CPU will halt indefinitely.
+    fn halt_until_interrupt();
+
+    /// Set the kernel stack pointer for the current CPU so that the next
+    /// privilege-level transition (syscall or exception) uses `stack_top`.
+    /// On x86-64: writes `stack_top` to `TSS.RSP0`.
+    /// On RISC-V: writes `stack_top` to `sscratch`.
+    ///
+    /// # Safety
+    /// `stack_top` must point to the top of a valid, mapped kernel stack that
+    /// remains allocated for the lifetime of the thread that will run next.
+    unsafe fn set_kernel_stack(stack_top: VirtAddr);
+}
+```
+
+---
+
+### `EarlyConsole`
+
+Output mechanism available before the full kernel heap and drivers are initialised.
+Used exclusively for boot-time diagnostics and fatal error messages. The implementation
+may use the framebuffer from `BootInfo`, a UART, or the SBI console on RISC-V.
+
+```rust
+pub trait EarlyConsole
+{
+    /// Initialise the early console using information from `boot_info`.
+    /// If no output device is available, this may be a no-op.
+    ///
+    /// # Safety
+    /// Must be called before any use of `write_byte` or `write_str`.
+    /// Physical memory must still be accessible at boot-info addresses.
+    unsafe fn init(boot_info: &BootInfo);
+
+    /// Write a single byte. No buffering; output is immediate. Implementations
+    /// must handle `\n` (add `\r` if required by the output device).
+    fn write_byte(b: u8);
+
+    /// Write a string slice. Default implementation calls `write_byte` per byte.
+    fn write_str(s: &str)
+    {
+        for b in s.bytes()
+        {
+            Self::write_byte(b);
+        }
+    }
+}
+```
+
+---
+
+## What Is Architecture-Specific vs Architecture-Neutral
+
+**Architecture-specific** (lives in `arch/*/`):
+
+- Page table format and hardware manipulation
+- Register file layout and context switch assembly
+- Exception/interrupt vector installation
+- Interrupt controller interaction (APIC / PLIC)
+- Segment descriptors, TSS (x86-64 only)
+- PCID/ASID hardware management
+- SMEP/SMAP enforcement (x86-64); SUM bit management (RISC-V)
+- Syscall instruction handling (`SYSCALL`/`SYSRET` vs `ECALL`)
+- CPU feature detection (CPUID / ISA extensions)
+- SMP bringup (INIT/SIPI on x86-64; SBI HSM on RISC-V)
+
+**Architecture-neutral** (lives in `mm/`, `cap/`, `ipc/`, `sched/`, `syscall/`):
+
+- Buddy allocator algorithm and zone management
+- Slab allocator and size-class allocator
+- CSpace slot storage, lookup, and growth
+- Capability derivation tree and revocation algorithm
+- Endpoint, signal, event queue, and wait set objects
+- Thread control block structure (except the `SavedState` field)
+- Run queue management, priority levels, and time-slice accounting
+- Load balancing decisions
+- Syscall dispatch table and argument validation
+- Init process creation and initial CSpace population
+
+---
+
+## Adding a New Architecture
+
+A new architecture port must:
+
+1. Create `kernel/src/arch/<arch>/` with the module files listed above
+2. Implement every trait in this document — the compiler enforces completeness
+3. Add a custom target JSON in `scripts/targets/`
+4. Add a linker script in `kernel/linker/`
+5. Add the `#[cfg]` branch in `arch/mod.rs`
+6. Add the target to the workspace build configuration
+
+No changes to shared kernel code are required or permitted. If implementing a trait
+requires a change to shared code, that change must be proposed as a modification to
+this document and the trait definitions.
+
+The existing x86-64 implementation is the reference. Where RISC-V diverges in the
+current implementation, comments explain why. New ports should document deviations
+from the reference equally clearly.

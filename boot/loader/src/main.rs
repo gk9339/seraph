@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 George Kottler <mail@kottlerg.com>
+
+// boot/loader/src/main.rs
+
 //! Seraph UEFI bootloader.
 //!
 //! Loads the kernel ELF and boot modules, establishes initial page tables,

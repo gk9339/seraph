@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
-# build.sh -- Build Seraph components.
+# SPDX-License-Identifier: GPL-2.0-only
+# Copyright (C) 2026 George Kottler <mail@kottlerg.com>
+
+# build.sh
+
+# Build Seraph components.
 #
 # Usage:
 #   ./build.sh [OPTIONS]
@@ -39,7 +44,7 @@ do
             COMPONENT="$2"; shift 2
             ;;
         -h|--help)
-            sed -n '2,10p' "$0"
+            sed -n '7,16p' "$0"
             exit 0
             ;;
         *)

@@ -1,23 +1,13 @@
-/* boot/loader/linker/riscv64-uefi.ld
+/*
+ * SPDX-License-Identifier: GPL-2.0-only
+ * Copyright (C) 2026 George Kottler <mail@kottlerg.com>
  *
- * Linker script for the RISC-V UEFI bootloader flat binary.
+ * boot/loader/linker/riscv64-uefi.ld
  *
- * The resulting ELF is converted to a flat binary by:
- *   llvm-objcopy -O binary seraph-boot BOOTRISCV64.EFI
- *
- * UEFI firmware then loads BOOTRISCV64.EFI as a PE32+ application, using the
- * hand-crafted PE/COFF header placed at offset 0 by header.S.
- *
- * Section layout (VMAs = file offsets in the flat binary):
- *   0x000000  .pecoff_header   PE/COFF header block (from header.S)
- *   0x001000  .text            Entry trampoline + Rust code
- *             .rodata          Read-only data
- *             .data            Initialised data
- *             .bss             Zero-initialised data
- *   aligned   .reloc           Minimal base-relocation block (from header.S)
- *
- * All symbols referenced in header.S (_start, _etext, _reloc_start,
- * _reloc_end, _image_end) are defined here.
+ * Linker script for the RISC-V UEFI bootloader. Produces an ELF that
+ * llvm-objcopy converts to a flat PE32+ binary. The hand-crafted PE/COFF
+ * header from header.S is placed at offset 0x000; the entry trampoline
+ * and Rust code begin at 0x1000.
  */
 
 OUTPUT_FORMAT("elf64-littleriscv")

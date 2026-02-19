@@ -1,17 +1,12 @@
 /*
- * x86_64.ld -- Linker script for the Seraph kernel (x86-64).
+ * SPDX-License-Identifier: GPL-2.0-only
+ * Copyright (C) 2026 George Kottler <mail@kottlerg.com>
  *
- * The kernel code model places all kernel code and static data within the
- * uppermost 2 GiB of the virtual address space (above 0xFFFFFFFF80000000).
- * The direct physical map occupies the region starting at PHYSMAP_BASE
- * (0xFFFF800000000000), leaving the upper 2 GiB for the kernel image.
+ * kernel/linker/x86_64.ld
  *
- * Memory layout (virtual):
- *   0xFFFFFFFF80000000  kernel image base (text, rodata, data, bss)
- *   0xFFFF800000000000  physical memory direct map (set up at runtime)
- *
- * The bootloader loads the kernel ELF and establishes page table mappings
- * at the addresses specified here before jumping to kernel_entry.
+ * Linker script for the Seraph kernel (x86-64). Places the kernel image
+ * at 0xFFFFFFFF80000000; the physical direct map is established at runtime
+ * at 0xFFFF800000000000.
  */
 
 KERNEL_BASE = 0xFFFFFFFF80000000;

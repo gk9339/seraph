@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
-# run.sh -- Build and run Seraph under QEMU.
+# SPDX-License-Identifier: GPL-2.0-only
+# Copyright (C) 2026 George Kottler <mail@kottlerg.com>
+
+# run.sh
+
+# Build and run Seraph under QEMU.
 #
 # Usage:
 #   ./run.sh [OPTIONS]
@@ -51,7 +56,7 @@ do
             RISCV_EDK2_VERBOSE=true; shift
             ;;
         -h|--help)
-            sed -n '2,17p' "$0"
+            sed -n '7,25p' "$0"
             exit 0
             ;;
         *)

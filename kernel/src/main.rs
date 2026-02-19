@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 George Kottler <mail@kottlerg.com>
+
+// kernel/src/main.rs
+
 //! Seraph microkernel — kernel entry point.
 //!
 //! See `docs/boot-protocol.md` for the CPU state and `BootInfo` contract

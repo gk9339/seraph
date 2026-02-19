@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# scripts/env.sh -- Shared environment for Seraph build scripts.
-#
-# Source this file from other scripts; do not execute it directly.
-# Defines common variables and helper functions used by build.sh,
-# clean.sh, and run.sh.
+# SPDX-License-Identifier: GPL-2.0-only
+# Copyright (C) 2026 George Kottler <mail@kottlerg.com>
+
+# scripts/env.sh
+
+# Shared environment for Seraph build scripts. Source this file from
+# other scripts; do not execute it directly.
 
 set -euo pipefail
 

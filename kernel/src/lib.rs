@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 George Kottler <mail@kottlerg.com>
+
+// kernel/src/lib.rs
+
 //! Seraph microkernel — library target.
 //!
 //! This target is compiled for the **host** during `cargo test`, enabling

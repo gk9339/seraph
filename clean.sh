@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
-# clean.sh -- Remove Seraph build artifacts.
+# SPDX-License-Identifier: GPL-2.0-only
+# Copyright (C) 2026 George Kottler <mail@kottlerg.com>
+
+# clean.sh
+
+# Remove Seraph build artifacts.
 #
 # Usage:
 #   ./clean.sh [OPTIONS]
@@ -23,7 +28,7 @@ do
             FULL_CLEAN=true; shift
             ;;
         -h|--help)
-            sed -n '2,9p' "$0"
+            sed -n '7,14p' "$0"
             exit 0
             ;;
         *)

@@ -2,17 +2,54 @@
 
 These standards apply across the entire Seraph codebase. All contributors (and AI assistants)
 must read this document before writing or reviewing code. Where a rule conflicts with a
-language's own enforced conventions, the language wins — this document covers everything else.
+language's own enforced conventions, the language wins.
 
 ---
 
 ## Philosophy
 
-Rules here exist to serve two goals: **correctness** and **readability**. A rule that
-makes code harder to understand or more error-prone should be challenged. Rules are not
-cargo-culted from other projects — each has a reason, documented below it where non-obvious.
+Rules exist to serve **correctness** and **readability**. A rule that undermines either should
+be challenged. Where there is no rule, prefer the most explicit and least surprising option.
 
-Where there is no rule, prefer the most explicit and least surprising option.
+---
+
+## File Headers
+
+Every source file opens with a license block, a path line, and a brief description. Author
+names and dates are not tracked in file headers — version control handles that.
+
+### Structure
+
+Elements appear in this order, each separated by a blank line:
+
+1. **License block** — SPDX identifier, then copyright line(s)
+2. **Path** — repository-relative path to this file
+3. **Description** — brief summary of the file's purpose
+
+For shell scripts with a shebang, the shebang precedes the license block on line 1.
+
+### License Block
+
+```
+SPDX-License-Identifier: GPL-2.0-only
+Copyright (C) <year> <name> <email>
+```
+
+Comment syntax follows the file type: `//` for Rust and assembly, `#` for shell. Files using
+block comments use the `/* * ... */` style throughout, headers included.
+
+### Description in Rust Files
+
+Rust files use `//!` inner doc comments for the description rather than plain comments. These
+are the module's rustdoc entry. The first `//!` line is the short summary shown in module index
+views; additional paragraphs, separated by a blank `//!` line, appear only on the module's own
+page. Crate-level attributes (`#![no_std]`, `#![cfg_attr(...)]`) follow the `//!` block.
+
+### Third-Party Attribution
+
+Files derived from third-party sources list the original copyright before the project copyright,
+with a note identifying the source. Copyright lines stack chronologically. Add your own copyright
+when you have made meaningful original contributions to the file; omit it for near-verbatim copies.
 
 ---
 
@@ -20,18 +57,17 @@ Where there is no rule, prefer the most explicit and least surprising option.
 
 ### Indentation
 
-4 spaces. No tabs, except where the tooling requires them (Makefiles, certain shell heredocs).
+4 spaces. No tabs, except where tooling requires them (Makefiles, certain shell heredocs).
 Never mix tabs and spaces in the same file.
 
 ### Line Length
 
-100 columns maximum, for all languages. This accommodates comfortable side-by-side editing
-on a laptop without forcing aggressive wrapping on ordinary code.
+100 columns maximum, for all languages.
 
 ### Brace Style
 
-Allman style throughout — opening brace on its own line, always. No exceptions for
-single-statement bodies; braces are never omitted.
+Allman style throughout — opening brace on its own line, always. Braces are never omitted,
+even for single-statement bodies.
 
 ```rust
 fn do_something(x: u32) -> Result<(), Error>
@@ -45,8 +81,7 @@ fn do_something(x: u32) -> Result<(), Error>
 }
 ```
 
-For `if-else` chains, `else` follows the closing brace on the same line to avoid
-excessive vertical spacing:
+For `if-else` chains, `else` follows the closing brace on the same line:
 
 ```rust
 if condition
@@ -62,29 +97,15 @@ The same applies to `else if`, `} while`, and similar continuations.
 
 ### C: Pointer Declarations
 
-The `*` attaches to the type, not the variable name. A pointer is a property of the
-type, not the identifier.
+The `*` attaches to the type, not the variable name:
 
 ```c
-// Correct
-int* ptr;
-char* name;
+int* ptr;       // correct
+int *ptr;       // wrong
 
-// Wrong
-int *ptr;
-char *name;
-```
-
-When declaring multiple pointers on one line, use a separate declaration per variable
-to avoid ambiguity:
-
-```c
-// Correct
-int* a;
+int* a;         // correct — one declaration per pointer variable
 int* b;
-
-// Wrong — only 'a' is a pointer here, misleading with type-attached style
-int* a, b;
+int* a, b;      // wrong — only 'a' is a pointer here
 ```
 
 ---
@@ -95,14 +116,12 @@ int* a, b;
 
 - `snake_case` for variables, functions, and modules
 - `SCREAMING_SNAKE_CASE` for constants and macros
-- Names should be descriptive enough to need no comment. If a name requires a comment
-  to explain what it refers to, rename it instead.
-- Abbreviations are acceptable only when universally understood in context
-  (e.g. `addr`, `buf`, `len`, `idx`). Avoid novel abbreviations.
+- Names should be self-describing. If a name requires a comment to explain what it refers to,
+  rename it instead.
+- Abbreviations only when universally understood in context (`addr`, `buf`, `len`, `idx`).
+  Avoid novel abbreviations.
 
 ### Rust
-
-Follow Rust language conventions:
 
 | Item | Convention | Example |
 |---|---|---|
@@ -121,7 +140,7 @@ Follow Rust language conventions:
 | Typedef'd structs and enums | `snake_case_t` | `process_t` |
 | Macros and constants | `SCREAMING_SNAKE_CASE` | `PAGE_SIZE` |
 
-Struct and enum tags (before typedef) use plain `snake_case` without `_t`:
+Struct and enum tags use plain `snake_case` without `_t`:
 
 ```c
 typedef struct process
@@ -134,20 +153,17 @@ typedef struct process
 ### Assembly
 
 Follow the target architecture's register naming conventions. Labels use `snake_case`.
-Global symbols exported to other translation units are prefixed with the component name
-to avoid collisions (e.g. `kernel_entry`, `boot_gdt`).
+Global symbols are prefixed with the component name to avoid collisions
+(e.g. `kernel_entry`, `boot_gdt`).
 
 ---
 
 ## Function Design
 
-- Functions should do one thing. If a function needs a comment to separate it into
-  phases, it should be split.
+- Functions do one thing. If a function needs a comment to separate phases, split it.
 - Prefer functions under 50 lines. Functions over 100 lines require strong justification.
-- Prefer many small, named functions over inline complexity. A named function is
-  self-documenting; a 40-line `if` tree is not.
-- Avoid boolean parameters that alter function behaviour — prefer separate functions or
-  an explicit enum.
+- Prefer many small, named functions over inline complexity.
+- Avoid boolean parameters that alter behaviour — prefer separate functions or an explicit enum.
 
 ---
 
@@ -156,51 +172,43 @@ to avoid collisions (e.g. `kernel_entry`, `boot_gdt`).
 ### Rust
 
 - All fallible operations return `Result`. Callers handle errors explicitly.
-- `unwrap()` and `expect()` are forbidden in production code paths. They are permitted
-  in tests and in `const` contexts where the compiler guarantees the value is `Some`/`Ok`.
-- Do not use `panic!` in production code paths. A kernel panic is a last resort for
-  unrecoverable states only (corrupted kernel structures, failed critical assertions),
-  not a substitute for error handling.
-- Error types should be defined per-subsystem and carry enough context for the caller
-  to make a decision without inspecting internal state.
+- `unwrap()` and `expect()` are forbidden in production code paths. Permitted in tests and
+  in `const` contexts where the value is statically guaranteed.
+- Do not use `panic!` in production code. A kernel panic is a last resort for unrecoverable
+  states only, not a substitute for error handling.
+- Error types are defined per-subsystem and carry enough context for the caller to decide
+  without inspecting internal state.
 
 ### C
 
-- Functions that can fail return a status code or a pointer with a sentinel error value.
-  Error paths are always documented in the function's comment.
-- Do not silently discard return values from fallible functions. If a return value is
-  intentionally ignored, document why.
+- Functions that can fail return a status code or a sentinel error value. Error paths are
+  documented in the function comment.
+- Do not silently discard return values from fallible functions. If intentionally ignored,
+  document why.
 
 ---
 
 ## Assertions
 
-Assertions communicate invariants — things that *must* be true for the program to be
-correct. They are not error handling.
+Assertions communicate invariants — conditions that must hold for the program to be correct.
+They are not error handling.
 
-- `debug_assert!` (Rust) / `assert()` in debug builds (C): use liberally for internal
-  invariants. These are optimised out in release builds and exist to catch logic errors
-  during development.
-- `assert!` (Rust) / unconditional `assert()` (C): use for invariants that, if violated,
-  indicate a fundamental and unrecoverable correctness failure. These remain in release
-  builds. Use sparingly and only where the cost is justified.
-- Assertions are not input validation. Never assert on values that originate from
-  outside the kernel (user input, hardware, boot info). Return an error instead.
+- `debug_assert!` / `assert()` in debug builds: use liberally for internal invariants.
+  Removed in release builds.
+- `assert!` / unconditional `assert()`: use only for invariants whose violation indicates an
+  unrecoverable correctness failure. Remain in release builds; use sparingly.
+- Never assert on external values (user input, hardware registers, boot info).
+  Return an error instead.
 
 ---
 
 ## Unsafe Code
 
-Unsafe is sometimes necessary. It must always be contained and justified.
-
 - Unsafe blocks must be as small as possible — wrap only the lines that require it.
-- Every unsafe block must be preceded by a `// SAFETY:` comment explaining why the
-  operation is sound: what invariants hold, what has been checked, and why this cannot
-  be expressed in safe Rust.
-- Unsafe code must never be used to work around a design problem. If safe Rust cannot
-  express something cleanly, reconsider the design before reaching for unsafe.
-- Public functions that are `unsafe` must document their safety contract in their
-  rustdoc comment under a `# Safety` heading.
+- Every unsafe block must be preceded by a `// SAFETY:` comment explaining why the operation
+  is sound: what invariants hold, what has been checked, and why safe Rust cannot express it.
+- Never use unsafe to work around a design problem — reconsider the design first.
+- `unsafe fn` must document their safety contract under a `# Safety` rustdoc heading.
 
 ```rust
 // SAFETY: `ptr` is non-null and correctly aligned, and we hold the exclusive
@@ -212,51 +220,48 @@ let value = unsafe { ptr.read() };
 
 ## Memory Allocation
 
-- Allocation can fail. All allocation paths must handle failure explicitly — no silent
-  OOM conditions.
-- In the kernel, prefer static or pool allocation over dynamic allocation on hot paths.
-- Document why dynamic allocation is acceptable at each site where it is used.
+- Allocation can fail. All allocation paths handle failure explicitly — no silent OOM.
+- In the kernel, prefer static or pool allocation on hot paths. Document why dynamic
+  allocation is acceptable at each site where it appears.
 - Never allocate inside interrupt handlers.
 
 ---
 
 ## Concurrency
 
-- Shared mutable state must be protected by an explicit synchronisation primitive.
-  The type system should enforce this — use `Mutex<T>` rather than a bare `T` with a
-  separate lock.
-- Prefer message passing over shared memory for communication between components.
-  Shared memory should be a deliberate optimisation, not the default.
-- Lock ordering must be documented and consistent to prevent deadlock. If acquiring
-  multiple locks, always acquire them in the documented order.
-- Avoid holding locks across IPC calls or any operation that may block.
+- Shared mutable state must be protected by an explicit synchronisation primitive. Use
+  `Mutex<T>` rather than a bare `T` with a separate lock — the type system should enforce
+  the invariant.
+- Prefer message passing over shared memory; shared memory is a deliberate optimisation,
+  not the default.
+- Lock ordering must be documented and consistent. When acquiring multiple locks, always
+  take them in the documented order.
+- Never hold a lock across an IPC call or any operation that may block.
 
 ---
 
 ## Documentation
 
-- All public APIs must have rustdoc comments. The comment must describe what the
-  function does, its arguments, return value, and any errors it can return.
-- Comments explain *why*, not *what*. Code that is clear enough to need no explanation
-  should not have one. Code whose logic is non-obvious must explain the reasoning.
-- Do not leave TODO comments without context. A TODO must state what needs doing and why
-  it was deferred, not just that something is incomplete.
-- Architecture decisions that are not obvious from the code should be documented in the
-  relevant `docs/` file, not only in inline comments.
+- All public APIs must have rustdoc comments covering behaviour, arguments, return value,
+  and all error variants.
+- Comments explain *why*, not *what*. Self-evident code needs no comment; non-obvious logic
+  must explain its reasoning.
+- TODO comments must state what needs doing and why it was deferred.
+- Architecture decisions not obvious from the code belong in the relevant `docs/` file,
+  not only in inline comments.
 
 ---
 
 ## Architecture-Specific Code
 
 - All architecture-specific behaviour must be behind a trait or module boundary.
-  No `#[cfg(target_arch = "x86_64")]` blocks in architecture-neutral code.
-- Inline assembly must be isolated to dedicated functions or modules. It must never
-  be inlined mid-function in code that also contains logic.
-- Every block of inline assembly must carry a comment explaining what it does,
-  what registers it clobbers, and what constraints it assumes.
-- When adding support for a new architecture, the existing architecture's implementation
-  serves as the reference. Do not diverge from the interface contract without updating
-  both implementations.
+  No `#[cfg(target_arch)]` blocks in architecture-neutral code.
+- Inline assembly must be isolated to dedicated functions or modules; never inlined
+  alongside logic.
+- Every inline assembly block must comment what it does, what registers it clobbers,
+  and what constraints it assumes.
+- When adding a new architecture, do not diverge from the interface contract without
+  updating both implementations.
 
 ---
 
@@ -264,9 +269,8 @@ let value = unsafe { ptr.read() };
 
 ### Philosophy
 
-Tests are not optional. Every module has tests. An untested code path is an unknown
-code path — treat it as broken until proven otherwise. Tests are written alongside
-the code they cover, not after the fact.
+Tests are not optional. Every module has tests, written alongside the code they cover.
+An untested path is an unknown path.
 
 ### Unit Tests
 
@@ -290,59 +294,42 @@ mod tests
 Rules:
 - One logical assertion per test function.
 - Test names read as a sentence describing expected behaviour.
-- Tests are independent — no test depends on another's side effects or order.
+- Tests are independent and order-independent.
 - Tests are deterministic — no randomness, no timing, no external state.
 
 ### What Must Be Tested
 
-- Every public function: at least one test for the primary success path, at least
-  one for each distinct failure mode.
+- Every public function: at least one success-path test, at least one test per failure mode.
 - Boundary conditions: empty input, maximum-size input, off-by-one cases.
-- Every `Result::Err` variant a function can return must be exercised by a test.
-- Any module containing `unsafe` blocks must have tests exercising the safe
-  wrapper to confirm the invariants hold under normal use.
+- Every `Result::Err` variant a function can return must be exercised.
+- Modules containing `unsafe` blocks must have tests confirming the safe wrapper upholds
+  its invariants under normal use.
 
 ### What Should Not Be Tested
 
 - Private implementation details not visible through the public interface.
 - Trivial getters and setters with no logic.
-- Code generated by `#[derive]` macros, unless custom logic is attached.
+- Code generated by `#[derive]`, unless custom logic is attached.
 
 ### Kernel Testing Strategy
 
-Kernel code is `no_std` and cannot use the standard Rust test harness directly
-when compiled for a custom target. Two strategies are used:
+**Host unit tests** — Pure algorithmic modules (buddy allocator, slab allocator, capability
+tree, scheduler run queues) keep hardware dependencies behind trait boundaries. The kernel's
+`lib` target uses `#![cfg_attr(not(test), no_std)]`, allowing `cargo test -p seraph-kernel`
+to run these modules on the host under the standard test harness.
 
-**Host unit tests** — Pure algorithmic modules (buddy allocator, slab allocator,
-capability derivation tree, scheduler run queues) are designed so that hardware
-dependencies are behind trait boundaries. The kernel crate has a `lib` target
-(`src/lib.rs`) compiled with `#![cfg_attr(not(test), no_std)]`, which lifts the
-`no_std` restriction when building for the host during `cargo test`. Tests in
-these modules run on the host with the standard test harness:
-
-```
-cargo test -p seraph-kernel
-```
-
-**QEMU integration tests** — Code that requires real hardware interaction (page
-table manipulation, interrupt handling, context switching) is tested under QEMU
-using a custom test harness. The kernel is compiled in a test configuration that
-runs test functions sequentially and reports results via the serial port. QEMU
-exits with a known status code. This harness will be implemented when arch code
-is written.
+**QEMU integration tests** — Code requiring real hardware (page tables, interrupts, context
+switching) is tested under QEMU with a custom harness that runs tests sequentially and reports
+results over serial. This harness will be implemented when arch code is written.
 
 ### Assertions in Tests
 
-`assert!`, `assert_eq!`, `assert_ne!`, `unwrap()`, and `expect()` are all
-permitted in test code. These are the only contexts where `unwrap()` and
-`expect()` are allowed. Test panics are the intended failure mechanism.
+`assert!`, `assert_eq!`, `assert_ne!`, `unwrap()`, and `expect()` are all permitted in test
+code — the only contexts where `unwrap()` and `expect()` are allowed.
 
 ### Running Tests
 
 ```sh
-# Host unit tests (runs immediately, no QEMU required)
-cargo test -p seraph-kernel
-
-# QEMU integration tests (not yet implemented)
-./build.sh --arch x86_64 --test
+cargo test -p seraph-kernel          # host unit tests
+./build.sh --arch x86_64 --test      # QEMU integration tests (not yet implemented)
 ```

@@ -2,10 +2,13 @@
 //
 // Derived from the Linux kernel file arch/riscv/kernel/efi-header.S
 // Copyright (C) 2020 Western Digital Corporation or its affiliates.
+// Copyright (C) 2026 George Kottler <mail@kottlerg.com>
 //
 // The Linux RISC-V EFI header is adapted from the ARM64 implementation
 // by Ard Biesheuvel and ARM64 Linux contributors.
-//
+
+// boot/loader/src/arch/riscv64/header.S
+
 // UEFI firmware loads EFI applications as PE32+ images. LLVM's PE/COFF backend
 // does not support RISC-V, so we compile the bootloader as a PIC ELF and
 // prepend this header. `llvm-objcopy -O binary` then produces a flat binary

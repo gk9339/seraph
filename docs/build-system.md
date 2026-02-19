@@ -1,0 +1,154 @@
+# Build System
+
+## Overview
+
+Seraph uses Cargo as its build system, with shell scripts providing convenience
+wrappers for cross-compilation, QEMU invocation, and artifact management. The
+build system supports two target architectures (x86-64 and RISC-V RV64GC) from
+a single source tree.
+
+---
+
+## Toolchain
+
+Seraph requires Rust nightly, pinned in `rust-toolchain.toml`. The following
+components must be installed:
+
+| Component | Purpose |
+|---|---|
+| `rust-src` | Required for `-Zbuild-std` (rebuilds `core`/`alloc` for custom targets) |
+| `rustfmt` | Code formatting |
+| `clippy` | Linting |
+| `llvm-tools` | `llvm-objcopy`, `llvm-objdump`, symbol map utilities |
+
+Run `rustup show` in the repository root to confirm the toolchain is active.
+
+---
+
+## Workspace Structure
+
+The repository is a Cargo virtual workspace. Each component is a workspace member
+with its own `Cargo.toml`. Components targeting different compilation targets are
+separate crates; types shared between them are extracted into library crates.
+
+```
+Cargo.toml                    # Virtual workspace root
+├── kernel/                   # Microkernel (no_std; custom target)
+├── boot/
+│   ├── protocol/             # Shared BootInfo types (no_std lib)
+│   └── loader/               # UEFI bootloader application (no_std)
+└── (future)
+    ├── init/
+    ├── devmgr/
+    └── drivers/
+```
+
+`boot/protocol` is a `#![no_std]` library containing the `BootInfo` structure
+and associated types. Both `boot/loader` and `kernel` depend on it. This crate
+is the single source of truth for the boot protocol ABI; the design is specified
+in [`docs/boot-protocol.md`](boot-protocol.md).
+
+---
+
+## Custom Targets
+
+The kernel cannot be compiled with standard Rust targets because it requires
+specific hardware configuration: no red zone, no SSE/AVX before explicit
+initialisation, and the kernel code model for higher-half placement.
+
+Custom target JSON specifications live in `scripts/targets/`:
+
+| File | Architecture | Key properties |
+|---|---|---|
+| `x86_64-seraph-none.json` | x86-64 | Red zone off, SSE/AVX/MMX off, soft-float, kernel code model |
+| `riscv64gc-seraph-none.json` | RISC-V | RV64GC features, medium code model, lp64d ABI |
+
+Both targets set `panic-strategy: abort` and link with `rust-lld`.
+
+The bootloader uses built-in Rust targets (`x86_64-unknown-uefi` for x86-64),
+so no custom JSON is needed for it.
+
+Custom targets require `-Zbuild-std=core,alloc,compiler_builtins` to rebuild
+the standard library from source. This is passed explicitly by the build scripts
+rather than via `.cargo/config.toml`, to avoid interfering with `cargo test`
+(which builds for the host target and does not need `build-std`).
+
+---
+
+## Build Output: the Sysroot
+
+Build artifacts are staged in `sysroot/`, which is used directly as a virtual
+FAT drive by QEMU. The sysroot is built for one architecture at a time; the
+active architecture is recorded in `sysroot/.arch`. Switching architectures
+requires a clean rebuild.
+
+```
+sysroot/
+  .arch                  # "x86_64" or "riscv64"
+  EFI/
+    BOOT/
+      BOOTX64.EFI        # UEFI fallback bootloader path (x86-64)
+    seraph/
+      seraph-kernel      # Kernel ELF binary
+  etc/                   # (future) System configuration
+  lib/                   # (future) Shared libraries
+```
+
+The UEFI firmware (OVMF) discovers the bootloader at `EFI/BOOT/BOOTX64.EFI`
+(the UEFI specification's fallback boot path). The kernel lives alongside it
+under `EFI/seraph/`, the Seraph vendor directory within the EFI partition. This
+arrangement mirrors real deployments: when the system eventually has a separate
+EFI System Partition and additional mounted filesystems, both the bootloader and
+the kernel remain on the ESP where the firmware can reach them.
+
+No temporary copies or image construction steps are needed — `run.sh` passes the
+sysroot directory directly to QEMU's `fat:rw:` drive parameter.
+
+Cargo's own `target/` directory contains intermediate compilation artifacts and
+is not part of the sysroot.
+
+---
+
+## Convenience Scripts
+
+Three scripts at the repository root provide the primary developer interface.
+They are thin wrappers over `cargo`; the shared logic lives in `scripts/env.sh`.
+
+| Script | Purpose |
+|---|---|
+| `build.sh` | Build components and populate the sysroot |
+| `clean.sh` | Remove the sysroot (and optionally `target/`) |
+| `run.sh` | Build and launch under QEMU |
+
+See [`scripts/README.md`](../scripts/README.md) for full usage documentation.
+
+---
+
+## QEMU and Firmware
+
+Seraph boots via its own UEFI bootloader on both architectures. This requires
+UEFI firmware in QEMU — SeaBIOS cannot load UEFI applications.
+
+**x86-64:** Requires OVMF from `edk2-ovmf`. `run.sh` searches standard Fedora
+install paths. The bootloader `.efi` is exposed to QEMU via a virtual FAT image
+(QEMU's `fat:rw:DIR` syntax), which OVMF reads like a real FAT partition.
+
+**RISC-V:** Requires `edk2-riscv64` firmware. Not yet implemented; `run.sh`
+exits with an error until the RISC-V bootloader target is determined.
+
+---
+
+## Testing
+
+See the Testing section in [`coding-standards.md`](coding-standards.md) for
+conventions and requirements. Kernel unit tests run on the host via `cargo test`;
+hardware-dependent integration tests run under QEMU (not yet implemented).
+
+---
+
+## Future: xtask
+
+When the build becomes complex enough to require disk image assembly, multi-stage
+builds, or integration test orchestration, the shell scripts will be supplemented
+or replaced by a `cargo xtask` pattern — a Rust program in `xtask/` that provides
+the same interface but with the full expressive power of Rust for build logic.

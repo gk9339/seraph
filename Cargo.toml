@@ -1,0 +1,20 @@
+[workspace]
+resolver = "2"
+members = [
+    "kernel",
+    "boot/protocol",
+    "boot/loader",
+]
+
+[workspace.dependencies]
+boot-protocol = { path = "boot/protocol" }
+
+[profile.dev]
+panic = "abort"
+opt-level = 1
+
+[profile.release]
+panic = "abort"
+lto = true
+codegen-units = 1
+opt-level = 2

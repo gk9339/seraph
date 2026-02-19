@@ -1,0 +1,19 @@
+[package]
+name = "seraph-kernel"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+boot-protocol = { workspace = true }
+
+# Library target: compiled for the host during `cargo test`, enabling unit
+# tests on pure algorithmic code without requiring QEMU.
+[lib]
+name = "seraph_kernel"
+path = "src/lib.rs"
+
+# Binary target: the actual kernel, compiled with a custom no_std target.
+[[bin]]
+name = "seraph-kernel"
+path = "src/main.rs"

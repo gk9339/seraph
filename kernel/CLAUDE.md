@@ -1,8 +1,7 @@
 # Kernel — AI Context
 
-The Seraph microkernel. Handles IPC, scheduling, memory management, and capabilities.
-Nothing else. See @README.md for source layout, module responsibilities, and build
-structure. See root `.claude/CLAUDE.md` for project-wide invariants and coding standards.
+@README.md
+@../docs/coding-standards.md
 
 ## Environment
 
@@ -13,24 +12,6 @@ structure. See root `.claude/CLAUDE.md` for project-wide invariants and coding s
 - The kernel heap is available **only after Phase 4** (slab allocator init). Before
   Phase 4, only static data and the boot stack exist — no `Box`, `Vec`, or any
   `alloc` type.
-
-## Key Design Documents
-
-Read the relevant document before modifying any subsystem:
-
-- @docs/initialization.md — 11-phase boot sequence (Phase 0–10) with per-phase
-  constraints and the fatal-boot-failure protocol
-- @docs/syscalls.md — 43 syscalls, full ABI, register conventions, error codes
-- @docs/memory-internals.md — buddy/slab/size-class allocators, TLB shootdown,
-  address space and page table structures
-- @docs/capability-internals.md — CSpace two-level array, derivation tree,
-  revocation algorithm
-- @docs/ipc-internals.md — endpoint state machine, signal fast path, event queue
-  ring buffer, wait set, **lock ordering**
-- @docs/scheduler.md — 32 priority levels, per-CPU run queues, SMT awareness,
-  context switch, load balancing
-- @docs/arch-interface.md — the 7 arch traits every implementation must satisfy:
-  `Paging`, `Context`, `Interrupts`, `Timer`, `Syscall`, `Cpu`, `EarlyConsole`
 
 ## Architecture Isolation
 

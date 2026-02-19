@@ -1,0 +1,9 @@
+# Build output
+/sysroot/
+/target/
+
+# rustfmt backup files
+**/*.rs.bk
+
+# Rust Analyzer workspace cache
+/.rust-analyzer/

@@ -1,7 +1,7 @@
 # Seraph — AI Context
 
-Seraph is a microkernel OS in Rust targeting x86-64 and RISC-V (RV64GC).
-See @../README.md for project goals, structure, and component overview.
+@../README.md
+@../docs/coding-standards.md
 
 ## Project Stage
 
@@ -12,8 +12,7 @@ without consulting the relevant document first.
 
 ## Coding Standards
 
-Read @../docs/coding-standards.md before writing or reviewing any code. The rules most
-commonly violated by AI assistants:
+The rules most commonly violated by AI assistants:
 
 - **Allman brace style**: opening brace on its own line, always
 - **`} else`**: `else` stays on the same line as the closing brace; the opening brace
@@ -35,7 +34,7 @@ wrong design.
 
 2. **Capabilities are the sole access control mechanism.** There is no ambient authority,
    no UID/GID, no root/superuser at the kernel level. Every resource operation requires
-   a capability. See @../docs/capability-model.md.
+   a capability. Full model: `docs/capability-model.md`.
 
 3. **No `#[cfg(target_arch)]` outside `arch/` modules.** Architecture-specific code
    lives behind trait boundaries in `arch/` directories. New arch-dependent behaviour
@@ -53,18 +52,6 @@ wrong design.
 7. **Not POSIX.** Seraph defines its own native interfaces. Do not suggest `fork()`,
    UNIX signals, or POSIX-style APIs. No binary compatibility with other operating
    systems.
-
-## Design Documents
-
-Consult the relevant document before making architectural suggestions:
-
-- @../docs/architecture.md — system structure, component diagram, design philosophy
-- @../docs/memory-model.md — address space layout, paging, TLB, allocator overview
-- @../docs/ipc-design.md — sync IPC, signals, event queues, wait sets
-- @../docs/capability-model.md — capability types, rights, derivation, revocation
-- @../docs/boot-protocol.md — UEFI boot flow, BootInfo contract, kernel entry state
-- @../docs/device-management.md — devmgr, driver binding, DMA safety model
-- @../docs/coding-standards.md — formatting, naming, error handling, unsafe rules
 
 ## Common Mistakes to Avoid
 

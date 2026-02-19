@@ -1,19 +1,7 @@
 # Bootloader — AI Context
 
-UEFI bootloader for Seraph. Loads the kernel ELF and boot modules, establishes initial
-page tables with W^X enforcement, parses firmware tables into structured `PlatformResource`
-descriptors, and jumps to the kernel entry point. See root `.claude/CLAUDE.md` for
-project-wide invariants and coding standards.
-
-## Key Design Document
-
-The boot protocol is the source of truth for everything this component produces:
-
-@../docs/boot-protocol.md
-
-This defines the `BootInfo` structure, CPU state at kernel entry, page table
-requirements, `PlatformResource` format, and protocol versioning. Read it before
-making any change to the boot flow or data structures.
+@README.md
+@../docs/coding-standards.md
 
 ## What the Bootloader Does
 

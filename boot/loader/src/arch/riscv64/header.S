@@ -1,12 +1,10 @@
-// boot/loader/src/arch/riscv64/header.S
+// SPDX-License-Identifier: GPL-2.0-only
 //
-// Hand-crafted PE32+ header for the RISC-V UEFI bootloader.
+// Derived from the Linux kernel file arch/riscv/kernel/efi-header.S
+// Copyright (C) 2020 Western Digital Corporation or its affiliates.
 //
-// Based on the Linux kernel's arch/riscv/kernel/efi-header.S,
-// authored by Ard Biesheuvel and the RISC-V Linux contributors
-// (SPDX-License-Identifier: GPL-2.0-only). The structural approach —
-// hand-crafted PE/COFF header, assembly entry trampoline, minimal .reloc
-// block — and the field layout follow the Linux original.
+// The Linux RISC-V EFI header is adapted from the ARM64 implementation
+// by Ard Biesheuvel and ARM64 Linux contributors.
 //
 // UEFI firmware loads EFI applications as PE32+ images. LLVM's PE/COFF backend
 // does not support RISC-V, so we compile the bootloader as a PIC ELF and

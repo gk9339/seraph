@@ -12,7 +12,7 @@
     "panic-strategy": "abort",
     "features": "+m,+a,+f,+d,+c,-v",
     "code-model": "medium",
-    "relocation-model": "pic",
+    "relocation-model": "static",
     "llvm-abiname": "lp64d",
     "max-atomic-width": 64,
     "pre-link-args": {

@@ -19,11 +19,13 @@
 //   0x040: PE signature (4 bytes)
 //   0x044: COFF file header (20 bytes)
 //   0x058: PE32+ optional header (240 bytes)
-//   0x148: .text section header (40 bytes)
-//   0x170: .reloc section header (40 bytes)
-//   0x198: padding to 0x1000 (page boundary)
-//   0x1000: .text section — entry trampoline, then Rust code
-//   aligned: .reloc section — minimal base-relocation block
+//   0x148: .text  section header (40 bytes) — code + rodata, RX
+//   0x170: .data  section header (40 bytes) — data + bss,   RW
+//   0x198: .reloc section header (40 bytes) — base relocs,  discardable
+//   0x1C0: padding to 0x1000 (page boundary)
+//   0x1000: .text section — entry trampoline, then Rust code, then .rodata
+//   _etext: .data section — initialised data (_edata), then BSS (virtual only)
+//   _ebss:  .reloc section — minimal base-relocation block
 //
 // References:
 //   - Linux kernel arch/riscv/kernel/efi-header.S
@@ -50,7 +52,7 @@ pe_header:
 // ── COFF file header (20 bytes) ───────────────────────────────────────────────
 
     .short  0x5064          // Machine: IMAGE_FILE_MACHINE_RISCV64
-    .short  2               // NumberOfSections (.text + .reloc)
+    .short  3               // NumberOfSections (.text + .data + .reloc)
     .long   0               // TimeDateStamp (0 = reproducible)
     .long   0               // PointerToSymbolTable (deprecated)
     .long   0               // NumberOfSymbols (deprecated)
@@ -68,9 +70,9 @@ opt_hdr:
     .short  0x020B                                  // Magic: PE32+
     .byte   0                                       // MajorLinkerVersion
     .byte   0                                       // MinorLinkerVersion
-    .long   _etext - _start                         // SizeOfCode
-    .long   0                                       // SizeOfInitializedData
-    .long   0                                       // SizeOfUninitializedData
+    .long   _etext - _start                         // SizeOfCode (code + rodata only)
+    .long   _ebss  - _etext                         // SizeOfInitializedData (data + bss, in file)
+    .long   0                                       // SizeOfUninitializedData (bss zero-fill included above)
     .long   _start - pecoff_header_start            // AddressOfEntryPoint (RVA)
     .long   _start - pecoff_header_start            // BaseOfCode (RVA)
 
@@ -120,13 +122,13 @@ opt_hdr:
 
 opt_hdr_end:
 
-// ── Section headers (2 × 40 bytes) ────────────────────────────────────────────
+// ── Section headers (3 × 40 bytes) ────────────────────────────────────────────
 
-    // .text section header
+    // .text section header — code + .rodata, read+execute only.
     .ascii  ".text\0\0\0"                           // Name (8 bytes, zero-padded)
-    .long   _etext - _start                         // VirtualSize
+    .long   _etext - _start                         // VirtualSize (code + rodata)
     .long   _start - pecoff_header_start            // VirtualAddress (RVA)
-    .long   _etext - _start                         // SizeOfRawData
+    .long   _etext - _start                         // SizeOfRawData (all present in file)
     .long   _start - pecoff_header_start            // PointerToRawData (file offset)
     .long   0                                       // PointerToRelocations
     .long   0                                       // PointerToLinenumbers
@@ -138,7 +140,28 @@ opt_hdr_end:
     //   IMAGE_SCN_MEM_READ                0x40000000
     .long   0x60000020
 
-    // .reloc section header
+    // .data section header — .data + .bss, read+write.
+    // llvm-objcopy -O binary zero-fills ALLOC/NOBITS regions (.bss), so the
+    // flat binary contains bytes for the entire [_etext, _ebss) range.
+    // Using SizeOfRawData = _ebss - _etext (page-aligned, always non-zero) avoids
+    // EFI_INVALID_PARAMETER from EDK2's PE loader, which rejects SizeOfRawData=0
+    // or non-FileAlignment-aligned values in non-discardable sections.
+    .ascii  ".data\0\0\0"                           // Name (8 bytes, zero-padded)
+    .long   _ebss - _etext                          // VirtualSize (data + bss)
+    .long   _etext - pecoff_header_start            // VirtualAddress (RVA)
+    .long   _ebss - _etext                          // SizeOfRawData (data + bss zero-fill, in file)
+    .long   _etext - pecoff_header_start            // PointerToRawData (file offset)
+    .long   0                                       // PointerToRelocations
+    .long   0                                       // PointerToLinenumbers
+    .short  0                                       // NumberOfRelocations
+    .short  0                                       // NumberOfLinenumbers
+    // Characteristics:
+    //   IMAGE_SCN_CNT_INITIALIZED_DATA    0x40
+    //   IMAGE_SCN_MEM_READ                0x40000000
+    //   IMAGE_SCN_MEM_WRITE               0x80000000
+    .long   0xC0000040
+
+    // .reloc section header — minimal base-relocation block, discardable.
     .ascii  ".reloc\0\0"                            // Name (8 bytes, zero-padded)
     .long   _reloc_end - _reloc_start               // VirtualSize
     .long   _reloc_start - pecoff_header_start      // VirtualAddress (RVA)
@@ -180,7 +203,8 @@ _start:
 // ── Minimal base-relocation block ─────────────────────────────────────────────
 //
 // The EFI loader checks for a .reloc section to confirm the image is
-// relocatable. Since the bootloader is PIC (no absolute addresses), the
+// relocatable. Since the bootloader uses static relocation-model with PC-relative
+// addressing (medany/medium code model, no GOT, no absolute addresses), the
 // block is empty (SizeOfBlock = 8 = header only, zero relocation entries).
 //
 // BaseRelocationBlock layout:

@@ -33,12 +33,24 @@ SECTIONS
     .text : {
         /* Entry trampoline must be first so it sits at AddressOfEntryPoint. */
         KEEP(*(.text.entry))
+
+        /* Force align handoff trampoline into its own 4KiB page. */
+        . = ALIGN(0x1000);
+        KEEP(*(.text.trampoline))
+        KEEP(*(.text.trampoline.*))
         *(.text .text.*)
     }
 
     .rodata : ALIGN(8) {
         *(.rodata .rodata.*)
     }
+
+    /* Advance the location counter to a page boundary and record it as
+     * _etext. This is where the PE .text section (RX) ends and the PE
+     * .data section (RW) begins. Using ". = ALIGN" (not "symbol = ALIGN")
+     * is required to actually advance the LMA/VMA before the next section. */
+    . = ALIGN(0x1000);
+    _etext = .;
 
     .data : ALIGN(8) {
         *(.data .data.*)
@@ -49,8 +61,11 @@ SECTIONS
         *(COMMON)
     }
 
-    /* _etext: end of all code and initialised data (used in PE SizeOfCode). */
-    _etext = ALIGN(0x1000);
+    /* _ebss: end of BSS, page-aligned. PE .data section VirtualSize ends here.
+     * llvm-objcopy -O binary zero-fills all ALLOC regions including .bss, so
+     * [_etext, _ebss) is fully present in the flat binary. */
+    . = ALIGN(0x1000);
+    _ebss = .;
 
     /* Base-relocation table — required by EFI loaders even for PIC images. */
     .reloc : ALIGN(0x1000) {

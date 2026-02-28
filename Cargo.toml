@@ -4,6 +4,7 @@ members = [
     "kernel",
     "boot/protocol",
     "boot/loader",
+    "init",
 ]
 
 [workspace.dependencies]

@@ -13,11 +13,15 @@ json-target-spec = true
 [env]
 RUST_TARGET_PATH = { value = "scripts/targets", relative = true }
 
+[build]
+rustflags = ["-Zunstable-options"]
+
 # RISC-V UEFI bootloader link flags.
 # The linker script path is relative to the workspace root.
 # jump-tables=no avoids generating jump tables that UEFI can't relocate.
 [target.riscv64gc-seraph-uefi]
 rustflags = [
+    "-Zunstable-options",
     "-C", "link-arg=-Tboot/loader/linker/riscv64-uefi.ld",
     "-C", "jump-tables=no",
 ]

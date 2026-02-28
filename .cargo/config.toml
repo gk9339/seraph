@@ -2,6 +2,22 @@
 #
 # build-std flags are passed explicitly by the build scripts rather than here,
 # to avoid applying them to host-target builds (e.g. cargo test).
-#
-# Target-specific runner configuration for integration tests will be added
-# here when the QEMU test harness is implemented.
+
+# Enable JSON target spec files and set the directory rustc searches for custom
+# target specs by triple name (e.g. --target x86_64-seraph-none resolves to
+# scripts/targets/x86_64-seraph-none.json). json-target-spec is benign on host
+# builds — it enables parsing, not forces it.
+[unstable]
+json-target-spec = true
+
+[env]
+RUST_TARGET_PATH = { value = "scripts/targets", relative = true }
+
+# RISC-V UEFI bootloader link flags.
+# The linker script path is relative to the workspace root.
+# jump-tables=no avoids generating jump tables that UEFI can't relocate.
+[target.riscv64gc-seraph-uefi]
+rustflags = [
+    "-C", "link-arg=-Tboot/loader/linker/riscv64-uefi.ld",
+    "-C", "jump-tables=no",
+]

@@ -15,9 +15,6 @@ SERAPH_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # Build output directory (the sysroot staging area).
 SERAPH_SYSROOT="${SERAPH_ROOT}/sysroot"
 
-# Custom target JSON directory.
-SERAPH_TARGETS_DIR="${SERAPH_ROOT}/scripts/targets"
-
 # Default architecture if not specified by the caller.
 SERAPH_ARCH="${SERAPH_ARCH:-x86_64}"
 
@@ -57,30 +54,12 @@ kernel_target_triple()
     esac
 }
 
-# Absolute path to the kernel's custom target JSON for the given arch.
-kernel_target_json()
-{
-    local triple
-    triple="$(kernel_target_triple "$1")"
-    echo "${SERAPH_TARGETS_DIR}/${triple}.json"
-}
-
 # Map an arch name to the Rust target triple used by the bootloader.
 boot_target_triple()
 {
     case "$1" in
         x86_64)  echo "x86_64-unknown-uefi" ;;
         riscv64) echo "riscv64gc-seraph-uefi" ;;
-    esac
-}
-
-# Absolute path to the bootloader's custom target JSON for the given arch.
-# Prints nothing for arches that use a built-in Rust target (e.g. x86_64).
-boot_target_json()
-{
-    case "$1" in
-        x86_64)  echo "" ;;
-        riscv64) echo "${SERAPH_TARGETS_DIR}/riscv64gc-seraph-uefi.json" ;;
     esac
 }
 

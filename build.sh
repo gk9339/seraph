@@ -57,7 +57,6 @@ validate_arch "${ARCH}"
 check_sysroot_arch "${ARCH}"
 
 KERNEL_TRIPLE="$(kernel_target_triple "${ARCH}")"
-KERNEL_JSON="$(kernel_target_json "${ARCH}")"
 
 SYSROOT_EFI_SERAPH="${SERAPH_SYSROOT}/EFI/seraph"
 
@@ -65,35 +64,20 @@ SYSROOT_EFI_SERAPH="${SERAPH_SYSROOT}/EFI/seraph"
 
 build_boot()
 {
-    local boot_triple boot_json efi_name
+    local boot_triple efi_name
     boot_triple="$(boot_target_triple "${ARCH}")"
-    boot_json="$(boot_target_json "${ARCH}")"
     efi_name="$(boot_efi_filename "${ARCH}")"
 
     step "Building bootloader for ${ARCH} (${PROFILE})"
 
-    # x86_64 uses the built-in x86_64-unknown-uefi target; RISC-V needs a custom
-    # target JSON and an extra linker script passed via RUSTFLAGS.
-    local extra_cargo_flags=""
-    local extra_rustflags=""
-
-    if [[ -n "${boot_json}" ]]
-    then
-        if [[ ! -f "${boot_json}" ]]
-        then
-            die "boot target spec not found: ${boot_json}"
-        fi
-        extra_cargo_flags="-Zjson-target-spec"
-        extra_rustflags="-C link-arg=-T${SERAPH_ROOT}/boot/loader/linker/riscv64-uefi.ld -C jump-tables=no "
-    fi
-
+    # Target JSON is resolved by rustc via RUST_TARGET_PATH (set in .cargo/config.toml).
+    # Linker flags for RISC-V are also in .cargo/config.toml under [target.*].
     # shellcheck disable=SC2086
-    RUSTFLAGS="${extra_rustflags}" cargo build \
+    cargo build \
         --manifest-path "${SERAPH_ROOT}/boot/loader/Cargo.toml" \
-        --target "${boot_json:-${boot_triple}}" \
+        --target "${boot_triple}" \
         -Zbuild-std=core,compiler_builtins \
         -Zbuild-std-features=compiler-builtins-mem \
-        ${extra_cargo_flags} \
         ${CARGO_PROFILE_FLAG}
 
     local efi_dir="${SERAPH_SYSROOT}/EFI/BOOT"
@@ -128,18 +112,12 @@ build_kernel()
 {
     step "Building kernel for ${ARCH} (${PROFILE})"
 
-    if [[ ! -f "${KERNEL_JSON}" ]]
-    then
-        die "kernel target spec not found: ${KERNEL_JSON}"
-    fi
-
     cargo build \
         --manifest-path "${SERAPH_ROOT}/kernel/Cargo.toml" \
         --bin seraph-kernel \
-        --target "${KERNEL_JSON}" \
+        --target "${KERNEL_TRIPLE}" \
         -Zbuild-std=core,alloc,compiler_builtins \
         -Zbuild-std-features=compiler-builtins-mem \
-        -Zjson-target-spec \
         ${CARGO_PROFILE_FLAG}
 
     local cargo_out="${SERAPH_ROOT}/target/${KERNEL_TRIPLE}/${OUTPUT_DIR}/seraph-kernel"
@@ -155,18 +133,12 @@ build_init()
 {
     step "Building init for ${ARCH} (${PROFILE})"
 
-    if [[ ! -f "${KERNEL_JSON}" ]]
-    then
-        die "kernel target spec not found: ${KERNEL_JSON}"
-    fi
-
     cargo build \
         --manifest-path "${SERAPH_ROOT}/init/Cargo.toml" \
         --bin seraph-init \
-        --target "${KERNEL_JSON}" \
+        --target "${KERNEL_TRIPLE}" \
         -Zbuild-std=core,compiler_builtins \
         -Zbuild-std-features=compiler-builtins-mem \
-        -Zjson-target-spec \
         ${CARGO_PROFILE_FLAG}
 
     local cargo_out="${SERAPH_ROOT}/target/${KERNEL_TRIPLE}/${OUTPUT_DIR}/seraph-init"

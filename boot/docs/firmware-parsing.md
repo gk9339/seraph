@@ -22,18 +22,19 @@ Phase 6 before minting capabilities from them.
 
 Firmware table location is obtained from `EFI_CONFIGURATION_TABLE`:
 
-| Architecture | GUID | `BootInfo` field |
+| GUID | `BootInfo` field | Typical architecture |
 |---|---|---|
-| x86-64 | `EFI_ACPI_20_TABLE_GUID` | `acpi_rsdp` |
-| RISC-V | `EFI_DTB_TABLE_GUID` | `device_tree` |
+| `EFI_ACPI_20_TABLE_GUID` | `acpi_rsdp` | x86-64 (and any ACPI-capable RISC-V platform) |
+| `EFI_DTB_TABLE_GUID` | `device_tree` | RISC-V (and any DTB-capable x86-64 platform) |
 
 The configuration table is a flat array (`SystemTable->NumberOfTableEntries` entries,
-each a `(GUID, pointer)` pair). The bootloader scans the array for the relevant GUID
-and records the physical address of the pointed-to table in the appropriate `BootInfo`
-field. If the GUID is absent, the field is zeroed.
+each a `(GUID, pointer)` pair). The bootloader scans the entire array unconditionally
+for both GUIDs, recording the physical address of each found table in the appropriate
+`BootInfo` field. If a GUID is absent, its field is zeroed.
 
-On x86-64, the `device_tree` field is always zero. On RISC-V, the `acpi_rsdp` field
-is always zero. Neither field is set on both architectures simultaneously.
+Both fields may be non-zero on a platform that exposes both ACPI tables and a Device
+Tree blob (some RISC-V platforms do this). The kernel and `devmgr` handle both fields
+independently; the presence of one does not preclude the other.
 
 ---
 

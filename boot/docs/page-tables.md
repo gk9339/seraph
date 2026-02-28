@@ -50,7 +50,7 @@ pub trait PageTableBuilder: Sized
 {
     /// Allocate a new, empty root page table. Frames come from UEFI AllocatePages.
     /// Returns None on allocation failure.
-    fn new() -> Option<Self>;
+    fn new(bs: *mut crate::uefi::EfiBootServices) -> Option<Self>;
 
     /// Map the virtual range [virt, virt+size) to [phys, phys+size) with the
     /// given flags. Size must be page-aligned. Returns Err on allocation failure
@@ -145,9 +145,8 @@ W^X: the combination Writable=1 and NX=0 is never written; `map` returns
 
 Each new PML3, PML2, or PML1 table requires one 4 KiB frame. Frames are allocated
 via `AllocatePages(AllocateAnyPages, EfiLoaderData, 1, &addr)` and zeroed before use.
-Zeroing ensures absent entries have `P=0` and the NX bit set, preventing accidental
-execution of zeroed memory on non-NX-aware processors (though SMEP would catch this
-anyway on modern hardware).
+Zeroing ensures absent entries have `P=0` (not present); the hardware never walks
+an absent entry regardless of other bits.
 
 ### Activation
 
@@ -264,7 +263,7 @@ mapping that reaches the kernel is a security defect, not just a policy violatio
 
 The bootloader does not free page table frames. All intermediate table frames
 allocated by `AllocatePages` appear in the UEFI memory map as `EfiLoaderData`
-regions, which translate to `MemoryKind::Loaded` in `BootInfo`. The kernel sees
+regions, which translate to `MemoryType::Loaded` in `BootInfo`. The kernel sees
 these regions as in-use and does not reclaim them until it establishes its own page
 tables in Phase 3, after which it can safely free the bootloader's intermediate
 frames via its buddy allocator.

@@ -165,21 +165,9 @@ polling or separate threads.
 
 ## Capability Semantics in IPC
 
-IPC capabilities carry rights:
-
-- **Send** — can call the endpoint; cannot receive on it
-- **Receive** — can accept calls on the endpoint; typically held only by the server
-- **Grant** — can pass capabilities to the receiver via message capability slots
-
-Grant rights can be scoped — a send capability with grant rights allows passing
-capabilities; one without does not. A server that should not receive capabilities from
-clients holds a receive capability without grant on its endpoint. This prevents clients
-from passing unexpected resources to a server.
-
-Capabilities passed in IPC messages are moved, not copied. After a successful call,
-the sender no longer holds the transferred capability. A server that delegates a
-resource to a client has genuinely given it up unless the capability was explicitly
-derived (a weaker copy) rather than transferred.
+IPC capabilities carry three rights — Send (call the endpoint), Receive (accept calls), and Grant
+(pass capabilities in messages) — with scoping rules defined in [capability-model.md#ipc-endpoint](capability-model.md#ipc-endpoint).
+Capabilities passed in IPC messages are moved, not copied; see [capability-model.md#transfer](capability-model.md#transfer).
 
 ---
 

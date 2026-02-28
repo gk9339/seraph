@@ -42,14 +42,60 @@ The EFI System Partition is accessed as follows:
 1. image_handle → EFI_LOADED_IMAGE_PROTOCOL → DeviceHandle
 2. DeviceHandle → EFI_SIMPLE_FILE_SYSTEM_PROTOCOL
 3. SimpleFileSystem->OpenVolume() → root EFI_FILE_PROTOCOL handle
-4. root->Open("\EFI\seraph\seraph-kernel") → kernel file handle
-5. root->Open("\EFI\seraph\init") → init module file handle
+4. root->Open("\EFI\seraph\boot.conf") → parse BootConfig (kernel and init paths)
+5. root->Open(BootConfig.kernel_path) → kernel file handle
+6. root->Open(BootConfig.init_path) → init module file handle
 ```
 
-The kernel and init binary are opened as read-only files. Their sizes are determined
-via `EFI_FILE_INFO` before reading. The files are read into physical memory allocated
-by `AllocatePages` at the addresses required by their ELF headers; see
+All files are opened as read-only. Sizes are determined via `EFI_FILE_INFO` before
+reading. Files are read into physical memory allocated by `AllocatePages`; see
 [elf-loading.md](elf-loading.md) for how segment placement works.
+
+---
+
+## Boot Configuration File
+
+The bootloader reads `\EFI\seraph\boot.conf` from the ESP before opening any other
+files. This file specifies the paths to the kernel and init binaries, replacing any
+hardcoded path strings in the bootloader binary.
+
+### Format
+
+```
+# Comment lines begin with '#' and are ignored.
+# Blank lines are ignored.
+key=value
+```
+
+Leading and trailing whitespace (space, tab, `\r`) is stripped from both key and
+value. Keys and values are ASCII only; non-ASCII values are rejected.
+
+### Required Keys
+
+| Key | Description | Default in `boot.conf` |
+|---|---|---|
+| `kernel` | ESP-relative path to the kernel ELF | `\EFI\seraph\seraph-kernel` |
+| `init` | ESP-relative path to the init binary | `\sbin\init` |
+
+Both keys are required. A missing key is a fatal error (`InvalidConfig`). Unknown
+keys are silently ignored for forward compatibility.
+
+### Location and Size
+
+The file is always at `\EFI\seraph\boot.conf` on the ESP. The maximum file size is
+4096 bytes; a larger file is a fatal error. The file is read into a stack-allocated
+buffer — no heap allocation is needed.
+
+### Error Handling
+
+| Condition | Result |
+|---|---|
+| File not found | `FileNotFound("\EFI\seraph\boot.conf")` — fatal |
+| File exceeds 4096 bytes | `InvalidConfig("boot.conf exceeds maximum size")` — fatal |
+| Line missing `=` separator | `InvalidConfig("missing '=' in line")` — fatal |
+| Non-ASCII path value | `InvalidConfig("kernel path invalid")` / `"init path invalid"` — fatal |
+| Missing `kernel` key | `InvalidConfig("missing 'kernel' key")` — fatal |
+| Missing `init` key | `InvalidConfig("missing 'init' key")` — fatal |
 
 ---
 
@@ -63,11 +109,11 @@ modes are used:
 array. The firmware selects a free physical page range.
 
 **`AllocateAddress`** — used for ELF LOAD segments that specify a physical address
-in their `p_paddr` field, and for page table frames when a specific alignment is
-needed. If the requested address range is already in use, allocation fails fatally.
+in their `p_paddr` field. If the requested address range is already in use,
+allocation fails fatally. Page table frames use `AllocateAnyPages`.
 
 All allocation uses memory type `EfiLoaderData`. UEFI memory map entries for
-`EfiLoaderData` regions translate to `MemoryKind::Loaded` in the boot protocol,
+`EfiLoaderData` regions translate to `MemoryType::Loaded` in the boot protocol,
 signalling to the kernel that these regions are in use and must not be reused until
 explicitly reclaimed.
 
@@ -93,7 +139,7 @@ The acquisition sequence:
    Note: this allocation itself invalidates any prior map key.
 3. Call GetMemoryMap(buf_size, buf_addr, &map_key, &desc_size, &desc_version)
    to fill the buffer. The map_key from this call is the correct one to use.
-4. Translate entries: UEFI memory types → MemoryKind (see translation table below).
+4. Translate entries: UEFI memory types → MemoryType (see translation table below).
 5. Sort entries by physical_base ascending.
 ```
 
@@ -104,7 +150,7 @@ is sufficient.
 
 ### UEFI Memory Type Translation
 
-| UEFI `EFI_MEMORY_TYPE` | `MemoryKind` |
+| UEFI `EFI_MEMORY_TYPE` | `MemoryType` |
 |---|---|
 | `EfiConventionalMemory` | `Usable` |
 | `EfiLoaderCode`, `EfiLoaderData` | `Loaded` |
@@ -193,6 +239,9 @@ pub enum BootError
 
     /// ExitBootServices failed after retry.
     ExitBootServicesFailed,
+
+    /// The boot configuration file is missing, malformed, or contains invalid values.
+    InvalidConfig(&'static str),
 }
 ```
 
@@ -203,9 +252,9 @@ and halts.
 ### Error Reporting
 
 Before `ExitBootServices`, error messages are written to the UEFI console output
-(`SystemTable->ConOut`) and, if a GOP framebuffer is available, to the framebuffer
-using a minimal pixel-writing text renderer. After `ExitBootServices`, only the
-framebuffer path is available (UEFI console is no longer accessible).
+(`SystemTable->ConOut`). After `ExitBootServices`, the UEFI console is no longer
+accessible; only a serial/framebuffer path would be available, but the current
+implementation has no post-exit output path.
 
 Error reporting writes a short descriptive message and halts:
 
@@ -235,12 +284,6 @@ implementation may be slow or redirect to a serial port.
 
 ### After ExitBootServices
 
-Only the GOP framebuffer path is available. The framebuffer's physical address and
-dimensions were recorded during step 1. The bootloader writes any post-exit messages
-by computing pixel offsets from the physical base address, which remains directly
-accessible (the identity map from step 5 covers the framebuffer region or the
-physical address is used directly if paging is not yet switched).
-
-In practice the bootloader has no output after `ExitBootServices` beyond an error
-message in the failure case. The normal path proceeds directly to `BootInfo`
-population and kernel handoff.
+The UEFI console (`ConOut`) is unavailable. The current implementation has no
+output path after `ExitBootServices`. The normal path proceeds directly to `BootInfo`
+population and kernel handoff without any further output.

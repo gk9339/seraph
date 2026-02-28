@@ -1,0 +1,11 @@
+# rustfmt.toml — rust formatting configuration
+# Requires nightly rustfmt (see rust-toolchain.toml).
+# Run: cargo fmt
+
+unstable_features = true
+edition = "2021"
+
+max_width = 100
+tab_spaces = 4
+brace_style = "AlwaysNextLine"   # Allman style: opening brace always on its own line
+control_brace_style = "AlwaysNextLine"

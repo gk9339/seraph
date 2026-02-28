@@ -1,9 +1,9 @@
 # boot
 
-UEFI bootloader for Seraph. Loads the kernel ELF and boot modules, establishes
-initial page tables with W^X enforcement, parses platform firmware tables
-(ACPI/Device Tree) into structured `PlatformResource` descriptors, and jumps to
-the kernel entry point.
+UEFI bootloader for Seraph. Reads boot configuration from `\EFI\seraph\boot.conf`,
+loads the kernel ELF and boot modules, establishes initial page tables with W^X
+enforcement, discovers firmware table addresses (ACPI RSDP / Device Tree blob) for
+passthrough to userspace, and jumps to the kernel entry point.
 
 The boot protocol contract — CPU state at entry, `BootInfo` structure layout, and
 `PlatformResource` format — is documented in
@@ -16,16 +16,18 @@ The boot protocol contract — CPU state at entry, `BootInfo` structure layout, 
 ```
 boot/
 ├── protocol/                   # boot-protocol crate: shared types
-│   └── src/lib.rs              # BootInfo, PlatformResource, MemoryKind, etc.
+│   └── src/lib.rs              # BootInfo, PlatformResource, MemoryType, etc.
 └── loader/                     # seraph-boot crate: UEFI application
     ├── linker/
     │   └── riscv64-uefi.ld     # Linker script for RISC-V PE/COFF pipeline
     └── src/
         ├── main.rs             # efi_main — boot sequence orchestrator
+        ├── config.rs           # Boot configuration file parser (boot.conf)
         ├── uefi.rs             # UEFI protocol wrappers and memory services
         ├── elf.rs              # ELF parser, segment loader, entry point extraction
-        ├── firmware.rs         # ACPI / Device Tree → PlatformResource extraction
+        ├── firmware.rs         # ACPI / Device Tree address discovery
         ├── paging.rs           # Initial page table construction (arch-neutral)
+        ├── error.rs            # Bootloader error type
         └── arch/
             ├── mod.rs          # Re-exports the active arch module
             ├── x86_64/
@@ -74,7 +76,7 @@ for details.
 | Document | Content |
 |---|---|
 | [docs/boot-protocol.md](../docs/boot-protocol.md) | Boot contract: CPU state, `BootInfo` layout, `PlatformResource` format |
-| [docs/boot-flow.md](docs/boot-flow.md) | Nine-step boot sequence, `BootInfo` population, kernel handoff |
+| [docs/boot-flow.md](docs/boot-flow.md) | Ten-step boot sequence, `BootInfo` population, kernel handoff |
 | [docs/uefi-environment.md](docs/uefi-environment.md) | UEFI protocols, memory allocation, `ExitBootServices`, error handling |
 | [docs/elf-loading.md](docs/elf-loading.md) | ELF validation, LOAD segment processing, boot module loading |
 | [docs/firmware-parsing.md](docs/firmware-parsing.md) | ACPI and Device Tree → `PlatformResource` extraction |
@@ -98,12 +100,13 @@ The CPU state established at the kernel entry point is specified in
 ## What the Bootloader Does Not Do
 
 - **No UEFI runtime services.** UEFI is fully exited before the kernel runs.
-- **No full firmware parsing.** The bootloader performs shallow ACPI/Device Tree
-  parsing to produce `PlatformResource` entries. Full namespace evaluation and device
-  enumeration are `devmgr`'s responsibility in userspace.
+- **Shallow firmware parsing only.** The bootloader records ACPI RSDP and Device
+  Tree blob addresses in `BootInfo` and extracts structured `PlatformResource`
+  entries from ACPI/MADT/MCFG and Device Tree nodes. Full namespace evaluation
+  and driver binding are `devmgr`'s responsibility.
 - **No PCI enumeration.** PCI ECAM windows are recorded as `PciEcam` entries; the
   bus scan is deferred to userspace.
-- **No boot menu or interactive UI.** Files are loaded from fixed paths; the kernel
+- **No boot menu or interactive UI.** File paths come from `boot.conf`; the kernel
   command line is an opaque string passed through to `BootInfo`.
 - **No permanent page tables.** The initial tables are minimal and temporary; the
   kernel replaces them during Phase 3 of its initialisation sequence.

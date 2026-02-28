@@ -14,17 +14,19 @@ is a fatal error — the bootloader will not establish a mapping it cannot make 
 
 ## File Paths
 
-Files are opened via `EFI_SIMPLE_FILE_SYSTEM_PROTOCOL` on the ESP volume:
+Files are opened via `EFI_SIMPLE_FILE_SYSTEM_PROTOCOL` on the ESP volume. Paths
+come from `\EFI\seraph\boot.conf`, parsed before any file loading occurs (see
+[uefi-environment.md](uefi-environment.md)):
 
-| File | Path on ESP |
-|---|---|
-| Kernel | `\EFI\seraph\seraph-kernel` |
-| Init binary (first module) | `\EFI\seraph\init` |
+| File | Config key | Default path on ESP |
+|---|---|---|
+| Kernel | `kernel` | `\EFI\seraph\seraph-kernel` |
+| Init binary (first module) | `init` | `\sbin\init` |
 
 All paths use backslash separators as required by the UEFI file protocol. Both files
-must be present; their absence is a fatal error. Additional modules (beyond init) are
-an extension point for future use; their paths would be listed in a configuration
-file or hard-coded by convention.
+must be present at their configured paths; their absence is a fatal error. Additional
+modules beyond init are an extension point; their paths would be added as new keys in
+`boot.conf`.
 
 ---
 
@@ -71,7 +73,7 @@ For each LOAD segment:
    p_offset (file offset), p_flags (permissions).
 2. Validate:
    a. p_memsz >= p_filesz (memory size must accommodate the file content plus BSS).
-   b. p_align is a power of two and >= PAGE_SIZE, or p_align == 0.
+   b. p_align validation (power-of-two, >= PAGE_SIZE) — **not yet implemented**.
    c. (p_flags & PF_W) && (p_flags & PF_X) is false — W^X enforcement.
       A segment with both PF_W and PF_X is a fatal error.
 3. Allocate physical frames:
@@ -128,8 +130,8 @@ first and occupies `modules.entries[0]`. Module loading:
 2. AllocatePages(AllocateAnyPages, EfiLoaderData, page_count, &phys_base).
    page_count = ceil(file_size / PAGE_SIZE).
 3. Read the entire file into the allocated region.
-4. Pad the region to a page boundary if the file size is not page-aligned
-   (the extra bytes are zero from AllocatePages, which zeroes pages on allocation).
+4. The allocated region may be larger than the file if the file size is not
+   page-aligned; the extra bytes at the end are unused (not explicitly zeroed).
 5. Record phys_base and file_size in a BootModule entry.
 ```
 
@@ -142,11 +144,11 @@ before use.
 
 ## Extensibility
 
-The current design hard-codes the kernel path and init module path. Future extension
-points:
+Kernel and init paths are specified in `\EFI\seraph\boot.conf` rather than
+hard-coded in the bootloader binary. Future extension points:
 
-- A boot configuration file on the ESP (`\EFI\seraph\boot.cfg`) could specify
-  additional module paths and a kernel command line, replacing hard-coded paths.
+- Additional module paths can be added as new keys in `boot.conf`; the parser
+  silently skips unknown keys, so old bootloader binaries are unaffected.
 - The `BootInfo.modules` array can accommodate any number of modules; the kernel
   iterates `modules.count` without assuming a fixed count.
 - Additional modules would follow init in the array, with their purpose established

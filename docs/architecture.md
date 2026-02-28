@@ -2,43 +2,50 @@
 
 ## Philosophy
 
-Seraph is a microkernel. The kernel's role is to be a minimal, trusted foundation —
-nothing more. It provides the primitives that make an operating system possible:
-isolation, communication, scheduling, and resource control. All policy, all device
-support, and all services are implemented in userspace.
+Seraph is a microkernel‑based operating system. The kernel is a minimal, trusted
+component that provides only core mechanisms: isolation, communication, scheduling,
+memory management, and capability enforcement.
 
-This boundary is strict by design. Moving something into the kernel for convenience
-or performance must be justified against the cost of expanding the trusted computing
-base. The trusted computing base should remain as small as possible, because every
-line of kernel code is a line that can corrupt the entire system if wrong.
+All policy, device support, and system services live in userspace. The kernel does
+not implement protocols or higher‑level abstractions; it enforces boundaries and
+provides primitives that userspace composes into a complete system.
+
+This boundary is strict by design. Expanding kernel functionality increases the
+trusted computing base and the impact of failure, and must be treated as an
+architectural decision rather than an implementation shortcut.
 
 ---
 
 ## Kernel Responsibilities
 
-The kernel handles four core responsibilities:
+The kernel provides only the core mechanisms required to support the system. It
+implements no policy and does not interpret higher‑level abstractions.
 
-**IPC** — message passing between processes. The kernel delivers messages, manages
-endpoints, and delivers asynchronous notifications. It enforces that communication
-only occurs through authorised channels. It has no opinion on the content of messages.
+The kernel is responsible for:
 
-**Scheduling** — preemptive, priority-based scheduling across all available CPUs.
-The scheduler is SMT-aware and understands physical core topology. Userspace may
-provide priority and affinity hints; the kernel implements the scheduling mechanism,
-while priority policy is controlled by capability-gated interfaces — elevated
-priorities require explicit authority delegation via the SchedControl capability.
+**IPC**
+Message delivery between processes, including endpoint management and asynchronous
+notifications. The kernel enforces that communication occurs only via authorised
+capabilities and does not interpret message contents.
 
-**Memory management** — physical frame allocation, virtual address space management,
-and page table maintenance. The kernel enforces isolation between address spaces.
-All memory access between processes is explicit and capability-controlled.
+**Scheduling**
+Preemptive, priority‑based scheduling across all CPUs. Userspace may freely alter
+priority to some level; changes beyond a certain level require explicit authority
+via capabilies.
 
-**Capabilities** — the kernel's access control mechanism. Every resource —
-memory regions, IPC endpoints, interrupt lines — is represented as a capability.
-Without a capability, a process cannot interact with a resource. The kernel enforces
-this unconditionally. See [capability-model.md](capability-model.md) for the full model.
+**Memory management**
+Physical frame allocation, virtual address space management, and page table
+maintenance. The kernel enforces isolation between address spaces and explicit,
+capability‑controlled sharing.
 
-The kernel does not implement: filesystems, device drivers, network stacks, user
-management, or any policy. These live in userspace.
+**Capabilities**
+The sole access control mechanism. All resources—memory regions, IPC endpoints,
+interrupt lines, and CPU time—are represented as capabilities and enforced
+unconditionally by the kernel. See [capability-model.md](capability-model.md)
+for the full model.
+
+The kernel does not implement filesystems, device drivers, network stacks, user
+management, or other policy. These components run in userspace.
 
 ---
 
@@ -52,92 +59,86 @@ capability-granted shared mapping.
 
 ## Userspace Services
 
-**init** is the first userspace process, spawned directly by the kernel at the end
-of boot. It is the service manager and the ancestor of all other processes. It reads
-a boot configuration, starts system services in dependency order, and supervises them.
-See [boot-protocol.md](boot-protocol.md) for how the kernel hands off to init.
+System functionality beyond core mechanisms is implemented in userspace as isolated
+services and applications. All services communicate exclusively via IPC and operate
+under explicit capability grants.
 
-**devmgr** is the device manager, launched by init shortly after boot. It receives
-platform resource capabilities (MMIO regions, interrupt lines, I/O port ranges,
-IOMMU units) and read-only access to firmware tables (ACPI/Device Tree) from init.
-devmgr parses the firmware tables in userspace, enumerates PCI, spawns driver
-processes, and delegates per-device capabilities to each driver. It exposes a device
-registry IPC service for other services to query. See
-[device-management.md](device-management.md) for the full design.
+**init**
+The first userspace process, started by the kernel at the end of boot. init acts as
+the service manager: it reads the boot configuration, starts system services in
+dependency order, and supervises them. See `boot-protocol.md`.
 
-**drivers** hosts device driver processes. Each driver runs in its own isolated
-address space. Drivers access hardware via MMIO regions mapped into their address
-space by the kernel under capability control (see Driver Model below). Interrupt
-lines are delivered to drivers as asynchronous IPC notifications. No driver code
-runs in kernel space.
+**devmgr**
+The device manager, launched by init early in boot. devmgr receives platform resource
+capabilities and read‑only access to firmware tables, enumerates devices, spawns driver
+processes, and delegates per‑device capabilities. See `device-management.md`.
 
-**vfs** is the virtual filesystem server. It provides a unified namespace over
-multiple underlying filesystems. Filesystem implementations (ext2, FAT, etc.) run
-as separate processes within or alongside vfs, communicating via IPC. Block device
-access goes through the appropriate driver.
+**drivers**
+Device drivers run as isolated userspace processes. Each driver accesses hardware only
+through capabilities granted by devmgr and the kernel. No driver code executes in
+kernel space.
 
-**net** is the network stack server. It manages network interfaces (via driver IPC),
-implements the protocol stack, and exposes socket-like endpoints to applications.
+**vfs**
+The virtual filesystem server. vfs provides a unified namespace over one or more
+filesystem implementations, which may run as separate processes. Block device access
+is mediated via driver IPC.
 
-**base** contains general-purpose userspace programs: terminal emulator, shell (gksh),
-text editor, coreutils equivalents, and network utilities. These are applications,
-not services — they have no special privileges beyond what their capabilities grant.
+**net**
+The network stack server. net manages network interfaces via driver IPC, implements
+network protocols, and exposes socket‑like interfaces to applications.
+
+**base**
+General‑purpose userspace applications and utilities (shell, terminal, editor,
+core tools). These are unprivileged applications with no authority beyond their
+capabilities.
 
 ---
 
 ## Driver Model
 
-Drivers run as unprivileged userspace processes. Hardware access works as follows:
+Device drivers run as unprivileged userspace processes. No driver code executes in
+kernel space. Hardware access is granted explicitly via capabilities and is fully
+revocable.
 
-**MMIO:** The kernel maps the physical MMIO region for a device into the driver's
-virtual address space, gated by a capability. Once mapped, the driver reads and
-writes hardware registers directly with no kernel involvement. This is fast —
-no syscall per register access — and is the primary hardware access mechanism.
+**MMIO**
+Physical MMIO regions are mapped into a driver’s address space under capability
+control. Once mapped, drivers access registers directly without kernel mediation.
 
-**Port I/O (x86 only):** x86 port I/O (`in`/`out` instructions) cannot be
-memory-mapped. A driver receives an IoPortRange capability for its assigned port
-range and binds it to a thread via `SYS_IOPORT_BIND`. The kernel updates the I/O
-Permission Bitmap (IOPB) in the TSS, allowing the thread to execute port I/O
-instructions directly for those ports without a syscall. Access is revocable: when
-the IoPortRange capability is revoked, port access is removed from all bound threads.
-RISC-V has no port I/O concept and does not need this mechanism.
+**Port I/O (x86‑64 only)**
+Drivers receive an IoPortRange capability for assigned port ranges. Binding this
+capability enables direct execution of port I/O instructions for those ranges.
+Access is revoked automatically when the capability is revoked. RISC‑V does not
+support port I/O.
 
-**DMA:** Drivers that perform DMA must have their physical access ranges authorised
-by the IOMMU (x86: VT-d; RISC-V: IOMMU extension). The kernel programs the IOMMU
-when granting DMA capabilities. A driver cannot DMA outside its authorised regions
-even if its process is compromised. On platforms without an IOMMU, DMA isolation
-is not enforced; callers must explicitly acknowledge this via `FLAG_DMA_UNSAFE` when
-calling `SYS_DMA_GRANT`, and devmgr is responsible for deciding whether to proceed.
-See [device-management.md](device-management.md) for the full DMA safety model.
+**DMA**
+DMA access requires an explicit DMA capability. On platforms with an IOMMU, the
+kernel programs the IOMMU to restrict DMA to authorised regions. On platforms
+without an IOMMU, DMA isolation is not enforced; callers must explicitly acknowledge
+this when granting DMA access. See `device-management.md`.
 
-**Interrupts:** Hardware interrupts are not delivered directly to drivers. The kernel
-receives the interrupt, masks it, and delivers an asynchronous IPC notification to
-the registered driver endpoint. The driver handles it and re-enables the line via
-a syscall when ready.
+**Interrupts**
+Hardware interrupts are received by the kernel and delivered to drivers as
+asynchronous IPC notifications. Drivers re‑enable interrupt delivery explicitly
+after handling.
 
 ---
 
 ## IPC Overview
 
-IPC is the backbone of the system. All service requests, device events, and
-inter-process communication go through the kernel's IPC mechanism.
+All inter‑process communication in Seraph occurs via the kernel’s IPC mechanism.
+There are no implicit shared‑memory shortcuts; any shared memory is established
+explicitly via capability‑granted mappings.
 
-Seraph uses a **hybrid model**:
+Seraph uses a hybrid IPC model:
 
-- **Synchronous calls** for structured request/reply between services. The caller
-  sends a message to an endpoint and blocks until the server replies. This gives
-  simple call/return semantics for service interfaces.
+- **Synchronous calls** for structured request/reply interactions between services.
+- **Asynchronous notifications** for events such as interrupts and completion signals.
 
-- **Asynchronous notifications** for events — hardware interrupts, completion
-  signals, and any case where the sender must not block. Notifications are
-  non-blocking and do not carry a payload beyond a signal.
+Processes may block on a set of endpoints and notifications, enabling event‑driven
+and multiplexed I/O patterns.
 
-A process can perform a blocking wait on a set of endpoints and notifications,
-returning when any of them become ready. This covers event-driven and
-multiplexed I/O patterns.
-
-Full IPC design, message format, endpoint lifecycle, and capability-passing
-semantics are documented in [ipc-design.md](ipc-design.md).
+Full IPC semantics, message formats, endpoint lifecycle rules, and capability‑passing
+behavior are defined in [ipc-design.md](ipc-design.md).
 
 ---
 
@@ -156,41 +157,48 @@ are documented in [memory-model.md](memory-model.md).
 
 ## Capability Model Overview
 
-Every resource in Seraph — memory regions, IPC endpoints, interrupt lines, MMIO
-ranges, CPU time — is represented as a capability. A process can only interact
-with a resource if it holds a valid capability for it. Capabilities can be
-delegated to child processes and revoked by their issuer.
 
-The capability system is the sole access control mechanism. There is no separate
-permission layer. Full design is in [capability-model.md](capability-model.md).
+Capabilities are the sole access control mechanism in Seraph. Every resource—
+memory regions, IPC endpoints, interrupt lines, and CPU time—is represented by a
+capability and enforced by the kernel.
+
+A process may interact with a resource only if it holds a valid capability for it.
+Capabilities may be delegated to other processes and revoked by their issuer. There
+is no separate permission or identity-based authority model.
+
+
+The complete capability design, including delegation, revocation, and lifetime
+rules, is defined in [capability-model.md](capability-model.md).
 
 ---
 
 ## Target Platforms
 
-**x86-64:** Primary target. Supported environments include physical hardware
-and hosted execution under hypervisors. Modern x86-64 features — APIC, SMEP,
-SMAP, PCIDs, VT-d IOMMU — are used where available. Legacy x86 (32-bit, i686
-and below) is not supported.
+Seraph targets 64‑bit architectures with modern MMU and privilege support.
 
-**RISC-V (RV64GC):** Explicit second target. Initially developed and tested under
-QEMU. Real RISC-V hardware is a future goal. The RV64GC profile (IMAFD +
-compressed instructions) is assumed; more minimal embedded profiles are not targeted.
+**x86‑64**
+Seraph supports the x86‑64 architecture and makes use of contemporary architectural
+features where available (e.g. APIC, PCIDs, IOMMU). Legacy x86 variants (32‑bit and
+earlier) are not supported.
 
-Architecture-specific code is isolated behind traits and module boundaries.
-No architecture-neutral code contains `#[cfg(target_arch)]` guards. Adding a
-new architecture means implementing the defined interfaces, not scattering
-conditionals through shared code.
+**RISC‑V (RV64GC)**
+Seraph supports the RISC‑V 64‑bit architecture with the RV64GC base ISA and standard
+extensions (IMAFD with compressed instructions). More minimal or embedded‑focused
+configurations are not targeted.
+
+See [coding-standards.md#architecture-specific-code](coding-standards.md#architecture-specific-code)
+for the architectural code isolation rules.
 
 ---
 
 ## Non-Goals
 
-**POSIX API compatibility.** POSIX was designed around monolithic kernel assumptions.
+**POSIX API compatibility.**
+POSIX was designed around monolithic kernel assumptions.
 `fork()`, signals, and related APIs are a poor fit for a capability-based microkernel.
 Seraph defines its own native interfaces. Filesystem formats and network protocols
 are adopted where useful as data formats, not as API commitments.
 
-**Binary compatibility with other operating systems.** Seraph does not aim to run
-Linux or other OS binaries.
+**Binary compatibility with other operating systems.**
+Seraph does not aim to run Linux or other OS binaries.
 

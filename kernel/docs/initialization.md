@@ -86,7 +86,7 @@ allocator is initialised and all usable frames are added to it.
 
 ```
 1. Iterate boot_info.memory_map.entries
-2. For each entry with kind == MemoryKind::Usable:
+2. For each entry with memory_type == MemoryType::Usable:
    a. Align start address up to PAGE_SIZE boundary
    b. Align end address down to PAGE_SIZE boundary
    c. Skip ranges smaller than PAGE_SIZE

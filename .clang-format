@@ -1,0 +1,8 @@
+# .clang-format — C formatting configuration
+# Run: clang-format -i <file>
+
+BasedOnStyle: LLVM
+BreakBeforeBraces: Allman
+IndentWidth: 4
+ColumnLimit: 100
+PointerAlignment: Left

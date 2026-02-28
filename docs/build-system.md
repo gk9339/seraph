@@ -85,12 +85,12 @@ requires a clean rebuild.
 ```
 sysroot/
   .arch                  # "x86_64" or "riscv64"
-  EFI/
+  efi/
     BOOT/
       BOOTX64.EFI        # UEFI fallback bootloader path (x86-64)
     seraph/
       seraph-kernel      # Kernel ELF binary
-  etc/                   # (future) System configuration
+  conf/                  # (future) System configuration
   lib/                   # (future) Shared libraries
 ```
 
@@ -140,9 +140,25 @@ exits with an error until the RISC-V bootloader target is determined.
 
 ## Testing
 
-See the Testing section in [`coding-standards.md`](coding-standards.md) for
-conventions and requirements. Kernel unit tests run on the host via `cargo test`;
-hardware-dependent integration tests run under QEMU (not yet implemented).
+### Kernel Testing Strategy
+
+**Host unit tests** — Pure algorithmic modules (buddy allocator, slab allocator, capability
+tree, scheduler run queues) keep hardware dependencies behind trait boundaries. The kernel's
+`lib` target uses `#![cfg_attr(not(test), no_std)]`, allowing `cargo test -p seraph-kernel`
+to run these modules on the host under the standard test harness.
+
+**QEMU integration tests** — Code requiring real hardware (page tables, interrupts, context
+switching) is tested under QEMU with a custom harness that runs tests sequentially and reports
+results over serial. This harness will be implemented when arch code is written.
+
+### Running Tests
+
+```sh
+cargo test -p seraph-kernel  # host unit tests
+```
+
+For test naming conventions and requirements (what must be tested, what should not), see
+[coding-standards.md](coding-standards.md#testing).
 
 ---
 

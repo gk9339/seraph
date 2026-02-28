@@ -15,13 +15,14 @@ Any compliant bootloader that satisfies this contract may be used in its place.
 ## Boot Flow
 
 1. UEFI firmware loads the bootloader from the EFI System Partition
-2. Bootloader locates and reads the kernel ELF and boot modules from disk
-3. Bootloader allocates physical memory for all loaded images
-4. Bootloader queries the UEFI memory map
-5. Bootloader sets up initial page tables mapping the kernel at its virtual addresses
-6. Bootloader calls `ExitBootServices` — firmware services are no longer available
-7. Bootloader populates the boot information structure
-8. Bootloader jumps to the kernel entry point
+2. Bootloader reads `\EFI\seraph\boot.conf` to obtain kernel and init paths
+3. Bootloader locates and reads the kernel ELF and boot modules from disk
+4. Bootloader allocates physical memory for all loaded images
+5. Bootloader queries the UEFI memory map
+6. Bootloader sets up initial page tables mapping the kernel at its virtual addresses
+7. Bootloader calls `ExitBootServices` — firmware services are no longer available
+8. Bootloader populates the boot information structure
+9. Bootloader jumps to the kernel entry point
 
 After step 6, the system is under full bootloader and then kernel control. UEFI
 runtime services are not used; the firmware is considered done.
@@ -79,7 +80,7 @@ The kernel must not assume anything beyond what is listed here.
 | MMU | Enabled (Sv48); kernel mapped at intended virtual addresses |
 | Stack | Valid; at least 64 KiB available |
 | `a0` | Physical address of `BootInfo` structure |
-| `a1` | Hart ID of the booting hart |
+| `a1` | Hart ID of the booting hart (obtained via `EFI_RISCV_BOOT_PROTOCOL`) |
 | Floating point | Not initialised |
 
 On RISC-V, secondary harts are held in a spin loop by the bootloader and are
@@ -132,18 +133,22 @@ pub struct BootInfo {
     /// Framebuffer, if available. Used for early debug output.
     pub framebuffer: FramebufferInfo,
 
-    /// ACPI RSDP physical address (x86-64). Zero if not present.
+    /// ACPI RSDP physical address. Zero if the UEFI configuration table does
+    /// not contain `EFI_ACPI_20_TABLE_GUID`.
     ///
     /// Passed through for userspace consumption (devmgr). The kernel does
     /// not parse ACPI tables; it reads structured platform resources from
-    /// `platform_resources` instead.
+    /// `platform_resources` instead. May be non-zero on any architecture
+    /// that exposes ACPI via UEFI.
     pub acpi_rsdp: u64,
 
-    /// Device tree blob physical address (RISC-V). Zero if not present.
+    /// Device tree blob physical address. Zero if the UEFI configuration
+    /// table does not contain `EFI_DTB_TABLE_GUID`.
     ///
     /// Passed through for userspace consumption (devmgr). The kernel does
     /// not parse the Device Tree; it reads structured platform resources
-    /// from `platform_resources` instead.
+    /// from `platform_resources` instead. May be non-zero on any
+    /// architecture that exposes a DTB via UEFI.
     pub device_tree: u64,
 
     /// Structured platform resource descriptors extracted from firmware tables
@@ -170,11 +175,11 @@ pub struct MemoryMapSlice {
 pub struct MemoryMapEntry {
     pub physical_base: u64,
     pub size: u64,
-    pub kind: MemoryKind,
+    pub memory_type: MemoryType,
 }
 
 #[repr(u32)]
-pub enum MemoryKind {
+pub enum MemoryType {
     /// Available for use by the kernel.
     Usable = 0,
     /// In use by the kernel image or boot modules.

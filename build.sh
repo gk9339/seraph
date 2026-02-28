@@ -12,7 +12,7 @@
 # Options:
 #   --arch ARCH           Target architecture: x86_64 (default), riscv64
 #   --release             Build in release mode (default: debug)
-#   --component COMPONENT Build only one component: boot, kernel, all (default: all)
+#   --component COMPONENT Build only one component: boot, kernel, init, all (default: all)
 #   -h, --help            Show this help and exit
 
 set -euo pipefail
@@ -84,7 +84,7 @@ build_boot()
             die "boot target spec not found: ${boot_json}"
         fi
         extra_cargo_flags="-Zjson-target-spec"
-        extra_rustflags="-C link-arg=-T${SERAPH_ROOT}/boot/loader/linker/riscv64-uefi.ld"
+        extra_rustflags="-C link-arg=-T${SERAPH_ROOT}/boot/loader/linker/riscv64-uefi.ld -C jump-tables=no "
     fi
 
     # shellcheck disable=SC2086
@@ -151,6 +151,44 @@ build_kernel()
     fi
 }
 
+build_init()
+{
+    step "Building init for ${ARCH} (${PROFILE})"
+
+    if [[ ! -f "${KERNEL_JSON}" ]]
+    then
+        die "kernel target spec not found: ${KERNEL_JSON}"
+    fi
+
+    cargo build \
+        --manifest-path "${SERAPH_ROOT}/init/Cargo.toml" \
+        --bin seraph-init \
+        --target "${KERNEL_JSON}" \
+        -Zbuild-std=core,compiler_builtins \
+        -Zbuild-std-features=compiler-builtins-mem \
+        -Zjson-target-spec \
+        ${CARGO_PROFILE_FLAG}
+
+    local cargo_out="${SERAPH_ROOT}/target/${KERNEL_TRIPLE}/${OUTPUT_DIR}/seraph-init"
+    if [[ -f "${cargo_out}" ]]
+    then
+        mkdir -p "${SERAPH_SYSROOT}/sbin"
+        cp "${cargo_out}" "${SERAPH_SYSROOT}/sbin/init"
+        step "Init: ${SERAPH_SYSROOT}/sbin/init"
+    fi
+}
+
+install_boot_conf()
+{
+    mkdir -p "${SYSROOT_EFI_SERAPH}"
+    cat > "${SYSROOT_EFI_SERAPH}/boot.conf" <<'EOF'
+# Seraph boot configuration
+kernel=\EFI\seraph\seraph-kernel
+init=\sbin\init
+EOF
+    step "Boot config: ${SYSROOT_EFI_SERAPH}/boot.conf"
+}
+
 # ── Dispatch ──────────────────────────────────────────────────────────────────
 
 case "${COMPONENT}" in
@@ -160,12 +198,17 @@ case "${COMPONENT}" in
     kernel)
         build_kernel
         ;;
+    init)
+        build_init
+        ;;
     all)
         build_boot
         build_kernel
+        build_init
+        install_boot_conf
         ;;
     *)
-        die "unknown component '${COMPONENT}' (supported: boot, kernel, all)"
+        die "unknown component '${COMPONENT}' (supported: boot, kernel, init, all)"
         ;;
 esac
 

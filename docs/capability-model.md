@@ -2,14 +2,15 @@
 
 ## Overview
 
-Capabilities are the sole access control mechanism in Seraph. Every resource the
-kernel manages — memory, IPC endpoints, interrupt lines, MMIO regions, threads —
-is represented as a capability. A process can only interact with a resource if it
-holds a valid capability for it. There is no separate permission layer, no ambient
-authority, and no way to access a resource by guessing its identity.
+Capabilities are the sole access control mechanism in Seraph.
 
-This is not a security layer bolted onto the system — it is the system. The kernel
-enforces capability checks unconditionally on every resource operation.
+- Every kernel-managed resource is represented by a capability.
+- A process must not operate on a resource without a valid capability authorising
+  that operation.
+- The kernel must enforce capability checks on every resource operation.
+- The system must not provide ambient authority or identity-based privilege.
+- A resource must not be accessible by naming or guessing an identifier without
+  holding the corresponding capability.
 
 ---
 
@@ -132,20 +133,13 @@ in the TSS on revocation.
 ### SchedControl
 
 A capability granting authority to assign elevated scheduling priorities. Rights:
-- **Elevate** — may set thread priorities in the elevated range (21–30)
+- **Elevate** — may set thread priorities in the elevated range
 
 There is one SchedControl capability, created at boot. Init holds it and delegates
 derived copies to services that need real-time-ish scheduling (e.g. audio servers,
 device managers). Without a SchedControl capability, a process can only set thread
-priorities in the normal range (1–20).
-
-The priority model is:
-- `PRIORITY_DEFAULT = 10` — baseline for newly created threads
-- Normal range (1–20): any holder of the thread's Control capability may set
-  priorities freely in this range
-- Elevated range (21–30): requires SchedControl capability with Elevate rights
-
-`SCHED_ELEVATED_MIN = 21` is the first priority that requires SchedControl.
+priorities in the normal range. For priority levels, ranges, and constants, see
+[kernel/docs/scheduler.md § Priority Levels](../kernel/docs/scheduler.md#priority-levels).
 
 ---
 
@@ -253,12 +247,9 @@ set of capabilities covering all available resources:
 - One SchedControl capability (Elevate rights)
 - Thread and process capabilities for init itself
 
-Init is responsible for delegating appropriate subsets of this authority to each
-service it starts. devmgr receives the platform resource capabilities and firmware
-table capabilities to perform hardware enumeration. A driver for a specific device
-receives MMIO and interrupt capabilities for that device only — nothing else. A
-filesystem server receives block device access capabilities only. No service starts
-with more authority than its job requires.
+Init is responsible for delegating appropriate subsets of this authority to each service it starts,
+following the principle of least privilege. See [device-management.md](device-management.md#what-devmgr-receives-from-init)
+for devmgr's specific initial capability set.
 
 This is the only point at which capabilities are created from nothing. All subsequent
 authority in the system is derived from this initial grant.

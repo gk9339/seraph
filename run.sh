@@ -14,7 +14,8 @@
 #   --release       Use the release build
 #   --no-build      Skip the build step (use existing sysroot artifacts)
 #   --gdb           Start QEMU with a GDB server on localhost:1234 (-s -S)
-#   --riscv-edk2-verbose  Show riscv64 edk2 DEBUG output (filtered by default; no effect on x86_64)
+#   --headless      Run without a display window (-display none)
+#   --verbose       Show all serial output including pre-boot firmware noise (filtered by default)
 #   -h, --help      Show this help and exit
 #
 # Requirements (see scripts/README.md for per-distro install commands):
@@ -34,7 +35,8 @@ ARCH="${SERAPH_ARCH}"
 CARGO_PROFILE_FLAG=""
 NO_BUILD=false
 GDB=false
-RISCV_EDK2_VERBOSE=false
+HEADLESS=false
+VERBOSE=false
 
 while [[ $# -gt 0 ]]
 do
@@ -52,11 +54,14 @@ do
         --gdb)
             GDB=true; shift
             ;;
-        --riscv-edk2-verbose)
-            RISCV_EDK2_VERBOSE=true; shift
+        --headless)
+            HEADLESS=true; shift
+            ;;
+        --verbose)
+            VERBOSE=true; shift
             ;;
         -h|--help)
-            sed -n '7,25p' "$0"
+            sed -n '7,27p' "$0"
             exit 0
             ;;
         *)
@@ -73,10 +78,18 @@ then
 fi
 
 GDB_FLAGS=""
+GDB_ACCEL_FLAGS=""
 if [[ "${GDB}" == true ]]
 then
     GDB_FLAGS="-s -S"
-    step "GDB server will listen on localhost:1234 (QEMU paused until debugger connects)"
+    # KVM prevents QEMU's gdbserver from reading live CPU register state —
+    # all vCPUs appear frozen at the reset vector (0xfff0) regardless of
+    # actual execution position. Disable KVM and fall back to TCG when
+    # debugging so register reads and breakpoints work correctly.
+    # TCG is ~5-10x slower than KVM; OVMF may take ~30s to reach the
+    # bootloader instead of ~5s. That is acceptable for a debug session.
+    GDB_ACCEL_FLAGS="-accel tcg -cpu qemu64"
+    step "GDB server will listen on localhost:1234 (QEMU paused; KVM disabled for correct register visibility)"
 fi
 
 # Restore terminal state when QEMU exits. OVMF sends xterm window-resize
@@ -88,23 +101,43 @@ _ORIG_ROWS="${_ORIG_SIZE% *}"
 _ORIG_COLS="${_ORIG_SIZE#* }"
 trap 'stty sane 2>/dev/null; printf "\033[8;%s;%st\033[?25h" "${_ORIG_ROWS}" "${_ORIG_COLS}" 2>/dev/null || true' EXIT
 
+# ── Validate bootloader and kernel files ──────────────────────────────────────
+
+EFI_NAME="$(boot_efi_filename "${ARCH}")"
+BOOT_EFI="${SERAPH_SYSROOT}/EFI/BOOT/${EFI_NAME}"
+KERNEL_BIN="${SERAPH_SYSROOT}/EFI/seraph/seraph-kernel"
+
+[[ -f "${BOOT_EFI}" ]] || die "bootloader not found: ${BOOT_EFI}"
+[[ -f "${KERNEL_BIN}" ]] || die "kernel not found: ${KERNEL_BIN}"
+INIT_BIN="${SERAPH_SYSROOT}/sbin/init"
+[[ -f "${INIT_BIN}" ]] || die "init not found: ${INIT_BIN}"
+
+# ── Build common QEMU args ────────────────────────────────────────────────────
+
+QEMU_ARGS=(
+    -m 512M
+    -smp 1
+    -drive "format=raw,file=fat:rw:${SERAPH_SYSROOT}"
+    -serial stdio
+    -no-reboot
+    -no-shutdown
+)
+
+if [[ "${HEADLESS}" == true ]]
+then
+    QEMU_ARGS+=(-display none)
+fi
+
+if [[ -n "${GDB_FLAGS}" ]]
+then
+    # shellcheck disable=SC2206
+    QEMU_ARGS+=(${GDB_FLAGS})
+fi
+
 # ── Launch QEMU ───────────────────────────────────────────────────────────────
 
 case "${ARCH}" in
     x86_64)
-        EFI_NAME="$(boot_efi_filename "${ARCH}")"
-        BOOT_EFI="${SERAPH_SYSROOT}/EFI/BOOT/${EFI_NAME}"
-        KERNEL_BIN="${SERAPH_SYSROOT}/EFI/seraph/seraph-kernel"
-
-        if [[ ! -f "${BOOT_EFI}" ]]
-        then
-            die "bootloader not found: ${BOOT_EFI}"
-        fi
-        if [[ ! -f "${KERNEL_BIN}" ]]
-        then
-            die "kernel not found: ${KERNEL_BIN}"
-        fi
-
         # Locate OVMF firmware. UEFI firmware is required — SeaBIOS cannot
         # load UEFI applications. See scripts/README.md for install instructions.
         OVMF_CODE=""
@@ -126,39 +159,22 @@ case "${ARCH}" in
             die "OVMF firmware not found (package: edk2-ovmf / ovmf — see scripts/README.md)"
         fi
 
-        step "Starting QEMU (x86_64, KVM, UEFI)"
+        QEMU_ARGS+=(
+            -machine q35
+            ${GDB_ACCEL_FLAGS:--enable-kvm -cpu host}
+            -drive "if=pflash,format=raw,readonly=on,file=${OVMF_CODE}"
+        )
 
-        # The sysroot is passed directly as the virtual FAT drive. OVMF will
-        # find the bootloader at EFI/BOOT/BOOTX64.EFI within the sysroot.
-        # shellcheck disable=SC2086
-        qemu-system-x86_64 \
-            -machine q35 \
-            -enable-kvm \
-            -cpu host \
-            -m 512M \
-            -smp 4 \
-            -drive "if=pflash,format=raw,readonly=on,file=${OVMF_CODE}" \
-            -drive "format=raw,file=fat:rw:${SERAPH_SYSROOT}" \
-            -serial stdio \
-            -no-reboot \
-            -no-shutdown \
-            ${GDB_FLAGS}
+        if [[ "${HEADLESS}" == true ]]
+        then
+            QEMU_ARGS+=(-vga none)
+        fi
+
+        QEMU_BIN="qemu-system-x86_64"
+        QEMU_DESC="x86_64, UEFI"
         ;;
 
     riscv64)
-        EFI_NAME="$(boot_efi_filename "${ARCH}")"
-        BOOT_EFI="${SERAPH_SYSROOT}/EFI/BOOT/${EFI_NAME}"
-        KERNEL_BIN="${SERAPH_SYSROOT}/EFI/seraph/seraph-kernel"
-
-        if [[ ! -f "${BOOT_EFI}" ]]
-        then
-            die "bootloader not found: ${BOOT_EFI}"
-        fi
-        if [[ ! -f "${KERNEL_BIN}" ]]
-        then
-            die "kernel not found: ${KERNEL_BIN}"
-        fi
-
         # Locate edk2 RISC-V firmware. See scripts/README.md for install instructions.
         RISCV_CODE=""
         RISCV_VARS_TEMPLATE=""
@@ -210,44 +226,38 @@ case "${ARCH}" in
               printf "\033[8;%s;%st\033[?25h" "${_ORIG_ROWS}" "${_ORIG_COLS}" \
               2>/dev/null || true' EXIT
 
-        # QEMU virt machine loads OpenSBI automatically; no explicit flag needed.
-        # Two pflash drives: CODE (read-only firmware) and VARS (writable NVRAM).
-        QEMU_ARGS=(
+        QEMU_ARGS+=(
             -machine virt
-            -m 512M
-            -smp 4
             -drive "if=pflash,format=raw,readonly=on,file=${RISCV_CODE_PADDED}"
             -drive "if=pflash,format=raw,file=${RISCV_VARS}"
-            -drive "format=raw,file=fat:rw:${SERAPH_SYSROOT}"
-            -device virtio-gpu-pci
-            -device qemu-xhci
-            -device usb-kbd
-            -device usb-tablet
-            -serial stdio
-            -no-reboot
-            -no-shutdown
         )
 
-        if [[ "${RISCV_EDK2_VERBOSE}" == false ]]
+        if [[ "${HEADLESS}" != true ]]
         then
-            # The packaged edk2-riscv64 is typically a DEBUG build that produces
-            # thousands of lines of diagnostic output before our bootloader loads.
-            # Suppress it
-            # by piping through awk until edk2 reports finding our EFI binary.
-            # Piping QEMU's stdout disables the QEMU monitor (Ctrl+A c); serial
-            # I/O to/from the bootloader and kernel is unaffected.
-            step "Starting QEMU (riscv64, TCG, UEFI) [edk2 DEBUG output filtered; --riscv-edk2-verbose to disable]"
-            # shellcheck disable=SC2086
-            qemu-system-riscv64 \
-                "${QEMU_ARGS[@]}" \
-                ${GDB_FLAGS} \
-                | awk '/BOOTRISCV64\.EFI/{show=1} show{print; fflush()}'
-        else
-            step "Starting QEMU (riscv64, TCG, UEFI)"
-            # shellcheck disable=SC2086
-            qemu-system-riscv64 \
-                "${QEMU_ARGS[@]}" \
-                ${GDB_FLAGS}
+            QEMU_ARGS+=(
+                -device ramfb
+                -device qemu-xhci
+                -device usb-kbd
+            )
         fi
+
+        # QEMU virt machine loads OpenSBI automatically; no explicit flag needed.
+        QEMU_BIN="qemu-system-riscv64"
+        QEMU_DESC="riscv64, TCG, UEFI"
         ;;
 esac
+
+# Apply serial output filter unless --verbose is set. Filters all output until
+# the first line containing 'seraph-boot', suppressing pre-boot firmware noise
+# (UEFI DEBUG spam, OpenSBI banners, etc.) that is irrelevant to normal runs.
+# Piping QEMU's stdout disables the QEMU monitor (Ctrl+A c); serial I/O to/from
+# the bootloader and kernel is unaffected.
+if [[ "${VERBOSE}" == false ]]
+then
+    step "Starting QEMU (${QEMU_DESC}) [output filtered until 'seraph-boot'; --verbose to disable]"
+    "${QEMU_BIN}" "${QEMU_ARGS[@]}" \
+        | awk '/seraph-boot/{show=1} show{print; fflush()}'
+else
+    step "Starting QEMU (${QEMU_DESC})"
+    "${QEMU_BIN}" "${QEMU_ARGS[@]}"
+fi

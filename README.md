@@ -4,12 +4,10 @@ Seraph is a microkernel operating system written in Rust, targeting x86-64 and R
 
 ## Goals
 
-- Minimal, modular microkernel — maximum code in userspace
-- Written primarily in Rust; architecture-specific assembly isolated, documented, and behind shared trait abstractions
+- Minimal, modular microkernel; most functionality in userspace
 - Capability-based security model throughout
-- Clear component boundaries with well-defined IPC contracts
-- Multi-architecture support: x86-64 and RISC-V (RV64GC)
-- Support for modern hardware features: multi-core execution (SMP), SMT-aware scheduling, per-process TLB tagging (PCIDs/ASIDs), and IOMMU-enforced device isolation
+- Clear component boundaries with explicit IPC contracts
+- Architecture-specific code isolated behind shared traits
 - Self-hosting as a long-term goal
 
 No binary compatibility with other operating systems.
@@ -33,7 +31,7 @@ No support for 32-bit or legacy x86.
 
 ## Documentation
 
-Design documents live in [`docs/`](docs/):
+Overall project design documents live in [`docs/`](docs/):
 
 - [Architecture Overview](docs/architecture.md) — component structure and design philosophy
 - [Memory Model](docs/memory-model.md) — virtual address space layout, paging, allocation
@@ -42,3 +40,5 @@ Design documents live in [`docs/`](docs/):
 - [Boot Protocol](docs/boot-protocol.md) — UEFI boot flow, boot info contract, kernel entry requirements
 - [Device Management](docs/device-management.md) — platform enumeration, devmgr, driver binding, DMA safety
 - [Coding Standards](docs/coding-standards.md) — Rust conventions, safety contracts, documentation rules
+
+Each module contains a `README.md` that references the design docs relevant to that module.

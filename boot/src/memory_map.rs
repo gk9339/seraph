@@ -106,32 +106,41 @@ mod tests
     use core::mem::size_of;
 
     use super::{insertion_sort_memory_map, translate_memory_map, translate_memory_type};
-    use boot_protocol::{MemoryMapEntry, MemoryType};
     use crate::uefi::{
         EfiMemoryDescriptor, MemoryMapResult, EFI_ACPI_MEMORY_NVS, EFI_ACPI_RECLAIM_MEMORY,
         EFI_BOOT_SERVICES_CODE, EFI_BOOT_SERVICES_DATA, EFI_CONVENTIONAL_MEMORY, EFI_LOADER_CODE,
         EFI_LOADER_DATA, EFI_MEMORY_MAPPED_IO, EFI_MEMORY_MAPPED_IO_PORT_SPACE,
         EFI_PERSISTENT_MEMORY, EFI_RUNTIME_SERVICES_CODE, EFI_RUNTIME_SERVICES_DATA,
     };
+    use boot_protocol::{MemoryMapEntry, MemoryType};
 
     // ── translate_memory_type ─────────────────────────────────────────────────
 
     #[test]
     fn conventional_memory_maps_to_usable()
     {
-        assert_eq!(translate_memory_type(EFI_CONVENTIONAL_MEMORY), MemoryType::Usable);
+        assert_eq!(
+            translate_memory_type(EFI_CONVENTIONAL_MEMORY),
+            MemoryType::Usable
+        );
     }
 
     #[test]
     fn boot_services_code_maps_to_usable()
     {
-        assert_eq!(translate_memory_type(EFI_BOOT_SERVICES_CODE), MemoryType::Usable);
+        assert_eq!(
+            translate_memory_type(EFI_BOOT_SERVICES_CODE),
+            MemoryType::Usable
+        );
     }
 
     #[test]
     fn boot_services_data_maps_to_usable()
     {
-        assert_eq!(translate_memory_type(EFI_BOOT_SERVICES_DATA), MemoryType::Usable);
+        assert_eq!(
+            translate_memory_type(EFI_BOOT_SERVICES_DATA),
+            MemoryType::Usable
+        );
     }
 
     #[test]
@@ -149,43 +158,64 @@ mod tests
     #[test]
     fn acpi_reclaim_maps_to_acpi_reclaimable()
     {
-        assert_eq!(translate_memory_type(EFI_ACPI_RECLAIM_MEMORY), MemoryType::AcpiReclaimable);
+        assert_eq!(
+            translate_memory_type(EFI_ACPI_RECLAIM_MEMORY),
+            MemoryType::AcpiReclaimable
+        );
     }
 
     #[test]
     fn persistent_memory_maps_to_persistent()
     {
-        assert_eq!(translate_memory_type(EFI_PERSISTENT_MEMORY), MemoryType::Persistent);
+        assert_eq!(
+            translate_memory_type(EFI_PERSISTENT_MEMORY),
+            MemoryType::Persistent
+        );
     }
 
     #[test]
     fn runtime_services_code_maps_to_reserved()
     {
-        assert_eq!(translate_memory_type(EFI_RUNTIME_SERVICES_CODE), MemoryType::Reserved);
+        assert_eq!(
+            translate_memory_type(EFI_RUNTIME_SERVICES_CODE),
+            MemoryType::Reserved
+        );
     }
 
     #[test]
     fn runtime_services_data_maps_to_reserved()
     {
-        assert_eq!(translate_memory_type(EFI_RUNTIME_SERVICES_DATA), MemoryType::Reserved);
+        assert_eq!(
+            translate_memory_type(EFI_RUNTIME_SERVICES_DATA),
+            MemoryType::Reserved
+        );
     }
 
     #[test]
     fn acpi_nvs_maps_to_reserved()
     {
-        assert_eq!(translate_memory_type(EFI_ACPI_MEMORY_NVS), MemoryType::Reserved);
+        assert_eq!(
+            translate_memory_type(EFI_ACPI_MEMORY_NVS),
+            MemoryType::Reserved
+        );
     }
 
     #[test]
     fn mmio_maps_to_reserved()
     {
-        assert_eq!(translate_memory_type(EFI_MEMORY_MAPPED_IO), MemoryType::Reserved);
+        assert_eq!(
+            translate_memory_type(EFI_MEMORY_MAPPED_IO),
+            MemoryType::Reserved
+        );
     }
 
     #[test]
     fn mmio_port_space_maps_to_reserved()
     {
-        assert_eq!(translate_memory_type(EFI_MEMORY_MAPPED_IO_PORT_SPACE), MemoryType::Reserved);
+        assert_eq!(
+            translate_memory_type(EFI_MEMORY_MAPPED_IO_PORT_SPACE),
+            MemoryType::Reserved
+        );
     }
 
     #[test]
@@ -200,7 +230,11 @@ mod tests
     /// irrelevant for sort order tests.
     fn make_entry(physical_base: u64) -> MemoryMapEntry
     {
-        MemoryMapEntry { physical_base, size: 0x1000, memory_type: MemoryType::Usable }
+        MemoryMapEntry {
+            physical_base,
+            size: 0x1000,
+            memory_type: MemoryType::Usable,
+        }
     }
 
     #[test]
@@ -242,8 +276,12 @@ mod tests
     #[test]
     fn duplicate_bases_do_not_panic()
     {
-        let mut entries =
-            vec![make_entry(0x2000), make_entry(0x1000), make_entry(0x1000), make_entry(0x3000)];
+        let mut entries = vec![
+            make_entry(0x2000),
+            make_entry(0x1000),
+            make_entry(0x1000),
+            make_entry(0x3000),
+        ];
         // Must not crash; exact ordering of duplicates is unspecified.
         unsafe { insertion_sort_memory_map(entries.as_mut_ptr(), entries.len()) };
         // First element must be one of the 0x1000 entries.
@@ -376,8 +414,11 @@ mod tests
             map_key: 0,
             descriptor_size: stride,
         };
-        let dummy =
-            MemoryMapEntry { physical_base: 0, size: 0, memory_type: MemoryType::Reserved };
+        let dummy = MemoryMapEntry {
+            physical_base: 0,
+            size: 0,
+            memory_type: MemoryType::Reserved,
+        };
         let mut out = vec![dummy; 4];
         let count = unsafe { translate_memory_map(&uefi_map, out.as_mut_ptr(), 4) };
         assert_eq!(count, 1);

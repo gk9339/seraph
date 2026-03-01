@@ -105,11 +105,7 @@ mod tests
         ];
         for v in variants
         {
-            assert!(
-                !v.message().is_empty(),
-                "empty message for {:?}",
-                v
-            );
+            assert!(!v.message().is_empty(), "empty message for {:?}", v);
         }
     }
 
@@ -118,10 +114,7 @@ mod tests
     #[test]
     fn protocol_not_found_detail_returns_payload()
     {
-        assert_eq!(
-            BootError::ProtocolNotFound("proto").detail(),
-            Some("proto")
-        );
+        assert_eq!(BootError::ProtocolNotFound("proto").detail(), Some("proto"));
     }
 
     #[test]
@@ -164,11 +157,7 @@ mod tests
         ];
         for v in no_detail
         {
-            assert!(
-                v.detail().is_none(),
-                "expected None detail for {:?}",
-                v
-            );
+            assert!(v.detail().is_none(), "expected None detail for {:?}", v);
         }
     }
 }

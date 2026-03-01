@@ -202,8 +202,7 @@ unsafe fn boot_sequence(image: EfiHandle, st: *mut EfiSystemTable) -> Result<!, 
     // init is a userspace ELF whose p_paddr values conflict with UEFI low-memory use.
     // The kernel receives phys_addr+virt_addr pairs to map init without an ELF parser.
     // SAFETY: bs is valid; init_buf contains the complete ELF file.
-    let init_image =
-        unsafe { load_init(bs, init_buf, arch::current::EXPECTED_ELF_MACHINE)? };
+    let init_image = unsafe { load_init(bs, init_buf, arch::current::EXPECTED_ELF_MACHINE)? };
 
     // ── Step 5: Firmware discovery ────────────────────────────────────────────
 

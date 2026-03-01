@@ -620,7 +620,9 @@ pub unsafe fn load_init(
         }
         if count >= INIT_MAX_SEGMENTS
         {
-            return Err(BootError::InvalidElf("init ELF has more than INIT_MAX_SEGMENTS LOAD segments"));
+            return Err(BootError::InvalidElf(
+                "init ELF has more than INIT_MAX_SEGMENTS LOAD segments",
+            ));
         }
 
         // Validate file data range.
@@ -840,7 +842,10 @@ mod tests
     fn wx_load_segment_returns_wx_violation()
     {
         let phdrs = [make_phdr(PT_LOAD, PF_W | PF_X)];
-        assert!(matches!(check_wx_segments(&phdrs), Err(BootError::WxViolation)));
+        assert!(matches!(
+            check_wx_segments(&phdrs),
+            Err(BootError::WxViolation)
+        ));
     }
 
     #[test]

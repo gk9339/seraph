@@ -262,53 +262,53 @@ mod tests
     #[test]
     fn parse_config_succeeds_with_both_keys()
     {
-        let input = b"kernel=\\EFI\\seraph\\seraph-kernel\ninit=\\sbin\\init\n";
+        let input = b"kernel=\\EFI\\seraph\\kernel\ninit=\\EFI\\seraph\\init\n";
         let cfg = parse_config(input).unwrap();
-        assert_eq!(cfg.kernel_path.len, 25);
-        assert_eq!(cfg.init_path.len, 10);
+        assert_eq!(cfg.kernel_path.len, 18);
+        assert_eq!(cfg.init_path.len, 16);
     }
 
     #[test]
     fn parse_config_skips_comments_and_blank_lines()
     {
-        let input = b"# comment\n\nkernel=\\EFI\\seraph\\seraph-kernel\ninit=\\sbin\\init\n";
+        let input = b"# comment\n\nkernel=\\EFI\\seraph\\kernel\ninit=\\EFI\\seraph\\init\n";
         let cfg = parse_config(input).unwrap();
-        assert_eq!(cfg.kernel_path.len, 25);
+        assert_eq!(cfg.kernel_path.len, 18);
     }
 
     #[test]
     fn parse_config_trims_whitespace()
     {
-        let input = b"kernel = \\EFI\\seraph\\seraph-kernel\r\ninit = \\sbin\\init\r\n";
+        let input = b"kernel = \\EFI\\seraph\\kernel\r\ninit = \\EFI\\seraph\\init\r\n";
         let cfg = parse_config(input).unwrap();
-        assert_eq!(cfg.kernel_path.len, 25);
+        assert_eq!(cfg.kernel_path.len, 18);
     }
 
     #[test]
     fn parse_config_missing_kernel_returns_error()
     {
-        let input = b"init=\\sbin\\init\n";
+        let input = b"init=\\EFI\\seraph\\init\n";
         assert!(parse_config(input).is_err());
     }
 
     #[test]
     fn parse_config_missing_init_returns_error()
     {
-        let input = b"kernel=\\EFI\\seraph\\seraph-kernel\n";
+        let input = b"kernel=\\EFI\\seraph\\kernel\n";
         assert!(parse_config(input).is_err());
     }
 
     #[test]
     fn parse_config_missing_equals_returns_error()
     {
-        let input = b"kernel\\EFI\\seraph\\seraph-kernel\ninit=\\sbin\\init\n";
+        let input = b"kernel\\EFI\\seraph\\kernel\ninit=\\EFI\\seraph\\init\n";
         assert!(parse_config(input).is_err());
     }
 
     #[test]
     fn parse_config_unknown_keys_are_skipped()
     {
-        let input = b"kernel=\\EFI\\seraph\\seraph-kernel\ninit=\\sbin\\init\nfoo=bar\n";
+        let input = b"kernel=\\EFI\\seraph\\kernel\ninit=\\EFI\\seraph\\init\nfoo=bar\n";
         assert!(parse_config(input).is_ok());
     }
 
@@ -333,11 +333,11 @@ mod tests
             buf: [0u16; MAX_PATH_LEN + 1],
             len: 0,
         };
-        let ok = ascii_to_utf16(b"\\sbin\\init", &mut p);
+        let ok = ascii_to_utf16(b"\\EFI\\seraph\\init", &mut p);
         assert!(ok);
-        assert_eq!(p.len, 10);
+        assert_eq!(p.len, 16);
         assert_eq!(p.buf[0], b'\\' as u16);
-        assert_eq!(p.buf[10], 0u16);
+        assert_eq!(p.buf[16], 0u16);
     }
 
     #[test]

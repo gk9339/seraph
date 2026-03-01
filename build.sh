@@ -96,14 +96,20 @@ build_boot()
         fi
 
         "${objcopy}" -O binary "${elf_out}" "${efi_dir}/${efi_name}"
+        mkdir -p "${SYSROOT_EFI_SERAPH}"
+        cp "${efi_dir}/${efi_name}" "${SYSROOT_EFI_SERAPH}/boot"
         step "Bootloader: ${efi_dir}/${efi_name} (ELF → flat binary)"
+        step "Bootloader: ${SYSROOT_EFI_SERAPH}/boot"
     else
         # x86_64: cargo produces a .efi PE directly.
         local cargo_out="${SERAPH_ROOT}/target/${boot_triple}/${OUTPUT_DIR}/seraph-boot.efi"
         if [[ -f "${cargo_out}" ]]
         then
             cp "${cargo_out}" "${efi_dir}/${efi_name}"
+            mkdir -p "${SYSROOT_EFI_SERAPH}"
+            cp "${cargo_out}" "${SYSROOT_EFI_SERAPH}/boot"
             step "Bootloader: ${efi_dir}/${efi_name}"
+            step "Bootloader: ${SYSROOT_EFI_SERAPH}/boot"
         fi
     fi
 }
@@ -124,8 +130,8 @@ build_kernel()
     if [[ -f "${cargo_out}" ]]
     then
         mkdir -p "${SYSROOT_EFI_SERAPH}"
-        cp "${cargo_out}" "${SYSROOT_EFI_SERAPH}/seraph-kernel"
-        step "Kernel: ${SYSROOT_EFI_SERAPH}/seraph-kernel"
+        cp "${cargo_out}" "${SYSROOT_EFI_SERAPH}/kernel"
+        step "Kernel: ${SYSROOT_EFI_SERAPH}/kernel"
     fi
 }
 
@@ -144,40 +150,25 @@ build_init()
     local cargo_out="${SERAPH_ROOT}/target/${KERNEL_TRIPLE}/${OUTPUT_DIR}/seraph-init"
     if [[ -f "${cargo_out}" ]]
     then
-        mkdir -p "${SERAPH_SYSROOT}/sbin"
-        cp "${cargo_out}" "${SERAPH_SYSROOT}/sbin/init"
-        step "Init: ${SERAPH_SYSROOT}/sbin/init"
+        mkdir -p "${SYSROOT_EFI_SERAPH}"
+        cp "${cargo_out}" "${SYSROOT_EFI_SERAPH}/init"
+        step "Init: ${SYSROOT_EFI_SERAPH}/init"
     fi
 }
 
-# install_rootfs: copy all files from rootfs/ into the sysroot, preserving
-# their relative paths. Each file's destination directory is created as needed.
-# To add a new file, place it under rootfs/ — no build script changes required.
+# install_rootfs: mirror rootfs/ into the sysroot, preserving relative paths.
+# Each file's destination directory is created as needed.
+# To add a new file, place it under rootfs/ at the path it should appear in
+# the sysroot — no build script changes required.
 install_rootfs()
 {
     local src_root="${SERAPH_ROOT}/rootfs"
     local dst_root="${SERAPH_SYSROOT}"
 
-    # Map rootfs/ filenames to sysroot destinations.
-    # rootfs/boot.conf -> sysroot/EFI/seraph/boot.conf
-    # Add entries here as new rootfs subtrees are introduced.
-    declare -A DEST_MAP=(
-        ["boot.conf"]="${SYSROOT_EFI_SERAPH}/boot.conf"
-    )
-
     while IFS= read -r -d '' src_file
     do
         local rel="${src_file#"${src_root}/"}"
-        local dst
-
-        if [[ -v DEST_MAP["${rel}"] ]]
-        then
-            dst="${DEST_MAP["${rel}"]}"
-        else
-            # Default: mirror the rootfs/ layout directly under sysroot/.
-            dst="${dst_root}/${rel}"
-        fi
-
+        local dst="${dst_root}/${rel}"
         mkdir -p "$(dirname "${dst}")"
         cp "${src_file}" "${dst}"
         step "Rootfs: ${dst}"

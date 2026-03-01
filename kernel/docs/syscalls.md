@@ -116,37 +116,38 @@ are never reassigned or reused.
 9   SYS_CAP_CREATE_EVENT_QUEUE
 10  SYS_CAP_CREATE_THREAD
 11  SYS_CAP_CREATE_ADDRESS_SPACE
-12  SYS_CAP_CREATE_WAIT_SET
-13  SYS_CAP_DERIVE
-14  SYS_CAP_REVOKE
-15  SYS_CAP_DELETE
-16  SYS_MEM_MAP
-17  SYS_MEM_UNMAP
-18  SYS_MEM_PROTECT
-19  SYS_THREAD_START
-20  SYS_THREAD_STOP
-21  SYS_THREAD_YIELD
-22  SYS_PROCESS_EXIT
-23  SYS_WAIT_SET_ADD
-24  SYS_WAIT_SET_REMOVE
-25  SYS_WAIT_SET_WAIT
-26  SYS_IRQ_ACK
-27  SYS_CAP_CREATE_PROCESS
-28  SYS_CAP_INSERT
-29  SYS_IRQ_REGISTER
-30  SYS_FRAME_SPLIT
-31  SYS_PROCESS_KILL
-32  SYS_PROCESS_SUPERVISE
-33  SYS_MMIO_MAP
-34  SYS_IOPORT_BIND
-35  SYS_DMA_GRANT
-36  SYS_THREAD_SET_PRIORITY
-37  SYS_THREAD_SET_AFFINITY
-38  SYS_THREAD_READ_REGS
-39  SYS_THREAD_WRITE_REGS
-40  SYS_ASPACE_QUERY
-41  SYS_IPC_BUFFER_SET
-42  SYS_SYSTEM_INFO
+12  SYS_CAP_CREATE_CSPACE
+13  SYS_CAP_CREATE_WAIT_SET
+14  SYS_CAP_DERIVE
+15  SYS_CAP_REVOKE
+16  SYS_CAP_DELETE
+17  SYS_MEM_MAP
+18  SYS_MEM_UNMAP
+19  SYS_MEM_PROTECT
+20  SYS_THREAD_START
+21  SYS_THREAD_STOP
+22  SYS_THREAD_YIELD
+23  SYS_THREAD_EXIT
+24  SYS_THREAD_CONFIGURE
+25  SYS_CAP_COPY
+26  SYS_CAP_MOVE
+27  SYS_WAIT_SET_ADD
+28  SYS_WAIT_SET_REMOVE
+29  SYS_WAIT_SET_WAIT
+30  SYS_IRQ_ACK
+31  SYS_CAP_INSERT
+32  SYS_IRQ_REGISTER
+33  SYS_FRAME_SPLIT
+34  SYS_MMIO_MAP
+35  SYS_IOPORT_BIND
+36  SYS_DMA_GRANT
+37  SYS_THREAD_SET_PRIORITY
+38  SYS_THREAD_SET_AFFINITY
+39  SYS_THREAD_READ_REGS
+40  SYS_THREAD_WRITE_REGS
+41  SYS_ASPACE_QUERY
+42  SYS_IPC_BUFFER_SET
+43  SYS_SYSTEM_INFO
 ```
 
 ---
@@ -665,22 +666,14 @@ capability is required — this syscall acts on the calling thread implicitly.
 
 ---
 
-### `SYS_PROCESS_EXIT` (22)
+### `SYS_THREAD_EXIT` (23)
 
-Exit the calling process. All threads are stopped, all capabilities are deleted,
-and all resources are freed.
+Exit the calling thread. The thread's TCB is freed and another thread is scheduled.
+This is the correct way for any thread to terminate itself, including init.
 
-**Arguments:**
-
-| # | Name | Description |
-|---|---|---|
-| 0 | `exit_code` | Exit code delivered to the process supervisor (if any) |
+**Arguments:** None.
 
 **Return:** Does not return.
-
-This syscall never returns to the caller. The kernel terminates the process and
-schedules another thread. If the process has a supervisor holding a Supervise
-capability, a process-exit event is posted to its event queue.
 
 **Errors:** None (this syscall cannot fail).
 
@@ -783,108 +776,125 @@ specific line.
 
 ---
 
-## Process Syscalls
+## Thread Configuration Syscalls
 
-### `SYS_CAP_CREATE_PROCESS` (27)
+### `SYS_THREAD_CONFIGURE` (24)
 
-Create a new process with its own CSpace. The process has no threads initially;
-threads are added by creating them with `SYS_CAP_CREATE_THREAD` using an address
-space associated with the process.
+Bind a thread to an AddressSpace, CSpace, and IPC buffer. Must be called before
+`SYS_THREAD_START`. Replaces the previous bindings if called on a stopped thread.
 
 **Arguments:**
 
 | # | Name | Description |
 |---|---|---|
-| 0 | `aspace_cap` | Address space capability (Map rights) to assign to the process |
-| 1 | `max_cspace_slots` | Maximum CSpace slots the new process may hold (ceiling) |
+| 0 | `thread_cap` | Thread capability (Control rights) |
+| 1 | `aspace_cap` | AddressSpace capability (Map rights) to bind |
+| 2 | `cspace_cap` | CSpace capability (Insert + Delete rights) to bind |
+| 3 | `ipc_buf_vaddr` | Virtual address of the IPC buffer page in the thread's address space (0 to clear) |
 
-**Return:** `rax`/`a0`: new process capability (Control + Supervise rights) on success;
-`SyscallError` on failure.
+**Return:** `rax`/`a0`: 0 on success; `SyscallError` on failure.
 
-**Capability requirement:** `aspace_cap` must have Map rights.
+All three bindings are updated atomically. The thread must be in the Stopped or
+Created state; calling on a Running or Blocked thread returns `InvalidState`.
 
-**Errors:** `InvalidCapability`, `AccessDenied`, `InvalidArgument` (max_cspace_slots
-is 0 or exceeds the system maximum), `OutOfMemory`.
+**Capability requirements:** `thread_cap` (Control), `aspace_cap` (Map),
+`cspace_cap` (Insert + Delete).
+
+**Errors:** `InvalidCapability`, `AccessDenied`, `InvalidState` (thread not stopped),
+`InvalidArgument` (ipc_buf_vaddr not page-aligned).
 
 ---
 
-### `SYS_CAP_INSERT` (28)
+### `SYS_CAP_CREATE_CSPACE` (12)
 
-Insert a capability from the caller's CSpace into another process's CSpace. Used by
-init to populate child process CSpaces before starting their threads.
+Create a new, empty CSpace.
 
 **Arguments:**
 
 | # | Name | Description |
 |---|---|---|
-| 0 | `process_cap` | Process capability (Control rights) for the target process |
-| 1 | `source_cap` | Capability to insert (moved, not copied) |
-| 2 | `dest_slot` | Slot index in the target process's CSpace to insert into |
+| 0 | `max_slots` | Maximum number of capability slots (ceiling; 0 means system default) |
+
+**Return:** `rax`/`a0`: new CSpace capability (Insert + Delete + Derive + Revoke rights)
+on success; `SyscallError` on failure.
+
+**Errors:** `InvalidArgument` (max_slots exceeds system maximum), `OutOfMemory`.
+
+---
+
+## Cross-CSpace Syscalls
+
+### `SYS_CAP_COPY` (25)
+
+Copy a capability from the caller's CSpace into another CSpace, creating a new
+derivation tree node (child of the source slot).
+
+**Arguments:**
+
+| # | Name | Description |
+|---|---|---|
+| 0 | `src_cap` | Capability to copy (source slot in caller's CSpace) |
+| 1 | `dst_cspace_cap` | Target CSpace capability (Insert rights) |
+| 2 | `dst_slot` | Destination slot index in the target CSpace |
+| 3 | `rights_mask` | Rights for the copy (must be subset of source rights) |
+
+**Return:** `rax`/`a0`: 0 on success; `SyscallError` on failure.
+
+The copy is a derivation (child of `src_cap` in the tree). Both the original and
+the copy remain valid. Used by init to delegate capabilities to services.
+
+**Capability requirements:** `src_cap` (at least one right), `dst_cspace_cap` (Insert).
+
+**Errors:** `InvalidCapability`, `AccessDenied`, `InvalidArgument` (dst_slot occupied
+or out of range), `OutOfMemory`.
+
+---
+
+### `SYS_CAP_MOVE` (26)
+
+Move a capability from the caller's CSpace into another CSpace. Transfer semantics:
+the source slot is cleared; the destination inherits the source's derivation position.
+
+**Arguments:**
+
+| # | Name | Description |
+|---|---|---|
+| 0 | `src_cap` | Capability to move (source slot in caller's CSpace) |
+| 1 | `dst_cspace_cap` | Target CSpace capability (Insert rights) |
+| 2 | `dst_slot` | Destination slot index in the target CSpace |
+
+**Return:** `rax`/`a0`: 0 on success; `SyscallError` on failure.
+
+**Capability requirements:** `src_cap` (any), `dst_cspace_cap` (Insert).
+
+**Errors:** `InvalidCapability`, `AccessDenied`, `InvalidArgument` (dst_slot occupied
+or out of range).
+
+---
+
+### `SYS_CAP_INSERT` (31)
+
+Insert a derived copy of a capability from the caller's CSpace into another CSpace.
+Like `SYS_CAP_COPY` but uses a CSpace capability directly for the destination.
+
+**Arguments:**
+
+| # | Name | Description |
+|---|---|---|
+| 0 | `cspace_cap` | CSpace capability (Insert rights) for the target CSpace |
+| 1 | `source_cap` | Capability to copy |
+| 2 | `dest_slot` | Slot index in the target CSpace |
 | 3 | `rights_mask` | Rights for the inserted capability (subset of source rights) |
 
 **Return:** `rax`/`a0`: 0 on success; `SyscallError` on failure.
 
-The source capability is moved: after a successful call, the caller no longer holds
-it and the target process holds a capability to the same object with `rights_mask`
-rights. The derivation tree position follows the slot (transfer semantics, not derive).
+Used by init to populate new service CSpaces before starting their threads.
 
-**Capability requirement:** `process_cap` must have Control rights.
+**Capability requirements:** `cspace_cap` (Insert), `source_cap` (at least one right).
 
 **Errors:** `InvalidCapability`, `AccessDenied` (requested rights exceed source rights,
 or dest_slot is already occupied), `InvalidArgument` (dest_slot out of range or
-exceeds process ceiling), `OutOfMemory`.
-
----
-
-### `SYS_PROCESS_KILL` (31)
-
-Terminate another process externally. Equivalent to `SYS_PROCESS_EXIT` from the
-process's own perspective, but issued by a holder of the process's Control capability.
-
-**Arguments:**
-
-| # | Name | Description |
-|---|---|---|
-| 0 | `process_cap` | Process capability (Control rights) |
-| 1 | `exit_code` | Exit code delivered to the process supervisor (if any) |
-
-**Return:** `rax`/`a0`: 0 on success; `SyscallError` on failure.
-
-All threads in the target process are stopped, all capabilities are deleted, and
-all resources are freed. If the process has a supervisor holding a Supervise
-capability, a process-exit event is posted to its registered event queue.
-
-**Capability requirement:** `process_cap` must have Control rights.
-
-**Errors:** `InvalidCapability`, `AccessDenied`, `InvalidState` (process already
-exited).
-
----
-
-### `SYS_PROCESS_SUPERVISE` (32)
-
-Register an event queue to receive process lifecycle events (exit, fault) for the
-target process.
-
-**Arguments:**
-
-| # | Name | Description |
-|---|---|---|
-| 0 | `process_cap` | Process capability (Supervise rights) |
-| 1 | `queue_cap` | Event queue capability (Post rights) to deliver events to |
-
-**Return:** `rax`/`a0`: 0 on success; `SyscallError` on failure.
-
-At most one supervisor event queue may be registered per process. A second call
-replaces the previous registration. Pass a null capability descriptor in `queue_cap`
-to deregister.
-
-Events posted to the queue carry a word-sized payload encoding the event type and
-exit code (format defined in the kernel ABI header).
-
-**Capability requirements:** `process_cap` (Supervise), `queue_cap` (Post).
-
-**Errors:** `InvalidCapability`, `AccessDenied`.
+exceeds CSpace ceiling), `OutOfMemory`.
 
 ---
 

@@ -1,13 +1,19 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // Copyright (C) 2026 George Kottler <mail@kottlerg.com>
 
-// init/src/main.rs
+// procmgr/src/main.rs
 
-//! Seraph init — minimal stub.
+//! Seraph process manager — stub.
 //!
-//! PID 1 service manager stub. Receives control from the kernel after
-//! Phase 9 of its initialisation sequence. This stub halts immediately;
-//! the full init implementation is deferred.
+//! procmgr is the userspace process lifecycle manager. It is the first service
+//! started by init and handles all subsequent process creation, ELF loading,
+//! and teardown. No process is created after early boot without going through
+//! procmgr (except svcmgr, which holds raw fallback syscall capabilities to
+//! restart procmgr if it crashes).
+//!
+//! This stub halts immediately. Full implementation is deferred.
+//!
+//! See `procmgr/README.md` for the design and IPC interface.
 
 #![cfg_attr(not(test), no_std)]
 #![cfg_attr(not(test), no_main)]
@@ -15,10 +21,6 @@
 #[cfg(not(test))]
 use core::panic::PanicInfo;
 
-/// Init entry point. Called by the kernel as the first userspace process.
-///
-/// This stub halts immediately. Set a GDB breakpoint here to confirm
-/// kernel-to-userspace handoff succeeded.
 #[cfg(not(test))]
 #[no_mangle]
 pub extern "C" fn _start() -> !
@@ -26,7 +28,6 @@ pub extern "C" fn _start() -> !
     halt_loop();
 }
 
-/// Disable interrupts and halt the CPU permanently.
 fn halt_loop() -> !
 {
     loop

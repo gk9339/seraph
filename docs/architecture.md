@@ -64,14 +64,27 @@ services and applications. All services communicate exclusively via IPC and oper
 under explicit capability grants.
 
 **init**
-The first userspace process, started by the kernel at the end of boot. init acts as
-the service manager: it reads the boot configuration, starts system services in
-dependency order, and supervises them. See `boot-protocol.md`.
+The first userspace process, started by the kernel at the end of boot. init is a
+minimal bootstrapper: it starts procmgr using a built-in ELF parser, then requests
+that procmgr start the remaining early services (devmgr, svcmgr, drivers, VFS),
+delegates all capabilities, and exits. init does not supervise services and is not
+long-lived. See `boot-protocol.md`.
+
+**procmgr**
+Userspace process lifecycle manager, started by init. procmgr handles all subsequent
+process creation, ELF loading, and teardown. No process is created after early boot
+without going through procmgr (except svcmgr restarting procmgr itself).
+
+**svcmgr**
+Service health monitor, started by init before init exits. svcmgr monitors running
+services, detects crashes, and requests restarts through procmgr. svcmgr holds raw
+process-creation syscall capabilities as a fallback to restart procmgr if procmgr
+crashes.
 
 **devmgr**
-The device manager, launched by init early in boot. devmgr receives platform resource
-capabilities and read‑only access to firmware tables, enumerates devices, spawns driver
-processes, and delegates per‑device capabilities. See `device-management.md`.
+The device manager, launched during bootstrap. devmgr receives platform resource
+capabilities and read‑only access to firmware tables from init, enumerates devices,
+spawns driver processes, and delegates per‑device capabilities. See `device-management.md`.
 
 **drivers**
 Device drivers run as isolated userspace processes. Each driver accesses hardware only
@@ -91,6 +104,51 @@ network protocols, and exposes socket‑like interfaces to applications.
 General‑purpose userspace applications and utilities (shell, terminal, editor,
 core tools). These are unprivileged applications with no authority beyond their
 capabilities.
+
+---
+
+## Kernel Primitives vs. Userspace Abstractions
+
+The kernel manages three primitive object types:
+
+- **Thread** — a schedulable unit of execution with a saved register state, a priority,
+  and bindings to an AddressSpace, a CSpace, and an IPC buffer.
+- **AddressSpace** — a virtual address space with a page table root and a set of
+  frame mappings. Revoking an AddressSpace capability stops all threads bound to it.
+- **CSpace** — a capability space: a growable array of capability slots that a thread
+  uses to name kernel objects.
+
+The kernel has no "Process" object. A **process** is a userspace convention: a group
+of threads sharing an AddressSpace and a CSpace, managed by procmgr. The kernel
+enforces isolation via AddressSpace and CSpace boundaries, not via a process abstraction.
+
+---
+
+## Bootstrap Sequence
+
+```
+Bootloader → kernel_entry
+    → Phase 0–8: memory, paging, caps, scheduler init
+    → Phase 9: map init from pre-parsed InitImage segments
+    → Phase 10: scheduler handoff — init runs in userspace
+
+init
+    → start procmgr (built-in ELF parser + raw syscalls)
+    → request: start devmgr, svcmgr, drivers, VFS [, net]
+    → delegate capabilities to each service
+    → exit
+
+procmgr    — all subsequent process creation goes through here
+devmgr     — platform enumeration, driver binding
+drivers    — block, FS, [net], etc.
+VFS        — unified filesystem namespace
+svcmgr     — service monitoring, restarts, procmgr fallback
+[net]      — network stack (optional early-boot module)
+```
+
+Boot modules (procmgr, devmgr, drivers, etc.) are configurable via `boot.conf`.
+The bootloader loads the configured set from the ESP; init starts them in order.
+The minimum set is: procmgr, devmgr, one block driver, one FS driver, VFS.
 
 ---
 
@@ -162,9 +220,9 @@ Capabilities are the sole access control mechanism in Seraph. Every resource—
 memory regions, IPC endpoints, interrupt lines, and CPU time—is represented by a
 capability and enforced by the kernel.
 
-A process may interact with a resource only if it holds a valid capability for it.
-Capabilities may be delegated to other processes and revoked by their issuer. There
-is no separate permission or identity-based authority model.
+A thread may interact with a resource only if it holds a valid capability for it.
+Capabilities may be delegated and revoked by their issuer. There is no separate
+permission or identity-based authority model.
 
 
 The complete capability design, including delegation, revocation, and lifetime

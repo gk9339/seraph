@@ -22,6 +22,6 @@ rustflags = ["-Zunstable-options"]
 [target.riscv64gc-seraph-uefi]
 rustflags = [
     "-Zunstable-options",
-    "-C", "link-arg=-Tboot/loader/linker/riscv64-uefi.ld",
+    "-C", "link-arg=-Tboot/linker/riscv64-uefi.ld",
     "-C", "jump-tables=no",
 ]

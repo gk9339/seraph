@@ -1,13 +1,16 @@
 # boot
 
 UEFI bootloader for Seraph. Reads boot configuration from `\EFI\seraph\boot.conf`,
-loads the kernel ELF and boot modules, establishes initial page tables with W^X
-enforcement, discovers firmware table addresses (ACPI RSDP / Device Tree blob) for
-passthrough to userspace, and jumps to the kernel entry point.
+loads the kernel ELF and boot modules, parses init's ELF into `InitImage`, establishes
+initial page tables with W^X enforcement, discovers firmware table addresses (ACPI
+RSDP / Device Tree blob) for passthrough to userspace, and jumps to the kernel entry
+point.
 
 The boot protocol contract — CPU state at entry, `BootInfo` structure layout, and
 `PlatformResource` format — is documented in
 [docs/boot-protocol.md](../docs/boot-protocol.md).
+
+The shared protocol types live in [`shared/boot-protocol/`](../shared/boot-protocol/).
 
 ---
 
@@ -15,42 +18,40 @@ The boot protocol contract — CPU state at entry, `BootInfo` structure layout, 
 
 ```
 boot/
-├── protocol/                   # boot-protocol crate: shared types
-│   └── src/lib.rs              # BootInfo, PlatformResource, MemoryType, etc.
-└── loader/                     # seraph-boot crate: UEFI application
-    ├── linker/
-    │   └── riscv64-uefi.ld     # Linker script for RISC-V PE/COFF pipeline
-    └── src/
-        ├── main.rs             # efi_main — boot sequence orchestrator
-        ├── config.rs           # Boot configuration file parser (boot.conf)
-        ├── uefi.rs             # UEFI protocol wrappers and memory services
-        ├── elf.rs              # ELF parser, segment loader, entry point extraction
-        ├── firmware.rs         # ACPI / Device Tree address discovery
-        ├── paging.rs           # Initial page table construction (arch-neutral)
-        ├── error.rs            # Bootloader error type
-        └── arch/
-            ├── mod.rs          # Re-exports the active arch module
-            ├── x86_64/
-            │   └── paging.rs   # x86-64 4-level page table implementation
-            └── riscv64/
-                ├── paging.rs   # RISC-V Sv48 page table implementation
-                └── header.S    # Hand-crafted PE32+ header and entry trampoline
+├── Cargo.toml                  # seraph-boot crate (UEFI application)
+├── linker/
+│   └── riscv64-uefi.ld         # Linker script for RISC-V PE/COFF pipeline
+└── src/
+    ├── main.rs                 # efi_main — boot sequence orchestrator
+    ├── config.rs               # Boot configuration file parser (boot.conf)
+    ├── uefi.rs                 # UEFI protocol wrappers and memory services
+    ├── elf.rs                  # ELF parser, segment loader, entry point extraction
+    ├── firmware.rs             # ACPI / Device Tree address discovery
+    ├── paging.rs               # Initial page table construction (arch-neutral)
+    ├── error.rs                # Bootloader error type
+    └── arch/
+        ├── mod.rs              # Re-exports the active arch module
+        ├── x86_64/
+        │   └── paging.rs       # x86-64 4-level page table implementation
+        └── riscv64/
+            ├── paging.rs       # RISC-V Sv48 page table implementation
+            └── header.S        # Hand-crafted PE32+ header and entry trampoline
 ```
 
 ---
 
 ## Crate Structure
 
-**`boot-protocol`** (`boot/protocol/`) — a `no_std` crate with no dependencies.
+**`boot-protocol`** (`shared/boot-protocol/`) — a `no_std` crate with no dependencies.
 Defines `BootInfo` and all associated types as a stable `#[repr(C)]` interface shared
 between the bootloader and the kernel. Also exports the `BOOT_PROTOCOL_VERSION`
 constant. Neither crate links to the other; both depend on `boot-protocol` as a
 workspace member.
 
-**`seraph-boot`** (`boot/loader/`) — the UEFI application. Depends on
-`boot-protocol` for the `BootInfo` type it populates. Architecture-specific code is
-isolated to `arch/*/`; no `#[cfg(target_arch)]` guards appear in the shared modules
-(`uefi.rs`, `elf.rs`, `firmware.rs`, `paging.rs`).
+**`seraph-boot`** (`boot/`) — the UEFI application. Depends on `boot-protocol` for the
+`BootInfo` type it populates. Architecture-specific code is isolated to `arch/*/`;
+no `#[cfg(target_arch)]` guards appear in the shared modules (`uefi.rs`, `elf.rs`,
+`firmware.rs`, `paging.rs`).
 
 ---
 

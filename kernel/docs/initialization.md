@@ -32,8 +32,8 @@ protocol.
 3. Compare against BOOT_PROTOCOL_VERSION
 4. If mismatch: halt immediately (cannot trust any other BootInfo fields)
 5. Validate memory_map.count > 0 and memory_map.entries is non-null
-6. Validate modules.count > 0 (init binary must be present)
-7. Validate modules.entries[0].size > 0 (init binary has content)
+6. Validate init_image.segment_count > 0 (init must have at least one segment)
+7. Validate init_image.entry_point != 0
 ```
 
 No output is produced before step 1 succeeds — the console is not yet available.
@@ -94,7 +94,9 @@ allocator is initialised and all usable frames are added to it.
 3. Remove from the candidate pool:
    a. Frames containing the kernel image
       (boot_info.kernel_physical_base .. kernel_physical_base + kernel_size)
-   b. Frames containing boot modules
+   b. Frames containing init segments
+      (boot_info.init_image.segments[i].phys_addr + size for each i)
+   bb. Frames containing boot modules
       (boot_info.modules.entries[i].physical_base + size for each i)
    c. Frames containing the BootInfo structure itself
    d. Frames containing the bootloader's page tables (if identifiable)
@@ -378,50 +380,52 @@ for all CPUs.
 
 ---
 
-## Phase 9: Init Process Creation
+## Phase 9: Init Creation
 
 **What happens:**
 
-The init binary (first boot module) is loaded and an initial process is created with
-a fully populated CSpace.
+Init's AddressSpace, CSpace, and Thread are created using the pre-parsed segment
+information in `BootInfo.init_image`. The kernel does not parse an ELF file; the
+bootloader has already done that and provided the segment array.
 
 ```
-1. Validate the init ELF:
-   a. Check ELF magic bytes
-   b. Verify e_machine matches the current architecture
-   c. Verify e_type == ET_EXEC (static executable; no dynamic linking in init)
-   d. Verify the entry point is within a LOAD segment
+1. Validate boot_info.init_image:
+   a. Verify segment_count > 0 and <= INIT_MAX_SEGMENTS
+   b. Verify entry_point is within at least one segment's virtual range
+   c. For each segment: verify phys_addr, virt_addr, size are non-zero and
+      that phys_addr + size does not wrap; verify flags is a known discriminant
 2. Create the init address space:
    a. Allocate a new page table (arch::current::Paging::new_page_table())
    b. Map the kernel higher half into the new address space (shared kernel mapping)
-3. Load ELF LOAD segments into the init address space:
-   a. Allocate physical frames for each segment (from buddy allocator)
-   b. Copy segment data from the module's physical memory
-   c. Zero BSS regions
-   d. Map at the segment's virtual address with ELF-specified permissions
+3. Map init segments into the init address space:
+   a. For each InitSegment in init_image.segments[0..segment_count]:
+      - Map at segment.virt_addr from segment.phys_addr with size segment.size
+      - Apply permissions from segment.flags (Read → RO, ReadWrite → RW, ReadExecute → RX)
+      - No copying or zeroing needed — bootloader already loaded and zeroed BSS
 4. Allocate init's user stack:
    a. Allocate INIT_STACK_PAGES frames
    b. Map below INIT_STACK_TOP with read/write permissions
    c. Place a guard page (unmapped) immediately below the stack
-5. Create the init TCB:
+5. Create init's CSpace:
+   a. The root CSpace from Phase 7 becomes init's CSpace
+   b. Add Thread, AddressSpace, and CSpace capabilities for init itself
+   c. Add Frame capabilities for each boot module image (for init to pass to procmgr)
+6. Create init's TCB:
    a. Allocate a kernel stack for init (for syscall handling)
-   b. arch::current::Context::new_state(entry=elf.e_entry, stack_top=INIT_STACK_TOP,
-      arg=root_cspace_descriptor, is_user=true)
+   b. arch::current::Context::new_state(entry=init_image.entry_point,
+      stack_top=INIT_STACK_TOP, arg=root_cspace_descriptor, is_user=true)
    c. Set priority to INIT_PRIORITY (high, but below real-time range)
-6. Create process and thread capabilities for init:
-   a. Allocate ProcessCap and ThreadCap objects
-   b. Insert into the root CSpace (these are how the kernel refers to init)
-7. Transfer the root CSpace to init:
-   a. The CSpace created in Phase 7 becomes init's CSpace
-   b. Init receives its own thread and process capabilities in well-known slots
-   c. Remaining slots hold the hardware capabilities from Phase 7
-8. Enqueue the init TCB on the BSP's run queue at INIT_PRIORITY
-9. Reclaim boot module frames (init binary is now loaded; original mapping unneeded)
-10. Emit: "init process created, entry at 0x{entry:016x}"
+   d. Bind thread to init's AddressSpace and CSpace
+7. Enqueue the init TCB on the BSP's run queue at INIT_PRIORITY
+8. Note: init segment frames are NOT reclaimed — they remain mapped in init's
+   address space and are backed by the physical memory the bootloader allocated.
+   Boot module frames (the raw ELF images for procmgr, devmgr, etc.) are also
+   kept live; init passes Frame capabilities for them to procmgr.
+9. Emit: "init created, entry at 0x{entry:016x}"
 ```
 
-**Failure mode:** ELF validation failure, allocation failure, or inability to map
-segments halts with a diagnostic message indicating which step failed.
+**Failure mode:** Validation failure or allocation failure halts with a diagnostic
+message indicating which step failed.
 
 **Completion criterion:** Init TCB is enqueued and ready to run.
 
@@ -511,5 +515,5 @@ BSP and other CPUs continue.
 | 6 | Platform resource validation | Halt if entries pointer is null with non-zero count; bad entries skipped |
 | 7 | Capability system + root CSpace | Halt: OOM |
 | 8 | Scheduler + idle threads | Halt: OOM |
-| 9 | Init process creation | Halt: invalid ELF or OOM |
+| 9 | Init creation from InitImage segments | Halt: invalid InitImage or OOM |
 | 10 | Scheduler handoff + SMP bringup | AP failure: warning; BSP failure: halt |

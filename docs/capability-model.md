@@ -103,11 +103,17 @@ A capability to a thread. Rights:
 - **Control** — may start, stop, and configure the thread
 - **Observe** — may read the thread's register state (for debugging)
 
-### Process
+### CSpace
 
-A capability to a process. Rights:
-- **Control** — may terminate the process and manage its CSpace
-- **Supervise** — may receive lifecycle events from the process
+A capability to a capability space. Rights:
+- **Insert** — may place a new capability into a slot
+- **Delete** — may clear a slot
+- **Derive** — may derive a new capability from an existing slot
+- **Revoke** — may revoke a capability and all its descendants
+
+CSpace capabilities are used when configuring a new thread (binding a CSpace to
+the thread) and when cross-CSpace capability operations are needed (e.g. init
+populating a new process's CSpace before handing it off).
 
 ### Wait Set
 
@@ -214,12 +220,13 @@ New kernel objects are created via typed syscalls. Each object type has a
 corresponding creation call:
 
 ```
-create_endpoint()   → endpoint_cap (Send + Receive + Grant)
-create_signal()     → signal_cap   (Signal + Wait)
-create_event_queue(capacity) → queue_cap (Post + Recv)
-create_thread(...)  → thread_cap   (Control)
-create_address_space() → aspace_cap (Map)
-create_wait_set()   → wait_set_cap (Modify + Wait)
+create_endpoint()      → endpoint_cap  (Send + Receive + Grant)
+create_signal()        → signal_cap    (Signal + Wait)
+create_event_queue(n)  → queue_cap     (Post + Recv)
+create_thread(...)     → thread_cap    (Control)
+create_address_space() → aspace_cap    (Map)
+create_cspace()        → cspace_cap    (Insert + Delete + Derive + Revoke)
+create_wait_set()      → wait_set_cap  (Modify + Wait)
 ```
 
 The returned capability is placed in a free slot in the caller's CSpace. The caller
@@ -234,8 +241,8 @@ frees the object. Objects do not outlive all references to them.
 
 ## Initial Capability Distribution
 
-At boot, the kernel creates the init process and populates its CSpace with an initial
-set of capabilities covering all available resources:
+At boot, the kernel creates init's Thread, AddressSpace, and CSpace and populates
+the CSpace with an initial set of capabilities covering all available resources:
 
 - Frame capabilities for all usable physical memory
 - MMIO region capabilities for all boot-provided platform resource regions
@@ -245,11 +252,19 @@ set of capabilities covering all available resources:
   allowing userspace to parse ACPI or Device Tree data
 - IoPortRange capabilities for all boot-provided I/O port ranges (x86-64 only)
 - One SchedControl capability (Elevate rights)
-- Thread and process capabilities for init itself
+- Thread, AddressSpace, and CSpace capabilities for init itself
+- Frame capabilities for each boot module image (raw ELF images for early services)
 
 Init is responsible for delegating appropriate subsets of this authority to each service it starts,
 following the principle of least privilege. See [device-management.md](device-management.md#what-devmgr-receives-from-init)
 for devmgr's specific initial capability set.
+
+### "Kill process" pattern
+
+Since there is no Process kernel object, terminating a process is done by revoking
+its AddressSpace capability. The kernel tracks which threads are bound to each
+AddressSpace; on revocation, all bound threads are stopped and removed from run queues.
+The process's resources are reclaimed as their capability reference counts reach zero.
 
 This is the only point at which capabilities are created from nothing. All subsequent
 authority in the system is derived from this initial grant.

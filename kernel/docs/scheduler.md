@@ -178,15 +178,12 @@ pub struct ThreadControlBlock
 
     // === Capability reference ===
 
-    /// CSpace for this thread's process.
+    /// CSpace bound to this thread (set via sys_thread_configure).
     cspace: *mut CSpace,
 
     // === Identity ===
 
-    /// Process this thread belongs to.
-    process_id: ProcessId,
-
-    /// Thread ID within the process.
+    /// Unique thread identifier.
     thread_id: ThreadId,
 }
 ```
@@ -210,7 +207,7 @@ Created ──(SYS_THREAD_START)──► Ready ──(scheduled)──► Runni
                                 Ready
 
 Running ──(SYS_THREAD_STOP)──► Stopped
-Running ──(SYS_PROCESS_EXIT)──► Exited (TCB freed)
+Running ──(SYS_THREAD_EXIT)──► Exited (TCB freed)
 ```
 
 State transitions are protected by the TCB's implicit lock (the scheduler lock on

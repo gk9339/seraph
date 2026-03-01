@@ -10,6 +10,8 @@ assumptions about the environment beyond what this document guarantees.
 The protocol is defined here. The bootloader in `boot/` is the reference implementation.
 Any compliant bootloader that satisfies this contract may be used in its place.
 
+The shared types are in `shared/boot-protocol/` (crate: `boot-protocol`).
+
 ---
 
 ## Boot Flow
@@ -127,7 +129,18 @@ pub struct BootInfo {
     pub kernel_virtual_base: u64,
     pub kernel_size: u64,
 
-    /// Boot modules (e.g. init binary). First entry is always init.
+    /// Pre-parsed init ELF information.
+    ///
+    /// The bootloader fully parses init's ELF and provides the entry point
+    /// and segment array. The kernel maps init directly from these segments
+    /// without needing an ELF parser.
+    pub init_image: InitImage,
+
+    /// Additional boot modules (raw ELF images for early services).
+    ///
+    /// The module set is configured via `boot.conf`. Typical set:
+    /// procmgr, devmgr, one block driver, one FS driver, VFS.
+    /// Net stack is optional; it may be included for network-backed filesystems.
     pub modules: ModuleSlice,
 
     /// Framebuffer, if available. Used for early debug output.
@@ -161,6 +174,49 @@ pub struct BootInfo {
     pub command_line_len: u64,
 }
 ```
+
+### Init Segments
+
+```rust
+#[repr(u32)]
+pub enum SegmentFlags {
+    /// Readable, not writable, not executable (e.g. rodata).
+    Read = 0,
+    /// Readable and writable (e.g. data/bss).
+    ReadWrite = 1,
+    /// Readable and executable (e.g. text).
+    ReadExecute = 2,
+}
+
+#[repr(C)]
+pub struct InitSegment {
+    /// Physical base address where this segment was loaded by the bootloader.
+    pub phys_addr: u64,
+    /// ELF virtual address this segment is mapped at.
+    pub virt_addr: u64,
+    /// Size of the segment in memory (p_memsz; may exceed file data).
+    pub size: u64,
+    /// Page permissions for this segment.
+    pub flags: SegmentFlags,
+}
+
+pub const INIT_MAX_SEGMENTS: usize = 8;
+
+#[repr(C)]
+pub struct InitImage {
+    /// Virtual entry point of init (e_entry from the ELF header).
+    pub entry_point: u64,
+    /// Pre-parsed LOAD segments. Valid entries occupy [0..segment_count].
+    pub segments: [InitSegment; INIT_MAX_SEGMENTS],
+    /// Number of valid entries in segments.
+    pub segment_count: u32,
+}
+```
+
+The bootloader fully parses init's ELF and populates `InitImage`. The kernel maps
+each segment directly from `phys_addr` to `virt_addr` with the given permissions.
+No ELF parsing occurs in the kernel. This is distinct from the other boot modules
+(`modules` slice), which are raw ELF images that init's built-in parser handles.
 
 ### Memory Map
 
@@ -213,10 +269,14 @@ pub struct BootModule {
 }
 ```
 
-The first module (`modules.entries[0]`) is always the init binary, as an ELF
-executable. Additional modules may follow; their purpose is defined by convention
-between the bootloader configuration and the kernel. The kernel must verify the
-ELF headers of each module before use.
+Each module is a raw ELF image for an early userspace service. The set of modules
+loaded is configured via `boot.conf` under the `modules` key. The kernel passes the
+module slice to init via the initial CSpace; init uses its built-in ELF parser to
+start procmgr from the first module, then delegates the remaining modules to procmgr
+for startup.
+
+Minimum module set: procmgr, devmgr, one block driver, one FS driver, VFS.
+The net stack may be included as a module when network-backed filesystems are needed.
 
 ### Framebuffer
 
@@ -341,13 +401,16 @@ version does not match the expected value, the kernel must halt rather than proc
 with a potentially incompatible structure. This prevents silent corruption from
 a mismatched bootloader.
 
-The current protocol version is `2`. This value is incremented whenever the
+The current protocol version is `3`. This value is incremented whenever the
 `BootInfo` structure or CPU entry contract changes in a non-backwards-compatible way.
 
 Version history:
 - **1** — initial protocol.
 - **2** — added `platform_resources` field to `BootInfo`; clarified `acpi_rsdp`
   and `device_tree` as userspace passthrough fields.
+- **3** — added `init_image` (`InitImage`) field to `BootInfo`; changed `modules`
+  from "first entry is init" to "configurable early service modules"; the kernel
+  no longer parses init's ELF.
 
 ---
 

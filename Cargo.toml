@@ -2,13 +2,17 @@
 resolver = "2"
 members = [
     "kernel",
-    "boot/protocol",
-    "boot/loader",
+    "boot",
     "init",
+    "procmgr",
+    "svcmgr",
+    "shared/boot-protocol",
+    "shared/elf",
+    "shared/syscall",
 ]
 
 [workspace.dependencies]
-boot-protocol = { path = "boot/protocol" }
+boot-protocol = { path = "shared/boot-protocol" }
 
 [profile.dev]
 panic = "abort"

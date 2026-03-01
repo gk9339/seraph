@@ -69,7 +69,7 @@ kernel/
 │       ├── ipc.rs              # IPC syscall implementations
 │       ├── cap.rs              # Capability syscall implementations
 │       ├── mm.rs               # Memory syscall implementations
-│       ├── thread.rs           # Thread/process syscall implementations
+│       ├── thread.rs           # Thread syscall implementations
 │       └── wait.rs             # Wait set syscall implementations
 └── docs/
     ├── arch-interface.md       # Architecture abstraction trait definitions
@@ -162,9 +162,12 @@ boot info validation
                                             └─► platform resource validation
                                                     └─► capability system (cap)
                                                     └─► scheduler (sched)
-                                                            └─► init process (cap + mm + sched)
+                                                            └─► init thread (cap + mm + sched)
                                                                     └─► SMP bringup (arch + sched)
 ```
+
+The kernel creates init's AddressSpace, CSpace, and Thread directly from the
+`init_image` segments in `BootInfo` — no ELF parsing occurs in the kernel.
 
 Each arrow means "requires the item above to be complete". Nothing in this chain is
 reversible — a failure at any phase is a fatal boot error.

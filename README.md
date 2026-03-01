@@ -20,12 +20,15 @@ No support for 32-bit or legacy x86.
 | `boot/` | UEFI bootloader |
 | `kernel/` | Microkernel (scheduler, IPC, memory, capabilities) |
 | `libc/` | C standard library |
-| `init/` | Service manager / PID 1 |
+| `init/` | Bootstrap service — starts early services and exits |
+| `procmgr/` | Userspace process lifecycle manager (ELF loading, creation, teardown) |
+| `svcmgr/` | Service health monitor and restart manager |
 | `devmgr/` | Device manager (platform enumeration, driver binding) |
 | `vfs/` | Virtual filesystem server |
 | `net/` | Network stack server |
 | `drivers/` | Userspace device drivers |
 | `base/` | General-purpose userspace applications and utilities |
+| `shared/` | Shared crates (boot protocol, ELF parsing, syscall wrappers) |
 | `docs/` | Architecture and design documentation |
 | `scripts/` | Build system, tooling, and helper scripts |
 

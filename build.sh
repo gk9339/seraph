@@ -74,7 +74,7 @@ build_boot()
     # Linker flags for RISC-V are also in .cargo/config.toml under [target.*].
     # shellcheck disable=SC2086
     cargo build \
-        --manifest-path "${SERAPH_ROOT}/boot/loader/Cargo.toml" \
+        --manifest-path "${SERAPH_ROOT}/boot/Cargo.toml" \
         --target "${boot_triple}" \
         -Zbuild-std=core,compiler_builtins \
         -Zbuild-std-features=compiler-builtins-mem \

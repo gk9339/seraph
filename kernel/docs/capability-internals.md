@@ -113,9 +113,9 @@ pub struct CapabilitySlot
 }
 ```
 
-`SlotId` is a global identifier combining a process ID and a slot index:
-`(ProcessId, usize)`. This allows derivation tree traversal across process boundaries
-without holding per-process CSpace locks longer than necessary.
+`SlotId` is a global identifier combining a CSpace ID and a slot index:
+`(CSpaceId, usize)`. This allows derivation tree traversal across CSpace boundaries
+without holding per-CSpace locks longer than necessary.
 
 ### Capability Tags
 
@@ -130,7 +130,7 @@ pub enum CapTag
     Signal        = 4,
     EventQueue    = 5,
     Thread        = 6,
-    Process       = 7,
+    CSpace        = 7,   // capability space; explicit kernel object
     WaitSet       = 8,
     Interrupt     = 9,
     MmioRegion    = 10,
@@ -173,9 +173,11 @@ bitflags! {
         const CONTROL    = 1 << 10;
         const OBSERVE    = 1 << 11;
 
-        // Process rights
-        // (CONTROL reused; SUPERVISE below)
-        const SUPERVISE  = 1 << 12;
+        // CSpace rights
+        const INSERT     = 1 << 12;  // may place a capability into a slot
+        // (DELETE reuses a bit below)
+        const DERIVE_CAP = 1 << 17;  // may derive a cap from an existing slot
+        const REVOKE_CAP = 1 << 18;  // may revoke a cap and all its descendants
 
         // Wait set rights
         const MODIFY     = 1 << 13;
@@ -330,8 +332,8 @@ all descendants but leaves C and any siblings of C1 untouched.
 
 ```
 resolve(slot_id):
-    process = process_table[slot_id.process_id]  // O(1) from global table
-    return process.cspace.slot(slot_id.index)    // O(1) two-level lookup
+    cspace = cspace_table[slot_id.cspace_id]  // O(1) from global table
+    return cspace.slot(slot_id.index)         // O(1) two-level lookup
 ```
 
 Neither operation requires holding a lock on the target process's CSpace — the
@@ -352,14 +354,15 @@ layout via a well-known structure at the top of init's stack.
 |---|---|
 | 0 | Null (permanent) |
 | 1 | Init's own thread capability |
-| 2 | Init's own process capability |
-| 3 | Root address space capability |
+| 2 | Init's own address space capability |
+| 3 | Init's own CSpace capability |
 | 4 | SchedControl capability (Elevate rights) |
 | 5..N | Frame capabilities (one per usable physical region) |
 | N+1..M | MMIO region capabilities (one per MmioRange / PciEcam / IommuUnit entry) |
 | M+1..K | Interrupt capabilities (one per IrqLine entry) |
 | K+1..L | Read-only Frame capabilities (one per PlatformTable entry) |
 | L+1..P | IoPortRange capabilities (one per IoPortRange entry; x86-64 only) |
+| P+1..Q | Frame capabilities for boot module images (raw ELF for procmgr, devmgr, etc.) |
 
 The exact slot numbers are passed to init in the `KernelHandoff` structure placed
 on init's user stack before it begins execution.

@@ -1,13 +1,67 @@
 # init
 
-Service manager and PID 1. The first userspace process, spawned directly by the
-kernel at the end of boot. init receives the full set of initial capabilities
-(hardware regions, interrupt lines, firmware table access, SchedControl) and is
-responsible for delegating appropriate subsets to each service it starts.
+Bootstrap service and first userspace process. The kernel starts init at the end
+of its initialization sequence. Init is a minimal bootstrapper — it starts early
+services, delegates all capabilities, and exits. It is not a long-lived service
+manager.
 
-init reads a boot configuration, starts system services in dependency order
-(devmgr first, then vfs, net, and drivers), and supervises them — restarting
-services that crash, and revoking their capabilities when they terminate.
+---
 
-Relationship to other components: init is the trust root for all userspace
-authority. No service receives more capability than init explicitly delegates.
+## Role
+
+Init's responsibilities are strictly bounded:
+
+1. **Start procmgr** — init contains a minimal ELF parser (from `shared/elf`)
+   and uses raw syscall wrappers (from `shared/syscall`) to create procmgr's
+   process directly, without IPC. This is the only process init creates itself.
+
+2. **Request early service startup** — init requests procmgr to start the
+   remaining early services in order: devmgr, svcmgr, drivers, VFS, and
+   optionally net.
+
+3. **Delegate capabilities** — for each service, init derives and transfers the
+   appropriate subset of its initial capabilities via IPC. Init retains derived
+   intermediary copies (for potential revocation), not the roots.
+
+4. **Register services with svcmgr** — before exiting, init registers all
+   started services with svcmgr along with their restart policies and capability
+   sets.
+
+5. **Exit** — init calls `sys_thread_exit`. It holds no long-lived state, no
+   supervision capability, and no restart authority. svcmgr takes over.
+
+---
+
+## What init does NOT do
+
+- Does not supervise services or restart them on crash (svcmgr's responsibility)
+- Does not hold raw process-creation fallback capabilities after delegating them
+  to svcmgr
+- Does not read a service dependency graph file at runtime (bootstrap order is
+  compiled in)
+- Does not remain resident after bootstrap completes
+
+---
+
+## Capability flow
+
+At entry, init holds the full initial CSpace populated by the kernel:
+- Thread, AddressSpace, and CSpace caps for itself
+- Frame caps for all usable physical memory
+- MMIO, IRQ, IoPortRange, IommuUnit, and PlatformTable caps from platform resources
+- SchedControl cap
+- Frame caps for boot module images (procmgr, devmgr, drivers, etc.)
+
+Init derives and transfers these to services using the "derive twice" pattern
+(see `docs/capability-model.md`) so it can revoke if needed before svcmgr takes over.
+
+---
+
+## Relevant Design Documents
+
+| Document | Content |
+|---|---|
+| [docs/architecture.md](../docs/architecture.md) | Bootstrap sequence, init/procmgr/svcmgr roles |
+| [docs/boot-protocol.md](../docs/boot-protocol.md) | InitImage, boot modules, initial CSpace |
+| [docs/capability-model.md](../docs/capability-model.md) | Initial capability distribution |
+| [docs/coding-standards.md](../docs/coding-standards.md) | Formatting, naming, safety rules |

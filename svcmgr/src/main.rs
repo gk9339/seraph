@@ -1,13 +1,18 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // Copyright (C) 2026 George Kottler <mail@kottlerg.com>
 
-// init/src/main.rs
+// svcmgr/src/main.rs
 
-//! Seraph init — minimal stub.
+//! Seraph service manager — stub.
 //!
-//! PID 1 service manager stub. Receives control from the kernel after
-//! Phase 9 of its initialisation sequence. This stub halts immediately;
-//! the full init implementation is deferred.
+//! svcmgr monitors running services, restarts them on crash, and holds raw
+//! process-creation syscall capabilities as a fallback to reconstruct procmgr
+//! if procmgr itself crashes. svcmgr is started by init before init exits, and
+//! runs for the lifetime of the system.
+//!
+//! This stub halts immediately. Full implementation is deferred.
+//!
+//! See `svcmgr/README.md` for the design and restart policy.
 
 #![cfg_attr(not(test), no_std)]
 #![cfg_attr(not(test), no_main)]
@@ -15,10 +20,6 @@
 #[cfg(not(test))]
 use core::panic::PanicInfo;
 
-/// Init entry point. Called by the kernel as the first userspace process.
-///
-/// This stub halts immediately. Set a GDB breakpoint here to confirm
-/// kernel-to-userspace handoff succeeded.
 #[cfg(not(test))]
 #[no_mangle]
 pub extern "C" fn _start() -> !
@@ -26,7 +27,6 @@ pub extern "C" fn _start() -> !
     halt_loop();
 }
 
-/// Disable interrupts and halt the CPU permanently.
 fn halt_loop() -> !
 {
     loop

@@ -44,9 +44,9 @@ byte ranges.
 
 ## devmgr: Userspace Device Manager
 
-`devmgr` is a privileged userspace process launched by init early in the service
-startup sequence. It is the single point responsible for platform enumeration and
-driver binding in a running system.
+`devmgr` is a privileged userspace process launched during bootstrap (started by init
+via procmgr). It is the single point responsible for platform enumeration and driver
+binding in a running system.
 
 ### What devmgr receives from init
 
@@ -163,4 +163,4 @@ init
 
 devmgr is not a dependency of vfs or net directly — those services receive device
 endpoints after devmgr has completed initial binding. The dependency ordering is
-managed by init's service supervision graph.
+managed by init's bootstrap sequence (for early boot) and svcmgr (for restarts).

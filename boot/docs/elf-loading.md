@@ -2,13 +2,18 @@
 
 ## Overview
 
-The bootloader loads two categories of ELF binaries from the EFI System Partition:
-the kernel ELF and one or more boot modules. The kernel ELF is loaded with full
-validation and segment placement; boot modules are loaded as opaque flat binaries.
-Both are placed in physical memory allocated via UEFI before `ExitBootServices`.
+The bootloader loads three categories of binaries from the EFI System Partition:
 
-W^X is enforced at load time. Any ELF segment with both write and execute permissions
-is a fatal error — the bootloader will not establish a mapping it cannot make safe.
+- **Kernel ELF** — fully validated and loaded at ELF-specified physical addresses.
+- **Init ELF** — fully validated and ELF-parsed; segments allocated at any available
+  physical address. Result is an `InitImage` passed to the kernel in `BootInfo.init_image`.
+- **Boot modules** — opaque flat binaries loaded verbatim into physical memory and
+  passed to the kernel via `BootInfo.modules`. The bootloader does not inspect or
+  interpret their content; what they are is init's concern.
+
+All loading occurs before `ExitBootServices`. W^X is enforced for the kernel and
+init ELFs at load time: any `PT_LOAD` segment with both write and execute permissions
+is a fatal error.
 
 ---
 
@@ -21,12 +26,13 @@ come from `\EFI\seraph\boot.conf`, parsed before any file loading occurs (see
 | File | Config key | Default path on ESP |
 |---|---|---|
 | Kernel | `kernel` | `\EFI\seraph\seraph-kernel` |
-| Init binary (first module) | `init` | `\sbin\init` |
+| Init binary | `init` | `\EFI\seraph\init` |
+| Boot modules | future `boot.conf` keys | — |
 
-All paths use backslash separators as required by the UEFI file protocol. Both files
-must be present at their configured paths; their absence is a fatal error. Additional
-modules beyond init are an extension point; their paths would be added as new keys in
-`boot.conf`.
+All paths use backslash separators as required by the UEFI file protocol. The kernel
+and init keys are required; their absence is a fatal error. Additional module paths
+are an extension point via new keys in `boot.conf`; the parser silently skips
+unknown keys, so old bootloader binaries are unaffected by additions.
 
 ---
 
@@ -56,10 +62,9 @@ fatal. The checks, in order:
 Validation of `e_entry` (check 10) requires reading the program headers first; this
 check is performed after the program headers are read.
 
-Boot modules (including init) are not ELF-validated by the bootloader. They are
-treated as opaque byte sequences and loaded into contiguous physical memory. The
-kernel ELF-validates each module in Phase 9 of its initialisation sequence before
-execution.
+The same ten checks apply to the init ELF. Boot modules (the `BootInfo.modules`
+slice) are not ELF-validated by the bootloader — they are loaded as opaque flat
+binaries. Their validation and execution is init's responsibility.
 
 ---
 
@@ -120,10 +125,35 @@ In practice, the page tables are installed in the bootloader before the jump
 
 ---
 
+## Init ELF Loading
+
+Init is loaded and pre-parsed into an `InitImage` for the kernel. The procedure
+differs from kernel loading in one key respect: init is a userspace ELF whose
+`p_paddr` values are in low memory already occupied by UEFI firmware, so segments
+are allocated at any available physical address via `AllocateAnyPages` rather than
+`AllocateAddress`.
+
+```
+For each PT_LOAD segment:
+1. AllocatePages(AllocateAnyPages, EfiLoaderData, page_count, &phys_base).
+   page_count = ceil(p_memsz / PAGE_SIZE).
+2. Copy p_filesz bytes from file offset p_offset into phys_base.
+3. Zero the BSS tail: memset(phys_base + p_filesz, 0, p_memsz - p_filesz).
+4. Record an InitSegment { phys_addr, virt_addr: p_vaddr, size: p_memsz, flags }.
+```
+
+`flags` is derived from `p_flags`: `ReadExecute` if `PF_X` is set, `ReadWrite` if
+`PF_W` is set (and `PF_X` is not), otherwise `Read`. The resulting `InitImage`
+(entry point + segment array) is stored in `BootInfo.init_image`. The kernel uses
+the `phys_addr`/`virt_addr` pairs to build init's page tables without an ELF parser.
+
+---
+
 ## Boot Module Loading
 
-Boot modules are loaded as flat binary regions. The init binary is always loaded
-first and occupies `modules.entries[0]`. Module loading:
+Boot modules are flat binary images for early userspace services (e.g. procmgr,
+devmgr). The bootloader loads whatever files `boot.conf` specifies; it does not
+interpret their purpose.
 
 ```
 1. Open the module file and query its size via EFI_FILE_INFO.
@@ -132,27 +162,19 @@ first and occupies `modules.entries[0]`. Module loading:
 3. Read the entire file into the allocated region.
 4. The allocated region may be larger than the file if the file size is not
    page-aligned; the extra bytes at the end are unused (not explicitly zeroed).
-5. Record phys_base and file_size in a BootModule entry.
+5. Record phys_base and file_size in a BootModule entry in BootInfo.modules.
 ```
 
-The physical address chosen by `AllocateAnyPages` is recorded as `BootModule.physical_base`.
-The file size (not the rounded allocation size) is recorded as `BootModule.size`, so
-the kernel knows the exact extent of valid data. The kernel ELF-validates each module
-before use.
+`BootModule.size` records the exact file size (not the rounded allocation size).
+Init receives the module slice via its initial CSpace and is responsible for
+validating and starting each service.
 
 ---
 
 ## Extensibility
 
-Kernel and init paths are specified in `\EFI\seraph\boot.conf` rather than
-hard-coded in the bootloader binary. Future extension points:
-
-- Additional module paths can be added as new keys in `boot.conf`; the parser
-  silently skips unknown keys, so old bootloader binaries are unaffected.
-- The `BootInfo.modules` array can accommodate any number of modules; the kernel
-  iterates `modules.count` without assuming a fixed count.
-- Additional modules would follow init in the array, with their purpose established
-  by convention between the kernel and the service using them.
-
-These extensions do not require protocol changes as long as the first module remains
-init and `BootInfo.modules.count` is accurate.
+All file paths come from `\EFI\seraph\boot.conf`, not hard-coded in the bootloader
+binary. Adding boot modules requires only new keys in `boot.conf`; the parser
+silently skips unknown keys, so existing bootloader binaries are unaffected.
+`BootInfo.modules.count` accurately reflects however many modules were loaded; the
+kernel and init iterate it without assuming a fixed count or fixed ordering.

@@ -57,12 +57,23 @@ executable permissions is a fatal error.
 
 Detail: [elf-loading.md](elf-loading.md)
 
-### Step 4: Load Boot Modules
+### Step 4: Load Init ELF and Boot Modules
 
-Boot modules are loaded from the ESP. The init binary path comes from the `init`
-key in `boot.conf` (default: `\sbin\init`) and is always the first module
-(`modules.entries[0]`). Each module is loaded as a contiguous physical allocation.
-The base address and size of each module are recorded for inclusion in `BootInfo`.
+**Init** is loaded from the path specified by the `init` key in `boot.conf`. It
+receives full ELF treatment: header validation, W^X check, and per-segment loading.
+Each `PT_LOAD` segment is allocated at any available physical address via
+`AllocateAnyPages` (not at `p_paddr`, which conflicts with UEFI low-memory use),
+file data is copied in, and the BSS tail is zeroed. The result is an `InitImage`
+containing the virtual entry point and one `InitSegment` per LOAD segment, each
+recording its physical allocation address, ELF virtual address, size, and
+permissions. This is stored in `BootInfo.init_image`.
+
+**Boot modules** are flat binary images listed in `boot.conf` beyond the `init` key.
+Each module is loaded via `AllocateAnyPages`, the file data is copied verbatim, and
+a `BootModule` entry recording `physical_base` and `size` is appended to
+`BootInfo.modules`. The bootloader does not inspect or interpret module content;
+what the modules are and in what order they are started is entirely init's concern.
+Typical modules: procmgr, devmgr, block driver, FS driver, vfsd.
 
 Detail: [elf-loading.md](elf-loading.md)
 
@@ -115,7 +126,7 @@ Detail: [uefi-environment.md](uefi-environment.md)
 
 `BootInfo` is populated in-place in a physical memory region allocated before step 8.
 All pointer and address fields hold physical addresses; no virtual addresses appear in
-`BootInfo`. The `version` field is set to `BOOT_PROTOCOL_VERSION` (currently `2`).
+`BootInfo`. The `version` field is set to `BOOT_PROTOCOL_VERSION` (currently `3`).
 Fields are populated as follows:
 
 | Field | Source |
@@ -125,7 +136,8 @@ Fields are populated as follows:
 | `kernel_physical_base` | Physical address of kernel LOAD segments from step 3 |
 | `kernel_virtual_base` | ELF virtual base address from step 3 |
 | `kernel_size` | Total span of kernel ELF LOAD segments from step 3 |
-| `modules` | Physical base and size of each boot module from step 4 |
+| `init_image` | Pre-parsed init ELF segments and entry point from step 4 |
+| `modules` | Physical base and size of each additional boot module from step 4; empty if none configured |
 | `framebuffer` | GOP framebuffer from step 1 (zeroed if GOP is absent) |
 | `acpi_rsdp` | Physical address of ACPI RSDP from step 5; zero if GUID absent |
 | `device_tree` | Physical address of DTB from step 5; zero if GUID absent |
@@ -207,7 +219,7 @@ bootloader and the kernel. Its constraints:
   UEFI bootloader and the `no_std` kernel without modification
 - **`#[repr(C)]`** on all shared types — layout must be stable across independently
   compiled crates and future compiler versions
-- **`BOOT_PROTOCOL_VERSION: u32 = 2`** — a version constant embedded by both the
+- **`BOOT_PROTOCOL_VERSION: u32 = 3`** — a version constant embedded by both the
   bootloader and the kernel; the kernel halts at entry if the field value does not
   match this constant
 

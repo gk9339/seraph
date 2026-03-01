@@ -1,0 +1,10 @@
+[package]
+name = "xtask"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# xtask builds on the host; std is available.
+[[bin]]
+name = "xtask"
+path = "src/main.rs"

@@ -156,11 +156,11 @@ init
  │    ├── driver/ethernet  (MMIO cap, IRQ cap, DMA grant)
  │    ├── driver/nvme      (MMIO cap, IRQ cap, DMA grant)
  │    └── driver/usb-hcd   (MMIO cap, IRQ cap, DMA grant)
- ├── vfs  (receives storage endpoint from devmgr)
- ├── net  (receives network endpoint from devmgr)
+ ├── vfsd  (receives storage endpoint from devmgr)
+ ├── netd  (receives network endpoint from devmgr)
  └── ...
 ```
 
-devmgr is not a dependency of vfs or net directly — those services receive device
+devmgr is not a dependency of vfsd or netd directly — those services receive device
 endpoints after devmgr has completed initial binding. The dependency ordering is
 managed by init's bootstrap sequence (for early boot) and svcmgr (for restarts).

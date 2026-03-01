@@ -5,13 +5,13 @@
 
 # Enable JSON target spec files and set the directory rustc searches for custom
 # target specs by triple name (e.g. --target x86_64-seraph-none resolves to
-# scripts/targets/x86_64-seraph-none.json). json-target-spec is benign on host
+# targets/x86_64-seraph-none.json). json-target-spec is benign on host
 # builds — it enables parsing, not forces it.
 [unstable]
 json-target-spec = true
 
 [env]
-RUST_TARGET_PATH = { value = "scripts/targets", relative = true }
+RUST_TARGET_PATH = { value = "targets", relative = true }
 
 [build]
 rustflags = ["-Zunstable-options"]

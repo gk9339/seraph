@@ -136,7 +136,7 @@ and is compiled with a custom target specification for each architecture:
 | x86-64 | `x86_64-seraph-none` |
 | RISC-V | `riscv64gc-seraph-none` |
 
-Custom target JSON files live in `scripts/targets/`. They specify the code model,
+Custom target JSON files live in `targets/`. They specify the code model,
 relocation model, and disable features the kernel cannot use (SSE/AVX before explicit
 initialization, for example).
 

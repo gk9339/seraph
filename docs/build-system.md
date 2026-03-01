@@ -32,21 +32,31 @@ with its own `Cargo.toml`. Components targeting different compilation targets ar
 separate crates; types shared between them are extracted into library crates.
 
 ```
-Cargo.toml                    # Virtual workspace root
+Cargo.toml                    # Virtual workspace root (default-members = ["xtask"])
+├── abi/
+│   ├── boot-protocol/        # BootInfo types (no_std lib) — boot ABI
+│   └── syscall/              # Syscall numbers, argument layout, return codes (no_std lib)
 ├── kernel/                   # Microkernel (no_std; custom target)
-├── boot/
-│   ├── protocol/             # Shared BootInfo types (no_std lib)
-│   └── loader/               # UEFI bootloader application (no_std)
-└── (future)
-    ├── init/
-    ├── devmgr/
-    └── drivers/
+├── boot/                     # UEFI bootloader (no_std; UEFI target)
+├── init/                     # Bootstrap process (no_std; kernel target)
+├── shared/
+│   ├── elf/                  # ELF parser (no_std lib)
+│   └── syscall/              # Inline-asm syscall wrappers — userspace only (no_std lib)
+└── xtask/                    # Build task runner (std; host target)
 ```
 
-`boot/protocol` is a `#![no_std]` library containing the `BootInfo` structure
-and associated types. Both `boot/loader` and `kernel` depend on it. This crate
-is the single source of truth for the boot protocol ABI; the design is specified
-in [`docs/boot-protocol.md`](boot-protocol.md).
+`abi/boot-protocol` is a `#![no_std]` library containing the `BootInfo` structure
+and associated types. Both the bootloader and kernel depend on it. This crate is the
+single source of truth for the boot protocol ABI; the design is specified in
+[`docs/boot-protocol.md`](boot-protocol.md).
+
+`abi/syscall` defines syscall numbers, argument layout, and return codes. It is
+the single source of truth for the syscall ABI; both the kernel and userspace
+import it. Inline assembly that invokes syscalls lives in `shared/syscall`.
+
+Setting `default-members = ["xtask"]` means bare `cargo build` and `cargo run`
+operate only on the host-target xtask binary. Components using custom embedded
+targets must be built via `build.sh`.
 
 ---
 
@@ -56,7 +66,7 @@ The kernel cannot be compiled with standard Rust targets because it requires
 specific hardware configuration: no red zone, no SSE/AVX before explicit
 initialisation, and the kernel code model for higher-half placement.
 
-Custom target JSON specifications live in `scripts/targets/`:
+Custom target JSON specifications live in `targets/`:
 
 | File | Architecture | Key properties |
 |---|---|---|
@@ -162,9 +172,11 @@ For test naming conventions and requirements (what must be tested, what should n
 
 ---
 
-## Future: xtask
+## xtask
 
-When the build becomes complex enough to require disk image assembly, multi-stage
-builds, or integration test orchestration, the shell scripts will be supplemented
-or replaced by a `cargo xtask` pattern — a Rust program in `xtask/` that provides
-the same interface but with the full expressive power of Rust for build logic.
+`xtask/` is a Rust binary crate that runs on the host and will absorb the shell
+scripts in `scripts/` as the build grows more complex. Run it with `cargo xtask
+<command>`. Currently a stub; see `xtask/src/main.rs` for planned commands.
+
+The shell scripts (`build.sh`, `clean.sh`, `run.sh`) remain the primary build
+interface until xtask is implemented.

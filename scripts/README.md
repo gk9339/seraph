@@ -105,7 +105,7 @@ They require `-Zbuild-std=core,alloc,compiler_builtins` (passed by the build scr
 
 ## Adding a New Architecture
 
-1. Add a `scripts/targets/<triple>.json` following the existing specs
+1. Add a `targets/<triple>.json` following the existing specs
 2. Add cases for the new arch in `validate_arch`, `kernel_target_triple`,
    `kernel_target_json`, `boot_target_triple`, and `boot_efi_filename`
    in `scripts/env.sh`

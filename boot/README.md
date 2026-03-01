@@ -10,7 +10,7 @@ The boot protocol contract — CPU state at entry, `BootInfo` structure layout, 
 `PlatformResource` format — is documented in
 [docs/boot-protocol.md](../docs/boot-protocol.md).
 
-The shared protocol types live in [`shared/boot-protocol/`](../shared/boot-protocol/).
+The shared protocol types live in [`abi/boot-protocol/`](../abi/boot-protocol/).
 
 ---
 
@@ -42,7 +42,7 @@ boot/
 
 ## Crate Structure
 
-**`boot-protocol`** (`shared/boot-protocol/`) — a `no_std` crate with no dependencies.
+**`boot-protocol`** (`abi/boot-protocol/`) — a `no_std` crate with no dependencies.
 Defines `BootInfo` and all associated types as a stable `#[repr(C)]` interface shared
 between the bootloader and the kernel. Also exports the `BOOT_PROTOCOL_VERSION`
 constant. Neither crate links to the other; both depend on `boot-protocol` as a

@@ -6,13 +6,20 @@ members = [
     "init",
     "procmgr",
     "svcmgr",
-    "shared/boot-protocol",
+    "abi/boot-protocol",
+    "abi/syscall",
     "shared/elf",
     "shared/syscall",
+    "xtask",
 ]
 
+# default-members limits bare `cargo build`/`cargo run` to xtask only.
+# Components targeting custom/embedded targets are built via build.sh.
+default-members = ["xtask"]
+
 [workspace.dependencies]
-boot-protocol = { path = "shared/boot-protocol" }
+boot-protocol = { path = "abi/boot-protocol" }
+syscall-abi = { path = "abi/syscall" }
 
 [profile.dev]
 panic = "abort"

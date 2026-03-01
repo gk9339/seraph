@@ -10,7 +10,7 @@ assumptions about the environment beyond what this document guarantees.
 The protocol is defined here. The bootloader in `boot/` is the reference implementation.
 Any compliant bootloader that satisfies this contract may be used in its place.
 
-The shared types are in `shared/boot-protocol/` (crate: `boot-protocol`).
+The shared types are in `abi/boot-protocol/` (crate: `boot-protocol`).
 
 ---
 
@@ -275,8 +275,8 @@ module slice to init via the initial CSpace; init uses its built-in ELF parser t
 start procmgr from the first module, then delegates the remaining modules to procmgr
 for startup.
 
-Minimum module set: procmgr, devmgr, one block driver, one FS driver, VFS.
-The net stack may be included as a module when network-backed filesystems are needed.
+Minimum module set: procmgr, devmgr, one block driver, one FS driver, vfsd.
+netd may be included as a module when network-backed filesystems are needed.
 
 ### Framebuffer
 

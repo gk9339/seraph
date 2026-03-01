@@ -91,14 +91,26 @@ Device drivers run as isolated userspace processes. Each driver accesses hardwar
 through capabilities granted by devmgr and the kernel. No driver code executes in
 kernel space.
 
-**vfs**
-The virtual filesystem server. vfs provides a unified namespace over one or more
-filesystem implementations, which may run as separate processes. Block device access
-is mediated via driver IPC.
+**vfsd**
+The virtual filesystem daemon. vfsd provides a unified namespace over one or more
+filesystem driver processes (see `fs/`). Block device access is mediated via driver
+IPC; vfsd delegates per-filesystem operations to the appropriate fs driver.
 
-**net**
-The network stack server. net manages network interfaces via driver IPC, implements
+**fs drivers**
+Filesystem implementations (FAT, ext4, tmpfs, etc.) run as separate binaries in
+`fs/`, launched by vfsd. Each fs driver communicates with block device drivers in
+`drivers/` via IPC and with vfsd via the fs driver IPC protocol. Filesystem drivers
+are distinct from hardware device drivers: they operate on block I/O streams, not
+hardware registers.
+
+**netd**
+The network stack daemon. netd manages network interfaces via driver IPC, implements
 network protocols, and exposes socket‑like interfaces to applications.
+
+**logd**
+The logging daemon. logd receives structured log messages via IPC from the kernel and
+all userspace components, and routes them to configured sinks. The kernel retains a
+direct serial logger for pre-logd output and panic reporting.
 
 **base**
 General‑purpose userspace applications and utilities (shell, terminal, editor,
@@ -134,21 +146,21 @@ Bootloader → kernel_entry
 
 init
     → start procmgr (built-in ELF parser + raw syscalls)
-    → request: start devmgr, svcmgr, drivers, VFS [, net]
+    → request: start devmgr, svcmgr, drivers, vfsd [, netd]
     → delegate capabilities to each service
     → exit
 
 procmgr    — all subsequent process creation goes through here
 devmgr     — platform enumeration, driver binding
 drivers    — block, FS, [net], etc.
-VFS        — unified filesystem namespace
+vfsd       — unified filesystem namespace
 svcmgr     — service monitoring, restarts, procmgr fallback
-[net]      — network stack (optional early-boot module)
+[netd]     — network stack (optional early-boot module)
 ```
 
 Boot modules (procmgr, devmgr, drivers, etc.) are configurable via `boot.conf`.
 The bootloader loads the configured set from the ESP; init starts them in order.
-The minimum set is: procmgr, devmgr, one block driver, one FS driver, VFS.
+The minimum set is: procmgr, devmgr, one block driver, one FS driver, vfsd.
 
 ---
 

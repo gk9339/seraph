@@ -1,0 +1,10 @@
+[package]
+name = "syscall-abi"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# no_std: this crate defines the syscall ABI and must be usable in both
+# kernel (no_std) and userspace contexts.
+[lib]
+name = "syscall_abi"

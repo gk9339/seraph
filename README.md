@@ -17,20 +17,27 @@ No support for 32-bit or legacy x86.
 
 | Directory | Purpose |
 |---|---|
-| `boot/` | UEFI bootloader |
-| `kernel/` | Microkernel (scheduler, IPC, memory, capabilities) |
-| `libc/` | C standard library |
-| `init/` | Bootstrap service — starts early services and exits |
-| `procmgr/` | Userspace process lifecycle manager (ELF loading, creation, teardown) |
-| `svcmgr/` | Service health monitor and restart manager |
-| `devmgr/` | Device manager (platform enumeration, driver binding) |
-| `vfs/` | Virtual filesystem server |
-| `net/` | Network stack server |
-| `drivers/` | Userspace device drivers |
+| `abi/` | ABI-defining crates (boot-protocol, syscall) — stable cross-boundary contracts |
 | `base/` | General-purpose userspace applications and utilities |
-| `shared/` | Shared crates (boot protocol, ELF parsing, syscall wrappers) |
+| `boot/` | UEFI bootloader |
+| `devmgr/` | Device manager (platform enumeration, driver binding) |
 | `docs/` | Architecture and design documentation |
-| `scripts/` | Build system, tooling, and helper scripts |
+| `drivers/` | Hardware device drivers (userspace, managed by devmgr) |
+| `fs/` | Filesystem driver implementations (FAT, ext4, tmpfs, …; managed by vfsd) |
+| `init/` | Bootstrap service — starts early services and exits |
+| `kernel/` | Microkernel (scheduler, IPC, memory, capabilities) |
+| `libc/` | POSIX compatibility layer |
+| `logd/` | Logging daemon — receives log messages from kernel and userspace via IPC |
+| `netd/` | Network stack daemon |
+| `procmgr/` | Userspace process lifecycle manager (ELF loading, creation, teardown) |
+| `rootfs/` | System files installed into the sysroot during builds (boot.conf, fonts, …) |
+| `ruststd/` | Rust standard library platform layer (`std::sys::seraph`) |
+| `scripts/` | Build helpers (`env.sh`) — to be absorbed by xtask |
+| `shared/` | Shared utility crates (ELF parsing, syscall wrappers) |
+| `svcmgr/` | Service health monitor and restart manager |
+| `targets/` | Custom Rust target JSON specs for cross-compilation |
+| `vfsd/` | Virtual filesystem daemon |
+| `xtask/` | Build task runner (`cargo xtask`) |
 
 ## Documentation
 

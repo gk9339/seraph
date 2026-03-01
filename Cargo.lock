@@ -39,3 +39,11 @@ version = "0.1.0"
 [[package]]
 name = "seraph-syscall"
 version = "0.1.0"
+
+[[package]]
+name = "syscall-abi"
+version = "0.1.0"
+
+[[package]]
+name = "xtask"
+version = "0.1.0"

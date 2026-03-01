@@ -205,7 +205,7 @@ The key symbols exported by the linker script for use in `header.S`:
 ## Custom Target JSON
 
 The RISC-V bootloader uses a custom Cargo target specification,
-`scripts/targets/riscv64gc-seraph-uefi.json`. Key differences from the kernel target
+`targets/riscv64gc-seraph-uefi.json`. Key differences from the kernel target
 (`riscv64gc-seraph-none.json`):
 
 | Field | UEFI bootloader | Kernel |

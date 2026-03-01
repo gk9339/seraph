@@ -435,7 +435,7 @@ A new architecture port must:
 
 1. Create `kernel/src/arch/<arch>/` with the module files listed above
 2. Implement every trait in this document — the compiler enforces completeness
-3. Add a custom target JSON in `scripts/targets/`
+3. Add a custom target JSON in `targets/`
 4. Add a linker script in `kernel/linker/`
 5. Add the `#[cfg]` branch in `arch/mod.rs`
 6. Add the target to the workspace build configuration

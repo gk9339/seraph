@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // Copyright (C) 2026 George Kottler <mail@kottlerg.com>
 
-// boot/src/font.rs
+// shared/font/src/lib.rs
+
+#![no_std]
 
 //! Embedded 9×20 bitmap font.
 //!

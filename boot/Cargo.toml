@@ -6,3 +6,4 @@ publish = false
 
 [dependencies]
 boot-protocol = { workspace = true }
+seraph-font = { workspace = true }

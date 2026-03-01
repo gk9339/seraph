@@ -9,6 +9,7 @@ members = [
     "abi/boot-protocol",
     "abi/syscall",
     "shared/elf",
+    "shared/font",
     "shared/syscall",
     "xtask",
 ]
@@ -19,6 +20,7 @@ default-members = ["xtask"]
 
 [workspace.dependencies]
 boot-protocol = { path = "abi/boot-protocol" }
+seraph-font = { path = "shared/font" }
 syscall-abi = { path = "abi/syscall" }
 
 [profile.dev]

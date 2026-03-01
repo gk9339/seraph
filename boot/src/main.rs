@@ -27,7 +27,6 @@ mod console;
 mod elf;
 mod error;
 mod firmware;
-mod font;
 mod framebuffer;
 mod memory_map;
 mod paging;

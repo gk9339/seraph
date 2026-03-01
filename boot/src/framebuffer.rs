@@ -9,7 +9,7 @@
 //! RGBX/BGRX framebuffer. Tracks cursor position, handles line wrap,
 //! and scrolls when the last row is filled.
 
-use crate::font::{FONT_9X20, GLYPH_HEIGHT, GLYPH_WIDTH};
+use seraph_font::{FONT_9X20, GLYPH_HEIGHT, GLYPH_WIDTH};
 use boot_protocol::{FramebufferInfo, PixelFormat};
 
 /// Framebuffer text renderer.

@@ -1,6 +1,7 @@
 # libc
 
-POSIX compatibility layer for Seraph userspace. Provides the C runtime and
+C standard library and POSIX compatibility layer for Seraph userspace.
+Implements the C standard library (stdio, stdlib, string, math, etc.) and
 standard POSIX interfaces for components written in C or targeting C-compatible
 FFI. Wraps Seraph's native syscall ABI with a POSIX-shaped surface (file
 descriptors, `read`/`write`, etc.).

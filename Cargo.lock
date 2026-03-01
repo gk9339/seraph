@@ -11,10 +11,15 @@ name = "seraph-boot"
 version = "0.1.0"
 dependencies = [
  "boot-protocol",
+ "seraph-font",
 ]
 
 [[package]]
 name = "seraph-elf"
+version = "0.1.0"
+
+[[package]]
+name = "seraph-font"
 version = "0.1.0"
 
 [[package]]

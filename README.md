@@ -26,7 +26,7 @@ No support for 32-bit or legacy x86.
 | `fs/` | Filesystem driver implementations (FAT, ext4, tmpfs, …; managed by vfsd) |
 | `init/` | Bootstrap service — starts early services and exits |
 | `kernel/` | Microkernel (scheduler, IPC, memory, capabilities) |
-| `libc/` | POSIX compatibility layer |
+| `libc/` | C standard library and POSIX compatibility layer |
 | `logd/` | Logging daemon — receives log messages from kernel and userspace via IPC |
 | `netd/` | Network stack daemon |
 | `procmgr/` | Userspace process lifecycle manager (ELF loading, creation, teardown) |

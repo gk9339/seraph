@@ -105,11 +105,11 @@ trap 'stty sane 2>/dev/null; printf "\033[8;%s;%st\033[?25h" "${_ORIG_ROWS}" "${
 
 EFI_NAME="$(boot_efi_filename "${ARCH}")"
 BOOT_EFI="${SERAPH_SYSROOT}/EFI/BOOT/${EFI_NAME}"
-KERNEL_BIN="${SERAPH_SYSROOT}/EFI/seraph/seraph-kernel"
+KERNEL_BIN="${SERAPH_SYSROOT}/EFI/seraph/kernel"
+INIT_BIN="${SERAPH_SYSROOT}/EFI/seraph/init"
 
 [[ -f "${BOOT_EFI}" ]] || die "bootloader not found: ${BOOT_EFI}"
 [[ -f "${KERNEL_BIN}" ]] || die "kernel not found: ${KERNEL_BIN}"
-INIT_BIN="${SERAPH_SYSROOT}/sbin/init"
 [[ -f "${INIT_BIN}" ]] || die "init not found: ${INIT_BIN}"
 
 # ── Build common QEMU args ────────────────────────────────────────────────────

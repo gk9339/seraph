@@ -150,15 +150,39 @@ build_init()
     fi
 }
 
-install_boot_conf()
+# install_config: copy all files from config/ into the sysroot, preserving
+# their relative paths. Each file's destination directory is created as needed.
+# To add a new config file, place it under config/ — no build script changes
+# required.
+install_config()
 {
-    mkdir -p "${SYSROOT_EFI_SERAPH}"
-    cat > "${SYSROOT_EFI_SERAPH}/boot.conf" <<'EOF'
-# Seraph boot configuration
-kernel=\EFI\seraph\seraph-kernel
-init=\sbin\init
-EOF
-    step "Boot config: ${SYSROOT_EFI_SERAPH}/boot.conf"
+    local src_root="${SERAPH_ROOT}/config"
+    local dst_root="${SERAPH_SYSROOT}"
+
+    # Map config/ subdirectory names to sysroot destinations.
+    # config/boot.conf -> sysroot/EFI/seraph/boot.conf
+    # Add entries here as new config subtrees are introduced.
+    declare -A DEST_MAP=(
+        ["boot.conf"]="${SYSROOT_EFI_SERAPH}/boot.conf"
+    )
+
+    while IFS= read -r -d '' src_file
+    do
+        local rel="${src_file#"${src_root}/"}"
+        local dst
+
+        if [[ -v DEST_MAP["${rel}"] ]]
+        then
+            dst="${DEST_MAP["${rel}"]}"
+        else
+            # Default: mirror the config/ layout directly under sysroot/.
+            dst="${dst_root}/${rel}"
+        fi
+
+        mkdir -p "$(dirname "${dst}")"
+        cp "${src_file}" "${dst}"
+        step "Config: ${dst}"
+    done < <(find "${src_root}" -type f -print0 | sort -z)
 }
 
 # ── Dispatch ──────────────────────────────────────────────────────────────────
@@ -177,7 +201,7 @@ case "${COMPONENT}" in
         build_boot
         build_kernel
         build_init
-        install_boot_conf
+        install_config
         ;;
     *)
         die "unknown component '${COMPONENT}' (supported: boot, kernel, init, all)"

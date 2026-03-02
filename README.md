@@ -32,12 +32,29 @@ No support for 32-bit or legacy x86.
 | `procmgr/` | Userspace process lifecycle manager (ELF loading, creation, teardown) |
 | `rootfs/` | System files installed into the sysroot during builds (boot.conf, fonts, …) |
 | `ruststd/` | Rust standard library platform layer (`std::sys::seraph`) |
-| `scripts/` | Build helpers (`env.sh`) — to be absorbed by xtask |
 | `shared/` | Shared utility crates (ELF parsing, syscall wrappers) |
 | `svcmgr/` | Service health monitor and restart manager |
 | `targets/` | Custom Rust target JSON specs for cross-compilation |
 | `vfsd/` | Virtual filesystem daemon |
 | `xtask/` | Build task runner (`cargo xtask`) |
+
+## Usage
+
+All build, run, and test operations go through `cargo xtask`. See `xtask/README.md`
+for the full command reference.
+
+```sh
+cargo xtask build                        # build all components (x86_64, debug)
+cargo xtask build --arch riscv64         # build for RISC-V
+cargo xtask build --component boot       # build a single component
+cargo xtask run                          # build + launch under QEMU
+cargo xtask run --gdb                    # pause at startup, GDB on localhost:1234
+cargo xtask clean                        # remove sysroot/
+cargo xtask clean --all                  # remove sysroot/ and target/
+cargo xtask test                         # run all workspace tests on the host
+```
+
+---
 
 ## Documentation
 
@@ -49,6 +66,7 @@ Overall project design documents live in [`docs/`](docs/):
 - [Capability Model](docs/capability-model.md) — permissions, delegation, revocation
 - [Boot Protocol](docs/boot-protocol.md) — UEFI boot flow, boot info contract, kernel entry requirements
 - [Device Management](docs/device-management.md) — platform enumeration, devmgr, driver binding, DMA safety
+- [Build System](docs/build-system.md) — toolchain, workspace layout, sysroot, xtask commands
 - [Coding Standards](docs/coding-standards.md) — Rust conventions, safety contracts, documentation rules
 
 Each module contains a `README.md` that references the design docs relevant to that module.

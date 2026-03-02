@@ -3,39 +3,46 @@
 
 //! xtask — build task runner for Seraph.
 //!
-//! Run via `cargo xtask <command>`. This replaces the shell scripts in
-//! `scripts/` once the build requires disk image assembly, multi-stage
-//! builds, or integration test orchestration.
+//! Invoke via `cargo xtask <command>`. Replaces `build.sh`, `run.sh`,
+//! `clean.sh`, and `test.sh`.
 //!
 //! # Adding a new command
 //!
-//! 1. Add a variant to the match below.
-//! 2. Implement the command as a function in this file or a submodule.
-//! 3. Update the usage string.
+//! 1. Add a variant to `cli::CliCommand` and a corresponding `Args` struct in
+//!    `cli.rs`.
+//! 2. Create `commands/<name>.rs` with a `pub fn run(ctx, args) -> Result<()>`.
+//! 3. Add a match arm in `main` below.
+//! 4. Re-export the module in `commands/mod.rs`.
+
+use clap::Parser;
+
+mod arch;
+mod cli;
+mod commands;
+mod context;
+mod sysroot;
+mod util;
+
+use cli::{Cli, CliCommand};
+use context::Context;
 
 fn main()
 {
-    let args: Vec<String> = std::env::args().collect();
-    let command = args.get(1).map(String::as_str);
+    let cli = Cli::parse();
+    let ctx = Context::from_manifest_dir();
 
-    match command
+    let result = match &cli.command
     {
-        None | Some("help") | Some("--help") | Some("-h") =>
-        {
-            println!("Usage: cargo xtask <command>");
-            println!();
-            println!("Commands:");
-            println!("  help    Print this message");
-            println!();
-            println!(
-                "No commands are implemented yet. See scripts/ for the current build interface."
-            );
-        }
-        Some(cmd) =>
-        {
-            eprintln!("error: unknown command '{cmd}'");
-            eprintln!("Run 'cargo xtask help' for usage.");
-            std::process::exit(1);
-        }
+        CliCommand::Build(args) => commands::build::run(&ctx, args),
+        CliCommand::Run(args) => commands::run::run(&ctx, args),
+        CliCommand::Clean(args) => commands::clean::run(&ctx, args),
+        CliCommand::Test(args) => commands::test::run(&ctx, args),
+    };
+
+    if let Err(err) = result
+    {
+        // Print the full error chain (anyhow includes context from .context() calls).
+        eprintln!("error: {err:#}");
+        std::process::exit(1);
     }
 }

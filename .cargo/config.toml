@@ -1,4 +1,9 @@
 # Cargo workspace configuration.
+
+[alias]
+# `cargo xtask <command>` runs the xtask build runner.
+xtask = "run --package xtask --release --"
+
 #
 # build-std flags are passed explicitly by the build scripts rather than here,
 # to avoid applying them to host-target builds (e.g. cargo test).

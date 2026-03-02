@@ -56,7 +56,7 @@ import it. Inline assembly that invokes syscalls lives in `shared/syscall`.
 
 Setting `default-members = ["xtask"]` means bare `cargo build` and `cargo run`
 operate only on the host-target xtask binary. Components using custom embedded
-targets must be built via `build.sh`.
+targets must be built via `cargo xtask build`.
 
 ---
 
@@ -111,26 +111,25 @@ arrangement mirrors real deployments: when the system eventually has a separate
 EFI System Partition and additional mounted filesystems, both the bootloader and
 the kernel remain on the ESP where the firmware can reach them.
 
-No temporary copies or image construction steps are needed — `run.sh` passes the
-sysroot directory directly to QEMU's `fat:rw:` drive parameter.
+No temporary copies or image construction steps are needed — `cargo xtask run`
+passes the sysroot directory directly to QEMU's `fat:rw:` drive parameter.
 
 Cargo's own `target/` directory contains intermediate compilation artifacts and
 is not part of the sysroot.
 
 ---
 
-## Convenience Scripts
+## Convenience Commands
 
-Three scripts at the repository root provide the primary developer interface.
-They are thin wrappers over `cargo`; the shared logic lives in `scripts/env.sh`.
+All build, run, clean, and test operations go through `cargo xtask`. See
+[`xtask/README.md`](../xtask/README.md) for the full command reference.
 
-| Script | Purpose |
+| Command | Purpose |
 |---|---|
-| `build.sh` | Build components and populate the sysroot |
-| `clean.sh` | Remove the sysroot (and optionally `target/`) |
-| `run.sh` | Build and launch under QEMU |
-
-See [`scripts/README.md`](../scripts/README.md) for full usage documentation.
+| `cargo xtask build` | Build components and populate the sysroot |
+| `cargo xtask clean` | Remove the sysroot (and optionally `target/`) |
+| `cargo xtask run` | Build (incremental) and launch under QEMU |
+| `cargo xtask test` | Run workspace unit tests on the host |
 
 ---
 
@@ -139,12 +138,14 @@ See [`scripts/README.md`](../scripts/README.md) for full usage documentation.
 Seraph boots via its own UEFI bootloader on both architectures. This requires
 UEFI firmware in QEMU — SeaBIOS cannot load UEFI applications.
 
-**x86-64:** Requires OVMF from `edk2-ovmf`. `run.sh` searches standard Fedora
-install paths. The bootloader `.efi` is exposed to QEMU via a virtual FAT image
-(QEMU's `fat:rw:DIR` syntax), which OVMF reads like a real FAT partition.
+**x86-64:** Requires OVMF from `edk2-ovmf`. `cargo xtask run` searches standard
+Fedora, Debian, and Arch install paths. The bootloader `.efi` is exposed to QEMU
+via a virtual FAT image (QEMU's `fat:rw:DIR` syntax), which OVMF reads like a
+real FAT partition.
 
-**RISC-V:** Requires `edk2-riscv64` firmware. Not yet implemented; `run.sh`
-exits with an error until the RISC-V bootloader target is determined.
+**RISC-V:** Requires `edk2-riscv64` firmware. `cargo xtask run` searches standard
+firmware paths and pads `RISCV_VIRT_CODE.fd` / `RISCV_VIRT_VARS.fd` to 32 MiB
+in temporary files if necessary (QEMU virt ≥9.0 requires exactly 32 MiB).
 
 ---
 
@@ -164,7 +165,8 @@ results over serial. This harness will be implemented when arch code is written.
 ### Running Tests
 
 ```sh
-cargo test -p seraph-kernel  # host unit tests
+cargo xtask test                        # all workspace tests
+cargo xtask test --component kernel     # single crate
 ```
 
 For test naming conventions and requirements (what must be tested, what should not), see
@@ -174,9 +176,9 @@ For test naming conventions and requirements (what must be tested, what should n
 
 ## xtask
 
-`xtask/` is a Rust binary crate that runs on the host and will absorb the shell
-scripts in `scripts/` as the build grows more complex. Run it with `cargo xtask
-<command>`. Currently a stub; see `xtask/src/main.rs` for planned commands.
+`xtask/` is a Rust binary crate that runs on the host. It is the primary build
+interface — `build.sh`, `clean.sh`, `run.sh`, and `test.sh` have been replaced.
+Invoke it with `cargo xtask <command>`.
 
-The shell scripts (`build.sh`, `clean.sh`, `run.sh`) remain the primary build
-interface until xtask is implemented.
+See [`xtask/README.md`](../xtask/README.md) for the full command reference and
+[`xtask/src/main.rs`](../xtask/src/main.rs) for the dispatch entry point.

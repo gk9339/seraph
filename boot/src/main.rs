@@ -386,6 +386,10 @@ unsafe fn boot_sequence(image: EfiHandle, st: *mut EfiSystemTable) -> Result<!, 
         track_region!(framebuffer.physical_base, (fb_size + 4095) & !4095);
     }
 
+    // RISC-V MMIO UART: identity-map so the kernel can use it for early console.
+    #[cfg(target_arch = "riscv64")]
+    track_region!(0x1000_0000u64, 4096u64);
+
     bprintln!("seraph-boot: step 6/10: building page tables");
 
     // Build the initial page tables. All AllocatePages calls for page table

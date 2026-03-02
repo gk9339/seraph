@@ -1,0 +1,41 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 George Kottler <mail@kottlerg.com>
+
+// kernel/src/arch/riscv64/cpu.rs
+
+//! RISC-V 64-bit CPU control primitives.
+
+/// Disable supervisor-mode interrupts via sstatus.SIE.
+///
+/// # Safety
+/// Changes global CPU interrupt state. Caller is responsible for managing
+/// interrupt state across the transition.
+pub unsafe fn disable_interrupts()
+{
+    // SAFETY: csrci clears the SIE bit (bit 1) in sstatus.
+    // Caller guarantees this is called in supervisor mode.
+    unsafe {
+        core::arch::asm!("csrci sstatus, 0x2", options(nomem, nostack));
+    }
+}
+
+/// Disable interrupts and halt the CPU permanently using `wfi`.
+///
+/// `wfi` (wait-for-interrupt) suspends the hart until an interrupt arrives.
+/// With SIE cleared the hart cannot actually handle the interrupt, so it
+/// re-executes `wfi` immediately — achieving an effective halt without a
+/// busy spin.
+pub fn halt_loop() -> !
+{
+    // SAFETY: disabling interrupts before wfi is required for a safe permanent halt.
+    unsafe {
+        disable_interrupts();
+    }
+    loop
+    {
+        // SAFETY: wfi is a hint that the hart may be suspended; safe at any privilege level.
+        unsafe {
+            core::arch::asm!("wfi", options(nomem, nostack));
+        }
+    }
+}

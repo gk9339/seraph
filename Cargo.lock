@@ -149,6 +149,7 @@ name = "kernel"
 version = "0.1.0"
 dependencies = [
  "boot-protocol",
+ "font",
 ]
 
 [[package]]

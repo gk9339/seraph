@@ -14,7 +14,10 @@ use crate::arch::Arch;
 
 /// Top-level CLI entry point.
 #[derive(Parser)]
-#[command(name = "xtask", about = "Seraph build task runner — invoke via `cargo xtask`")]
+#[command(
+    name = "xtask",
+    about = "Seraph build task runner — invoke via `cargo xtask`"
+)]
 pub struct Cli
 {
     #[command(subcommand)]

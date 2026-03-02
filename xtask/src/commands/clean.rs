@@ -19,9 +19,8 @@ pub fn run(ctx: &BuildContext, args: &CleanArgs) -> Result<()>
     if ctx.sysroot.exists()
     {
         step(&format!("Removing sysroot: {}", ctx.sysroot.display()));
-        std::fs::remove_dir_all(&ctx.sysroot).map_err(|e| {
-            anyhow::anyhow!("failed to remove {}: {}", ctx.sysroot.display(), e)
-        })?;
+        std::fs::remove_dir_all(&ctx.sysroot)
+            .map_err(|e| anyhow::anyhow!("failed to remove {}: {}", ctx.sysroot.display(), e))?;
     }
     else
     {

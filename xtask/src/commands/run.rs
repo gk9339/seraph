@@ -13,9 +13,9 @@ use anyhow::{bail, Context, Result};
 
 use crate::arch::Arch;
 use crate::cli::{BuildArgs, BuildComponent, RunArgs};
+use crate::commands::build;
 use crate::context::Context as BuildContext;
 use crate::util::{run_with_sigint_ignored, step, TempFile, TerminalGuard};
-use crate::commands::build;
 
 /// OVMF firmware search paths (Fedora, Debian/Ubuntu, Arch).
 const OVMF_CODE_PATHS: &[&str] = &[
@@ -40,7 +40,11 @@ pub fn run(ctx: &BuildContext, args: &RunArgs) -> Result<()>
 {
     // Always build first. Cargo's incremental compilation makes this near-instant
     // when nothing has changed. Use `cargo xtask clean` to force a full rebuild.
-    let build_args = BuildArgs { arch: args.arch, release: args.release, component: BuildComponent::All };
+    let build_args = BuildArgs {
+        arch: args.arch,
+        release: args.release,
+        component: BuildComponent::All,
+    };
     build::run(ctx, &build_args)?;
 
     // Validate that sysroot artifacts exist before launching QEMU.
@@ -106,7 +110,12 @@ pub fn run(ctx: &BuildContext, args: &RunArgs) -> Result<()>
         Arch::Riscv64 => arch_setup_riscv(&mut qemu_args, args)?,
     };
 
-    launch_qemu(args.arch.qemu_binary(), &qemu_args, &setup.desc, args.verbose)?;
+    launch_qemu(
+        args.arch.qemu_binary(),
+        &qemu_args,
+        &setup.desc,
+        args.verbose,
+    )?;
 
     // setup is dropped here, cleaning up any TempFiles.
     drop(setup);
@@ -144,7 +153,12 @@ fn arch_setup_x86(args: &mut Vec<String>, run_args: &RunArgs) -> Result<ArchSetu
         // KVM prevents QEMU's gdbserver from reading live CPU register state —
         // all vCPUs appear frozen at the reset vector regardless of actual
         // execution. Disable KVM and fall back to TCG for GDB sessions.
-        args.extend(["-accel".into(), "tcg".into(), "-cpu".into(), "qemu64".into()]);
+        args.extend([
+            "-accel".into(),
+            "tcg".into(),
+            "-cpu".into(),
+            "qemu64".into(),
+        ]);
     }
     else
     {
@@ -161,7 +175,10 @@ fn arch_setup_x86(args: &mut Vec<String>, run_args: &RunArgs) -> Result<ArchSetu
         args.extend(["-vga".into(), "none".into()]);
     }
 
-    Ok(ArchSetup { desc: "x86_64, UEFI".into(), _temp_files: Vec::new() })
+    Ok(ArchSetup {
+        desc: "x86_64, UEFI".into(),
+        _temp_files: Vec::new(),
+    })
 }
 
 fn arch_setup_riscv(args: &mut Vec<String>, run_args: &RunArgs) -> Result<ArchSetup>
@@ -183,7 +200,10 @@ fn arch_setup_riscv(args: &mut Vec<String>, run_args: &RunArgs) -> Result<ArchSe
 
     if !riscv_vars_template.exists()
     {
-        bail!("RISC-V NVRAM template not found: {}", riscv_vars_template.display());
+        bail!(
+            "RISC-V NVRAM template not found: {}",
+            riscv_vars_template.display()
+        );
     }
 
     // QEMU virt (>=9.0) requires pflash images exactly 32 MiB. Some distro
@@ -202,7 +222,10 @@ fn arch_setup_riscv(args: &mut Vec<String>, run_args: &RunArgs) -> Result<ArchSe
     args.extend(["-machine".into(), "virt".into()]);
     args.extend([
         "-drive".into(),
-        format!("if=pflash,format=raw,readonly=on,file={}", code_tmp.path.display()),
+        format!(
+            "if=pflash,format=raw,readonly=on,file={}",
+            code_tmp.path.display()
+        ),
         "-drive".into(),
         format!("if=pflash,format=raw,file={}", vars_tmp.path.display()),
     ]);
@@ -222,7 +245,10 @@ fn arch_setup_riscv(args: &mut Vec<String>, run_args: &RunArgs) -> Result<ArchSe
 
     // QEMU virt loads OpenSBI automatically; no explicit firmware flag needed.
 
-    Ok(ArchSetup { desc: "riscv64, TCG, UEFI".into(), _temp_files: vec![code_tmp, vars_tmp] })
+    Ok(ArchSetup {
+        desc: "riscv64, TCG, UEFI".into(),
+        _temp_files: vec![code_tmp, vars_tmp],
+    })
 }
 
 /// Extend a file with zero bytes until it reaches `target_size`.

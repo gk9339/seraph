@@ -29,8 +29,8 @@ pub fn check_arch(ctx: &BuildContext, arch: Arch) -> Result<()>
     {
         return Ok(());
     }
-    let existing =
-        fs::read_to_string(&arch_file).with_context(|| format!("reading {}", arch_file.display()))?;
+    let existing = fs::read_to_string(&arch_file)
+        .with_context(|| format!("reading {}", arch_file.display()))?;
     let existing = existing.trim();
     if existing != arch.to_string()
     {
@@ -73,7 +73,9 @@ pub fn install_rootfs(ctx: &BuildContext) -> Result<()>
     for src in files
     {
         // Skip documentation files that are not part of the sysroot image.
-        let rel = src.strip_prefix(&src_root).expect("src must be under src_root");
+        let rel = src
+            .strip_prefix(&src_root)
+            .expect("src must be under src_root");
         if rel.file_name().map(|n| n == "README.md").unwrap_or(false)
         {
             continue;
@@ -82,8 +84,7 @@ pub fn install_rootfs(ctx: &BuildContext) -> Result<()>
         let dst = ctx.sysroot.join(rel);
         if let Some(parent) = dst.parent()
         {
-            fs::create_dir_all(parent)
-                .with_context(|| format!("creating {}", parent.display()))?;
+            fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
         }
         fs::copy(&src, &dst)
             .with_context(|| format!("copying {} -> {}", src.display(), dst.display()))?;

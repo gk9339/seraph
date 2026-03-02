@@ -36,7 +36,11 @@ impl Context
             .to_path_buf();
         let sysroot = root.join("sysroot");
         let target_dir = root.join("target");
-        Context { root, sysroot, target_dir }
+        Context {
+            root,
+            sysroot,
+            target_dir,
+        }
     }
 
     /// Path to `sysroot/EFI/BOOT/` — where the UEFI fallback bootloader lives.

@@ -27,15 +27,18 @@ where
 {
     // POSIX guarantees: SIGINT = 2, SIG_DFL = 0, SIG_IGN = 1 on all targets
     // we care about (Linux x86-64, Linux riscv64). xtask is host-only.
-    extern "C"
-    {
+    extern "C" {
         fn signal(signum: i32, handler: usize) -> usize;
     }
     // SAFETY: signal() is async-signal-safe. We restore the previous disposition
     // after `f` returns, so no permanent state change.
-    let prev = unsafe { signal(2 /* SIGINT */, 1 /* SIG_IGN */) };
+    let prev = unsafe {
+        signal(2 /* SIGINT */, 1 /* SIG_IGN */)
+    };
     let result = f();
-    unsafe { signal(2 /* SIGINT */, prev) };
+    unsafe {
+        signal(2 /* SIGINT */, prev)
+    };
     result
 }
 
@@ -54,8 +57,9 @@ pub fn step(msg: &str)
 /// it exits non-zero.
 pub fn run_cmd(cmd: &mut Command) -> Result<()>
 {
-    let status =
-        cmd.status().with_context(|| format!("failed to launch {:?}", cmd.get_program()))?;
+    let status = cmd
+        .status()
+        .with_context(|| format!("failed to launch {:?}", cmd.get_program()))?;
     if !status.success()
     {
         bail!("{:?} exited with {}", cmd.get_program(), status);
@@ -68,8 +72,9 @@ pub fn run_cmd(cmd: &mut Command) -> Result<()>
 /// Returns an error if the process exits non-zero.
 pub fn run_cmd_capture(cmd: &mut Command) -> Result<String>
 {
-    let output =
-        cmd.output().with_context(|| format!("failed to launch {:?}", cmd.get_program()))?;
+    let output = cmd
+        .output()
+        .with_context(|| format!("failed to launch {:?}", cmd.get_program()))?;
     if !output.status.success()
     {
         bail!("{:?} exited with {}", cmd.get_program(), output.status);
@@ -157,7 +162,10 @@ fn restore_terminal(rows: u16, cols: u16)
     let _ = Command::new("stty").arg("sane").status();
 
     // Restore TIOCSWINSZ via direct ioctl rather than a stty subprocess.
-    if let Ok(tty) = std::fs::OpenOptions::new().read(true).write(true).open("/dev/tty")
+    if let Ok(tty) = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open("/dev/tty")
     {
         use std::os::unix::io::AsRawFd;
         tiocswinsz(tty.as_raw_fd(), rows, cols);
@@ -182,8 +190,7 @@ struct Winsize
     ws_ypixel: u16,
 }
 
-extern "C"
-{
+extern "C" {
     fn ioctl(fd: i32, request: u64, ...) -> i32;
 }
 
@@ -191,19 +198,44 @@ extern "C"
 fn tiocgwinsz() -> Option<(u16, u16)>
 {
     use std::os::unix::io::AsRawFd;
-    let tty = std::fs::OpenOptions::new().read(true).write(true).open("/dev/tty").ok()?;
-    let mut ws = Winsize { ws_row: 0, ws_col: 0, ws_xpixel: 0, ws_ypixel: 0 };
+    let tty = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open("/dev/tty")
+        .ok()?;
+    let mut ws = Winsize {
+        ws_row: 0,
+        ws_col: 0,
+        ws_xpixel: 0,
+        ws_ypixel: 0,
+    };
     // SAFETY: tty fd is valid; Winsize matches the kernel struct for TIOCGWINSZ.
-    let ret = unsafe { ioctl(tty.as_raw_fd(), 0x5413 /* TIOCGWINSZ */, &mut ws) };
-    if ret == 0 && ws.ws_row > 0 && ws.ws_col > 0 { Some((ws.ws_row, ws.ws_col)) } else { None }
+    let ret = unsafe {
+        ioctl(tty.as_raw_fd(), 0x5413 /* TIOCGWINSZ */, &mut ws)
+    };
+    if ret == 0 && ws.ws_row > 0 && ws.ws_col > 0
+    {
+        Some((ws.ws_row, ws.ws_col))
+    }
+    else
+    {
+        None
+    }
 }
 
 /// Set terminal character dimensions via `ioctl(TIOCSWINSZ)` on `fd`.
 fn tiocswinsz(fd: i32, rows: u16, cols: u16)
 {
-    let ws = Winsize { ws_row: rows, ws_col: cols, ws_xpixel: 0, ws_ypixel: 0 };
+    let ws = Winsize {
+        ws_row: rows,
+        ws_col: cols,
+        ws_xpixel: 0,
+        ws_ypixel: 0,
+    };
     // SAFETY: fd is a valid terminal fd; Winsize matches the kernel struct for TIOCSWINSZ.
-    unsafe { ioctl(fd, 0x5414 /* TIOCSWINSZ */, &ws) };
+    unsafe {
+        ioctl(fd, 0x5414 /* TIOCSWINSZ */, &ws)
+    };
 }
 
 // ── Temporary file ────────────────────────────────────────────────────────────
@@ -232,7 +264,9 @@ impl TempFile
             .subsec_nanos();
         let pid = std::process::id();
         let name = format!("seraph-xtask-{}-{}{}", pid, ts, suffix);
-        Ok(TempFile { path: std::env::temp_dir().join(name) })
+        Ok(TempFile {
+            path: std::env::temp_dir().join(name),
+        })
     }
 }
 

@@ -46,7 +46,11 @@ pub fn run(ctx: &BuildContext, args: &BuildArgs) -> Result<()>
 
 fn build_boot(ctx: &BuildContext, args: &BuildArgs) -> Result<()>
 {
-    step(&format!("Building bootloader for {} ({})", args.arch, profile_name(args.release)));
+    step(&format!(
+        "Building bootloader for {} ({})",
+        args.arch,
+        profile_name(args.release)
+    ));
 
     let boot_triple = args.arch.boot_target_triple();
     let efi_name = args.arch.boot_efi_filename();
@@ -80,8 +84,9 @@ fn build_boot(ctx: &BuildContext, args: &BuildArgs) -> Result<()>
         {
             // RISC-V: cargo produces an ELF; convert to a flat PE32+ binary via
             // llvm-objcopy. The UEFI spec requires a PE32+ image on disk.
-            let elf_out =
-                ctx.cargo_output_dir(boot_triple, args.release).join("seraph-boot");
+            let elf_out = ctx
+                .cargo_output_dir(boot_triple, args.release)
+                .join("seraph-boot");
             if !elf_out.exists()
             {
                 bail!("expected ELF output not found: {}", elf_out.display());
@@ -89,17 +94,29 @@ fn build_boot(ctx: &BuildContext, args: &BuildArgs) -> Result<()>
 
             let objcopy = find_llvm_objcopy()?;
             let dst_efi = efi_boot_dir.join(efi_name);
-            run_cmd(Command::new(&objcopy).args(["-O", "binary"]).arg(&elf_out).arg(&dst_efi))?;
+            run_cmd(
+                Command::new(&objcopy)
+                    .args(["-O", "binary"])
+                    .arg(&elf_out)
+                    .arg(&dst_efi),
+            )?;
             copy_file(&dst_efi, &efi_seraph_dir.join("boot"))?;
 
-            step(&format!("Bootloader: {} (ELF → flat binary)", dst_efi.display()));
-            step(&format!("Bootloader: {}", efi_seraph_dir.join("boot").display()));
+            step(&format!(
+                "Bootloader: {} (ELF → flat binary)",
+                dst_efi.display()
+            ));
+            step(&format!(
+                "Bootloader: {}",
+                efi_seraph_dir.join("boot").display()
+            ));
         }
         _ =>
         {
             // x86_64 (and future PE-native archs): cargo produces a .efi PE directly.
-            let cargo_out =
-                ctx.cargo_output_dir(boot_triple, args.release).join("seraph-boot.efi");
+            let cargo_out = ctx
+                .cargo_output_dir(boot_triple, args.release)
+                .join("seraph-boot.efi");
             if !cargo_out.exists()
             {
                 bail!("expected EFI output not found: {}", cargo_out.display());
@@ -110,7 +127,10 @@ fn build_boot(ctx: &BuildContext, args: &BuildArgs) -> Result<()>
             copy_file(&cargo_out, &efi_seraph_dir.join("boot"))?;
 
             step(&format!("Bootloader: {}", dst_efi.display()));
-            step(&format!("Bootloader: {}", efi_seraph_dir.join("boot").display()));
+            step(&format!(
+                "Bootloader: {}",
+                efi_seraph_dir.join("boot").display()
+            ));
         }
     }
 
@@ -119,7 +139,11 @@ fn build_boot(ctx: &BuildContext, args: &BuildArgs) -> Result<()>
 
 fn build_kernel(ctx: &BuildContext, args: &BuildArgs) -> Result<()>
 {
-    step(&format!("Building kernel for {} ({})", args.arch, profile_name(args.release)));
+    step(&format!(
+        "Building kernel for {} ({})",
+        args.arch,
+        profile_name(args.release)
+    ));
 
     let triple = args.arch.kernel_target_triple();
     let mut cmd = cargo(&ctx.root);
@@ -140,7 +164,9 @@ fn build_kernel(ctx: &BuildContext, args: &BuildArgs) -> Result<()>
     }
     run_cmd(&mut cmd)?;
 
-    let cargo_out = ctx.cargo_output_dir(triple, args.release).join("seraph-kernel");
+    let cargo_out = ctx
+        .cargo_output_dir(triple, args.release)
+        .join("seraph-kernel");
     if !cargo_out.exists()
     {
         bail!("expected kernel binary not found: {}", cargo_out.display());
@@ -157,7 +183,11 @@ fn build_kernel(ctx: &BuildContext, args: &BuildArgs) -> Result<()>
 
 fn build_init(ctx: &BuildContext, args: &BuildArgs) -> Result<()>
 {
-    step(&format!("Building init for {} ({})", args.arch, profile_name(args.release)));
+    step(&format!(
+        "Building init for {} ({})",
+        args.arch,
+        profile_name(args.release)
+    ));
 
     let triple = args.arch.kernel_target_triple();
     let mut cmd = cargo(&ctx.root);
@@ -178,7 +208,9 @@ fn build_init(ctx: &BuildContext, args: &BuildArgs) -> Result<()>
     }
     run_cmd(&mut cmd)?;
 
-    let cargo_out = ctx.cargo_output_dir(triple, args.release).join("seraph-init");
+    let cargo_out = ctx
+        .cargo_output_dir(triple, args.release)
+        .join("seraph-init");
     if !cargo_out.exists()
     {
         bail!("expected init binary not found: {}", cargo_out.display());
@@ -214,5 +246,12 @@ fn copy_file(src: &Path, dst: &Path) -> Result<()>
 /// Human-readable profile name matching Cargo's output directory naming.
 fn profile_name(release: bool) -> &'static str
 {
-    if release { "release" } else { "debug" }
+    if release
+    {
+        "release"
+    }
+    else
+    {
+        "debug"
+    }
 }

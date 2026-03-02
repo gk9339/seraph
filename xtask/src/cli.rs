@@ -66,6 +66,11 @@ pub enum BuildComponent
     Boot,
     Kernel,
     Init,
+    Procmgr,
+    Devmgr,
+    Vfsd,
+    VirtioBlk,
+    Fatfs,
     All,
 }
 

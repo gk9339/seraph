@@ -1,5 +1,5 @@
 [package]
-name = "seraph-kernel"
+name = "kernel"
 version = "0.1.0"
 edition = "2021"
 publish = false
@@ -8,5 +8,5 @@ publish = false
 boot-protocol = { workspace = true }
 
 [[bin]]
-name = "seraph-kernel"
+name = "kernel"
 path = "src/main.rs"

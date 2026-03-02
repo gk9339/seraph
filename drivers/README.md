@@ -9,3 +9,10 @@ devices and delegates per-device capabilities. No driver code runs in kernel spa
 
 See [docs/device-management.md](../docs/device-management.md) for how drivers are
 discovered, bound, and revoked.
+
+## Layout
+
+| Directory | Purpose |
+|---|---|
+| `virtio/core/` | Shared VirtIO transport and queue primitives (library crate) |
+| `virtio/blk/` | VirtIO block device driver (`virtio-blk` binary) |

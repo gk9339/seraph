@@ -17,6 +17,15 @@ use crate::context::Context as BuildContext;
 use crate::sysroot;
 use crate::util::{find_llvm_objcopy, run_cmd, step};
 
+// Modules built with the kernel target triple, placed under EFI/seraph/.
+// All modules follow the same build pattern: `-p <name> --bin <name>`, output
+// at target/<triple>/<profile>/<name>, sysroot dest EFI/seraph/<name>.
+//
+// TODO: rework to support per-module configuration (different output paths,
+// target triples, sysroot destinations, extra build flags). For now every
+// module uses the same kernel target and flags.
+const MODULES: &[&str] = &["procmgr", "devmgr", "vfsd", "virtio-blk", "fatfs"];
+
 /// Entry point for `cargo xtask build`.
 pub fn run(ctx: &BuildContext, args: &BuildArgs) -> Result<()>
 {
@@ -27,11 +36,17 @@ pub fn run(ctx: &BuildContext, args: &BuildArgs) -> Result<()>
         BuildComponent::Boot => build_boot(ctx, args)?,
         BuildComponent::Kernel => build_kernel(ctx, args)?,
         BuildComponent::Init => build_init(ctx, args)?,
+        BuildComponent::Procmgr => build_module(ctx, args, "procmgr")?,
+        BuildComponent::Devmgr => build_module(ctx, args, "devmgr")?,
+        BuildComponent::Vfsd => build_module(ctx, args, "vfsd")?,
+        BuildComponent::VirtioBlk => build_module(ctx, args, "virtio-blk")?,
+        BuildComponent::Fatfs => build_module(ctx, args, "fatfs")?,
         BuildComponent::All =>
         {
             build_boot(ctx, args)?;
             build_kernel(ctx, args)?;
             build_init(ctx, args)?;
+            build_modules(ctx, args)?;
             sysroot::install_rootfs(ctx)?;
         }
     }
@@ -59,7 +74,7 @@ fn build_boot(ctx: &BuildContext, args: &BuildArgs) -> Result<()>
     cmd.args([
         "build",
         "-p",
-        "seraph-boot",
+        "boot",
         "--target",
         boot_triple,
         "-Zbuild-std=core,compiler_builtins",
@@ -84,9 +99,7 @@ fn build_boot(ctx: &BuildContext, args: &BuildArgs) -> Result<()>
         {
             // RISC-V: cargo produces an ELF; convert to a flat PE32+ binary via
             // llvm-objcopy. The UEFI spec requires a PE32+ image on disk.
-            let elf_out = ctx
-                .cargo_output_dir(boot_triple, args.release)
-                .join("seraph-boot");
+            let elf_out = ctx.cargo_output_dir(boot_triple, args.release).join("boot");
             if !elf_out.exists()
             {
                 bail!("expected ELF output not found: {}", elf_out.display());
@@ -116,7 +129,7 @@ fn build_boot(ctx: &BuildContext, args: &BuildArgs) -> Result<()>
             // x86_64 (and future PE-native archs): cargo produces a .efi PE directly.
             let cargo_out = ctx
                 .cargo_output_dir(boot_triple, args.release)
-                .join("seraph-boot.efi");
+                .join("boot.efi");
             if !cargo_out.exists()
             {
                 bail!("expected EFI output not found: {}", cargo_out.display());
@@ -150,9 +163,9 @@ fn build_kernel(ctx: &BuildContext, args: &BuildArgs) -> Result<()>
     cmd.args([
         "build",
         "-p",
-        "seraph-kernel",
+        "kernel",
         "--bin",
-        "seraph-kernel",
+        "kernel",
         "--target",
         triple,
         "-Zbuild-std=core,alloc,compiler_builtins",
@@ -164,9 +177,7 @@ fn build_kernel(ctx: &BuildContext, args: &BuildArgs) -> Result<()>
     }
     run_cmd(&mut cmd)?;
 
-    let cargo_out = ctx
-        .cargo_output_dir(triple, args.release)
-        .join("seraph-kernel");
+    let cargo_out = ctx.cargo_output_dir(triple, args.release).join("kernel");
     if !cargo_out.exists()
     {
         bail!("expected kernel binary not found: {}", cargo_out.display());
@@ -194,9 +205,9 @@ fn build_init(ctx: &BuildContext, args: &BuildArgs) -> Result<()>
     cmd.args([
         "build",
         "-p",
-        "seraph-init",
+        "init",
         "--bin",
-        "seraph-init",
+        "init",
         "--target",
         triple,
         "-Zbuild-std=core,compiler_builtins",
@@ -208,9 +219,7 @@ fn build_init(ctx: &BuildContext, args: &BuildArgs) -> Result<()>
     }
     run_cmd(&mut cmd)?;
 
-    let cargo_out = ctx
-        .cargo_output_dir(triple, args.release)
-        .join("seraph-init");
+    let cargo_out = ctx.cargo_output_dir(triple, args.release).join("init");
     if !cargo_out.exists()
     {
         bail!("expected init binary not found: {}", cargo_out.display());
@@ -222,6 +231,72 @@ fn build_init(ctx: &BuildContext, args: &BuildArgs) -> Result<()>
     copy_file(&cargo_out, &dst)?;
     step(&format!("Init: {}", dst.display()));
 
+    Ok(())
+}
+
+/// Build a single module and copy it to the sysroot.
+///
+/// All modules use the same kernel target triple and build flags. `name` must
+/// match the crate's `package.name` in Cargo.toml and the desired sysroot
+/// filename under `EFI/seraph/`.
+///
+/// If a module ever needs special treatment (different target, extra flags,
+/// different sysroot path), extract it into its own build function — same
+/// pattern as `build_boot`, `build_kernel`, and `build_init` above.
+fn build_module(ctx: &BuildContext, args: &BuildArgs, name: &str) -> Result<()>
+{
+    step(&format!(
+        "Building {} for {} ({})",
+        name,
+        args.arch,
+        profile_name(args.release)
+    ));
+
+    let triple = args.arch.kernel_target_triple();
+    let mut cmd = cargo(&ctx.root);
+    cmd.args([
+        "build",
+        "-p",
+        name,
+        "--bin",
+        name,
+        "--target",
+        triple,
+        "-Zbuild-std=core,compiler_builtins",
+        "-Zbuild-std-features=compiler-builtins-mem",
+    ]);
+    if args.release
+    {
+        cmd.arg("--release");
+    }
+    run_cmd(&mut cmd)?;
+
+    let cargo_out = ctx.cargo_output_dir(triple, args.release).join(name);
+    if !cargo_out.exists()
+    {
+        bail!(
+            "expected {} binary not found: {}",
+            name,
+            cargo_out.display()
+        );
+    }
+
+    let dst = ctx.sysroot_efi_seraph().join(name);
+    fs::create_dir_all(ctx.sysroot_efi_seraph())
+        .with_context(|| format!("creating {}", ctx.sysroot_efi_seraph().display()))?;
+    copy_file(&cargo_out, &dst)?;
+    step(&format!("{}: {}", name, dst.display()));
+
+    Ok(())
+}
+
+/// Build all modules listed in `MODULES`.
+fn build_modules(ctx: &BuildContext, args: &BuildArgs) -> Result<()>
+{
+    for &name in MODULES
+    {
+        build_module(ctx, args, name)?;
+    }
     Ok(())
 }
 

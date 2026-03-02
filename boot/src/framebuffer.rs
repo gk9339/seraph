@@ -10,7 +10,7 @@
 //! and scrolls when the last row is filled.
 
 use boot_protocol::{FramebufferInfo, PixelFormat};
-use seraph_font::{FONT_9X20, GLYPH_HEIGHT, GLYPH_WIDTH};
+use font::{FONT_9X20, GLYPH_HEIGHT, GLYPH_WIDTH};
 
 /// Framebuffer text renderer.
 ///

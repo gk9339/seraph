@@ -1,9 +1,9 @@
 [package]
-name = "seraph-boot"
+name = "boot"
 version = "0.1.0"
 edition = "2021"
 publish = false
 
 [dependencies]
 boot-protocol = { workspace = true }
-seraph-font = { workspace = true }
+font = { workspace = true }

@@ -25,7 +25,7 @@ pub fn run(ctx: &BuildContext, args: &TestArgs) -> Result<()>
         TestComponent::Boot =>
         {
             step("Testing bootloader (host)");
-            run_cmd(cargo(ctx).args(["test", "-p", "seraph-boot"]))?;
+            run_cmd(cargo(ctx).args(["test", "-p", "boot"]))?;
         }
         TestComponent::Protocol =>
         {
@@ -35,12 +35,12 @@ pub fn run(ctx: &BuildContext, args: &TestArgs) -> Result<()>
         TestComponent::Kernel =>
         {
             step("Testing kernel (host)");
-            run_cmd(cargo(ctx).args(["test", "-p", "seraph-kernel"]))?;
+            run_cmd(cargo(ctx).args(["test", "-p", "kernel"]))?;
         }
         TestComponent::Init =>
         {
             step("Testing init (host)");
-            run_cmd(cargo(ctx).args(["test", "-p", "seraph-init"]))?;
+            run_cmd(cargo(ctx).args(["test", "-p", "init"]))?;
         }
         TestComponent::All =>
         {
@@ -56,5 +56,9 @@ fn cargo(ctx: &BuildContext) -> Command
 {
     let mut cmd = Command::new("cargo");
     cmd.current_dir(&ctx.root);
+    // Suppress dead_code warnings in test builds. Stubs intentionally define
+    // functions (e.g. halt_loop) that are only reachable in non-test cfg.
+    // Real dead code will still warn during normal builds.
+    cmd.env("RUSTFLAGS", "-A dead_code");
     cmd
 }

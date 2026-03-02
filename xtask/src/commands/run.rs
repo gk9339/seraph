@@ -85,7 +85,7 @@ pub fn run(ctx: &BuildContext, args: &RunArgs) -> Result<()>
         "-smp".into(),
         "1".into(),
         "-drive".into(),
-        format!("format=raw,file=fat:rw:{}", ctx.sysroot.display()),
+        format!("if=virtio,format=raw,file=fat:rw:{}", ctx.sysroot.display()),
         "-serial".into(),
         "stdio".into(),
         "-no-reboot".into(),

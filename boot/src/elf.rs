@@ -720,8 +720,6 @@ pub unsafe fn load_init(
 ///
 /// `bs` must be a valid pointer to UEFI boot services and boot services must
 /// not yet have been exited.
-// Used when boot.conf specifies additional modules (procmgr, devmgr, etc.).
-#[allow(dead_code)]
 pub unsafe fn load_module(
     bs: *mut crate::uefi::EfiBootServices,
     data: &[u8],

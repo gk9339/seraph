@@ -33,7 +33,7 @@ mod paging;
 mod uefi;
 
 use crate::config::load_boot_config;
-use crate::elf::{load_init, load_kernel};
+use crate::elf::{load_init, load_kernel, load_module};
 use crate::error::BootError;
 use crate::firmware::discover_firmware;
 use crate::paging::{build_initial_tables, PageTableBuilder};
@@ -43,7 +43,7 @@ use crate::uefi::{
     EfiSystemTable,
 };
 use boot_protocol::{
-    BootInfo, MemoryMapEntry, MemoryMapSlice, ModuleSlice, PlatformResourceSlice,
+    BootInfo, BootModule, MemoryMapEntry, MemoryMapSlice, ModuleSlice, PlatformResourceSlice,
     BOOT_PROTOCOL_VERSION,
 };
 
@@ -204,6 +204,55 @@ unsafe fn boot_sequence(image: EfiHandle, st: *mut EfiSystemTable) -> Result<!, 
     // SAFETY: bs is valid; init_buf contains the complete ELF file.
     let init_image = unsafe { load_init(bs, init_buf, arch::current::EXPECTED_ELF_MACHINE)? };
 
+    // ── Step 4b: Load additional boot modules ─────────────────────────────────
+    //
+    // Modules listed in boot.conf under `modules=` are flat binary images
+    // (raw ELF files for early userspace services). Each is loaded into a
+    // UEFI-allocated physical region via load_module(); the resulting BootModule
+    // descriptors are held in a local array and written into modules_phys during
+    // step 9. The file read buffers are tracked for identity mapping below.
+
+    // Local arrays: sized to MAX_MODULES (16). Filled entries are [0..boot_module_count].
+    // BootModule is Copy so the zeroed initializer compiles without a Default impl.
+    let mut boot_modules = [BootModule {
+        physical_base: 0,
+        size: 0,
+    }; crate::config::MAX_MODULES];
+    let mut boot_module_count: usize = 0;
+
+    // Per-module file read buffer: (physical_base, page_count) for identity mapping.
+    let mut mod_buf_phys_arr = [0u64; crate::config::MAX_MODULES];
+    let mut mod_buf_pages_arr = [0usize; crate::config::MAX_MODULES];
+
+    for i in 0..config.module_count
+    {
+        // SAFETY: esp_root is valid; module_paths[i] is a null-terminated UTF-16 path.
+        let mod_file = unsafe {
+            open_file(
+                esp_root,
+                config.module_paths[i].as_ptr(),
+                "module (boot.conf)",
+            )?
+        };
+        // SAFETY: mod_file is a valid open file handle.
+        let mod_file_sz = unsafe { file_size(mod_file)? } as usize;
+        let mod_buf_pages = (mod_file_sz + 4095) / 4096;
+        // SAFETY: bs is valid.
+        let mod_buf_phys = unsafe { allocate_pages(bs, mod_buf_pages)? };
+        // SAFETY: mod_buf_phys is a freshly allocated region of mod_buf_pages*4096 bytes.
+        let mod_buf =
+            unsafe { core::slice::from_raw_parts_mut(mod_buf_phys as *mut u8, mod_file_sz) };
+        // SAFETY: mod_file is open at position 0; mod_buf is the correct size.
+        unsafe { file_read(mod_file, mod_buf)? };
+        // SAFETY: bs is valid; mod_buf contains the complete module file.
+        let module = unsafe { load_module(bs, mod_buf)? };
+
+        mod_buf_phys_arr[i] = mod_buf_phys;
+        mod_buf_pages_arr[i] = mod_buf_pages;
+        boot_modules[boot_module_count] = module;
+        boot_module_count += 1;
+    }
+
     // ── Step 5: Firmware discovery ────────────────────────────────────────────
 
     bprintln!("seraph-boot: step 5/10: firmware discovery");
@@ -252,11 +301,25 @@ unsafe fn boot_sequence(image: EfiHandle, st: *mut EfiSystemTable) -> Result<!, 
     let stack_phys = unsafe { allocate_pages(bs, KERNEL_STACK_PAGES)? };
     let stack_top = stack_phys + (KERNEL_STACK_PAGES as u64) * 4096;
 
-    // Command line: one page — contains a single null byte (empty command line).
+    // Command line: one page. Copy cmdline from config and null-terminate.
+    // MAX_CMDLINE_LEN (512) is well within the 4096-byte allocation.
     // SAFETY: bs is valid.
     let cmdline_phys = unsafe { allocate_pages(bs, 1)? };
-    // SAFETY: cmdline_phys is a valid 4096-byte allocation; we write a single null byte.
-    unsafe { core::ptr::write(cmdline_phys as *mut u8, 0u8) };
+    if config.cmdline_len > 0
+    {
+        // SAFETY: cmdline_phys is a valid allocation; config.cmdline[..cmdline_len]
+        // is valid ASCII. Regions are disjoint (config is stack data).
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                config.cmdline.as_ptr(),
+                cmdline_phys as *mut u8,
+                config.cmdline_len,
+            )
+        };
+    }
+    // SAFETY: cmdline_phys + cmdline_len is within the 4096-byte allocation
+    // because MAX_CMDLINE_LEN (512) < 4096.
+    unsafe { core::ptr::write((cmdline_phys + config.cmdline_len as u64) as *mut u8, 0u8) };
 
     // Accumulate all physical regions that must be identity-mapped so the kernel
     // can access them before its own page tables are established. The array is
@@ -306,6 +369,15 @@ unsafe fn boot_sequence(image: EfiHandle, st: *mut EfiSystemTable) -> Result<!, 
     // allocation until ExitBootServices so we account for it.
     track_region!(init_buf_phys, (init_buf_pages as u64) * 4096);
     track_region!(kernel_buf_phys, (kernel_buf_pages as u64) * 4096);
+
+    // Boot modules: identity-map both the file read buffer (UEFI retains it until
+    // ExitBootServices) and the loaded module region (kernel reads the ELF content).
+    for i in 0..config.module_count
+    {
+        track_region!(mod_buf_phys_arr[i], (mod_buf_pages_arr[i] as u64) * 4096);
+        let aligned_size = (boot_modules[i].size + 4095) & !4095;
+        track_region!(boot_modules[i].physical_base, aligned_size);
+    }
 
     // Framebuffer: identity-map if present so the kernel can write early output.
     if framebuffer.physical_base != 0
@@ -383,10 +455,15 @@ unsafe fn boot_sequence(image: EfiHandle, st: *mut EfiSystemTable) -> Result<!, 
 
     bprintln!("seraph-boot: step 9/10: populating BootInfo");
 
-    // modules_phys is reserved but currently empty: init is passed via init_image.
-    // No additional boot modules are loaded in this configuration (boot.conf
-    // specifies only kernel + init). The allocation is identity-mapped and
-    // will be reclaimed by the kernel as usable RAM.
+    // Write loaded BootModule descriptors into the pre-allocated modules page.
+    // Each BootModule is 16 bytes; MAX_MODULES (16) entries fit in one 4096-byte page.
+    // SAFETY: modules_phys is a valid 4096-byte allocation. boot_module_count <=
+    // MAX_MODULES (16) so the writes stay within the allocation.
+    let modules_ptr = modules_phys as *mut BootModule;
+    for i in 0..boot_module_count
+    {
+        unsafe { core::ptr::write(modules_ptr.add(i), boot_modules[i]) };
+    }
 
     // Translate the UEFI memory descriptors into the boot protocol's MemoryMapEntry
     // format and sort by physical_base ascending.
@@ -416,11 +493,15 @@ unsafe fn boot_sequence(image: EfiHandle, st: *mut EfiSystemTable) -> Result<!, 
                 kernel_size: kernel_info.size,
                 init_image,
                 modules: ModuleSlice {
-                    // No additional boot modules in the current configuration.
-                    // Populate entries and increment count when boot.conf gains
-                    // extra modules (procmgr, devmgr, etc.).
-                    entries: core::ptr::null(),
-                    count: 0,
+                    entries: if boot_module_count > 0
+                    {
+                        modules_phys as *const BootModule
+                    }
+                    else
+                    {
+                        core::ptr::null()
+                    },
+                    count: boot_module_count as u64,
                 },
                 framebuffer,
                 acpi_rsdp: firmware.acpi_rsdp,
@@ -435,7 +516,7 @@ unsafe fn boot_sequence(image: EfiHandle, st: *mut EfiSystemTable) -> Result<!, 
                     count: 0,
                 },
                 command_line: cmdline_phys as *const u8,
-                command_line_len: 0,
+                command_line_len: config.cmdline_len as u64,
             },
         )
     };

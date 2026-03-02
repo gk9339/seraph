@@ -37,11 +37,32 @@ Detail: [uefi-environment.md](uefi-environment.md)
 The bootloader opens `\EFI\seraph\boot.conf` on the ESP and reads it into a
 4096-byte stack buffer. The file is parsed line by line for `key=value` entries.
 `#` comments and blank lines are ignored; unknown keys are skipped for forward
-compatibility. The required keys are `kernel` and `init`; a missing key or
-malformed line is a fatal error (`InvalidConfig`).
+compatibility.
 
-The parsed paths are used in all subsequent file-open operations, replacing any
-hardcoded path strings in the bootloader binary.
+**File format:**
+
+```
+# Seraph boot configuration
+path=\EFI\seraph
+kernel=kernel
+init=init
+modules=procmgr, devmgr, vfsd, fat
+cmdline=placeholder
+```
+
+- `path` — required. Base ESP directory. Prepended (with `\`) to kernel, init,
+  and all module names to form full ESP paths.
+- `kernel` — required. Kernel filename, resolved against `path`.
+- `init` — required. Init filename, resolved against `path`.
+- `modules` — optional. Comma-separated module filenames resolved against `path`.
+  Whitespace around names is trimmed; empty tokens are skipped. Absent or empty
+  means no additional modules.
+- `cmdline` — optional. Kernel command line passed verbatim via
+  `BootInfo.command_line`. Absent means empty string.
+
+Missing `path`, `kernel`, or `init` keys, or a malformed line (missing `=`), are
+fatal errors (`InvalidConfig`). The parsed paths are used in all subsequent
+file-open operations.
 
 Detail: [uefi-environment.md](uefi-environment.md)
 
@@ -59,7 +80,7 @@ Detail: [elf-loading.md](elf-loading.md)
 
 ### Step 4: Load Init ELF and Boot Modules
 
-**Init** is loaded from the path specified by the `init` key in `boot.conf`. It
+**Init** is loaded from the path resolved from the `init` key in `boot.conf`. It
 receives full ELF treatment: header validation, W^X check, and per-segment loading.
 Each `PT_LOAD` segment is allocated at any available physical address via
 `AllocateAnyPages` (not at `p_paddr`, which conflicts with UEFI low-memory use),
@@ -68,12 +89,17 @@ containing the virtual entry point and one `InitSegment` per LOAD segment, each
 recording its physical allocation address, ELF virtual address, size, and
 permissions. This is stored in `BootInfo.init_image`.
 
-**Boot modules** are flat binary images listed in `boot.conf` beyond the `init` key.
-Each module is loaded via `AllocateAnyPages`, the file data is copied verbatim, and
-a `BootModule` entry recording `physical_base` and `size` is appended to
-`BootInfo.modules`. The bootloader does not inspect or interpret module content;
-what the modules are and in what order they are started is entirely init's concern.
-Typical modules: procmgr, devmgr, block driver, FS driver, vfsd.
+**Boot modules** are flat binary images listed in `boot.conf` under the `modules`
+key. Each module path is resolved as `path\<name>`. For each module: the file is
+read into a temporary UEFI-allocated buffer, `load_module()` copies the data into a
+persistent physical allocation, and a `BootModule` entry recording `physical_base`
+and `size` is stored in a local array. The descriptors are written into the
+pre-allocated modules page in step 9. The bootloader does not inspect or interpret
+module content; what the modules are and in what order they are started is entirely
+init's concern. Typical modules: procmgr, devmgr, block driver, FS driver, vfsd.
+
+Both the module file read buffers and the loaded module physical regions are tracked
+for identity mapping so they remain accessible after page table switch.
 
 Detail: [elf-loading.md](elf-loading.md)
 

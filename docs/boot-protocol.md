@@ -17,7 +17,7 @@ The shared types are in `abi/boot-protocol/` (crate: `boot-protocol`).
 ## Boot Flow
 
 1. UEFI firmware loads the bootloader from the EFI System Partition
-2. Bootloader reads `\EFI\seraph\boot.conf` to obtain kernel and init paths
+2. Bootloader reads `\EFI\seraph\boot.conf` to obtain kernel, init, module paths, and command line
 3. Bootloader locates and reads the kernel ELF and boot modules from disk
 4. Bootloader allocates physical memory for all loaded images
 5. Bootloader queries the UEFI memory map

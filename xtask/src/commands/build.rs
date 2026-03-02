@@ -106,14 +106,15 @@ fn build_boot(ctx: &BuildContext, args: &BuildArgs) -> Result<()>
             }
 
             let objcopy = find_llvm_objcopy()?;
-            let dst_efi = efi_boot_dir.join(efi_name);
+            let dst_boot = efi_seraph_dir.join("boot.efi");
             run_cmd(
                 Command::new(&objcopy)
                     .args(["-O", "binary"])
                     .arg(&elf_out)
-                    .arg(&dst_efi),
+                    .arg(&dst_boot),
             )?;
-            copy_file(&dst_efi, &efi_seraph_dir.join("boot"))?;
+            let dst_efi = efi_boot_dir.join(efi_name);
+            copy_file(&dst_boot, &dst_efi)?;
 
             step(&format!(
                 "Bootloader: {} (ELF → flat binary)",
@@ -135,9 +136,10 @@ fn build_boot(ctx: &BuildContext, args: &BuildArgs) -> Result<()>
                 bail!("expected EFI output not found: {}", cargo_out.display());
             }
 
+            let dst_boot = efi_seraph_dir.join("boot.efi");
+            copy_file(&cargo_out, &dst_boot)?;
             let dst_efi = efi_boot_dir.join(efi_name);
-            copy_file(&cargo_out, &dst_efi)?;
-            copy_file(&cargo_out, &efi_seraph_dir.join("boot"))?;
+            copy_file(&dst_boot, &dst_efi)?;
 
             step(&format!("Bootloader: {}", dst_efi.display()));
             step(&format!(

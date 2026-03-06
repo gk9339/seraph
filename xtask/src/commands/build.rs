@@ -118,11 +118,11 @@ fn build_boot(ctx: &BuildContext, args: &BuildArgs) -> Result<()>
 
             step(&format!(
                 "Bootloader: {} (ELF → flat binary)",
-                dst_efi.display()
+                efi_seraph_dir.join("boot.efi").display()
             ));
             step(&format!(
-                "Bootloader: {}",
-                efi_seraph_dir.join("boot").display()
+                "Bootloader: {} (ELF → flat binary)",
+                dst_efi.display()
             ));
         }
         _ =>
@@ -141,11 +141,11 @@ fn build_boot(ctx: &BuildContext, args: &BuildArgs) -> Result<()>
             let dst_efi = efi_boot_dir.join(efi_name);
             copy_file(&dst_boot, &dst_efi)?;
 
-            step(&format!("Bootloader: {}", dst_efi.display()));
             step(&format!(
                 "Bootloader: {}",
-                efi_seraph_dir.join("boot").display()
+                efi_seraph_dir.join("boot.efi").display()
             ));
+            step(&format!("Bootloader: {}", dst_efi.display()));
         }
     }
 

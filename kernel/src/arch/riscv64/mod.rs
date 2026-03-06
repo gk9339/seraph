@@ -7,6 +7,7 @@
 
 pub mod console;
 pub mod cpu;
+pub mod paging;
 
 /// Architecture name string for use in diagnostic output.
 pub const ARCH_NAME: &str = "riscv64";

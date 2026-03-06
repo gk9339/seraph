@@ -67,6 +67,20 @@ impl FramebufferWriter
         Some(writer)
     }
 
+    /// Update the framebuffer base pointer to a new virtual address.
+    ///
+    /// Called after the kernel's page tables are activated to repoint the
+    /// framebuffer from its bootloader identity-mapped address to the
+    /// corresponding virtual address in the direct physical map.
+    ///
+    /// # Safety
+    /// `new_base` must be a valid, writable virtual address for the same
+    /// physical framebuffer memory, accessible under the current page tables.
+    pub unsafe fn rebase(&mut self, new_base: *mut u8)
+    {
+        self.base = new_base;
+    }
+
     /// Write one byte to the framebuffer, advancing the cursor.
     ///
     /// Handles `\n` (newline + carriage return), `\r` (carriage return),

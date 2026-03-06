@@ -12,6 +12,9 @@
 //! Initialization phases implemented here:
 //! - Phase 0: validate `BootInfo` (pre-console; halts silently on failure).
 //! - Phase 1: initialize early console (serial + framebuffer); emit startup banner.
+//! - Phase 2: parse memory map, populate buddy frame allocator.
+//! - Phase 3: install kernel page tables (direct physical map + W^X image).
+//! - Phase 4: activate kernel heap (`GlobalAlloc` via slab/size-class allocator).
 
 #![cfg_attr(not(test), no_std)]
 #![cfg_attr(not(test), no_main)]
@@ -19,11 +22,17 @@
 #[cfg(not(test))]
 use core::panic::PanicInfo;
 
+// Pull in the `alloc` crate (Box, Vec, …) for no_std kernel builds.
+// In test mode the standard library provides alloc implicitly.
+#[cfg(not(test))]
+extern crate alloc;
+
 use boot_protocol::BootInfo;
 
 mod arch;
 mod console;
 mod framebuffer;
+mod mm;
 mod validate;
 
 /// Kernel entry point.
@@ -60,7 +69,64 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
     kprintln!("  boot protocol version: {}", info.version);
     kprintln!("  architecture: {}", arch::current::ARCH_NAME);
 
-    // ── TODO: Phase 2+ ─────────────────────────────────────────────────────
+    // ── Phase 2: physical memory ────────────────────────────────────────────
+    // Parse the memory map, subtract reserved regions, populate the buddy
+    // allocator. Halts with a FATAL message if no usable memory is found.
+    //
+    // SAFETY: single-threaded boot; FRAME_ALLOCATOR is not accessed elsewhere.
+    let allocator = unsafe { &mut *core::ptr::addr_of_mut!(mm::FRAME_ALLOCATOR) };
+    mm::init::init_physical_memory(info, allocator);
+    kprintln!(
+        "  usable RAM: {} MiB",
+        allocator.free_page_count() * mm::PAGE_SIZE / (1024 * 1024)
+    );
+
+    // ── Phase 3: kernel page tables ─────────────────────────────────────────
+    // Replace the bootloader's minimal page tables with the kernel's own,
+    // establishing the direct physical map and W^X kernel image mappings.
+    //
+    // Save the framebuffer physical base before the switch; `info` is a
+    // physical-address reference that is no longer identity-mapped in the
+    // new tables (it is accessible via the direct map as a future Phase 4
+    // concern). All further uses of `info` must be resolved before activate.
+    let fb_phys = info.framebuffer.physical_base;
+    if let Err(_e) = mm::paging::init_kernel_page_tables(info, allocator)
+    {
+        fatal("Phase 3: boot page table pool exhausted (RAM > 248 GiB?)");
+    }
+    // Rebase MMIO-based console devices to the direct physical map.
+    // On RISC-V the UART is MMIO and must be accessed via the direct map after
+    // the page table switch; on x86-64 the UART is I/O-mapped (no-op).
+    // SAFETY: page tables are now active; direct map covers all physical RAM
+    // and the UART MMIO region.
+    unsafe {
+        let uart_phys = arch::current::console::UART_PHYS_BASE;
+        if uart_phys != 0
+        {
+            arch::current::console::rebase_serial(mm::paging::phys_to_virt(uart_phys));
+        }
+        console::rebase_framebuffer(fb_phys);
+    }
+    kprintln!(
+        "  page tables: active (direct map at {:#x})",
+        mm::paging::DIRECT_MAP_BASE
+    );
+
+    // ── Phase 4: kernel heap ─────────────────────────────────────────────────
+    // Flip the GlobalAlloc ready flag. The SizeClassAllocator and KernelCaches
+    // are const-initialised in their statics; no heap memory is consumed here.
+    //
+    // Note on bootloader page table frame reclamation:
+    // Two categories of frames are NOT reclaimed:
+    //   1. BOOT_TABLE_POOL (BSS array): part of the kernel image; cannot be
+    //      freed to buddy. The unused portion (~750 KiB) is acceptable waste.
+    //   2. Bootloader's original page tables: BootInfo does not record their
+    //      physical addresses, so they cannot be identified. Future enhancement:
+    //      have the bootloader pass old CR3/satp in BootInfo.
+    mm::heap::init();
+    kprintln!("  kernel heap active");
+
+    // ── TODO: Phase 5+ ─────────────────────────────────────────────────────
 
     arch::current::cpu::halt_loop();
 }
@@ -69,7 +135,6 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
 ///
 /// Used for unrecoverable post-console errors. Prints the message then halts
 /// permanently. Never returns.
-#[allow(dead_code)]
 fn fatal(msg: &str) -> !
 {
     kprintln!("FATAL: {}", msg);

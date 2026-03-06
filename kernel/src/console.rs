@@ -16,6 +16,7 @@
 
 use crate::arch::current::console::{serial_init, serial_write_byte};
 use crate::framebuffer::FramebufferWriter;
+use crate::mm::paging::phys_to_virt;
 use boot_protocol::BootInfo;
 
 /// Static console state. Single-threaded early boot: no locking required.
@@ -92,6 +93,36 @@ pub unsafe fn init(boot_info: &BootInfo)
     // SAFETY: CONSOLE is only accessed from the single boot thread.
     unsafe {
         (*core::ptr::addr_of_mut!(CONSOLE)).fb = writer;
+    }
+}
+
+/// Repoint the framebuffer to its direct-map virtual address.
+///
+/// Called after Phase 3 activates the kernel's page tables. Converts
+/// `fb_phys` to `DIRECT_MAP_BASE + fb_phys` and calls `FramebufferWriter::rebase`
+/// so subsequent output writes to the correct virtual address.
+///
+/// Does nothing if no framebuffer is present (`fb_phys == 0`).
+///
+/// # Safety
+/// Must be called only after `init_kernel_page_tables` has returned
+/// successfully and the direct physical map is active.
+pub unsafe fn rebase_framebuffer(fb_phys: u64)
+{
+    if fb_phys == 0
+    {
+        return;
+    }
+    // SAFETY: CONSOLE is only accessed from the single boot thread.
+    let console = unsafe { &mut *core::ptr::addr_of_mut!(CONSOLE) };
+    if let Some(ref mut fb) = console.fb
+    {
+        let new_base = phys_to_virt(fb_phys) as *mut u8;
+        // SAFETY: new_base is the direct-map VA of the framebuffer physical memory,
+        // which is now mapped R/W by the kernel's page tables.
+        unsafe {
+            fb.rebase(new_base);
+        }
     }
 }
 

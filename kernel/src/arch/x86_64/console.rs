@@ -4,9 +4,26 @@
 // kernel/src/arch/x86_64/console.rs
 
 //! COM1 serial backend for x86-64 (UART 16550, I/O port 0x3F8, 115200 8N1).
+//!
+//! COM1 is accessed via I/O ports (`in`/`out` instructions), not MMIO, so it
+//! is unaffected by page table changes. [`rebase_serial`] is a no-op here.
 
 /// COM1 base I/O port.
 const COM1: u16 = 0x3F8;
+
+/// Physical base address of the serial device.
+///
+/// 0 on x86-64 because COM1 is I/O-mapped (no physical MMIO address).
+/// Callers that pass this to [`rebase_serial`] will trigger a no-op.
+pub const UART_PHYS_BASE: u64 = 0;
+
+/// No-op on x86-64: COM1 is accessed via I/O ports, not MMIO.
+///
+/// Present to satisfy the cross-architecture call site in `main.rs`.
+///
+/// # Safety
+/// No preconditions; always safe to call.
+pub unsafe fn rebase_serial(_new_base: u64) {}
 
 /// Initialize COM1 at 115200 baud, 8-N-1.
 ///

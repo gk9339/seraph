@@ -8,17 +8,47 @@
 //! QEMU's virt machine pre-initializes the UART; this module performs a
 //! minimal reset and provides byte-level write access.
 //!
+//! After Phase 3 activates the kernel's page tables, the UART is no longer
+//! accessible at its physical address (0x10000000); call [`rebase_serial`]
+//! to switch to the direct-map virtual address.
+//!
 //! TODO: Replace the hardcoded MMIO base with a value from the Device Tree.
 //! QEMU virt always places the UART at 0x10000000, but real RISC-V boards
 //! may differ. A proper implementation should parse the DTB provided by
 //! firmware and look up the "ns16550a" compatible node.
 
-/// QEMU virt UART MMIO base address.
-const UART_BASE: usize = 0x1000_0000;
+/// Physical address of the QEMU virt UART MMIO region.
+///
+/// Exported so callers can compute `DIRECT_MAP_BASE + UART_PHYS_BASE` and
+/// pass it to [`rebase_serial`] after the page table switch.
+pub const UART_PHYS_BASE: u64 = 0x1000_0000;
 
 /// UART register offsets (byte-addressed).
 const UART_TX: usize = 0; // transmit holding register
 const UART_LSR: usize = 5; // line status register
+
+/// Current UART virtual base address.
+///
+/// Initialized to the physical address (identity-mapped by the bootloader).
+/// Updated by [`rebase_serial`] after Phase 3 switches to the direct map.
+/// Single-threaded early boot: no locking required.
+// SAFETY: accessed only from the single kernel boot thread.
+static mut UART_BASE: u64 = UART_PHYS_BASE;
+
+/// Switch the UART accessor to a new virtual base address.
+///
+/// Call this after Phase 3 activates the kernel's page tables, passing
+/// `phys_to_virt(UART_PHYS_BASE)` so subsequent serial output uses the
+/// direct-map address instead of the now-unmapped physical address.
+///
+/// # Safety
+/// Must be called from the single kernel boot thread after the direct
+/// physical map is active (i.e. after `activate` returns successfully).
+pub unsafe fn rebase_serial(new_base: u64)
+{
+    // SAFETY: single-threaded boot; no concurrent access.
+    unsafe { UART_BASE = new_base };
+}
 
 /// Initialize the QEMU virt UART.
 ///
@@ -30,7 +60,8 @@ const UART_LSR: usize = 5; // line status register
 /// at `UART_BASE` is accessible and not protected by the MMU.
 pub unsafe fn serial_init()
 {
-    let base = UART_BASE as *mut u8;
+    // SAFETY: UART_BASE is valid (identity-mapped by bootloader at init time).
+    let base = unsafe { UART_BASE } as *mut u8;
     unsafe {
         // IER = 0: disable all interrupts.
         core::ptr::write_volatile(base.add(1), 0x00);
@@ -52,14 +83,13 @@ pub unsafe fn serial_init()
 /// `serial_init` must have been called before this function.
 pub unsafe fn serial_write_byte(byte: u8)
 {
-    let base = UART_BASE as *mut u8;
+    // SAFETY: UART_BASE is valid (set by serial_init or rebase_serial).
+    let base = unsafe { UART_BASE } as *mut u8;
 
     // Spin on LSR bit 5 (THRE — Transmit Holding Register Empty).
-    // SAFETY: MMIO read from LSR; UART_BASE is valid after serial_init.
     while unsafe { core::ptr::read_volatile(base.add(UART_LSR)) } & 0x20 == 0
     {}
 
-    // SAFETY: THRE is set; writing the byte to TX is safe.
     unsafe {
         core::ptr::write_volatile(base.add(UART_TX), byte);
     }

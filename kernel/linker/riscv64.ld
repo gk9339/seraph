@@ -25,17 +25,23 @@ SECTIONS
 
     .text ALIGN(4K) : AT(ADDR(.text) - KERNEL_VBASE + KERNEL_PBASE)
     {
+        __text_start = .;
         *(.text .text.*)
+        __text_end = .;
     }
 
     .rodata ALIGN(4K) : AT(ADDR(.rodata) - KERNEL_VBASE + KERNEL_PBASE)
     {
+        __rodata_start = .;
         *(.rodata .rodata.*)
+        __rodata_end = .;
     }
 
     .data ALIGN(4K) : AT(ADDR(.data) - KERNEL_VBASE + KERNEL_PBASE)
     {
+        __data_start = .;
         *(.data .data.*)
+        __data_end = .;
     }
 
     .bss ALIGN(4K) : AT(ADDR(.bss) - KERNEL_VBASE + KERNEL_PBASE)

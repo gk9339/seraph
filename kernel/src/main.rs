@@ -15,6 +15,7 @@
 //! - Phase 2: parse memory map, populate buddy frame allocator.
 //! - Phase 3: install kernel page tables (direct physical map + W^X image).
 //! - Phase 4: activate kernel heap (`GlobalAlloc` via slab/size-class allocator).
+//! - Phase 5: architecture hardware init (GDT/IDT/APIC or stvec/PLIC, timer, syscall).
 
 #![cfg_attr(not(test), no_std)]
 #![cfg_attr(not(test), no_main)]
@@ -126,8 +127,26 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
     mm::heap::init();
     kprintln!("  kernel heap active");
 
-    // ── TODO: Phase 5+ ─────────────────────────────────────────────────────
+    // ── Phase 5: architecture hardware initialization ─────────────────────────
+    kprintln!("  phase 5: hardware init");
+    // SAFETY: single-threaded boot; heap active; direct map active.
+    unsafe {
+        arch::current::interrupts::init();
+    }
+    kprintln!("  interrupts: initialized");
+    // Enable preemption timer at 10 ms period.
+    // timer::init() enables interrupts as its final step.
+    unsafe {
+        arch::current::timer::init(10_000);
+    }
+    kprintln!("  timer: running");
+    unsafe {
+        arch::current::syscall::init();
+    }
+    kprintln!("  syscall: entry installed");
+    kprintln!("  phase 5: complete");
 
+    // ── TODO: Phase 6+ ────────────────────────────────────────────────────────
     arch::current::cpu::halt_loop();
 }
 

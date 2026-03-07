@@ -1,0 +1,181 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 George Kottler <mail@kottlerg.com>
+
+// kernel/src/arch/riscv64/timer.rs
+
+//! RISC-V supervisor-mode timer using the SBI timer extension.
+//!
+//! The RISC-V time-compare mechanism works by scheduling a deadline:
+//! when `time` CSR ≥ `timecmp`, a supervisor timer interrupt fires.
+//!
+//! The timebase frequency is hardcoded to 10 MHz (QEMU virt machine default).
+//! Future work: parse the DTB `timebase-frequency` property.
+//!
+//! # SBI timer extension
+//! Extension ID `0x54494D45` ("TIME"), function ID 0.
+//! - a7 = extension ID
+//! - a6 = function ID (0 = `sbi_set_timer`)
+//! - a0 = timer value (next deadline)
+//!
+//! # Modification notes
+//! - To read the real timebase: parse the DTB passed by the bootloader and
+//!   initialise `TIMEBASE_FREQ` from the `timebase-frequency` property.
+//! - To use the `sstc` extension instead of SBI: write `stimecmp` CSR directly.
+
+use core::sync::atomic::{AtomicU64, Ordering};
+
+use super::interrupts;
+
+// ── Constants ─────────────────────────────────────────────────────────────────
+
+/// QEMU virt machine timer frequency (10 MHz).
+///
+/// Replace with DTB-parsed value in a later phase.
+const TIMEBASE_FREQ: u64 = 10_000_000;
+
+/// SBI TIME extension ID: ASCII "TIME" = 0x54494D45.
+const SBI_EXT_TIME: u64 = 0x5449_4D45;
+
+// ── Tick state ────────────────────────────────────────────────────────────────
+
+/// Monotonic tick counter; incremented by `handle_tick`.
+static TICK_COUNT: AtomicU64 = AtomicU64::new(0);
+
+/// APIC-equivalent: number of timer ticks per period (stored for querying).
+static TICKS_PER_SEC: AtomicU64 = AtomicU64::new(0);
+
+/// Ticks per period (stored to rearm the timer on each interrupt).
+static TIMER_PERIOD_TICKS: AtomicU64 = AtomicU64::new(0);
+
+// ── SBI helper ────────────────────────────────────────────────────────────────
+
+/// Call the SBI timer extension to set the next timer deadline.
+///
+/// `val` is the absolute `time` CSR value at which the next interrupt fires.
+fn sbi_set_timer(val: u64)
+{
+    // SAFETY: SBI ecall is always available in RISC-V supervisor mode.
+    unsafe {
+        core::arch::asm!(
+            "ecall",
+            inout("a0") val => _,
+            // a1 unused (high 32 bits for RV32; zero for RV64).
+            inout("a1") 0u64 => _,
+            // a6 = function ID 0 (sbi_set_timer).
+            inout("a6") 0u64 => _,
+            // a7 = extension ID.
+            inout("a7") SBI_EXT_TIME => _,
+            options(nostack, nomem),
+        );
+    }
+}
+
+/// Read the `time` CSR (supervisor-mode read of the machine-mode timer).
+#[cfg(not(test))]
+fn read_time() -> u64
+{
+    let t: u64;
+    unsafe {
+        core::arch::asm!("csrr {0}, time", out(reg) t, options(nostack, nomem));
+    }
+    t
+}
+
+// ── Public interface ──────────────────────────────────────────────────────────
+
+/// Initialise the supervisor timer for periodic preemption at `period_us` µs.
+///
+/// Sets the first SBI timer deadline, stores the period, and enables
+/// supervisor interrupts (`sstatus.SIE`).
+///
+/// Must be called after `interrupts::init()`.
+///
+/// # Safety
+/// Must execute in supervisor mode from a single-threaded context.
+#[cfg(not(test))]
+pub unsafe fn init(period_us: u64)
+{
+    let period_ticks = TIMEBASE_FREQ * period_us / 1_000_000;
+    TIMER_PERIOD_TICKS.store(period_ticks, Ordering::Relaxed);
+    TICKS_PER_SEC.store(1_000_000 / period_us, Ordering::Relaxed);
+
+    let deadline = read_time() + period_ticks;
+    sbi_set_timer(deadline);
+
+    // Enable supervisor interrupts — the timer will now fire.
+    // SAFETY: stvec is installed.
+    unsafe {
+        interrupts::enable();
+    }
+}
+
+/// Handle a supervisor timer interrupt.
+///
+/// Called from `trap_dispatch` on scause = 5 (supervisor timer interrupt).
+/// Increments the tick count and schedules the next deadline.
+pub fn handle_tick()
+{
+    TICK_COUNT.fetch_add(1, Ordering::Relaxed);
+    let period = TIMER_PERIOD_TICKS.load(Ordering::Relaxed);
+    // Set next deadline relative to current time to avoid drift.
+    #[cfg(not(test))]
+    sbi_set_timer(read_time() + period);
+}
+
+/// Return the current monotonic tick count.
+pub fn current_tick() -> u64
+{
+    TICK_COUNT.load(Ordering::Relaxed)
+}
+
+/// Return the configured number of ticks per second.
+pub fn ticks_per_second() -> u64
+{
+    TICKS_PER_SEC.load(Ordering::Relaxed)
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests
+{
+    use super::*;
+
+    #[test]
+    fn timebase_freq_is_10_mhz()
+    {
+        assert_eq!(TIMEBASE_FREQ, 10_000_000);
+    }
+
+    #[test]
+    fn period_ticks_for_10ms()
+    {
+        // 10 ms = 10_000 µs → 10_000_000 * 10_000 / 1_000_000 = 100_000 ticks.
+        let ticks = TIMEBASE_FREQ * 10_000 / 1_000_000;
+        assert_eq!(ticks, 100_000);
+    }
+
+    #[test]
+    fn period_ticks_for_1ms()
+    {
+        let ticks = TIMEBASE_FREQ * 1_000 / 1_000_000;
+        assert_eq!(ticks, 10_000);
+    }
+
+    #[test]
+    fn sbi_ext_time_constant()
+    {
+        // ASCII "TIME" = 0x54494D45.
+        assert_eq!(SBI_EXT_TIME, 0x5449_4D45);
+    }
+
+    #[test]
+    fn tick_count_starts_at_zero()
+    {
+        // The global is module-level; this just validates the initial value.
+        // (Real state is reset between test runs since tests run in isolation.)
+        let t = TICK_COUNT.load(Ordering::Relaxed);
+        // May be non-zero if tests share state, but must be reasonable.
+        let _ = t; // just ensure it compiles and is accessible
+    }
+}

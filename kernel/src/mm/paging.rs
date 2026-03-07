@@ -33,11 +33,11 @@ use boot_protocol::BootInfo;
 // Production-only imports (linker symbols and arch paging are unavailable
 // when running unit tests on the host).
 #[cfg(not(test))]
-use crate::arch::current::paging as arch_paging;
-#[cfg(not(test))]
 use super::buddy::BuddyAllocator;
 #[cfg(not(test))]
 use super::PAGE_SIZE;
+#[cfg(not(test))]
+use crate::arch::current::paging as arch_paging;
 
 // ── Public constants ──────────────────────────────────────────────────────────
 
@@ -234,10 +234,7 @@ pub fn compute_max_physical_address(info: &BootInfo) -> u64
     // SAFETY: Phase 0 validated that memory_map.entries is non-null and
     // count > 0; the region is identity-mapped by the bootloader.
     let entries = unsafe {
-        core::slice::from_raw_parts(
-            info.memory_map.entries,
-            info.memory_map.count as usize,
-        )
+        core::slice::from_raw_parts(info.memory_map.entries, info.memory_map.count as usize)
     };
     entries
         .iter()
@@ -259,8 +256,7 @@ pub fn compute_max_physical_address(info: &BootInfo) -> u64
 // Excluded from unit test builds: references linker symbols and arch hardware.
 
 #[cfg(not(test))]
-extern "C"
-{
+extern "C" {
     /// Start of the kernel `.text` section (virtual address).
     static __text_start: u8;
     /// End of the kernel `.text` section (virtual address).
@@ -328,7 +324,11 @@ pub fn init_kernel_page_tables(
     // ── Direct physical map ───────────────────────────────────────────────────
     // Map [0, max_phys_rounded) at DIRECT_MAP_BASE using 2 MiB large pages.
     // The framebuffer MMIO (if above max_phys) is handled separately below.
-    let rw = PageFlags { readable: true, writable: true, executable: false };
+    let rw = PageFlags {
+        readable: true,
+        writable: true,
+        executable: false,
+    };
     let mut phys: u64 = 0;
     while phys < max_phys_rounded
     {
@@ -345,6 +345,31 @@ pub fn init_kernel_page_tables(
     // ── Framebuffer (only if above direct map range) ──────────────────────────
     map_framebuffer_if_needed(root_va, info, max_phys_rounded, &mut pool)?;
 
+    // ── Architecture-specific MMIO regions ────────────────────────────────────
+    // Map regions listed in arch::current::MMIO_DIRECT_MAP_REGIONS that fall
+    // above max_phys_rounded (and thus outside the large-page direct map loop).
+    for &(phys_base, size) in crate::arch::current::MMIO_DIRECT_MAP_REGIONS
+    {
+        if phys_base < max_phys_rounded
+        {
+            continue; // already covered by the large-page direct map
+        }
+        let page_mask = !(PAGE_SIZE as u64 - 1);
+        let start = phys_base & page_mask;
+        let end = (phys_base + size + PAGE_SIZE as u64 - 1) & page_mask;
+        let rw = PageFlags {
+            readable: true,
+            writable: true,
+            executable: false,
+        };
+        let mut phys = start;
+        while phys < end
+        {
+            arch_paging::map_page(root_va, DIRECT_MAP_BASE + phys, phys, rw, &mut pool)?;
+            phys += PAGE_SIZE as u64;
+        }
+    }
+
     // Activate the new page tables. After this point the direct map is live.
     // SAFETY: we have mapped kernel code, stack, and all data accessed next.
     unsafe {
@@ -358,11 +383,8 @@ pub fn init_kernel_page_tables(
 ///
 /// Physical addresses are derived from the kernel VA/PA offset in `info`.
 #[cfg(not(test))]
-fn map_kernel_image(
-    root_va: u64,
-    info: &BootInfo,
-    pool: &mut PoolState,
-) -> Result<(), PagingError>
+fn map_kernel_image(root_va: u64, info: &BootInfo, pool: &mut PoolState)
+    -> Result<(), PagingError>
 {
     let kv = info.kernel_virtual_base;
     let kp = info.kernel_physical_base;
@@ -386,19 +408,31 @@ fn map_kernel_image(
     };
 
     // .text: readable + executable, not writable (W^X).
-    let rx = PageFlags { readable: true, writable: false, executable: true };
+    let rx = PageFlags {
+        readable: true,
+        writable: false,
+        executable: true,
+    };
     let text_start = core::ptr::addr_of!(__text_start) as u64;
     let text_end = core::ptr::addr_of!(__text_end) as u64;
     map_range(root_va, text_start, text_end, rx, pool)?;
 
     // .rodata: readable only.
-    let ro = PageFlags { readable: true, writable: false, executable: false };
+    let ro = PageFlags {
+        readable: true,
+        writable: false,
+        executable: false,
+    };
     let rodata_start = core::ptr::addr_of!(__rodata_start) as u64;
     let rodata_end = core::ptr::addr_of!(__rodata_end) as u64;
     map_range(root_va, rodata_start, rodata_end, ro, pool)?;
 
     // .data + .bss: readable + writable, not executable (W^X).
-    let rw = PageFlags { readable: true, writable: true, executable: false };
+    let rw = PageFlags {
+        readable: true,
+        writable: true,
+        executable: false,
+    };
     let data_start = core::ptr::addr_of!(__data_start) as u64;
     let bss_end = core::ptr::addr_of!(__bss_end) as u64;
     map_range(root_va, data_start, bss_end, rw, pool)?;
@@ -412,11 +446,7 @@ fn map_kernel_image(
 /// If the stack pointer is already within the kernel image mapping (unlikely
 /// but possible), this is a no-op.
 #[cfg(not(test))]
-fn map_boot_stack(
-    root_va: u64,
-    info: &BootInfo,
-    pool: &mut PoolState,
-) -> Result<(), PagingError>
+fn map_boot_stack(root_va: u64, info: &BootInfo, pool: &mut PoolState) -> Result<(), PagingError>
 {
     let sp = arch_paging::read_stack_pointer();
 
@@ -430,7 +460,11 @@ fn map_boot_stack(
 
     // Identity-map 64 KiB aligned to 64 KiB around SP (VA == PA).
     let stack_base = sp & !0xFFFF;
-    let rw = PageFlags { readable: true, writable: true, executable: false };
+    let rw = PageFlags {
+        readable: true,
+        writable: true,
+        executable: false,
+    };
     let mut virt = stack_base;
     while virt < stack_base + 0x10000
     {
@@ -464,7 +498,11 @@ fn map_framebuffer_if_needed(
     let start = fb_phys & page_mask;
     let end = (fb_phys + fb_bytes + PAGE_SIZE as u64 - 1) & page_mask;
 
-    let rw = PageFlags { readable: true, writable: true, executable: false };
+    let rw = PageFlags {
+        readable: true,
+        writable: true,
+        executable: false,
+    };
     let mut phys = start;
     while phys < end
     {
@@ -686,7 +724,11 @@ mod tests
     #[test]
     fn page_flags_text_is_readable_executable_not_writable()
     {
-        let f = PageFlags { readable: true, writable: false, executable: true };
+        let f = PageFlags {
+            readable: true,
+            writable: false,
+            executable: true,
+        };
         assert!(f.readable);
         assert!(!f.writable);
         assert!(f.executable);
@@ -695,7 +737,11 @@ mod tests
     #[test]
     fn page_flags_rodata_is_readable_only()
     {
-        let f = PageFlags { readable: true, writable: false, executable: false };
+        let f = PageFlags {
+            readable: true,
+            writable: false,
+            executable: false,
+        };
         assert!(f.readable);
         assert!(!f.writable);
         assert!(!f.executable);
@@ -704,7 +750,11 @@ mod tests
     #[test]
     fn page_flags_data_is_readable_writable_not_executable()
     {
-        let f = PageFlags { readable: true, writable: true, executable: false };
+        let f = PageFlags {
+            readable: true,
+            writable: true,
+            executable: false,
+        };
         assert!(f.readable);
         assert!(f.writable);
         assert!(!f.executable);

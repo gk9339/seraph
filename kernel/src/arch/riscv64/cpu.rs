@@ -4,6 +4,37 @@
 // kernel/src/arch/riscv64/cpu.rs
 
 //! RISC-V 64-bit CPU control primitives.
+//!
+//! # Phase 5 additions
+//! - `halt_until_interrupt` — execute `wfi` with SIE enabled so the timer fires.
+//! - `current_id` — returns 0 (BSP only; real hart ID deferred to SMP phase).
+
+// ── Phase 5 additions ─────────────────────────────────────────────────────────
+
+/// Suspend the hart until the next interrupt fires, then return.
+///
+/// Unlike `halt_loop`, this requires interrupts to be enabled (via
+/// `sstatus.SIE`) so the supervisor timer can wake the hart.
+/// Interrupts remain enabled after `wfi` returns.
+pub fn halt_until_interrupt()
+{
+    // SAFETY: wfi is a hint; the CPU suspends until an enabled interrupt arrives.
+    unsafe {
+        core::arch::asm!("wfi", options(nostack, nomem));
+    }
+}
+
+/// Return the current hart ID.
+///
+/// Phase 5: only the BSP is running; returns 0.
+/// Future: read `mhartid` via SBI `sbi_get_marchid` or from the boot-info
+/// structure when SMP is brought up.
+pub fn current_id() -> u32
+{
+    0
+}
+
+// ── Interrupt control ─────────────────────────────────────────────────────────
 
 /// Disable supervisor-mode interrupts via sstatus.SIE.
 ///

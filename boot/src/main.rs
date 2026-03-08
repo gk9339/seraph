@@ -424,8 +424,7 @@ unsafe fn boot_sequence(image: EfiHandle, st: *mut EfiSystemTable) -> Result<!, 
     // Platform resource array: identity-map if allocated.
     if resource_count > 0
     {
-        let resource_array_size =
-            resource_count * core::mem::size_of::<PlatformResource>();
+        let resource_array_size = resource_count * core::mem::size_of::<PlatformResource>();
         track_region!(resources_phys, (resource_array_size + 4095) & !4095);
     }
 

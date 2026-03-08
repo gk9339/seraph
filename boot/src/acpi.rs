@@ -40,7 +40,7 @@ const SDT_OFF_LENGTH: usize = 4;
 
 // MADT offsets (relative to table start, after SDT header):
 const MADT_OFF_LAPIC_BASE: usize = SDT_HDR_LEN; // u32
-// MADT entries start at offset 44.
+                                                // MADT entries start at offset 44.
 const MADT_ENTRIES_OFF: usize = 44;
 
 // MADT entry types:
@@ -242,7 +242,8 @@ pub unsafe fn parse_acpi_resources(rsdp_addr: u64, out: &mut [PlatformResource])
                     id: 1,
                 });
             }
-            _ => {} // Skip unknown tables gracefully.
+            _ =>
+            {} // Skip unknown tables gracefully.
         }
     }
 
@@ -426,7 +427,8 @@ fn parse_madt(table: &[u8], _table_addr: u64, count: &mut usize, out: &mut [Plat
                     });
                 }
             }
-            _ => {} // Skip unknown MADT entry types.
+            _ =>
+            {} // Skip unknown MADT entry types.
         }
 
         off += entry_len;

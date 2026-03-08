@@ -35,8 +35,7 @@ const UART_LSR: usize = 5; // line status register
 pub unsafe fn discover_uart(st: *mut EfiSystemTable)
 {
     // Try ACPI SPCR first (EDK2 on QEMU virt provides ACPI, not DTB).
-    if let Some(rsdp_ptr) =
-        unsafe { crate::uefi::find_config_table(st, &EFI_ACPI_20_TABLE_GUID) }
+    if let Some(rsdp_ptr) = unsafe { crate::uefi::find_config_table(st, &EFI_ACPI_20_TABLE_GUID) }
     {
         let rsdp_addr = rsdp_ptr as u64;
         if let Some(base) = unsafe { crate::acpi::find_spcr_uart_base(rsdp_addr) }
@@ -47,8 +46,7 @@ pub unsafe fn discover_uart(st: *mut EfiSystemTable)
     }
 
     // Try Device Tree (bare-metal RISC-V or non-EDK2 firmware with DTB).
-    if let Some(dtb_ptr) =
-        unsafe { crate::uefi::find_config_table(st, &EFI_DTB_TABLE_GUID) }
+    if let Some(dtb_ptr) = unsafe { crate::uefi::find_config_table(st, &EFI_DTB_TABLE_GUID) }
     {
         let dtb_addr = dtb_ptr as u64;
         if let Some(base) = unsafe { crate::dtb::find_uart_base(dtb_addr) }

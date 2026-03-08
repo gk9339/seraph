@@ -427,8 +427,7 @@ pub struct EfiRiscvBootProtocol
     /// Protocol revision (unused by us).
     pub revision: u64,
     /// Query the boot hart ID.
-    pub get_boot_hartid:
-        unsafe extern "efiapi" fn(this: *mut Self, hart_id: *mut u64) -> EfiStatus,
+    pub get_boot_hartid: unsafe extern "efiapi" fn(this: *mut Self, hart_id: *mut u64) -> EfiStatus,
 }
 
 /// `EFI_GRAPHICS_OUTPUT_PROTOCOL` — provides framebuffer information.

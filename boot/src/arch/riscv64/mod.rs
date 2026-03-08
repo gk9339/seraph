@@ -16,8 +16,8 @@ pub use paging::BootPageTable;
 
 use crate::elf::EM_RISCV;
 use crate::uefi::{
-    EfiBootServices, EfiRiscvBootProtocol, EfiStatus, EfiSystemTable,
-    EFI_RISCV_BOOT_PROTOCOL_GUID, EFI_SUCCESS,
+    EfiBootServices, EfiRiscvBootProtocol, EfiStatus, EfiSystemTable, EFI_RISCV_BOOT_PROTOCOL_GUID,
+    EFI_SUCCESS,
 };
 
 /// ELF machine type expected for RISC-V 64-bit kernel binaries.

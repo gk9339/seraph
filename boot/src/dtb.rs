@@ -165,7 +165,9 @@ impl Fdt
             return None;
         }
         let addr = self.base + self.off_struct as u64 + off as u64;
-        Some(u32::from_be(unsafe { core::ptr::read_unaligned(addr as *const u32) }))
+        Some(u32::from_be(unsafe {
+            core::ptr::read_unaligned(addr as *const u32)
+        }))
     }
 
     /// Return a byte slice covering `len` bytes of the struct block at `off`.
@@ -313,14 +315,20 @@ impl Fdt
                         let mut i = 0;
                         while i + 4 <= data.len() && state.irq_count < MAX_IRQ_ENTRIES
                         {
-                            let irq = u32::from_be_bytes([data[i], data[i + 1], data[i + 2], data[i + 3]]);
+                            let irq = u32::from_be_bytes([
+                                data[i],
+                                data[i + 1],
+                                data[i + 2],
+                                data[i + 3],
+                            ]);
                             state.interrupts[state.irq_count] = irq;
                             state.irq_count += 1;
                             i += 4;
                         }
                     }
                 }
-                FDT_NOP => {}
+                FDT_NOP =>
+                {}
                 // FDT_END or unknown token: stop walking.
                 _ => break,
             }
@@ -333,8 +341,7 @@ impl Fdt
     pub fn find_compatible(&self, compat: &[u8]) -> Option<FdtNode>
     {
         let mut result: Option<FdtNode> = None;
-        self.walk_compatible(compat, |node|
-        {
+        self.walk_compatible(compat, |node| {
             result = Some(node);
             false // stop after first match
         });
@@ -344,8 +351,7 @@ impl Fdt
     /// Call `f` for each node whose `compatible` property contains `compat`.
     pub fn for_each_compatible<F: FnMut(&FdtNode)>(&self, compat: &[u8], mut f: F)
     {
-        self.walk_compatible(compat, |node|
-        {
+        self.walk_compatible(compat, |node| {
             f(&node);
             true
         });
@@ -396,7 +402,9 @@ fn read_be64(buf: &[u8]) -> u64
     {
         return 0;
     }
-    u64::from_be_bytes([buf[0], buf[1], buf[2], buf[3], buf[4], buf[5], buf[6], buf[7]])
+    u64::from_be_bytes([
+        buf[0], buf[1], buf[2], buf[3], buf[4], buf[5], buf[6], buf[7],
+    ])
 }
 
 // ── Public parsing functions ──────────────────────────────────────────────────
@@ -464,8 +472,7 @@ pub unsafe fn parse_dtb_resources(dtb_addr: u64, out: &mut [PlatformResource]) -
     // PLIC: riscv,plic0 or sifive,plic-1.0.0
     for compat in [b"riscv,plic0".as_ref(), b"sifive,plic-1.0.0".as_ref()]
     {
-        fdt.for_each_compatible(compat, |node|
-        {
+        fdt.for_each_compatible(compat, |node| {
             if node.reg_count > 0
             {
                 push_resource!(PlatformResource {
@@ -482,8 +489,7 @@ pub unsafe fn parse_dtb_resources(dtb_addr: u64, out: &mut [PlatformResource]) -
     // CLINT: riscv,clint0 or sifive,clint0
     for compat in [b"riscv,clint0".as_ref(), b"sifive,clint0".as_ref()]
     {
-        fdt.for_each_compatible(compat, |node|
-        {
+        fdt.for_each_compatible(compat, |node| {
             if node.reg_count > 0
             {
                 push_resource!(PlatformResource {
@@ -500,8 +506,7 @@ pub unsafe fn parse_dtb_resources(dtb_addr: u64, out: &mut [PlatformResource]) -
     // PCIe ECAM: pci-host-ecam-generic
     // flags = (start_bus=0) | (end_bus=255 << 8) = 0xFF00 (default full range).
     // To-do: parse `bus-range` property for accurate values.
-    fdt.for_each_compatible(b"pci-host-ecam-generic", |node|
-    {
+    fdt.for_each_compatible(b"pci-host-ecam-generic", |node| {
         if node.reg_count > 0
         {
             push_resource!(PlatformResource {
@@ -515,8 +520,7 @@ pub unsafe fn parse_dtb_resources(dtb_addr: u64, out: &mut [PlatformResource]) -
     });
 
     // UART: ns16550a
-    fdt.for_each_compatible(b"ns16550a", |node|
-    {
+    fdt.for_each_compatible(b"ns16550a", |node| {
         if node.reg_count > 0
         {
             push_resource!(PlatformResource {

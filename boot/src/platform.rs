@@ -14,10 +14,10 @@
 
 use crate::acpi;
 use crate::dtb;
-use crate::{bprint, bprintln};
 use crate::error::BootError;
 use crate::firmware::FirmwareInfo;
 use crate::uefi::{allocate_pages, EfiBootServices};
+use crate::{bprint, bprintln};
 use boot_protocol::{PlatformResource, ResourceType};
 
 /// Maximum number of platform resources tracked across all parsers.
@@ -65,8 +65,7 @@ pub unsafe fn parse_platform_resources(
     if firmware.device_tree != 0
     {
         // SAFETY: device_tree is a valid identity-mapped physical address from UEFI.
-        let n =
-            unsafe { dtb::parse_dtb_resources(firmware.device_tree, &mut buf[count..]) };
+        let n = unsafe { dtb::parse_dtb_resources(firmware.device_tree, &mut buf[count..]) };
         count += n;
         bprint!("seraph-boot:     DTB:  ");
         unsafe { crate::console::console_write_dec32(n as u32) };

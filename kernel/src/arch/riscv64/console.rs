@@ -12,10 +12,17 @@
 //! accessible at its physical address (0x10000000); call [`rebase_serial`]
 //! to switch to the direct-map virtual address.
 //!
-//! TODO: Replace the hardcoded MMIO base with a value from the Device Tree.
-//! QEMU virt always places the UART at 0x10000000, but real RISC-V boards
-//! may differ. A proper implementation should parse the DTB provided by
-//! firmware and look up the "ns16550a" compatible node.
+//! # UART base address
+//! The physical base is currently hardcoded to the QEMU virt default.
+//! The bootloader discovers the actual base via ACPI SPCR (primary path with
+//! EDK2) or DTB ns16550a node, but does not yet pass it to the kernel — there
+//! is no dedicated field in `BootInfo` for this. On QEMU virt both resolve to
+//! 0x10000000, so the hardcode is correct for the supported target.
+//!
+//! TODO: Pass the discovered UART base through `BootInfo` to the kernel.
+//! Steps: add `uart_phys_base: u64` to `BootInfo` (bump protocol version),
+//! set it from `arch::current::uart_mmio_region()` in the bootloader's
+//! Step 9, and replace `UART_PHYS_BASE` here with `info.uart_phys_base`.
 
 /// Physical address of the QEMU virt UART MMIO region.
 ///

@@ -34,6 +34,9 @@ extern "C" {
 /// installs the new page table via `satp`, flushes the TLB, sets the
 /// stack pointer, and jumps to the kernel entry point. Does not return.
 ///
+/// `boot_hart_id` is passed to the kernel in `a1` (SBI boot hart convention).
+/// It should come from [`crate::arch::current::discover_boot_hart_id`].
+///
 /// # Safety
 /// - `page_table_root` must be the physical address (4 KiB-aligned) of a
 ///   complete Sv48 root page table covering all addresses the kernel will
@@ -44,18 +47,20 @@ extern "C" {
 /// - `stack_top` must be a valid stack pointer, identity-mapped writable.
 /// - UEFI boot services must have exited before this call.
 /// - `sstatus.SIE` must be clear (interrupts disabled).
-pub unsafe fn perform_handoff(page_table_root: u64, entry: u64, boot_info: u64, stack_top: u64)
-    -> !
+pub unsafe fn perform_handoff(
+    page_table_root: u64,
+    entry: u64,
+    boot_info: u64,
+    stack_top: u64,
+    boot_hart_id: u64,
+) -> !
 {
     // Sv48 SATP: mode=9 (bits [63:60]), ASID=0, PPN = root >> 12.
     let satp = (9u64 << 60) | (page_table_root >> 12);
 
     let trampoline = core::ptr::addr_of!(_handoff_trampoline) as u64;
 
-    // TODO: Obtain the true boot hart ID via EFI_RISCV_BOOT_PROTOCOL rather
-    // than hard-coding 0. Deferred: the kernel stub ignores a1 and
-    // EFI_RISCV_BOOT_PROTOCOL requires additional UEFI bindings.
-    let hart_id: u64 = 0;
+    let hart_id: u64 = boot_hart_id;
 
     // Register contract for the trampoline (see trampoline asm above):
     //   t0 = satp value  t1 = kernel entry VA  t2 = stack top

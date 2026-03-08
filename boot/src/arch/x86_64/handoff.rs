@@ -73,6 +73,9 @@ pub fn trampoline_page_range() -> (u64, u64)
 /// before calling this function (see [`trampoline_page_range`] and the
 /// caller in `main.rs`).
 ///
+/// `_boot_hart_id` is unused on x86-64 (RISC-V-only concept); accepted for
+/// API symmetry with the RISC-V handoff.
+///
 /// # Safety
 /// - `page_table_root` must be the physical address of a valid, complete PML4
 ///   table covering all addresses the kernel will access at entry, including
@@ -81,8 +84,13 @@ pub fn trampoline_page_range() -> (u64, u64)
 /// - `boot_info` must be the physical address of a valid, populated `BootInfo`.
 /// - `stack_top` must be a valid stack pointer, 16-byte aligned.
 /// - UEFI boot services must have exited before this call.
-pub unsafe fn perform_handoff(page_table_root: u64, entry: u64, boot_info: u64, stack_top: u64)
-    -> !
+pub unsafe fn perform_handoff(
+    page_table_root: u64,
+    entry: u64,
+    boot_info: u64,
+    stack_top: u64,
+    _boot_hart_id: u64,
+) -> !
 {
     let trampoline = core::ptr::addr_of!(_handoff_trampoline) as u64;
 

@@ -15,6 +15,28 @@ pub use handoff::{perform_handoff, trampoline_page_range};
 pub use paging::BootPageTable;
 
 use crate::elf::EM_X86_64;
+use crate::uefi::EfiSystemTable;
 
 /// ELF machine type expected for x86-64 kernel binaries.
 pub const EXPECTED_ELF_MACHINE: u16 = EM_X86_64;
+
+/// No-op on x86-64: the UART is already initialized by the serial module.
+///
+/// # Safety
+/// `_st` is unused; the function is safe to call at any point.
+pub unsafe fn pre_serial_init(_st: *mut EfiSystemTable) {}
+
+/// Returns 0: x86-64 has no UART MMIO region to identity-map.
+pub fn uart_mmio_region() -> u64
+{
+    0
+}
+
+/// Returns 0: x86-64 has no boot hart ID concept.
+///
+/// # Safety
+/// `_st` is unused.
+pub unsafe fn discover_boot_hart_id(_st: *mut EfiSystemTable) -> u64
+{
+    0
+}

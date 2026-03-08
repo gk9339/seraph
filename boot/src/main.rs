@@ -21,15 +21,18 @@
 #[cfg(target_arch = "riscv64")]
 core::arch::global_asm!(include_str!("arch/riscv64/header.S"));
 
+mod acpi;
 mod arch;
 mod config;
 mod console;
+mod dtb;
 mod elf;
 mod error;
 mod firmware;
 mod framebuffer;
 mod memory_map;
 mod paging;
+mod platform;
 mod uefi;
 
 use crate::config::load_boot_config;
@@ -43,8 +46,8 @@ use crate::uefi::{
     EfiSystemTable,
 };
 use boot_protocol::{
-    BootInfo, BootModule, MemoryMapEntry, MemoryMapSlice, ModuleSlice, PlatformResourceSlice,
-    BOOT_PROTOCOL_VERSION,
+    BootInfo, BootModule, MemoryMapEntry, MemoryMapSlice, ModuleSlice, PlatformResource,
+    PlatformResourceSlice, BOOT_PROTOCOL_VERSION,
 };
 
 // ── Size constants ────────────────────────────────────────────────────────────
@@ -75,6 +78,11 @@ const MAX_IDENTITY_REGIONS: usize = 64;
 #[no_mangle]
 pub extern "efiapi" fn efi_main(image: EfiHandle, st: *mut EfiSystemTable) -> usize
 {
+    // Discover the UART MMIO base from ACPI SPCR or DTB before initializing
+    // the serial console. Falls back to the arch default if neither is present.
+    // SAFETY: st is valid; called exactly once before init_serial.
+    unsafe { arch::current::pre_serial_init(st) };
+
     // SAFETY: serial_init called exactly once, before boot_sequence.
     unsafe {
         crate::console::init_serial();
@@ -278,6 +286,23 @@ unsafe fn boot_sequence(image: EfiHandle, st: *mut EfiSystemTable) -> Result<!, 
         bprintln!("seraph-boot:   DTB: not found");
     }
 
+    // Query the boot hart ID via EFI_RISCV_BOOT_PROTOCOL (RISC-V only).
+    // Returns 0 on x86-64 (no-op) or when the protocol is unavailable.
+    // SAFETY: st is a valid UEFI system table pointer.
+    let boot_hart_id = unsafe { arch::current::discover_boot_hart_id(st) };
+
+    // ── Step 5b: Parse platform resources ────────────────────────────────────
+
+    bprintln!("seraph-boot: step 5b/10: parsing platform resources");
+
+    // Parse ACPI and/or DTB tables into a sorted PlatformResource array.
+    // SAFETY: bs is valid boot services; firmware addresses are from UEFI config table.
+    let (resources_phys, resource_count) =
+        unsafe { platform::parse_platform_resources(bs, &firmware)? };
+    bprint!("seraph-boot:   ");
+    unsafe { crate::console::console_write_dec32(resource_count as u32) };
+    bprintln!(" platform resources found");
+
     // ── Step 6: Pre-allocate boot structures and build page tables ────────────
 
     // BootInfo: one page — holds the BootInfo struct populated in step 8.
@@ -387,8 +412,22 @@ unsafe fn boot_sequence(image: EfiHandle, st: *mut EfiSystemTable) -> Result<!, 
     }
 
     // RISC-V MMIO UART: identity-map so the kernel can use it for early console.
-    #[cfg(target_arch = "riscv64")]
-    track_region!(0x1000_0000u64, 4096u64);
+    // Use the runtime-discovered address from arch::current::uart_mmio_region().
+    {
+        let uart_base = arch::current::uart_mmio_region();
+        if uart_base != 0
+        {
+            track_region!(uart_base, 4096u64);
+        }
+    }
+
+    // Platform resource array: identity-map if allocated.
+    if resource_count > 0
+    {
+        let resource_array_size =
+            resource_count * core::mem::size_of::<PlatformResource>();
+        track_region!(resources_phys, (resource_array_size + 4095) & !4095);
+    }
 
     bprintln!("seraph-boot: step 6/10: building page tables");
 
@@ -511,13 +550,15 @@ unsafe fn boot_sequence(image: EfiHandle, st: *mut EfiSystemTable) -> Result<!, 
                 acpi_rsdp: firmware.acpi_rsdp,
                 device_tree: firmware.device_tree,
                 platform_resources: PlatformResourceSlice {
-                    // TODO: Populate platform_resources with parsed ACPI/DT platform
-                    // data. Requires an ACPI table parser and/or DTB parser to extract
-                    // interrupt controller, timer, and device information. Deferred
-                    // until the kernel's device management subsystem is ready to
-                    // consume this data. See docs/device-management.md.
-                    entries: core::ptr::null(),
-                    count: 0,
+                    entries: if resource_count > 0
+                    {
+                        resources_phys as *const PlatformResource
+                    }
+                    else
+                    {
+                        core::ptr::null()
+                    },
+                    count: resource_count as u64,
                 },
                 command_line: cmdline_phys as *const u8,
                 command_line_len: config.cmdline_len as u64,
@@ -542,6 +583,7 @@ unsafe fn boot_sequence(image: EfiHandle, st: *mut EfiSystemTable) -> Result<!, 
             kernel_info.entry_virtual,
             boot_info_phys,
             stack_top,
+            boot_hart_id,
         )
     }
 }

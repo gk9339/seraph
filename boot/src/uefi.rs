@@ -87,6 +87,15 @@ pub const EFI_DTB_TABLE_GUID: EfiGuid = EfiGuid {
     data4: [0x83, 0x0B, 0xD9, 0x15, 0x2C, 0x69, 0xAA, 0xE0],
 };
 
+/// `EFI_RISCV_BOOT_PROTOCOL_GUID`
+/// `{CCD15FEC-6F73-4EEC-8395-3E69E4B940BF}`
+pub const EFI_RISCV_BOOT_PROTOCOL_GUID: EfiGuid = EfiGuid {
+    data1: 0xCCD1_5FEC,
+    data2: 0x6F73,
+    data3: 0x4EEC,
+    data4: [0x83, 0x95, 0x3E, 0x69, 0xE4, 0xB9, 0x40, 0xBF],
+};
+
 /// `EFI_FILE_INFO_ID` GUID
 /// `{09576E92-6D3F-11D2-8E39-00A0C969723B}`
 pub const EFI_FILE_INFO_ID: EfiGuid = EfiGuid {
@@ -374,9 +383,16 @@ pub struct EfiFileInfo
     // Variable-length file_name (UTF-16) follows; omitted here.
 }
 
-/// Pixel format constants for GOP.
+/// Pixel format constants for GOP pixel_format field.
 const GOP_PIXEL_RED_GREEN_BLUE_RESERVED_8BIT_PER_COLOR: u32 = 0;
 const GOP_PIXEL_BLUE_GREEN_RED_RESERVED_8BIT_PER_COLOR: u32 = 1;
+const GOP_PIXEL_BIT_MASK: u32 = 2;
+
+// Standard 8bpc bitmask layouts used by `pixel_information[4]` when
+// `pixel_format == GOP_PIXEL_BIT_MASK`. Map to Rgbx8 / Bgrx8 respectively.
+// Any other layout is non-standard and skipped.
+const BITMASK_RGBX8: [u32; 4] = [0x0000_00FF, 0x0000_FF00, 0x00FF_0000, 0xFF00_0000];
+const BITMASK_BGRX8: [u32; 4] = [0x00FF_0000, 0x0000_FF00, 0x0000_00FF, 0xFF00_0000];
 
 /// Mode info structure returned by `EFI_GRAPHICS_OUTPUT_PROTOCOL`.
 #[repr(C)]
@@ -400,6 +416,19 @@ pub struct EfiGopMode
     pub size_of_info: usize,
     pub frame_buffer_base: u64,
     pub frame_buffer_size: usize,
+}
+
+/// `EFI_RISCV_BOOT_PROTOCOL` — provides the boot hart ID on RISC-V platforms.
+///
+/// Located via `LocateProtocol` using [`EFI_RISCV_BOOT_PROTOCOL_GUID`].
+#[repr(C)]
+pub struct EfiRiscvBootProtocol
+{
+    /// Protocol revision (unused by us).
+    pub revision: u64,
+    /// Query the boot hart ID.
+    pub get_boot_hartid:
+        unsafe extern "efiapi" fn(this: *mut Self, hart_id: *mut u64) -> EfiStatus,
 }
 
 /// `EFI_GRAPHICS_OUTPUT_PROTOCOL` — provides framebuffer information.
@@ -813,7 +842,8 @@ pub unsafe fn query_gop(bs: *mut EfiBootServices) -> Option<FramebufferInfo>
         let info = unsafe { &*mode.info };
 
         // Skip PixelBltOnly (format 3) — no linear framebuffer exists.
-        // Skip PixelBitMask (format 2) — custom channel layout not yet handled.
+        // For PixelBitMask (format 2), accept only the two standard 8bpc layouts
+        // that map exactly to our Rgbx8 / Bgrx8 variants; skip all others.
         let pixel_format = if info.pixel_format == GOP_PIXEL_RED_GREEN_BLUE_RESERVED_8BIT_PER_COLOR
         {
             PixelFormat::Rgbx8
@@ -821,6 +851,22 @@ pub unsafe fn query_gop(bs: *mut EfiBootServices) -> Option<FramebufferInfo>
         else if info.pixel_format == GOP_PIXEL_BLUE_GREEN_RED_RESERVED_8BIT_PER_COLOR
         {
             PixelFormat::Bgrx8
+        }
+        else if info.pixel_format == GOP_PIXEL_BIT_MASK
+        {
+            let masks = info.pixel_information;
+            if masks == BITMASK_RGBX8
+            {
+                PixelFormat::Rgbx8
+            }
+            else if masks == BITMASK_BGRX8
+            {
+                PixelFormat::Bgrx8
+            }
+            else
+            {
+                continue; // non-standard bitmask layout; skip
+            }
         }
         else
         {

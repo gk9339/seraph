@@ -17,6 +17,7 @@
 //! - Phase 4: activate kernel heap (`GlobalAlloc` via slab/size-class allocator).
 //! - Phase 5: architecture hardware init (GDT/IDT/APIC or stvec/PLIC, timer, syscall).
 //! - Phase 6: validate `platform_resources` slice; reject malformed entries before capability minting.
+//! - Phase 7: initialise capability subsystem; mint root CSpace with initial hardware caps.
 
 #![cfg_attr(not(test), no_std)]
 #![cfg_attr(not(test), no_main)]
@@ -32,6 +33,7 @@ extern crate alloc;
 use boot_protocol::BootInfo;
 
 mod arch;
+mod cap;
 mod console;
 mod framebuffer;
 mod mm;
@@ -151,9 +153,15 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
     // ── Phase 6: platform resource validation ─────────────────────────────────
     // Validate platform_resources from BootInfo before Phase 7 mints
     // capabilities from them. Returns only valid, non-overlapping entries.
-    let _platform_resources = platform::validate_platform_resources(boot_info as u64);
+    let platform_resources = platform::validate_platform_resources(boot_info as u64);
 
-    // ── TODO: Phase 7+ ────────────────────────────────────────────────────────
+    // ── Phase 7: capability system ─────────────────────────────────────────────
+    // Initialises the root CSpace and mints initial capabilities for all
+    // boot-provided hardware resources.
+    let cap_count = cap::init_capability_system(platform_resources, boot_info as u64);
+    kprintln!("  capability system: {} slots populated", cap_count);
+
+    // ── TODO: Phase 8+ ────────────────────────────────────────────────────────
     arch::current::cpu::halt_loop();
 }
 

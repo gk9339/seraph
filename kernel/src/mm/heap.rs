@@ -222,7 +222,7 @@ impl KernelCaches
     pub const fn new() -> Self
     {
         Self {
-            capability_slot: SlabCache::new("capability-slot", 64),
+            capability_slot: SlabCache::new("capability-slot", 48),
             tcb: SlabCache::new("tcb", 256),
             endpoint: SlabCache::new("endpoint", 128),
             signal: SlabCache::new("signal", 32),
@@ -328,7 +328,7 @@ mod tests
     fn named_caches_have_expected_obj_sizes()
     {
         let caches = KernelCaches::new();
-        assert_eq!(caches.capability_slot.obj_size, 64);
+        assert_eq!(caches.capability_slot.obj_size, 48);
         assert_eq!(caches.tcb.obj_size, 256);
         assert_eq!(caches.endpoint.obj_size, 128);
         assert_eq!(caches.signal.obj_size, 32);

@@ -155,13 +155,7 @@ impl SizeClassAllocator
     ///
     /// `size` and `align` must match the values passed to `alloc`. Passing
     /// incorrect values causes memory corruption or a buddy double-free.
-    pub fn dealloc(
-        &mut self,
-        ptr: *mut u8,
-        size: usize,
-        align: usize,
-        buddy: &mut BuddyAllocator,
-    )
+    pub fn dealloc(&mut self, ptr: *mut u8, size: usize, align: usize, buddy: &mut BuddyAllocator)
     {
         let effective = size.max(align).max(1);
         if effective <= 4096
@@ -266,7 +260,10 @@ mod tests
         let ptr = sc.alloc(64, 8, &mut buddy).unwrap();
         // Write and read to confirm the memory is usable.
         unsafe { core::ptr::write(ptr as *mut u64, 0xDEAD_BEEF_u64) };
-        assert_eq!(unsafe { core::ptr::read(ptr as *const u64) }, 0xDEAD_BEEF_u64);
+        assert_eq!(
+            unsafe { core::ptr::read(ptr as *const u64) },
+            0xDEAD_BEEF_u64
+        );
         sc.dealloc(ptr, 64, 8, &mut buddy);
     }
 
@@ -300,7 +297,10 @@ mod tests
         let mut sc = SizeClassAllocator::new();
         let ptr = sc.alloc(8192, 8, &mut buddy).unwrap();
         unsafe { core::ptr::write(ptr as *mut u64, 0xCAFE_BABE_u64) };
-        assert_eq!(unsafe { core::ptr::read(ptr as *const u64) }, 0xCAFE_BABE_u64);
+        assert_eq!(
+            unsafe { core::ptr::read(ptr as *const u64) },
+            0xCAFE_BABE_u64
+        );
         sc.dealloc(ptr, 8192, 8, &mut buddy);
         // Buddy should have the pages back; confirm re-alloc works.
         let ptr2 = sc.alloc(8192, 8, &mut buddy);

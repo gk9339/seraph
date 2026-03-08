@@ -329,7 +329,11 @@ mod tests
     #[test]
     fn new_page_rx_sets_present_clears_writable_clears_nx()
     {
-        let flags = PageFlags { readable: true, writable: false, executable: true };
+        let flags = PageFlags {
+            readable: true,
+            writable: false,
+            executable: true,
+        };
         let pte = PageTableEntry::new_page(0x2000, flags);
         assert!(pte.is_present());
         assert_eq!(pte.0 & WRITABLE, 0);
@@ -339,7 +343,11 @@ mod tests
     #[test]
     fn new_page_rw_sets_present_sets_writable_sets_nx()
     {
-        let flags = PageFlags { readable: true, writable: true, executable: false };
+        let flags = PageFlags {
+            readable: true,
+            writable: true,
+            executable: false,
+        };
         let pte = PageTableEntry::new_page(0x3000, flags);
         assert!(pte.is_present());
         assert!(pte.0 & WRITABLE != 0);
@@ -349,7 +357,11 @@ mod tests
     #[test]
     fn new_large_page_sets_ps_bit()
     {
-        let flags = PageFlags { readable: true, writable: true, executable: false };
+        let flags = PageFlags {
+            readable: true,
+            writable: true,
+            executable: false,
+        };
         let pte = PageTableEntry::new_large_page(0x20_0000, flags);
         assert!(pte.0 & LARGE_PAGE != 0);
     }

@@ -105,14 +105,7 @@ impl SlabCache
     {
         // Minimum 8 bytes; round up to 8-byte alignment so each free slot can
         // hold a u64 pointer. In const context we avoid .max() to be safe.
-        let obj_size = if obj_size < 8
-        {
-            8
-        }
-        else
-        {
-            (obj_size + 7) & !7
-        };
+        let obj_size = if obj_size < 8 { 8 } else { (obj_size + 7) & !7 };
         let slab_order = if obj_size <= 256
         {
             0
@@ -152,7 +145,10 @@ impl SlabCache
     {
         // Find a slab with at least one free slot.
         let idx = (0..self.slab_count).find(|&i| {
-            self.slabs[i].as_ref().map(|s| s.free_head != 0).unwrap_or(false)
+            self.slabs[i]
+                .as_ref()
+                .map(|s| s.free_head != 0)
+                .unwrap_or(false)
         });
 
         let idx = if let Some(i) = idx
@@ -411,7 +407,9 @@ mod tests
         let capacity = PAGE_SIZE / 64; // 64 slots per slab
 
         // Drain the first slab.
-        let mut ptrs: Vec<*mut u8> = (0..capacity).map(|_| cache.alloc(&mut buddy).unwrap()).collect();
+        let mut ptrs: Vec<*mut u8> = (0..capacity)
+            .map(|_| cache.alloc(&mut buddy).unwrap())
+            .collect();
         assert_eq!(cache.slab_count, 1);
 
         // One more alloc must trigger growth.
@@ -451,8 +449,9 @@ mod tests
         let capacity = PAGE_SIZE / 64;
 
         // Fill first slab completely to trigger allocation of second slab.
-        let mut first_slab_ptrs: Vec<*mut u8> =
-            (0..capacity).map(|_| cache.alloc(&mut buddy).unwrap()).collect();
+        let mut first_slab_ptrs: Vec<*mut u8> = (0..capacity)
+            .map(|_| cache.alloc(&mut buddy).unwrap())
+            .collect();
 
         // Alloc one from the second slab.
         let second_ptr = cache.alloc(&mut buddy).unwrap();

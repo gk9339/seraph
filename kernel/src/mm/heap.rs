@@ -31,8 +31,8 @@ use core::sync::atomic::AtomicBool;
 #[cfg(not(test))]
 use core::sync::atomic::Ordering;
 
-use super::slab::SlabCache;
 use super::size_class::SizeClassAllocator;
+use super::slab::SlabCache;
 use super::BuddyAllocator;
 
 // ── KernelHeapInner ───────────────────────────────────────────────────────────
@@ -61,13 +61,7 @@ impl KernelHeapInner
     /// Deallocate a pointer previously returned by [`alloc`][Self::alloc].
     ///
     /// `size` and `align` must match the values passed to `alloc`.
-    pub fn dealloc(
-        &mut self,
-        ptr: *mut u8,
-        size: usize,
-        align: usize,
-        buddy: &mut BuddyAllocator,
-    )
+    pub fn dealloc(&mut self, ptr: *mut u8, size: usize, align: usize, buddy: &mut BuddyAllocator)
     {
         self.size_class.dealloc(ptr, size, align, buddy);
     }
@@ -134,8 +128,7 @@ impl KernelHeap
             let inner = unsafe { &mut *self.inner.get() };
             // SAFETY: single-threaded boot; SMP not active; lock prevents
             // re-entrant access if an allocator is called from an interrupt.
-            let buddy =
-                unsafe { &mut *core::ptr::addr_of_mut!(crate::mm::FRAME_ALLOCATOR) };
+            let buddy = unsafe { &mut *core::ptr::addr_of_mut!(crate::mm::FRAME_ALLOCATOR) };
             f(inner, buddy)
         };
 
@@ -178,7 +171,9 @@ unsafe impl core::alloc::GlobalAlloc for KernelHeap
             return core::ptr::null_mut();
         }
         self.with_lock(|inner, buddy| {
-            inner.alloc(layout.size(), layout.align(), buddy).unwrap_or(core::ptr::null_mut())
+            inner
+                .alloc(layout.size(), layout.align(), buddy)
+                .unwrap_or(core::ptr::null_mut())
         })
     }
 
@@ -287,7 +282,9 @@ mod tests
     fn inner_alloc_returns_valid_pointer()
     {
         let (_buf, mut buddy) = test_buddy(4);
-        let mut inner = KernelHeapInner { size_class: SizeClassAllocator::new() };
+        let mut inner = KernelHeapInner {
+            size_class: SizeClassAllocator::new(),
+        };
         let ptr = inner.alloc(64, 8, &mut buddy).expect("alloc failed");
         assert!(!ptr.is_null());
         // Memory must be writable.
@@ -300,7 +297,9 @@ mod tests
     fn inner_alloc_dealloc_round_trip_small()
     {
         let (_buf, mut buddy) = test_buddy(4);
-        let mut inner = KernelHeapInner { size_class: SizeClassAllocator::new() };
+        let mut inner = KernelHeapInner {
+            size_class: SizeClassAllocator::new(),
+        };
         let ptr = inner.alloc(128, 16, &mut buddy).unwrap();
         inner.dealloc(ptr, 128, 16, &mut buddy);
         // Re-alloc after free must succeed (slot reused).
@@ -313,8 +312,12 @@ mod tests
     {
         // Large path: size > 4096. Need at least 2 pages for order-1 buddy block.
         let (_buf, mut buddy) = test_buddy(4);
-        let mut inner = KernelHeapInner { size_class: SizeClassAllocator::new() };
-        let ptr = inner.alloc(8192, 8, &mut buddy).expect("large alloc failed");
+        let mut inner = KernelHeapInner {
+            size_class: SizeClassAllocator::new(),
+        };
+        let ptr = inner
+            .alloc(8192, 8, &mut buddy)
+            .expect("large alloc failed");
         assert!(!ptr.is_null());
         inner.dealloc(ptr, 8192, 8, &mut buddy);
     }

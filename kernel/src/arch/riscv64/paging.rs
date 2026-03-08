@@ -289,7 +289,11 @@ mod tests
     #[test]
     fn new_page_rw_sets_read_write_clears_execute()
     {
-        let flags = PageFlags { readable: true, writable: true, executable: false };
+        let flags = PageFlags {
+            readable: true,
+            writable: true,
+            executable: false,
+        };
         let pte = PageTableEntry::new_page(0x2000, flags);
         assert!(pte.is_present());
         assert!(pte.0 & READ != 0);
@@ -300,7 +304,11 @@ mod tests
     #[test]
     fn new_page_rx_sets_read_execute_clears_write()
     {
-        let flags = PageFlags { readable: true, writable: false, executable: true };
+        let flags = PageFlags {
+            readable: true,
+            writable: false,
+            executable: true,
+        };
         let pte = PageTableEntry::new_page(0x3000, flags);
         assert!(pte.0 & READ != 0);
         assert_eq!(pte.0 & WRITE, 0);

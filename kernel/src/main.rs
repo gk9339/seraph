@@ -16,6 +16,7 @@
 //! - Phase 3: install kernel page tables (direct physical map + W^X image).
 //! - Phase 4: activate kernel heap (`GlobalAlloc` via slab/size-class allocator).
 //! - Phase 5: architecture hardware init (GDT/IDT/APIC or stvec/PLIC, timer, syscall).
+//! - Phase 6: validate `platform_resources` slice; reject malformed entries before capability minting.
 
 #![cfg_attr(not(test), no_std)]
 #![cfg_attr(not(test), no_main)]
@@ -34,6 +35,7 @@ mod arch;
 mod console;
 mod framebuffer;
 mod mm;
+mod platform;
 mod validate;
 
 /// Kernel entry point.
@@ -146,7 +148,12 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
     kprintln!("  syscall: entry installed");
     kprintln!("  phase 5: complete");
 
-    // ── TODO: Phase 6+ ────────────────────────────────────────────────────────
+    // ── Phase 6: platform resource validation ─────────────────────────────────
+    // Validate platform_resources from BootInfo before Phase 7 mints
+    // capabilities from them. Returns only valid, non-overlapping entries.
+    let _platform_resources = platform::validate_platform_resources(boot_info as u64);
+
+    // ── TODO: Phase 7+ ────────────────────────────────────────────────────────
     arch::current::cpu::halt_loop();
 }
 
@@ -154,7 +161,7 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
 ///
 /// Used for unrecoverable post-console errors. Prints the message then halts
 /// permanently. Never returns.
-fn fatal(msg: &str) -> !
+pub(crate) fn fatal(msg: &str) -> !
 {
     kprintln!("FATAL: {}", msg);
     arch::current::cpu::halt_loop();

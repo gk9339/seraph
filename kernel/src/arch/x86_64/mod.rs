@@ -6,6 +6,7 @@
 //! x86-64 architecture module for the kernel.
 
 pub mod console;
+pub mod context;
 pub mod cpu;
 pub mod gdt;
 pub mod idt;

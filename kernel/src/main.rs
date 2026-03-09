@@ -18,6 +18,7 @@
 //! - Phase 5: architecture hardware init (GDT/IDT/APIC or stvec/PLIC, timer, syscall).
 //! - Phase 6: validate `platform_resources` slice; reject malformed entries before capability minting.
 //! - Phase 7: initialise capability subsystem; mint root CSpace with initial hardware caps.
+//! - Phase 8: initialise per-CPU scheduler state and idle threads (BSP only; SMP in Phase 10).
 
 #![cfg_attr(not(test), no_std)]
 #![cfg_attr(not(test), no_main)]
@@ -38,6 +39,8 @@ mod console;
 mod framebuffer;
 mod mm;
 mod platform;
+mod sched;
+mod sync;
 mod validate;
 
 /// Kernel entry point.
@@ -161,7 +164,15 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
     let cap_count = cap::init_capability_system(platform_resources, boot_info as u64);
     kprintln!("  capability system: {} slots populated", cap_count);
 
-    // ── TODO: Phase 8+ ────────────────────────────────────────────────────────
+    // ── Phase 8: scheduler ────────────────────────────────────────────────────
+    // Initialise per-CPU scheduler state and create idle threads.
+    // BSP only (cpu_count = 1); SMP bringup in Phase 10.
+    //
+    // SAFETY: single-threaded boot; heap and page tables are active.
+    let cpu_count = sched::init(1, allocator);
+    kprintln!("  scheduler: initialised, {} CPU", cpu_count);
+
+    // ── TODO: Phase 9+ ────────────────────────────────────────────────────────
     arch::current::cpu::halt_loop();
 }
 

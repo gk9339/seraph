@@ -6,6 +6,7 @@
 //! RISC-V 64-bit architecture module for the kernel.
 
 pub mod console;
+pub mod context;
 pub mod cpu;
 pub mod interrupts;
 pub mod paging;

@@ -104,6 +104,10 @@ pub struct RunArgs
     /// 'seraph-boot', hiding UEFI/OpenSBI debug spam.
     #[arg(long)]
     pub verbose: bool,
+
+    /// Number of vCPUs to expose to the guest (QEMU -smp).
+    #[arg(long, default_value = "4")]
+    pub cpus: u32,
 }
 
 // ── Clean ─────────────────────────────────────────────────────────────────────

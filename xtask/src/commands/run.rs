@@ -83,7 +83,7 @@ pub fn run(ctx: &BuildContext, args: &RunArgs) -> Result<()>
         "-m".into(),
         "512M".into(),
         "-smp".into(),
-        "1".into(),
+        args.cpus.to_string(),
         "-drive".into(),
         format!("if=virtio,format=raw,file=fat:rw:{}", ctx.sysroot.display()),
         "-serial".into(),

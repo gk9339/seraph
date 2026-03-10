@@ -37,8 +37,9 @@ pub use cspace::{CSpace, CapError, L1_SIZE, L2_SIZE};
 pub use derivation::DERIVATION_LOCK;
 #[allow(unused_imports)]
 pub use object::{
-    FrameObject, InterruptObject, IoPortRangeObject, KernelObjectHeader, MmioRegionObject,
-    ObjectType, SchedControlObject,
+    AddressSpaceObject, CSpaceKernelObject, EndpointObject, FrameObject, InterruptObject,
+    IoPortRangeObject, KernelObjectHeader, MmioRegionObject, ObjectType, SchedControlObject,
+    SignalObject, ThreadObject,
 };
 #[allow(unused_imports)]
 pub use slot::{CSpaceId, CapTag, CapabilitySlot, Rights, SlotId};

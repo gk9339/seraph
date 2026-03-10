@@ -150,6 +150,7 @@ version = "0.1.0"
 dependencies = [
  "boot-protocol",
  "font",
+ "syscall-abi",
 ]
 
 [[package]]

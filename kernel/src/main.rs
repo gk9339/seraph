@@ -19,6 +19,7 @@
 //! - Phase 6: validate `platform_resources` slice; reject malformed entries before capability minting.
 //! - Phase 7: initialise capability subsystem; mint root CSpace with initial hardware caps.
 //! - Phase 8: initialise per-CPU scheduler state and idle threads (BSP only; SMP in Phase 10).
+//! - Phase 9: create init process address space + TCB; enter user mode.
 
 #![cfg_attr(not(test), no_std)]
 #![cfg_attr(not(test), no_main)]
@@ -37,10 +38,12 @@ mod arch;
 mod cap;
 mod console;
 mod framebuffer;
+mod ipc;
 mod mm;
 mod platform;
 mod sched;
 mod sync;
+mod syscall;
 mod validate;
 
 /// Kernel entry point.
@@ -172,8 +175,111 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
     let cpu_count = sched::init(1, allocator);
     kprintln!("  scheduler: initialised, {} CPU", cpu_count);
 
-    // ── TODO: Phase 9+ ────────────────────────────────────────────────────────
-    arch::current::cpu::halt_loop();
+    // ── Phase 9: create and launch init ───────────────────────────────────────
+    // Gated #[cfg(not(test))]: Phase 9 uses heap allocation and arch-specific
+    // functions unavailable in the host test environment. Tests exercise Phases
+    // 0-8 via their individual stub functions; kernel_entry is never invoked.
+    #[cfg(not(test))]
+    {
+        // Re-access BootInfo via the direct physical map (identity mapping no longer active).
+        // SAFETY: boot_info holds the physical address of the BootInfo struct; after Phase 3
+        // all physical memory is accessible via DIRECT_MAP_BASE.
+        let info9 = unsafe {
+            &*(mm::paging::phys_to_virt(boot_info as u64) as *const boot_protocol::BootInfo)
+        };
+
+        kprintln!("  phase 9: init image segments: {}", info9.init_image.segment_count);
+
+        if info9.init_image.segment_count == 0 || info9.init_image.entry_point == 0
+        {
+            fatal("Phase 9: init image missing or has no entry point");
+        }
+
+        // Create init's user address space (PML4 / Sv48 root + kernel entries).
+        // SAFETY: Phase 3 active, Phase 4 heap active; single-threaded boot.
+        let init_as = unsafe { mm::address_space::AddressSpace::new_user(allocator) };
+        let init_as_ptr = alloc::boxed::Box::into_raw(alloc::boxed::Box::new(init_as));
+
+        // Map each ELF LOAD segment into the init address space.
+        for i in 0..info9.init_image.segment_count as usize
+        {
+            let seg = &info9.init_image.segments[i];
+            // SAFETY: segment data is in Loaded memory reachable via the direct map.
+            unsafe {
+                (*init_as_ptr).map_segment(seg, allocator)
+            }
+            .unwrap_or_else(|_| fatal("Phase 9: failed to map init segment"));
+        }
+
+        // Map init's user stack (INIT_STACK_PAGES pages below INIT_STACK_TOP).
+        // SAFETY: stack_top is page-aligned and within the user address range.
+        unsafe {
+            (*init_as_ptr).map_stack(
+                mm::address_space::INIT_STACK_TOP,
+                mm::address_space::INIT_STACK_PAGES,
+                allocator,
+            )
+        }
+        .unwrap_or_else(|_| fatal("Phase 9: failed to map init stack"));
+
+        kprintln!("  phase 9: init address space ready");
+
+        // Allocate init's kernel stack (KERNEL_STACK_PAGES = 4 pages = 16 KiB).
+        let init_kstack_phys = allocator
+            .alloc(2) // 2^2 = 4 pages
+            .unwrap_or_else(|| fatal("Phase 9: out of memory for init kernel stack"));
+        let init_kstack_virt = mm::paging::phys_to_virt(init_kstack_phys);
+        let init_kstack_top =
+            init_kstack_virt + (sched::KERNEL_STACK_PAGES * mm::PAGE_SIZE) as u64;
+
+        // Build the init TCB.  saved_state.rip / .ra stores the user entry point
+        // so sched::enter() can retrieve it without depending on BootInfo.
+        let init_saved = arch::current::context::new_state(
+            info9.init_image.entry_point,
+            init_kstack_top,
+            0, // arg (unused for user threads)
+            true,
+        );
+
+        let init_tcb = alloc::boxed::Box::into_raw(alloc::boxed::Box::new(
+            sched::thread::ThreadControlBlock {
+                state:           sched::thread::ThreadState::Ready,
+                priority:        sched::INIT_PRIORITY,
+                slice_remaining: sched::TIME_SLICE_TICKS,
+                cpu_affinity:    sched::AFFINITY_ANY,
+                preferred_cpu:   0,
+                run_queue_next:  None,
+                ipc_state:       sched::thread::IpcThreadState::None,
+                ipc_msg:         ipc::message::Message::default(),
+                reply_tcb:       core::ptr::null_mut(),
+                ipc_wait_next:   None,
+                is_user:         true,
+                saved_state:     init_saved,
+                kernel_stack_top: init_kstack_top,
+                trap_frame:      core::ptr::null_mut(), // set in sched::enter()
+                address_space:   init_as_ptr,
+                cspace:          core::ptr::null_mut(), // TODO: hand ROOT_CSPACE to init
+                thread_id:       1, // 0 = idle BSP, 1 = init
+            },
+        ));
+
+        // Enqueue init on the BSP scheduler at INIT_PRIORITY.
+        // SAFETY: single-threaded boot; SCHEDULERS[0] is exclusively owned.
+        unsafe {
+            let sched = sched::scheduler_for(0);
+            sched.enqueue(init_tcb, sched::INIT_PRIORITY);
+        }
+
+        kprintln!("  phase 9: init TCB enqueued (priority {})", sched::INIT_PRIORITY);
+
+        // Hand off to the scheduler. Never returns.
+        sched::enter();
+    }
+
+    // Test-mode divergence: kernel_entry is never called in host tests, but
+    // the function must type-check as returning `!`.
+    #[cfg(test)]
+    arch::current::cpu::halt_loop()
 }
 
 /// Emit a fatal error message and halt.

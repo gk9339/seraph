@@ -7,6 +7,7 @@ publish = false
 [dependencies]
 boot-protocol = { workspace = true }
 font = { workspace = true }
+syscall = { workspace = true }
 
 [[bin]]
 name = "kernel"

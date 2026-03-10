@@ -5,16 +5,41 @@
 
 //! Thread Control Block (TCB) definition.
 //!
-//! Each kernel thread has exactly one TCB. TCBs are heap-allocated via `Box`
-//! for Phase 8 idle threads; later phases will use the `tcb_cache` slab for
-//! user threads (see `kernel/docs/scheduler.md`).
+//! Each kernel thread has exactly one TCB. TCBs are heap-allocated via `Box`.
 //!
-//! # Adding fields
-//! When Phase 9 adds IPC: populate the `reply_cap_slot`, `pending_send`,
-//! `wakeup_value`, `wakeup_token`, and `ipc_wait_next` fields.
-//! When Phase 10 adds SMP: populate `address_space` and `cspace`.
+//! # Phase 9 fields
+//! - `address_space`: typed pointer to the user address space (null for kernel threads).
+//! - `cspace`: typed pointer to the capability space.
+//! - `ipc_state`: IPC blocking state.
+//! - `ipc_msg`: inline message buffer for IPC transfer.
+//! - `reply_tcb`: pointer to the thread to wake on IPC reply.
+//! - `trap_frame`: pointer to the user register snapshot on the kernel stack.
+//! - `is_user`: true for user-mode threads.
+//!
+//! # TODO Phase 10 (SMP)
+//! - Bind `cpu_affinity` and `preferred_cpu` to the actual CPU being started.
 
 use crate::arch::current::context::SavedState;
+
+// ── IpcThreadState ────────────────────────────────────────────────────────────
+
+/// IPC blocking reason for a thread in the `Blocked` state.
+///
+/// Threads not involved in IPC have `None`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IpcThreadState
+{
+    /// Not blocked on IPC.
+    None,
+    /// Blocked waiting for a receiver to call `recv` on an endpoint.
+    BlockedOnSend,
+    /// Blocked waiting for a caller to `call` an endpoint.
+    BlockedOnRecv,
+    /// Blocked waiting for a `reply` after a `call`.
+    BlockedOnReply,
+    /// Blocked waiting for a signal bitmask to become non-zero.
+    BlockedOnSignal,
+}
 
 // ── ThreadState ───────────────────────────────────────────────────────────────
 
@@ -57,24 +82,10 @@ pub enum ThreadState
 
 /// Per-thread kernel state.
 ///
-/// # Phase 8 scope
-/// Only the scheduling and context fields are used. IPC fields and address-space
-/// / cspace pointers are zeroed placeholders; their types will be concrete in
-/// Phase 9/10.
-///
 /// # Safety invariant
 /// `run_queue_next` and `ipc_wait_next` are raw intrusive pointers. They are
 /// only valid when the TCB is on a run queue or IPC wait queue respectively.
-/// Access is serialised by the owning CPU's `PerCpuScheduler` lock (Phase 9+).
-///
-/// # TODO Phase 9
-/// - Replace `reply_cap_slot: u64`, `pending_send: u64`, `wakeup_value`,
-///   `wakeup_token`, and `ipc_wait_next` with the proper IPC types from cap/.
-///
-/// # TODO Phase 10
-/// - Replace `address_space: u64` and `cspace: u64` with typed pointers to
-///   `AddressSpace` and `CSpace`.
-/// - Bind `cpu_affinity` and `preferred_cpu` to the actual CPU being started.
+/// Access is serialised by the owning CPU's `PerCpuScheduler` lock.
 #[repr(C)]
 pub struct ThreadControlBlock
 {
@@ -100,24 +111,23 @@ pub struct ThreadControlBlock
     /// `None` when not on any run queue.
     pub run_queue_next: Option<*mut ThreadControlBlock>,
 
-    // === IPC state (Phase 9 placeholder) ===
-    // TODO Phase 9: replace with proper IPC types (ReplyCapability, PendingSendBuffer).
-    /// Reply capability slot for a pending IPC call.
-    pub reply_cap_slot: u64,
+    // === IPC state ===
+    /// Current IPC blocking reason (None when not blocked on IPC).
+    pub ipc_state: IpcThreadState,
 
-    /// Pending send message buffer (used while BlockedOnSend).
-    pub pending_send: u64,
+    /// Inline message buffer for in-flight IPC data.
+    pub ipc_msg: crate::ipc::message::Message,
 
-    /// Wakeup value — payload for signal/event wakeup.
-    pub wakeup_value: u64,
-
-    /// Token from a wait-set wakeup.
-    pub wakeup_token: u64,
+    /// Thread waiting for our reply (set when we received a call; cleared on reply).
+    pub reply_tcb: *mut ThreadControlBlock,
 
     /// Intrusive IPC wait-queue link.
     pub ipc_wait_next: Option<*mut ThreadControlBlock>,
 
     // === Context ===
+    /// Whether this thread executes in user mode (ring 3 / U-mode).
+    pub is_user: bool,
+
     /// Architecture-specific saved kernel register state.
     pub saved_state: SavedState,
 
@@ -125,19 +135,23 @@ pub struct ThreadControlBlock
     /// Stored in TSS RSP0 (x86-64) or sscratch (RISC-V) on every context switch.
     pub kernel_stack_top: u64,
 
-    // === Address space / capability references (Phase 10 placeholder) ===
-    // TODO Phase 10: replace with *mut AddressSpace and *mut CSpace.
+    /// Pointer to the TrapFrame on the kernel stack (null for kernel threads).
+    ///
+    /// Populated by `syscall_entry` / trap handler on each kernel entry.
+    /// Points into the kernel stack below `kernel_stack_top`.
+    pub trap_frame: *mut crate::arch::current::trap_frame::TrapFrame,
+
+    // === Address space / capability references ===
     /// Address space this thread executes in (null for kernel threads).
-    pub address_space: u64,
+    pub address_space: *mut crate::mm::address_space::AddressSpace,
 
     /// CSpace bound to this thread.
-    pub cspace: u64,
+    pub cspace: *mut crate::cap::cspace::CSpace,
 
     // === Identity ===
     /// Unique thread identifier assigned at creation.
     pub thread_id: u32,
 }
 
-// SAFETY: TCB pointers are only accessed under the scheduler lock (Phase 9+).
-// Phase 8 is single-threaded, so no concurrent access is possible.
+// SAFETY: TCB pointers are only accessed under the scheduler lock.
 unsafe impl Send for ThreadControlBlock {}

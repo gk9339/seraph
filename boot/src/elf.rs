@@ -643,25 +643,42 @@ pub unsafe fn load_init(
 
         // Allocate at any available physical address (not at p_paddr, which is
         // a low userspace address already used by UEFI firmware).
-        let page_count = (ph.p_memsz as usize + 4095) / 4096;
+        //
+        // Preserve the in-page byte offset from the ELF virtual address so the
+        // kernel can map the physical page directly without an extra copy step:
+        //   InitSegment.phys_addr = phys_base + (p_vaddr & 0xFFF)
+        //   InitSegment.virt_addr = p_vaddr
+        //
+        // The kernel then creates: PTE[page(virt_addr)] → frame(phys_base),
+        // and the CPU translates virtual byte virt_addr to physical byte
+        //   phys_base + (virt_addr & 0xFFF) = phys_addr ✓
+        //
+        // page_count must cover the in-page offset so segments that would
+        // otherwise cross a page boundary get enough frames.
+        let in_page_off = (ph.p_vaddr & 0xFFF) as usize;
+        let page_count = (in_page_off + ph.p_memsz as usize + 4095) / 4096;
         // SAFETY: `bs` is valid per the caller's contract.
         let phys_base = unsafe { crate::uefi::allocate_pages(bs, page_count)? };
 
-        // Copy file data.
+        // Copy file data at the correct in-page offset.
         if file_sz > 0
         {
             let src = data[file_off..].as_ptr();
-            let dst = phys_base as *mut u8;
-            // SAFETY: `dst` is a freshly allocated region of `page_count * 4096`
-            // bytes. `src` is within `data` (verified above). Regions are disjoint.
+            // Destination: phys_base + in-page offset, so virtual virt_addr
+            // maps to exactly this physical byte after the kernel activates
+            // the page table entry (phys_base → virtual page of virt_addr).
+            let dst = (phys_base + in_page_off as u64) as *mut u8;
+            // SAFETY: `dst` is within the freshly allocated region
+            // (size = page_count * 4096 ≥ in_page_off + file_sz).
+            // `src` is within `data` (verified above). Regions are disjoint.
             unsafe { core::ptr::copy_nonoverlapping(src, dst, file_sz) };
         }
 
-        // Zero BSS tail.
+        // Zero BSS tail (bytes [file_sz, p_memsz) relative to virt_addr).
         let bss_sz = (ph.p_memsz - ph.p_filesz) as usize;
         if bss_sz > 0
         {
-            let bss_ptr = (phys_base + ph.p_filesz) as *mut u8;
+            let bss_ptr = (phys_base + in_page_off as u64 + ph.p_filesz) as *mut u8;
             // SAFETY: `bss_ptr` is within the allocated region.
             unsafe { core::ptr::write_bytes(bss_ptr, 0, bss_sz) };
         }
@@ -680,7 +697,10 @@ pub unsafe fn load_init(
         };
 
         segments[count] = InitSegment {
-            phys_addr: phys_base,
+            // Encode the in-page offset: phys_addr & 0xFFF = virt_addr & 0xFFF.
+            // The kernel maps the physical PAGE (phys_addr & !0xFFF) to the
+            // virtual PAGE (virt_addr & !0xFFF) for each page of the segment.
+            phys_addr: phys_base + in_page_off as u64,
             virt_addr: ph.p_vaddr,
             size: ph.p_memsz,
             flags,

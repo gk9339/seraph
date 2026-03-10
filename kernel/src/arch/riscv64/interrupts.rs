@@ -31,6 +31,7 @@
 //! - To support additional harts: pass the hart ID and update the PLIC
 //!   context register offsets (context = hart*2 + 1 for S-mode).
 
+use super::trap_frame::TrapFrame;
 use crate::mm::paging::DIRECT_MAP_BASE;
 
 // ── PLIC constants ────────────────────────────────────────────────────────────
@@ -52,27 +53,6 @@ const PLIC_CLAIM_COMPLETE: u64 = 0x0020_1004;
 
 /// Number of PLIC interrupt sources supported on the QEMU virt machine.
 const PLIC_NUM_SOURCES: u32 = 127;
-
-// ── TrapFrame ─────────────────────────────────────────────────────────────────
-
-/// Supervisor-mode register state saved/restored by `trap_entry`.
-///
-/// Laid out as a contiguous array on the stack. `trap_entry` saves x1-x31
-/// (31 integer registers), `sepc`, `scause`, and `stval` in this order.
-///
-/// Fields are accessed by index in the naked assembly, so the order is fixed.
-#[repr(C)]
-pub struct TrapFrame
-{
-    /// x1 (ra) through x31 (t6): general-purpose registers.
-    pub regs: [u64; 31],
-    /// Supervisor exception program counter (return address after `sret`).
-    pub sepc: u64,
-    /// Supervisor cause register.
-    pub scause: u64,
-    /// Supervisor trap value (faulting address or instruction).
-    pub stval: u64,
-}
 
 // ── PLIC access helpers ───────────────────────────────────────────────────────
 
@@ -235,9 +215,10 @@ extern "C" fn trap_dispatch(frame: &mut TrapFrame)
         {
             8 =>
             {
-                // U-mode ecall.
-                super::syscall::syscall_stub();
-                // Advance sepc past the ecall instruction.
+                // U-mode ecall: dispatch via the kernel syscall table.
+                // SAFETY: frame is a valid TrapFrame on the kernel stack.
+                unsafe { crate::syscall::dispatch(frame as *mut _); }
+                // Advance sepc past the ecall instruction (4 bytes on RV64).
                 frame.sepc += 4;
             }
             _ =>

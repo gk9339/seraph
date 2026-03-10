@@ -14,6 +14,7 @@ pub mod interrupts;
 pub mod paging;
 pub mod syscall;
 pub mod timer;
+pub mod trap_frame;
 
 /// Architecture name string for use in diagnostic output.
 pub const ARCH_NAME: &str = "x86_64";

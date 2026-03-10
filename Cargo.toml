@@ -26,6 +26,7 @@ default-members = ["xtask"]
 [workspace.dependencies]
 boot-protocol = { path = "abi/boot-protocol" }
 font = { path = "shared/font" }
+syscall = { path = "abi/syscall", package = "syscall-abi" }
 syscall-abi = { path = "abi/syscall" }
 virtio-core = { path = "drivers/virtio/core" }
 

@@ -8,20 +8,38 @@
 //! `SavedState` holds the kernel-mode callee-saved register set for one thread.
 //! `new_state` constructs the initial state for a new thread.
 //!
-//! `switch` and `return_to_user` are stubs that call `fatal()` — real
-//! implementations are deferred to Phase 9/10.
-
-use crate::fatal;
+//! `switch` saves the current thread's callee-saved registers to `*current`
+//! (including `ra` as the resume point) and restores from `*next`, then
+//! executes `ret` which jumps to `next.ra`.
+//!
+//! `return_to_user` sets `sepc` to the user entry point, configures `sstatus`
+//! for U-mode return, restores all GPRs from a [`TrapFrame`], and executes `sret`.
 
 // ── SavedState ────────────────────────────────────────────────────────────────
 
 /// Kernel-mode callee-saved register state for one thread.
 ///
-/// On each context switch only this minimal set is saved/restored (see
-/// `docs/scheduler.md` — "What Gets Saved and Restored"). The full user
-/// register file (a0–a7, t0–t6, etc.) lives in the thread's trap frame.
+/// ## Field offsets (used by assembly in `switch`)
 ///
-/// Layout matches the push order used by the assembly switch stub (Phase 9).
+/// | Offset | Field   |
+/// |--------|---------|
+/// |  0     | sp      |
+/// |  8     | ra      |
+/// | 16     | s0      |
+/// | 24     | s1      |
+/// | 32     | s2      |
+/// | 40     | s3      |
+/// | 48     | s4      |
+/// | 56     | s5      |
+/// | 64     | s6      |
+/// | 72     | s7      |
+/// | 80     | s8      |
+/// | 88     | s9      |
+/// | 96     | s10     |
+/// | 104    | s11     |
+/// | 112    | tp      |
+/// | 120    | sstatus |
+/// | 128    | a0      |
 #[derive(Debug, Default, Clone, Copy)]
 #[repr(C)]
 pub struct SavedState
@@ -30,7 +48,7 @@ pub struct SavedState
     pub sp: u64,
     /// Return address — where execution resumes after `switch` returns.
     pub ra: u64,
-    /// Callee-saved general-purpose registers (s0/fp = frame pointer).
+    /// Callee-saved registers s0/fp through s11.
     pub s0: u64,
     pub s1: u64,
     pub s2: u64,
@@ -43,17 +61,13 @@ pub struct SavedState
     pub s9: u64,
     pub s10: u64,
     pub s11: u64,
-    /// Thread pointer — used for per-thread TLS pointer.
+    /// Thread pointer — per-thread TLS pointer.
     pub tp: u64,
-    /// Supervisor status register snapshot.
+    /// sstatus snapshot (SIE bit controls interrupt enable).
     pub sstatus: u64,
-    /// First argument register (a0); holds the entry argument for new threads.
-    ///
-    /// Not a callee-saved register, but stored here so the Phase 9 switch stub
-    /// can deliver the argument when first entering a new thread.
-    ///
-    /// TODO Phase 9: deliver via a0 in the switch stub; remove from SavedState
-    /// once the argument-passing convention is settled.
+    /// First argument register `a0`, used to deliver the argument on first
+    /// entry to a new kernel thread. Caller-saved; only meaningful at thread
+    /// creation time.
     pub a0: u64,
 }
 
@@ -62,26 +76,18 @@ pub struct SavedState
 /// Construct the initial [`SavedState`] for a new thread.
 ///
 /// `entry`     — virtual address of the thread's entry function.
-/// `stack_top` — top of the thread's kernel stack (stack grows down; sp starts here).
-/// `arg`       — first argument passed in `a0`.
-/// `is_user`   — if false (kernel thread), `sstatus.SPP` is left at 0 (supervisor);
-///               no user-mode bits needed until Phase 9 `return_to_user`.
-///
-/// # TODO Phase 9
-/// For user threads set `sstatus.SPP = 0` (user) and `sstatus.SPIE = 1`
-/// (enable interrupts on `sret`). The real `switch` / `return_to_user` stubs
-/// in Phase 9 use `sepc` + `sret`; adjust `ra` usage accordingly.
-pub fn new_state(entry: u64, stack_top: u64, arg: u64, is_user: bool) -> SavedState
+/// `stack_top` — top of the thread's kernel stack (sp starts here).
+/// `arg`       — first argument delivered in `a0` on first entry.
+/// `_is_user`  — unused; user-mode entry uses `return_to_user`.
+pub fn new_state(entry: u64, stack_top: u64, arg: u64, _is_user: bool) -> SavedState
 {
-    // sstatus.SIE (bit 1) — supervisor interrupt enable while in S-mode.
-    // Set for kernel threads so the timer can fire once the thread runs.
-    let sstatus: u64 = 1 << 1; // SIE
-    let _ = is_user; // user-mode sstatus bits handled in Phase 9 return_to_user.
+    // sstatus.SIE (bit 1) — enable supervisor interrupts when thread runs.
+    let sstatus: u64 = 1 << 1;
 
     SavedState {
-        ra: entry,
-        sp: stack_top,
-        a0: arg,
+        ra:      entry,
+        sp:      stack_top,
+        a0:      arg,
         sstatus,
         ..SavedState::default()
     }
@@ -89,40 +95,134 @@ pub fn new_state(entry: u64, stack_top: u64, arg: u64, is_user: bool) -> SavedSt
 
 // ── switch ────────────────────────────────────────────────────────────────────
 
-/// Save `current`'s registers and restore `next`'s.
+/// Save the current thread's kernel registers to `*current` and restore the
+/// next thread's registers from `*next`, then execute `ret` (jr ra).
+///
+/// For a thread's first run, `next.ra` is its entry function. For a resumed
+/// thread, `next.ra` is the return address from its previous `switch` call.
 ///
 /// # Safety
-/// Both pointers must point to valid, aligned `SavedState` values.
-///
-/// # TODO Phase 9
-/// Replace this stub with real save/restore assembly. The switch must:
-/// 1. Save s0–s11, ra, sp, tp, sstatus into `*current`.
-/// 2. Restore the same fields from `*next`.
-/// 3. Return (ret), which jumps to `next.ra`.
-/// 4. Update sscratch with `next_tcb.kernel_stack_top` for trap entry.
-#[allow(unused_variables)]
-pub unsafe fn switch(current: *mut SavedState, next: *const SavedState)
+/// Both pointers must be valid, aligned `SavedState` values. Caller must hold
+/// the scheduler lock.
+#[cfg(not(test))]
+#[unsafe(naked)]
+pub unsafe extern "C" fn switch(current: *mut SavedState, next: *const SavedState)
 {
-    // TODO Phase 9: implement register save/restore.
-    fatal("context::switch not yet implemented (Phase 9)");
+    // a0 = current (*mut SavedState), a1 = next (*const SavedState)
+    core::arch::naked_asm!(
+        // ── Save current thread to *a0 ────────────────────────────────────
+        // `ra` holds the return address from the `call switch` instruction;
+        // saving it means the resumed thread will "return" to the call site.
+        "sd ra,     8(a0)",
+        "sd sp,     0(a0)",
+        "sd s0,    16(a0)",
+        "sd s1,    24(a0)",
+        "sd s2,    32(a0)",
+        "sd s3,    40(a0)",
+        "sd s4,    48(a0)",
+        "sd s5,    56(a0)",
+        "sd s6,    64(a0)",
+        "sd s7,    72(a0)",
+        "sd s8,    80(a0)",
+        "sd s9,    88(a0)",
+        "sd s10,   96(a0)",
+        "sd s11,  104(a0)",
+        "sd tp,   112(a0)",
+        "csrr t0, sstatus",
+        "sd t0,   120(a0)",
+
+        // ── Restore next thread from *a1 ──────────────────────────────────
+        "ld t0,   120(a1)",     // sstatus
+        "csrw sstatus, t0",
+        "ld ra,     8(a1)",     // return address (or entry function)
+        "ld sp,     0(a1)",
+        "ld s0,    16(a1)",
+        "ld s1,    24(a1)",
+        "ld s2,    32(a1)",
+        "ld s3,    40(a1)",
+        "ld s4,    48(a1)",
+        "ld s5,    56(a1)",
+        "ld s6,    64(a1)",
+        "ld s7,    72(a1)",
+        "ld s8,    80(a1)",
+        "ld s9,    88(a1)",
+        "ld s10,   96(a1)",
+        "ld s11,  104(a1)",
+        "ld tp,   112(a1)",
+        "ld a0,   128(a1)",     // argument for first-entry threads
+
+        "ret",                  // jr ra → jumps to next thread's entry or resume point
+    );
 }
 
 // ── return_to_user ────────────────────────────────────────────────────────────
 
-/// Restore full user register state and return to user mode via `sret`.
+/// Restore full user register state from `tf` and enter U-mode via `sret`.
+///
+/// Sets `sepc` to `tf.sepc` (user entry point), configures `sstatus` for
+/// U-mode return (SPP=0, SPIE=1 → interrupts enabled after sret), restores
+/// all GPRs, then executes `sret`. Never returns.
 ///
 /// # Safety
-/// `state` must hold a valid user-mode register snapshot.
-///
-/// # TODO Phase 9
-/// Replace this stub with assembly that:
-/// 1. Restores a0–a7, t0–t6, s0–s11, ra, sp, tp from the trap frame.
-/// 2. Loads `sepc` with the user program counter.
-/// 3. Sets `sstatus.SPP = 0` (return to user) and `sstatus.SPIE = 1`.
-/// 4. Executes `sret`.
-#[allow(unused_variables)]
-pub unsafe fn return_to_user(state: &SavedState) -> !
+/// `tf` must point to a valid [`TrapFrame`] with `sepc` set to the user entry
+/// point and `sp` (x2) set to the user stack top.
+#[cfg(not(test))]
+#[unsafe(naked)]
+pub unsafe extern "C" fn return_to_user(tf: *const super::trap_frame::TrapFrame) -> !
 {
-    // TODO Phase 9: implement sret path.
-    fatal("context::return_to_user not yet implemented (Phase 9)");
+    // a0 = tf (*const TrapFrame)
+    // TrapFrame field offsets (trap_frame.rs):
+    //   ra(x1)=0, sp(x2)=8, gp(x3)=16, tp(x4)=24,
+    //   t0=32, t1=40, t2=48, s0=56, s1=64,
+    //   a0=72, a1=80, a2=88, a3=96, a4=104, a5=112, a6=120, a7=128,
+    //   s2=136, s3=144, s4=152, s5=160, s6=168, s7=176, s8=184,
+    //   s9=192, s10=200, s11=208, t3=216, t4=224, t5=232, t6=240,
+    //   sepc=248, scause=256, stval=264
+    core::arch::naked_asm!(
+        // Set sepc = user entry point.
+        "ld t0, 248(a0)",
+        "csrw sepc, t0",
+
+        // Set sstatus for U-mode return:
+        //   SPP  = 0 (bit 8): return to U-mode after sret.
+        //   SPIE = 1 (bit 5): enable interrupts after sret.
+        "li t0, 0x20",
+        "csrw sstatus, t0",
+
+        // Restore GPRs x1–x31; restore x10 (a0) last since it is our pointer.
+        "ld x1,    0(a0)",   // ra
+        "ld x2,    8(a0)",   // sp (user stack)
+        "ld x3,   16(a0)",   // gp
+        "ld x4,   24(a0)",   // tp
+        "ld x5,   32(a0)",   // t0
+        "ld x6,   40(a0)",   // t1
+        "ld x7,   48(a0)",   // t2
+        "ld x8,   56(a0)",   // s0
+        "ld x9,   64(a0)",   // s1
+        // skip x10 (a0) for last
+        "ld x11,  80(a0)",   // a1
+        "ld x12,  88(a0)",   // a2
+        "ld x13,  96(a0)",   // a3
+        "ld x14, 104(a0)",   // a4
+        "ld x15, 112(a0)",   // a5
+        "ld x16, 120(a0)",   // a6
+        "ld x17, 128(a0)",   // a7
+        "ld x18, 136(a0)",   // s2
+        "ld x19, 144(a0)",   // s3
+        "ld x20, 152(a0)",   // s4
+        "ld x21, 160(a0)",   // s5
+        "ld x22, 168(a0)",   // s6
+        "ld x23, 176(a0)",   // s7
+        "ld x24, 184(a0)",   // s8
+        "ld x25, 192(a0)",   // s9
+        "ld x26, 200(a0)",   // s10
+        "ld x27, 208(a0)",   // s11
+        "ld x28, 216(a0)",   // t3
+        "ld x29, 224(a0)",   // t4
+        "ld x30, 232(a0)",   // t5
+        "ld x31, 240(a0)",   // t6
+        "ld x10,  72(a0)",   // a0 — restore last (was TrapFrame pointer)
+
+        "sret",
+    );
 }

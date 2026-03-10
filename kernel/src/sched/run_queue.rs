@@ -9,15 +9,12 @@
 //! non-empty queues for O(1) highest-priority selection, and pointers to the
 //! currently running and idle TCBs.
 //!
-//! # Phase 8 scope
-//! The `lock` field is a stub (`u32`). Concurrent access is not possible in
-//! Phase 8 (single-threaded boot, interrupts disabled during scheduler ops).
-//! Phase 9 will replace the stub with a real `Spinlock<()>` and enforce it
-//! before any preemptive context switch.
+//! # Phase 9 scope
+//! The `lock` field is a real `Spinlock<()>` (implemented in Phase 9). It
+//! disables interrupts while held, preventing timer-driven deadlock.
+//! Acquire before any `enqueue`, `dequeue_highest`, or `set_current` call.
 //!
 //! # TODO Phase 9
-//! - Replace `lock: u32` with `lock: crate::sync::Spinlock<()>`.
-//! - Hold the lock during all `enqueue`, `dequeue_highest`, and `set_current` calls.
 //! - Invoke `arch::current::gdt::set_rsp0` (x86-64) or update `sscratch` (RISC-V)
 //!   with `next_tcb.kernel_stack_top` inside `context_switch`.
 //!
@@ -110,9 +107,9 @@ pub struct PerCpuScheduler
 
     /// Lock protecting this struct.
     ///
-    /// TODO Phase 9: replace with `crate::sync::Spinlock<()>` and acquire before
-    /// any enqueue/dequeue/set_current operation. For Phase 8 this is a no-op stub.
-    pub lock: u32,
+    /// Acquire before any enqueue/dequeue/set_current operation.
+    /// The lock disables interrupts while held, preventing timer-driven deadlock.
+    pub lock: crate::sync::Spinlock<()>,
 }
 
 // SAFETY: scheduler is protected by `lock` (Phase 9+) and only accessed
@@ -142,7 +139,7 @@ impl PerCpuScheduler
             non_empty: 0,
             current: core::ptr::null_mut(),
             idle: core::ptr::null_mut(),
-            lock: 0,
+            lock: crate::sync::Spinlock::new(()),
         }
     }
 

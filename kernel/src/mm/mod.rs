@@ -8,6 +8,7 @@
 //! Provides the buddy frame allocator, boot-time physical memory initialization,
 //! kernel page table setup, slab/size-class allocators, and the kernel heap.
 
+pub mod address_space;
 pub mod buddy;
 pub mod heap;
 pub mod init;

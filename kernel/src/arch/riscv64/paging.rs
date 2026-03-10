@@ -266,6 +266,93 @@ pub fn read_stack_pointer() -> u64
     sp
 }
 
+/// Read the current page table root physical address from `satp`.
+///
+/// Extracts PPN from `satp[43:0]` and converts to a physical address.
+///
+/// # Safety
+/// Must be called in S-mode.
+#[cfg(not(test))]
+pub unsafe fn read_root_phys() -> u64
+{
+    let satp: u64;
+    // SAFETY: reading satp is safe in S-mode.
+    unsafe {
+        core::arch::asm!("csrr {}, satp", out(reg) satp, options(nostack, nomem));
+    }
+    // PPN is satp[43:0]; physical address = PPN << 12.
+    (satp & 0x000F_FFFF_FFFF_FFFF) << 12
+}
+
+/// Map a single 4 KiB user page `virt` → `phys` in the Sv48 page table
+/// rooted at `root_virt`, allocating missing intermediate frames from `allocator`.
+///
+/// Sets U (user) bit so userspace can access the mapping.
+///
+/// # Errors
+/// Returns `Err(())` if the buddy allocator is exhausted.
+///
+/// # Safety
+/// `root_virt` must be the direct-map virtual address of a valid 4 KiB Sv48
+/// root frame. `virt` must be in the lower (user) half. `phys` must be 4 KiB-aligned.
+#[cfg(not(test))]
+pub unsafe fn map_user_page(
+    root_virt: u64,
+    virt: u64,
+    phys: u64,
+    flags: crate::mm::paging::PageFlags,
+    allocator: &mut crate::mm::BuddyAllocator,
+) -> Result<(), ()>
+{
+    use crate::mm::paging::phys_to_virt;
+
+    let root = unsafe { table_at(root_virt) };
+
+    let l2_pa = rv_walk_or_alloc(&mut root[vpn3_index(virt)], allocator)?;
+    let l2 = unsafe { table_at(phys_to_virt(l2_pa)) };
+
+    let l1_pa = rv_walk_or_alloc(&mut l2[vpn2_index(virt)], allocator)?;
+    let l1 = unsafe { table_at(phys_to_virt(l1_pa)) };
+
+    let l0_pa = rv_walk_or_alloc(&mut l1[vpn1_index(virt)], allocator)?;
+    let l0 = unsafe { table_at(phys_to_virt(l0_pa)) };
+
+    // U bit (bit 4) allows user-mode access.
+    const USER: u64 = 1 << 4;
+    let mut pte = PageTableEntry::new_page(phys, flags);
+    pte.0 |= USER;
+    l0[vpn0_index(virt)] = pte;
+
+    Ok(())
+}
+
+/// Walk an existing Sv48 page table entry or allocate a new child frame.
+#[cfg(not(test))]
+fn rv_walk_or_alloc(
+    entry: &mut PageTableEntry,
+    allocator: &mut crate::mm::BuddyAllocator,
+) -> Result<u64, ()>
+{
+    use crate::mm::paging::phys_to_virt;
+    use crate::mm::PAGE_SIZE;
+
+    if entry.is_present()
+    {
+        return Ok(entry.phys_addr());
+    }
+
+    let frame_pa = allocator.alloc(0).ok_or(())?;
+    let frame_va = phys_to_virt(frame_pa);
+
+    // Zero the new table.
+    unsafe {
+        core::ptr::write_bytes(frame_va as *mut u8, 0, PAGE_SIZE);
+    }
+
+    *entry = PageTableEntry::new_table(frame_pa);
+    Ok(frame_pa)
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]

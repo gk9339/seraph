@@ -380,99 +380,103 @@ for all CPUs.
 
 ---
 
-## Phase 9: Init Creation
+## Phase 9: Init Creation and Scheduler Entry
 
-**What happens:**
+**Status: Implemented.**
 
-Init's AddressSpace, CSpace, and Thread are created using the pre-parsed segment
-information in `BootInfo.init_image`. The kernel does not parse an ELF file; the
-bootloader has already done that and provided the segment array.
+Init's AddressSpace and Thread are created using the pre-parsed segment information
+in `BootInfo.init_image`. The kernel does not parse an ELF file; the bootloader has
+already done that and provided the segment array. After enqueueing init, the kernel
+calls `sched::enter()` to hand control to init.
 
 ```
 1. Validate boot_info.init_image:
-   a. Verify segment_count > 0 and <= INIT_MAX_SEGMENTS
-   b. Verify entry_point is within at least one segment's virtual range
-   c. For each segment: verify phys_addr, virt_addr, size are non-zero and
-      that phys_addr + size does not wrap; verify flags is a known discriminant
-2. Create the init address space:
-   a. Allocate a new page table (arch::current::Paging::new_page_table())
-   b. Map the kernel higher half into the new address space (shared kernel mapping)
+   a. Verify segment_count > 0
+   b. Verify entry_point != 0
+2. Create the init address space (AddressSpace::new_user):
+   a. Allocate a new root page table frame from the buddy allocator
+   b. Zero the frame
+   c. Copy kernel PML4/Sv48 entries 256–511 from the active root so the kernel
+      remains reachable from init's address space
 3. Map init segments into the init address space:
    a. For each InitSegment in init_image.segments[0..segment_count]:
-      - Map at segment.virt_addr from segment.phys_addr with size segment.size
-      - Apply permissions from segment.flags (Read → RO, ReadWrite → RW, ReadExecute → RX)
-      - No copying or zeroing needed — bootloader already loaded and zeroed BSS
-4. Allocate init's user stack:
-   a. Allocate INIT_STACK_PAGES frames
-   b. Map below INIT_STACK_TOP with read/write permissions
-   c. Place a guard page (unmapped) immediately below the stack
-5. Create init's CSpace:
-   a. The root CSpace from Phase 7 becomes init's CSpace
-   b. Add Thread, AddressSpace, and CSpace capabilities for init itself
-   c. Add Frame capabilities for each boot module image (for init to pass to procmgr)
-6. Create init's TCB:
-   a. Allocate a kernel stack for init (for syscall handling)
-   b. arch::current::Context::new_state(entry=init_image.entry_point,
-      stack_top=INIT_STACK_TOP, arg=root_cspace_descriptor, is_user=true)
-   c. Set priority to INIT_PRIORITY (high, but below real-time range)
-   d. Bind thread to init's AddressSpace and CSpace
-7. Enqueue the init TCB on the BSP's run queue at INIT_PRIORITY
-8. Note: init segment frames are NOT reclaimed — they remain mapped in init's
-   address space and are backed by the physical memory the bootloader allocated.
-   Boot module frames (the raw ELF images for procmgr, devmgr, etc.) are also
-   kept live; init passes Frame capabilities for them to procmgr.
-9. Emit: "init created, entry at 0x{entry:016x}"
+      - Align virt_addr and phys_addr to page boundaries before mapping
+      - Map the page-aligned virtual address to the page-aligned physical frame
+      - The in-page offset (virt_addr & 0xFFF) is preserved implicitly: the CPU
+        adds it to the physical frame address at translation time
+      - Apply permissions from segment.flags (Read → RO, ReadWrite → RW,
+        ReadExecute → RX); W^X is enforced (ReadWrite cannot also be executable)
+4. Allocate init's user stack (AddressSpace::map_stack):
+   a. Allocate INIT_STACK_PAGES (4) frames from the buddy allocator
+   b. Zero each frame
+   c. Map below INIT_STACK_TOP (0x7FFF_FFFF_E000) with read/write permissions
+   d. Guard page (unmapped) sits immediately below the stack; stack overflows fault
+5. Create init's TCB:
+   a. Allocate a kernel stack for init (KERNEL_STACK_PAGES = 4 pages = 16 KiB)
+   b. new_state(entry=init_image.entry_point, stack_top=kstack_top, arg=0, is_user=true)
+      stores entry_point in saved_state.rip (x86-64) or .ra (RISC-V)
+   c. Priority: INIT_PRIORITY (15)
+   d. cspace: null_mut() — root CSpace hand-off to init is deferred to Phase 10
+6. Enqueue the init TCB on the BSP's run queue at INIT_PRIORITY
+7. Call sched::enter() — does not return:
+   a. Dequeue the highest-priority ready thread (init)
+   b. Build an initial user-mode TrapFrame on init's kernel stack:
+      rip/sepc=entry_point, rsp/sp=INIT_STACK_TOP, cs=USER_CS, ss=USER_DS,
+      rflags=0x202 (IF=1)
+   c. x86-64: call switch_and_enter_user(root_phys, tf_ptr) — atomically
+      switches RSP to init's kernel stack, writes CR3, builds iretq frame, iretq
+   d. RISC-V: activate init's address space (satp write + sfence.vma),
+      then return_to_user(tf_ptr) — restores registers and executes sret
 ```
 
-**Failure mode:** Validation failure or allocation failure halts with a diagnostic
-message indicating which step failed.
+**Implementation notes:**
+- CSpace hand-off (step 5d) is deferred to Phase 10; init's cspace pointer is null.
+- The x86-64 `switch_and_enter_user` function atomically switches the stack pointer
+  BEFORE writing CR3. This is required because the boot stack is identity-mapped in
+  PML4 entries 0–255 (the lower half), which are not copied into init's page tables.
+  Any function call/return on the boot stack after the CR3 write would page-fault.
+- Init segment frames are NOT reclaimed — they remain mapped in init's address space.
 
-**Completion criterion:** Init TCB is enqueued and ready to run.
+**Failure mode:** Allocation failure halts with a diagnostic message identifying the
+failed step. Invalid init_image (zero segment_count or zero entry_point) halts with
+"Phase 9: init image missing or has no entry point".
+
+**Completion criterion:** Init is executing in user mode (ring-3 / U-mode).
 
 ---
 
-## Phase 10: Scheduler Handoff and SMP Bringup
+## Phase 10: SMP Bringup (Pending)
 
-**What happens:**
+**Status: Pending.**
 
-The BSP transfers control to the scheduler, which selects init (the highest-priority
-runnable thread) and begins execution. Secondary CPUs are brought up in parallel.
+Secondary CPUs are brought up. TLB shootdown, CSpace hand-off to init, and
+real context switching between multiple threads are implemented here.
 
 ```
 BSP:
-1. Emit: "entering scheduler"
-2. Call sched::enter() — this does not return
-   sched::enter() selects the highest-priority runnable thread (init),
-   calls arch::current::Context::return_to_user(&init_tcb.saved_state)
-   Init begins executing at its ELF entry point.
+1. Hand ROOT_CSPACE to init (set init_tcb.cspace = root_cspace_ptr)
 
-Secondary CPUs (in parallel with init startup on BSP):
-3. Each secondary CPU is signalled:
+Secondary CPUs (in parallel):
+2. Each secondary CPU is signalled:
    - x86-64: BSP sends INIT+SIPI to each AP's APIC ID
    - RISC-V: BSP calls SBI HSM hart_start for each secondary hart
-4. Secondary CPUs execute a minimal AP/hart startup stub:
+3. Secondary CPUs execute a minimal AP/hart startup stub:
    a. Load the kernel stack pointer (pre-allocated in Phase 8)
    b. Install the kernel page table (same root as BSP)
-   c. Call arch::current::Cpu::init_local() for per-CPU state
-   d. Call arch::current::Interrupts::init()
-   e. Call arch::current::Timer::init(TIMER_PERIOD_US)
-   f. Call arch::current::Syscall::init()
-   g. Call sched::enter() — begins running the idle thread for this CPU
-5. BSP waits for all secondary CPUs to reach step 4g before declaring SMP active
-   (a shared atomic counter is incremented by each secondary on entry to sched::enter)
-6. Emit (from BSP after all secondaries are up): "SMP: N CPUs online"
+   c. Call arch::current::Interrupts::init()
+   d. Call arch::current::Timer::init(TIMER_PERIOD_US)
+   e. Call arch::current::Syscall::init()
+   f. Call sched::enter() — begins running the idle thread for this CPU
+4. BSP waits for all secondaries to reach step 3f
+5. Emit: "SMP: N CPUs online"
 ```
 
-After this phase, the kernel is fully operational. Init runs in userspace and begins
-its service startup sequence. The kernel only executes when a syscall or interrupt
-brings a CPU into kernel mode.
+**Failure mode:** If a secondary CPU fails to come up within a timeout, emit a
+warning and mark that CPU offline. BSP continues; loss of secondary CPUs is not
+fatal.
 
-**Failure mode:** If a secondary CPU fails to come up within a timeout, a warning is
-emitted and that CPU is marked offline. Loss of secondary CPUs is not fatal — the
-system can operate on fewer CPUs. Failure of the BSP to enter the scheduler is fatal.
-
-**Completion criterion:** Init is running in userspace; all secondary CPUs are in
-their idle loops.
+**Completion criterion:** All secondary CPUs are in their idle loops; init has a
+valid CSpace.
 
 ---
 
@@ -515,5 +519,5 @@ BSP and other CPUs continue.
 | 6 | Platform resource validation | Halt if entries pointer is null with non-zero count; bad entries skipped |
 | 7 | Capability system + root CSpace | Halt: OOM |
 | 8 | Scheduler + idle threads | Halt: OOM |
-| 9 | Init creation from InitImage segments | Halt: invalid InitImage or OOM |
-| 10 | Scheduler handoff + SMP bringup | AP failure: warning; BSP failure: halt |
+| 9 | Init creation + scheduler entry (user mode) | Halt: invalid InitImage or OOM |
+| 10 | SMP bringup + CSpace hand-off (pending) | AP failure: warning; BSP failure: halt |

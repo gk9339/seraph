@@ -301,6 +301,106 @@ pub fn read_stack_pointer() -> u64
     sp
 }
 
+/// Read the current page table root physical address from CR3.
+///
+/// Returns the physical address of the active PML4 table. Strips the low
+/// 12 bits (PCID and flags) per the CR3 layout specification.
+///
+/// # Safety
+/// Must be called at ring 0.
+#[cfg(not(test))]
+pub unsafe fn read_root_phys() -> u64
+{
+    let cr3: u64;
+    // SAFETY: reading CR3 is safe at ring 0.
+    unsafe {
+        core::arch::asm!("mov {}, cr3", out(reg) cr3, options(nostack, nomem));
+    }
+    // Strip low 12 bits (PCID field / flags in no-PCID mode).
+    cr3 & !0xFFF
+}
+
+/// Map a single 4 KiB user page `virt` → `phys` in the page table rooted at
+/// `root_virt`, allocating missing intermediate frames from `allocator`.
+///
+/// Unlike `map_page` (which uses a BSS pool), this function allocates
+/// intermediate page table frames dynamically from the buddy allocator.
+/// Used for building user address spaces after Phase 4 (heap active).
+///
+/// # Errors
+/// Returns `Err(())` if the buddy allocator is exhausted.
+///
+/// # Safety
+/// `root_virt` must be the direct-map virtual address of a valid 4 KiB PML4
+/// frame. `virt` must be in the lower (user) half. `phys` must be 4 KiB-aligned.
+#[cfg(not(test))]
+pub unsafe fn map_user_page(
+    root_virt: u64,
+    virt: u64,
+    phys: u64,
+    flags: crate::mm::paging::PageFlags,
+    allocator: &mut crate::mm::BuddyAllocator,
+) -> Result<(), ()>
+{
+    use crate::mm::paging::phys_to_virt;
+
+    // SAFETY: root_virt is a valid 4 KiB page table frame.
+    let pml4 = unsafe { table_at(root_virt) };
+
+    let pdpt_pa = user_walk_or_alloc(&mut pml4[pml4_index(virt)], allocator)?;
+    let pdpt = unsafe { table_at(phys_to_virt(pdpt_pa)) };
+
+    let pd_pa = user_walk_or_alloc(&mut pdpt[pdpt_index(virt)], allocator)?;
+    let pd = unsafe { table_at(phys_to_virt(pd_pa)) };
+
+    let pt_pa = user_walk_or_alloc(&mut pd[pd_index(virt)], allocator)?;
+    let pt = unsafe { table_at(phys_to_virt(pt_pa)) };
+
+    // Set USER bit (bit 2) so ring-3 code can access the page.
+    const USER: u64 = 1 << 2;
+    let mut pte = PageTableEntry::new_page(phys, flags);
+    pte.0 |= USER;
+    pt[pt_index(virt)] = pte;
+
+    Ok(())
+}
+
+/// Walk an existing page table entry or allocate a new child frame from the
+/// buddy allocator.
+///
+/// Used by `map_user_page` in place of `walk_or_alloc` (which uses PoolState).
+#[cfg(not(test))]
+fn user_walk_or_alloc(
+    entry: &mut PageTableEntry,
+    allocator: &mut crate::mm::BuddyAllocator,
+) -> Result<u64, ()>
+{
+    use crate::mm::paging::phys_to_virt;
+    use crate::mm::PAGE_SIZE;
+
+    if entry.is_present()
+    {
+        return Ok(entry.phys_addr());
+    }
+
+    let frame_pa = allocator.alloc(0).ok_or(())?;
+    let frame_va = phys_to_virt(frame_pa);
+
+    // Zero the new table.
+    // SAFETY: frame_va is an exclusively-owned direct-map kernel address.
+    unsafe {
+        core::ptr::write_bytes(frame_va as *mut u8, 0, PAGE_SIZE);
+    }
+
+    // Set USER bit so lower-level tables are accessible from ring 3.
+    const USER: u64 = 1 << 2;
+    let mut table_pte = PageTableEntry::new_table(frame_pa);
+    table_pte.0 |= USER;
+    *entry = table_pte;
+
+    Ok(frame_pa)
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]

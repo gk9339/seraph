@@ -31,6 +31,11 @@
 //! | InterruptObject     | 16 B |
 //! | IoPortRangeObject   | 12 B |
 //! | SchedControlObject  |  8 B |
+//! | ThreadObject        | 16 B |
+//! | AddressSpaceObject  | 16 B |
+//! | CSpaceKernelObject  | 16 B |
+//! | EndpointObject      | 16 B |
+//! | SignalObject        | 16 B |
 
 use core::sync::atomic::{AtomicU32, Ordering};
 
@@ -49,6 +54,11 @@ pub enum ObjectType
     Interrupt = 2,
     IoPortRange = 3,
     SchedControl = 4,
+    Thread = 5,
+    AddressSpace = 6,
+    CSpaceObj = 7,
+    Endpoint = 8,
+    Signal = 9,
 }
 
 // ── KernelObjectHeader ────────────────────────────────────────────────────────
@@ -158,6 +168,71 @@ pub struct SchedControlObject
 {
     pub header: KernelObjectHeader,
 }
+
+/// Kernel object for a thread control block (Thread capability).
+#[repr(C)]
+pub struct ThreadObject
+{
+    pub header: KernelObjectHeader,
+    /// Pointer to the TCB (heap-allocated).
+    pub tcb: *mut crate::sched::thread::ThreadControlBlock,
+}
+
+// SAFETY: ThreadObject is accessed only under the scheduler lock.
+unsafe impl Send for ThreadObject {}
+unsafe impl Sync for ThreadObject {}
+
+/// Kernel object for a user-mode address space (AddressSpace capability).
+#[repr(C)]
+pub struct AddressSpaceObject
+{
+    pub header: KernelObjectHeader,
+    /// Pointer to the AddressSpace (heap-allocated).
+    pub address_space: *mut crate::mm::address_space::AddressSpace,
+}
+
+// SAFETY: AddressSpaceObject is accessed only with proper locks.
+unsafe impl Send for AddressSpaceObject {}
+unsafe impl Sync for AddressSpaceObject {}
+
+/// Kernel object for a capability space (CSpace capability).
+#[repr(C)]
+pub struct CSpaceKernelObject
+{
+    pub header: KernelObjectHeader,
+    /// Pointer to the CSpace (heap-allocated).
+    pub cspace: *mut crate::cap::cspace::CSpace,
+}
+
+// SAFETY: CSpaceKernelObject is accessed only with proper locks.
+unsafe impl Send for CSpaceKernelObject {}
+unsafe impl Sync for CSpaceKernelObject {}
+
+/// Kernel object for an IPC endpoint (Endpoint capability).
+#[repr(C)]
+pub struct EndpointObject
+{
+    pub header: KernelObjectHeader,
+    /// Mutable endpoint state (heap-allocated).
+    pub state: *mut crate::ipc::endpoint::EndpointState,
+}
+
+// SAFETY: EndpointObject is accessed only under the scheduler lock.
+unsafe impl Send for EndpointObject {}
+unsafe impl Sync for EndpointObject {}
+
+/// Kernel object for a signal (Signal capability).
+#[repr(C)]
+pub struct SignalObject
+{
+    pub header: KernelObjectHeader,
+    /// Mutable signal state (heap-allocated).
+    pub state: *mut crate::ipc::signal::SignalState,
+}
+
+// SAFETY: SignalObject is accessed only under the scheduler lock.
+unsafe impl Send for SignalObject {}
+unsafe impl Sync for SignalObject {}
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 

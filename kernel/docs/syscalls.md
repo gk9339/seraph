@@ -129,11 +129,13 @@ are never reassigned or reused.
 19  SYS_THREAD_START          41  SYS_ASPACE_QUERY
 20  SYS_THREAD_STOP           42  SYS_IPC_BUFFER_SET
 21  SYS_THREAD_YIELD          43  SYS_SYSTEM_INFO
-                              44  SYS_DEBUG_LOG (temporary; removed post-Phase 9)
+                              44  SYS_DEBUG_LOG  [temporary scaffold]
 ```
 
-**Phase 9 implementation status:** Handlers for 0–4 (IPC), 21–22 (yield/exit),
-and 44 (debug log) are implemented. All other numbers return `NotSupported`.
+**Phase 10 implementation status:** Handlers for 0–4 (IPC/signal), 7–8
+(capability creation), 21–22 (yield/exit), 42 (IPC buffer set), and 44
+(debug log) are implemented. All other numbers return `UnknownSyscall`.
+Syscall 44 is a temporary scaffold; see the `SYS_DEBUG_LOG` section below.
 
 ---
 
@@ -1267,6 +1269,37 @@ pub enum SystemInfoKind
 The layout of each result struct is defined in the kernel ABI headers. Structs are
 versioned; the first field of each is a `u32` version number so that future additions
 can be detected by userspace.
+
+---
+
+### `SYS_DEBUG_LOG` (44) — TEMPORARY SCAFFOLD
+
+**This syscall is a development scaffold. It will be removed once `logd`
+and the IPC logging path are operational. Do not use it in any component
+that is intended to survive past Phase 10.**
+
+Write a UTF-8 string directly to the kernel serial console via `kprintln!`.
+This bypasses the proper userspace logging path (`init` → `logd` via IPC)
+and should be used only in early-boot test programs where `logd` is not yet
+available.
+
+The correct production approach is for userspace to send log messages to
+`logd` over an IPC endpoint. `logd` owns the console; the kernel does not.
+
+**Arguments:**
+
+| # | Name | Description |
+|---|---|---|
+| 0 | `ptr` | User virtual address of a UTF-8 string |
+| 1 | `len` | Byte length of the string (clamped to 1024 by the kernel) |
+
+**Return:** `rax`/`a0`: 0 on success; `SyscallError` on failure.
+
+**Capability requirement:** None.
+
+**Errors:** `InvalidArgument` (null pointer).
+
+**Removal target:** Phase 11 (once `logd` is running and init uses IPC logging).
 
 ---
 

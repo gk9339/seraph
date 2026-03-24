@@ -57,6 +57,15 @@ pub struct SavedState
     pub rflags: u64,
 }
 
+impl SavedState
+{
+    /// Return the thread's resume instruction pointer.
+    ///
+    /// For a newly created thread this is the entry function address; for a
+    /// resumed thread it is the return address from the previous `switch` call.
+    pub fn entry_point(&self) -> u64 { self.rip }
+}
+
 // ── new_state ─────────────────────────────────────────────────────────────────
 
 /// Construct the initial [`SavedState`] for a new thread.
@@ -214,6 +223,26 @@ pub unsafe extern "C" fn return_to_user(tf: *const super::trap_frame::TrapFrame)
 
         "iretq",
     );
+}
+
+// ── first_entry_to_user ───────────────────────────────────────────────────────
+
+/// Switch to a new address space and enter user mode for the first time.
+///
+/// Architecture-neutral entry point for `sched::enter`. On x86-64 this
+/// delegates to [`switch_and_enter_user`], which atomically switches CR3 and
+/// discards the boot stack before executing `iretq`.
+///
+/// # Safety
+/// Same contract as [`switch_and_enter_user`]: TSS RSP0 and
+/// `SYSCALL_KERNEL_RSP` must already be set to init's `kernel_stack_top`.
+#[cfg(not(test))]
+pub unsafe fn first_entry_to_user(
+    root_phys: u64,
+    tf: *const super::trap_frame::TrapFrame,
+) -> !
+{
+    unsafe { switch_and_enter_user(root_phys, tf) }
 }
 
 // ── switch_and_enter_user ─────────────────────────────────────────────────────

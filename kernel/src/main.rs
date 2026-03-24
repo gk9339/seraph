@@ -18,8 +18,9 @@
 //! - Phase 5: architecture hardware init (GDT/IDT/APIC or stvec/PLIC, timer, syscall).
 //! - Phase 6: validate `platform_resources` slice; reject malformed entries before capability minting.
 //! - Phase 7: initialise capability subsystem; mint root CSpace with initial hardware caps.
-//! - Phase 8: initialise per-CPU scheduler state and idle threads (BSP only; SMP in Phase 10).
+//! - Phase 8: initialise per-CPU scheduler state and idle threads (BSP only; SMP in Phase 11).
 //! - Phase 9: create init process address space + TCB; enter user mode.
+//! - Phase 10: CSpace handoff to init; context switching + timer preemption; IPC syscalls.
 
 #![cfg_attr(not(test), no_std)]
 #![cfg_attr(not(test), no_main)]
@@ -258,7 +259,17 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
                 kernel_stack_top: init_kstack_top,
                 trap_frame:      core::ptr::null_mut(), // set in sched::enter()
                 address_space:   init_as_ptr,
-                cspace:          core::ptr::null_mut(), // TODO: hand ROOT_CSPACE to init
+                ipc_buffer:      0,
+                wakeup_value:    0,
+                cspace:          {
+                    // Transfer root CSpace ownership to init. ROOT_CSPACE is
+                    // an Option<Box<CSpace>> set in Phase 7; take it here so
+                    // the raw pointer is valid for the lifetime of the process.
+                    // SAFETY: single-threaded boot; ROOT_CSPACE not yet accessed.
+                    let cs = unsafe { cap::ROOT_CSPACE.take() }
+                        .unwrap_or_else(|| fatal("Phase 9: ROOT_CSPACE missing"));
+                    alloc::boxed::Box::into_raw(cs)
+                },
                 thread_id:       1, // 0 = idle BSP, 1 = init
             },
         ));

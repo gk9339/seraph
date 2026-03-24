@@ -102,6 +102,54 @@ pub struct TrapFrame
     pub fs_base: u64,
 }
 
+// ── Syscall / IPC accessors ───────────────────────────────────────────────────
+
+impl TrapFrame
+{
+    /// Syscall number (rax on x86-64).
+    pub fn syscall_nr(&self) -> u64 { self.rax }
+
+    /// Write the primary syscall return value (rax).
+    pub fn set_return(&mut self, val: i64) { self.rax = val as u64; }
+
+    /// Read syscall argument `n` (0-indexed).
+    /// Mapping: 0=rdi, 1=rsi, 2=rdx, 3=r10, 4=r8, 5=r9.
+    pub fn arg(&self, n: usize) -> u64
+    {
+        match n
+        {
+            0 => self.rdi,
+            1 => self.rsi,
+            2 => self.rdx,
+            3 => self.r10,
+            4 => self.r8,
+            5 => self.r9,
+            _ => 0,
+        }
+    }
+
+    /// Write IPC return values: primary in rax, label in rdx.
+    pub fn set_ipc_return(&mut self, primary: u64, label: u64)
+    {
+        self.rax = primary;
+        self.rdx = label;
+    }
+
+    /// Initialise the frame for first entry to user mode.
+    ///
+    /// Sets the user entry point (`rip`), user stack (`rsp`), segment
+    /// selectors (ring-3 CS/SS), and RFLAGS (IF=1). All other fields remain
+    /// zero.
+    pub fn init_user(&mut self, entry: u64, stack: u64)
+    {
+        self.rip    = entry;
+        self.rsp    = stack;
+        self.cs     = 0x23; // USER_CS: ring 3, 64-bit code segment
+        self.ss     = 0x1B; // USER_DS: ring 3, data segment
+        self.rflags = 0x202; // IF=1, reserved bit 1 set
+    }
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]

@@ -34,6 +34,115 @@ pub fn current_id() -> u32
     0
 }
 
+// ── Kernel trap stack ─────────────────────────────────────────────────────────
+
+/// Set the kernel stack pointer used when a trap fires from U-mode.
+///
+/// On RISC-V this writes `stack_top` to `sscratch`.  The trap entry reads
+/// `sscratch` to detect U-mode traps and switch to the kernel stack before
+/// building the [`TrapFrame`].  Must be called before the first `sret` to
+/// U-mode and again whenever the current thread changes.
+///
+/// # Safety
+/// Must execute in supervisor mode.
+#[cfg(not(test))]
+#[inline]
+pub unsafe fn set_kernel_trap_stack(stack_top: u64)
+{
+    // SAFETY: csrw sscratch is safe in S-mode and has no side effects beyond
+    // updating the register.
+    unsafe {
+        core::arch::asm!(
+            "csrw sscratch, {}",
+            in(reg) stack_top,
+            options(nomem, nostack),
+        );
+    }
+}
+
+// ── SUM user-access bracket ───────────────────────────────────────────────────
+
+/// Allow supervisor-mode access to user pages (sets sstatus.SUM, bit 18).
+///
+/// Must be paired with a matching `user_access_end` call.
+///
+/// # Safety
+/// Must execute in supervisor mode. Leaves SUM set until `user_access_end`.
+#[cfg(not(test))]
+#[inline]
+pub unsafe fn user_access_begin()
+{
+    // SAFETY: csrrs sets bit 18 (SUM) in sstatus; safe in supervisor mode.
+    // csrsi/csrci only accept 5-bit immediates (0-31); bit 18 must use a register.
+    unsafe {
+        core::arch::asm!(
+            "csrrs zero, sstatus, {sum}",
+            sum = in(reg) (1u64 << 18),
+            options(nomem, nostack),
+        );
+    }
+}
+
+/// Revoke supervisor-mode access to user pages (clears sstatus.SUM, bit 18).
+///
+/// # Safety
+/// Must be called after a matching `user_access_begin`.
+#[cfg(not(test))]
+#[inline]
+pub unsafe fn user_access_end()
+{
+    // SAFETY: csrrc clears bit 18 (SUM) in sstatus; restores user-page isolation.
+    unsafe {
+        core::arch::asm!(
+            "csrrc zero, sstatus, {sum}",
+            sum = in(reg) (1u64 << 18),
+            options(nomem, nostack),
+        );
+    }
+}
+
+// ── Interrupt save/restore ────────────────────────────────────────────────────
+
+/// Save the current interrupt-enable state and disable supervisor interrupts.
+/// Returns the sstatus value at the time of the call (opaque to callers).
+///
+/// # Safety
+/// Must execute in supervisor mode.
+#[cfg(not(test))]
+#[inline]
+pub unsafe fn save_and_disable_interrupts() -> u64
+{
+    let sstatus: u64;
+    // SAFETY: csrrci atomically reads sstatus and clears the SIE bit.
+    unsafe {
+        core::arch::asm!(
+            "csrrci {sstatus}, sstatus, 2",
+            sstatus = out(reg) sstatus,
+            options(nostack, nomem),
+        );
+    }
+    sstatus
+}
+
+/// Restore the interrupt-enable state saved by [`save_and_disable_interrupts`].
+///
+/// # Safety
+/// Must execute in supervisor mode. `saved` must be a value returned by
+/// `save_and_disable_interrupts` on this hart.
+#[cfg(not(test))]
+#[inline]
+pub unsafe fn restore_interrupts(saved: u64)
+{
+    let sie_bit = (saved >> 1) & 1;
+    if sie_bit != 0
+    {
+        // SAFETY: re-enabling SIE after we previously cleared it.
+        unsafe {
+            core::arch::asm!("csrsi sstatus, 2", options(nostack, nomem));
+        }
+    }
+}
+
 // ── Interrupt control ─────────────────────────────────────────────────────────
 
 /// Disable supervisor-mode interrupts via sstatus.SIE.

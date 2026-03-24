@@ -187,6 +187,12 @@ impl PerCpuScheduler
     {
         self.current = tcb;
     }
+
+    /// Return `true` if any thread is ready to run (non-empty run queues).
+    pub fn has_runnable(&self) -> bool
+    {
+        self.non_empty != 0
+    }
 }
 
 // RunQueue is not Copy, so derive Copy on the containing const is not possible.

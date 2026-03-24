@@ -78,15 +78,20 @@ pub unsafe fn signal_send(sig: *mut SignalState, bits: u64) -> Option<*mut Threa
 {
     // SAFETY: caller guarantees sig is valid and lock is held.
     let sig = unsafe { &mut *sig };
-    sig.bits.fetch_or(bits, Ordering::Release);
-
-    // Wake a waiter if present.
+    // If a waiter is present, atomically swap the bits out so we can deliver
+    // the exact value to the waiter rather than leaving it to read-and-clear.
     if !sig.waiter.is_null()
     {
+        // OR our bits in, then swap the whole bitmask to zero so the waiter
+        // gets exactly what was pending (including bits set before this call).
+        sig.bits.fetch_or(bits, Ordering::AcqRel);
+        let delivered = sig.bits.swap(0, Ordering::AcqRel);
+
         let waiter = sig.waiter;
         sig.waiter = core::ptr::null_mut();
         // SAFETY: waiter is a valid TCB pointer placed here by signal_wait.
         unsafe {
+            (*waiter).wakeup_value = delivered;
             (*waiter).state = crate::sched::thread::ThreadState::Ready;
             (*waiter).ipc_state = IpcThreadState::None;
         }
@@ -94,6 +99,7 @@ pub unsafe fn signal_send(sig: *mut SignalState, bits: u64) -> Option<*mut Threa
     }
     else
     {
+        sig.bits.fetch_or(bits, Ordering::Release);
         None
     }
 }

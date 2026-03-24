@@ -76,6 +76,52 @@ pub struct TrapFrame
     pub stval: u64,
 }
 
+// ── Syscall / IPC accessors ───────────────────────────────────────────────────
+
+impl TrapFrame
+{
+    /// Syscall number (a7 on RISC-V).
+    pub fn syscall_nr(&self) -> u64 { self.a7 }
+
+    /// Write the primary syscall return value (a0).
+    pub fn set_return(&mut self, val: i64) { self.a0 = val as u64; }
+
+    /// Read syscall argument `n` (0-indexed).
+    /// Mapping: 0=a0, 1=a1, 2=a2, 3=a3, 4=a4, 5=a5.
+    pub fn arg(&self, n: usize) -> u64
+    {
+        match n
+        {
+            0 => self.a0,
+            1 => self.a1,
+            2 => self.a2,
+            3 => self.a3,
+            4 => self.a4,
+            5 => self.a5,
+            _ => 0,
+        }
+    }
+
+    /// Write IPC return values: primary in a0, label in a1.
+    pub fn set_ipc_return(&mut self, primary: u64, label: u64)
+    {
+        self.a0 = primary;
+        self.a1 = label;
+    }
+
+    /// Initialise the frame for first entry to user mode.
+    ///
+    /// Sets the supervisor exception PC (`sepc`, the user entry point) and
+    /// user stack pointer (`sp` = x2). All other fields remain zero;
+    /// `return_to_user` sets `sstatus` (SPP=0, SPIE=1) immediately before
+    /// `sret`.
+    pub fn init_user(&mut self, entry: u64, stack: u64)
+    {
+        self.sepc = entry;
+        self.sp   = stack; // x2 = user stack pointer
+    }
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]

@@ -71,6 +71,15 @@ pub struct SavedState
     pub a0: u64,
 }
 
+impl SavedState
+{
+    /// Return the thread's resume address.
+    ///
+    /// For a newly created thread this is the entry function address; for a
+    /// resumed thread it is the return address from the previous `switch` call.
+    pub fn entry_point(&self) -> u64 { self.ra }
+}
+
 // ── new_state ─────────────────────────────────────────────────────────────────
 
 /// Construct the initial [`SavedState`] for a new thread.
@@ -153,6 +162,33 @@ pub unsafe extern "C" fn switch(current: *mut SavedState, next: *const SavedStat
 
         "ret",                  // jr ra → jumps to next thread's entry or resume point
     );
+}
+
+// ── first_entry_to_user ───────────────────────────────────────────────────────
+
+/// Activate a new address space and enter user mode for the first time.
+///
+/// Architecture-neutral entry point for `sched::enter`. On RISC-V, activating
+/// via `satp` + `sfence.vma` is safe to do before `sret` because the boot
+/// stack lives in the direct-mapped region (covered by kernel PPN entries),
+/// which is present in the new address space.
+///
+/// `sscratch` must be set to `kernel_stack_top` before this call so that the
+/// trap entry can switch stacks on the first U-mode trap.
+///
+/// # Safety
+/// `root_phys` must be a valid page-table root. `tf` must point to a
+/// [`TrapFrame`] on the init thread's kernel stack with `sepc` and `sp` set.
+#[cfg(not(test))]
+pub unsafe fn first_entry_to_user(
+    root_phys: u64,
+    tf: *const super::trap_frame::TrapFrame,
+) -> !
+{
+    unsafe {
+        crate::arch::current::paging::activate(root_phys);
+        return_to_user(tf)
+    }
 }
 
 // ── return_to_user ────────────────────────────────────────────────────────────

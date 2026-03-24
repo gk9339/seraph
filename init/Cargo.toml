@@ -7,3 +7,6 @@ publish = false
 [[bin]]
 name = "init"
 path = "src/main.rs"
+
+[dependencies]
+seraph-syscall = { path = "../shared/syscall" }

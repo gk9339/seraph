@@ -246,9 +246,11 @@ and the floating-point state) is saved in the thread's trap frame, not in
 
 ```
 context_switch(current_tcb, next_tcb):
-    // 1. Update TSS/kernel stack (x86-64) or sscratch (RISC-V)
-    //    so that the next syscall or interrupt on this CPU uses next_tcb's stack.
-    arch::current::Cpu::set_kernel_stack(next_tcb.kernel_stack_top)
+    // 1. Update the kernel trap stack pointer so the next privilege-level
+    //    transition (syscall, interrupt, or exception) lands on next_tcb's stack.
+    //    x86-64: writes TSS.RSP0 and SYSCALL_KERNEL_RSP.
+    //    RISC-V: writes sscratch (read by trap_entry to switch from user stack).
+    arch::current::cpu::set_kernel_trap_stack(next_tcb.kernel_stack_top)
 
     // 2. Switch address space if different.
     if current_tcb.address_space != next_tcb.address_space:

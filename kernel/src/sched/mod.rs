@@ -3,16 +3,18 @@
 
 // kernel/src/sched/mod.rs
 
-//! Kernel scheduler — Phase 8/9: per-CPU state, idle threads, and init launch.
+//! Kernel scheduler — Phase 8/9/10: per-CPU state, idle threads, init launch,
+//! and context switching.
 //!
 //! Phase 8 allocates a kernel stack and idle TCB for each CPU.
 //! Phase 9 adds `enter()`, which dequeues the init thread, builds its initial
 //! user-mode [`TrapFrame`], activates its address space, and calls
 //! `return_to_user` to start init running.
+//! Phase 10 adds `schedule()` for preemptive context switching and wires
+//! timer preemption.
 //!
 //! # Deferred work
-//! - Phase 10: SMP bringup, secondary CPU idle threads, load balancing,
-//!   real context switching between multiple threads.
+//! - Phase 11: SMP bringup, secondary CPU idle threads, load balancing.
 
 #[cfg(not(test))]
 extern crate alloc;
@@ -91,40 +93,39 @@ static mut SCHEDULERS: [PerCpuScheduler; MAX_CPUS] = {
 
 // ── Thread ID counter ─────────────────────────────────────────────────────────
 
-// Simple counter for assigning unique thread IDs.
-// TODO Phase 9: replace with an atomic counter once multiple threads are created.
-static mut NEXT_THREAD_ID: u32 = 0;
+/// Atomic counter for assigning unique thread IDs.
+static NEXT_THREAD_ID: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
 
 #[cfg(not(test))]
 fn alloc_thread_id() -> u32
 {
-    // SAFETY: single-threaded Phase 8 boot; no concurrent access.
-    unsafe {
-        let id = NEXT_THREAD_ID;
-        NEXT_THREAD_ID = id.wrapping_add(1);
-        id
-    }
+    NEXT_THREAD_ID.fetch_add(1, core::sync::atomic::Ordering::Relaxed)
 }
 
 // ── Idle thread entry ─────────────────────────────────────────────────────────
 
 /// Entry function for idle threads.
 ///
-/// Runs at priority 0. Halts the CPU until the next interrupt, then loops.
-/// The `schedule()` call that dispatches real work is added in Phase 9.
+/// Runs at priority 0. If any runnable threads are available, yields to the
+/// scheduler; otherwise halts the CPU until the next interrupt.
 ///
 /// `_cpu_id` — logical CPU index (0-based).
-///
-/// # TODO Phase 9
-/// Before halting, check whether any thread became runnable (to avoid a race
-/// between the runnable check and the halt instruction):
-/// ```rust
-/// if has_runnable_threads(cpu_id) { schedule(); }
-/// ```
 fn idle_thread_entry(_cpu_id: u64) -> !
 {
     loop
     {
+        // Check non_empty before halting; if any threads are ready, schedule
+        // them rather than spinning idle. SAFETY: SCHEDULERS[0] is owned by
+        // the BSP; single-CPU Phase 10.
+        #[cfg(not(test))]
+        {
+            let has_work = unsafe { SCHEDULERS[0].has_runnable() };
+            if has_work
+            {
+                // SAFETY: single-CPU Phase 10; called from scheduler context.
+                unsafe { schedule(); }
+            }
+        }
         halt_until_interrupt();
     }
 }
@@ -201,6 +202,8 @@ pub fn init(cpu_count: u32, allocator: &mut BuddyAllocator) -> u32
             trap_frame: core::ptr::null_mut(),
             address_space: core::ptr::null_mut(),
             cspace: core::ptr::null_mut(),
+            ipc_buffer: 0,
+            wakeup_value: 0,
             thread_id: alloc_thread_id(),
         }));
 
@@ -246,6 +249,158 @@ pub unsafe fn scheduler_for(id: usize) -> &'static mut PerCpuScheduler
     unsafe { &mut SCHEDULERS[id] }
 }
 
+// ── schedule ──────────────────────────────────────────────────────────────────
+
+/// Select the next thread to run and switch to it.
+///
+/// Called from `sys_yield`, timer preemption, and the idle thread. On a
+/// single CPU (Phase 10) this always uses `SCHEDULERS[0]`.
+///
+/// If the current thread is still `Running` it is re-queued at its priority
+/// before selection. If the selected next thread is the same as the current
+/// one, no switch occurs.
+///
+/// After updating architecture-specific kernel-stack pointers the scheduler
+/// lock is released, then `arch::current::context::switch` performs the actual
+/// register save/restore.
+///
+/// # Safety
+/// Must be called from within a kernel context (interrupt handler or syscall
+/// handler) with a valid kernel stack. Interrupts are disabled by the
+/// scheduler lock; they are re-enabled as part of lock release.
+#[cfg(not(test))]
+pub unsafe fn schedule()
+{
+    use crate::arch::current::context::switch;
+    use thread::ThreadState;
+
+    let sched = unsafe { &mut SCHEDULERS[0] };
+
+    // Acquire the scheduler lock via lock_raw so we hold no borrow reference
+    // to `sched` during the critical section — allowing us to call mutable
+    // methods on `sched` while the lock is logically held.
+    // SAFETY: lock_raw must be paired with unlock_raw before function return
+    // (or before the context switch that may change the stack).
+    let saved_flags = unsafe { sched.lock.lock_raw() };
+
+    let current = sched.current;
+
+    // If the current thread is still actively running, put it back in the
+    // run queue so it can be rescheduled.
+    // SAFETY: current is a valid TCB set by enter() or a previous schedule().
+    if !current.is_null()
+    {
+        unsafe {
+            if (*current).state == ThreadState::Running
+            {
+                (*current).state = ThreadState::Ready;
+                let prio = (*current).priority;
+                sched.enqueue(current, prio);
+            }
+        }
+    }
+
+    let next = sched.dequeue_highest();
+
+    // If the scheduler selected the same thread, nothing to do.
+    if next == current
+    {
+        // Re-mark as running, release lock, and return.
+        if !current.is_null()
+        {
+            unsafe { (*current).state = ThreadState::Running; }
+        }
+        unsafe { sched.lock.unlock_raw(saved_flags); }
+        return;
+    }
+
+    // Activate next thread.
+    // SAFETY: next is a valid TCB from the run queue or idle.
+    unsafe {
+        (*next).state = ThreadState::Running;
+    }
+    sched.set_current(next);
+
+    // Update the kernel trap stack pointer so the next ring-3 → ring-0
+    // transition (interrupt, exception, or syscall) lands on the correct
+    // kernel stack for the incoming thread.
+    // SAFETY: next is a valid TCB; called with interrupts disabled.
+    unsafe { crate::arch::current::cpu::set_kernel_trap_stack((*next).kernel_stack_top); }
+
+    // Switch address space if different (both non-null).
+    // SAFETY: address_space pointers were set up by Phase 9 init or future
+    // thread creation; null means kernel thread (shares kernel mappings).
+    unsafe {
+        let cur_as = if current.is_null() { core::ptr::null_mut() } else { (*current).address_space };
+        let nxt_as = (*next).address_space;
+        if !nxt_as.is_null() && nxt_as != cur_as
+        {
+            (*nxt_as).activate();
+        }
+    }
+
+    // Capture saved-state pointers before releasing the lock.
+    let current_state: *mut crate::arch::current::context::SavedState = if current.is_null()
+    {
+        core::ptr::null_mut()
+    }
+    else
+    {
+        // SAFETY: current is a valid TCB.
+        unsafe { &mut (*current).saved_state as *mut _ }
+    };
+    // SAFETY: next is a valid TCB.
+    let next_state = unsafe { &(*next).saved_state as *const _ };
+
+    // Release the lock before calling switch. The context switch changes RSP
+    // to the next thread's kernel stack; the unlock_raw call must complete on
+    // the current stack before that happens.
+    // SAFETY: saved_flags was returned by the matching lock_raw above.
+    unsafe { sched.lock.unlock_raw(saved_flags); }
+
+    if !current_state.is_null()
+    {
+        // SAFETY: both pointers are valid SavedState values on heap-allocated
+        // TCBs; interrupts are now re-enabled.
+        unsafe { switch(current_state, next_state); }
+    }
+    // If current_state is null (unreachable post-init), the idle TCB is
+    // always current, so this path cannot be reached normally.
+}
+
+/// Decrement the current thread's time slice and call `schedule()` if expired.
+///
+/// Called from architecture-specific timer handlers on each timer tick.
+///
+/// # Safety
+/// Must be called from within an interrupt handler with a valid kernel stack.
+#[cfg(not(test))]
+pub unsafe fn timer_tick()
+{
+    let sched = unsafe { &mut SCHEDULERS[0] };
+    let current = sched.current;
+    if current.is_null()
+    {
+        return;
+    }
+    // SAFETY: current is a valid TCB.
+    let remaining = unsafe { (*current).slice_remaining };
+    if remaining == 0
+    {
+        // Idle threads have slice_remaining = 0 and should not be preempted.
+        return;
+    }
+    let new_remaining = remaining - 1;
+    unsafe { (*current).slice_remaining = new_remaining; }
+    if new_remaining == 0
+    {
+        // Reset slice for next run.
+        unsafe { (*current).slice_remaining = TIME_SLICE_TICKS; }
+        // SAFETY: called from interrupt handler.
+        unsafe { schedule(); }
+    }
+}
+
 // ── enter ─────────────────────────────────────────────────────────────────────
 
 /// Start executing the highest-priority ready thread and never return.
@@ -279,51 +434,36 @@ pub fn enter() -> !
         {
             crate::fatal("sched::enter: run queue empty — init TCB not enqueued");
         }
+        // Mark as the currently running thread so syscall handlers that call
+        // current_tcb() find the correct TCB while init is executing.
+        sched.set_current(tcb);
+        (*tcb).state = thread::ThreadState::Running;
         &mut *tcb
     };
 
     let kernel_stack_top = init_tcb.kernel_stack_top;
 
     // Retrieve the user entry point stored in saved_state at TCB creation.
-    #[cfg(target_arch = "x86_64")]
-    let entry_point = init_tcb.saved_state.rip;
-    #[cfg(target_arch = "riscv64")]
-    let entry_point = init_tcb.saved_state.ra;
+    let entry_point = init_tcb.saved_state.entry_point();
 
-    // x86-64: update TSS RSP0 and SYSCALL_KERNEL_RSP so the next ring-3 →
-    // ring-0 transition (interrupt or SYSCALL) lands on the right kernel stack.
-    #[cfg(target_arch = "x86_64")]
-    unsafe {
-        crate::arch::current::gdt::set_rsp0(kernel_stack_top);
-        crate::arch::current::syscall::set_kernel_rsp(kernel_stack_top);
-    }
+    // Set the kernel trap stack pointer before entering user mode so the first
+    // ring-3 → ring-0 transition lands on the correct kernel stack.
+    // On x86-64: writes TSS RSP0 + SYSCALL_KERNEL_RSP.
+    // On RISC-V: writes sscratch (read by trap_entry to switch stacks).
+    // SAFETY: single-boot-thread; kernel_stack_top is valid.
+    unsafe { crate::arch::current::cpu::set_kernel_trap_stack(kernel_stack_top); }
 
     // Build the initial user-mode TrapFrame on the init thread's kernel stack.
     // The frame sits just below kernel_stack_top.
     let tf_size = core::mem::size_of::<TrapFrame>() as u64;
     let tf_ptr = (kernel_stack_top - tf_size) as *mut TrapFrame;
 
-    // Zero the frame then fill in the non-zero fields.
+    // Zero the frame then populate the user-mode entry fields via TrapFrame
+    // methods (arch-specific field names are hidden inside trap_frame.rs).
     // SAFETY: kernel_stack_top - tf_size is within the allocated kernel stack.
     unsafe {
         core::ptr::write_bytes(tf_ptr as *mut u8, 0, tf_size as usize);
-
-        // x86-64: user entry via iretq.
-        #[cfg(target_arch = "x86_64")]
-        {
-            (*tf_ptr).rip    = entry_point;
-            (*tf_ptr).rsp    = INIT_STACK_TOP;
-            (*tf_ptr).cs     = 0x23; // USER_CS (ring 3)
-            (*tf_ptr).ss     = 0x1B; // USER_DS (ring 3)
-            (*tf_ptr).rflags = 0x202; // IF=1, reserved bit 1 always set
-        }
-
-        // RISC-V: user entry via sret (sepc + sstatus set in return_to_user).
-        #[cfg(target_arch = "riscv64")]
-        {
-            (*tf_ptr).sepc = entry_point;
-            (*tf_ptr).sp   = INIT_STACK_TOP; // x2 = user stack pointer
-        }
+        (*tf_ptr).init_user(entry_point, INIT_STACK_TOP);
     }
 
     // Record the trap_frame pointer in the TCB so future trap handlers can
@@ -336,30 +476,10 @@ pub fn enter() -> !
 
     crate::kprintln!("  sched::enter: handing control to init");
 
-    // On x86-64: atomically switch page tables and enter user mode.
-    // switch_and_enter_user switches RSP to init's kernel stack BEFORE writing
-    // CR3, so no Rust call/return happens on the boot stack after the CR3
-    // write. The boot stack's identity mapping lives in PML4 entries 0–255
-    // (lower half) which are not present in the init address space.
-    //
-    // On RISC-V: activate first (satp write + sfence.vma does not require a
-    // return, as the sfence serializes execution), then return_to_user.
-    // The RISC-V boot stack is in physical RAM covered by the direct map
-    // (PPN entries 256–511), so it remains accessible after satp write.
-    #[cfg(target_arch = "x86_64")]
-    unsafe {
-        use crate::arch::current::context::switch_and_enter_user;
-        switch_and_enter_user(root_phys, tf_ptr);
-    }
-
-    #[cfg(target_arch = "riscv64")]
-    unsafe {
-        use crate::arch::current::context::return_to_user;
-        (*init_tcb.address_space).activate();
-        return_to_user(tf_ptr)
-    }
-
-    // Unreachable: both paths above diverge.
-    #[allow(unreachable_code)]
-    loop {}
+    // Activate init's address space and enter user mode.
+    // `first_entry_to_user` handles the arch-specific sequence:
+    //   x86-64: atomically switches CR3 and executes iretq from init's kernel stack.
+    //   RISC-V: writes satp (sfence serializes), then executes sret.
+    // SAFETY: root_phys is init's valid page-table root; tf_ptr is on init's kernel stack.
+    unsafe { crate::arch::current::context::first_entry_to_user(root_phys, tf_ptr); }
 }

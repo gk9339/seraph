@@ -112,14 +112,18 @@ pub unsafe fn init(period_us: u64)
 /// Handle a supervisor timer interrupt.
 ///
 /// Called from `trap_dispatch` on scause = 5 (supervisor timer interrupt).
-/// Increments the tick count and schedules the next deadline.
+/// Increments the tick count, rearms the timer, then calls the scheduler tick
+/// which may preempt the current thread.
 pub fn handle_tick()
 {
     TICK_COUNT.fetch_add(1, Ordering::Relaxed);
     let period = TIMER_PERIOD_TICKS.load(Ordering::Relaxed);
-    // Set next deadline relative to current time to avoid drift.
+    // Rearm timer before calling schedule() so the next tick is not missed.
     #[cfg(not(test))]
     sbi_set_timer(read_time() + period);
+    // SAFETY: called from interrupt handler on a valid kernel stack.
+    #[cfg(not(test))]
+    unsafe { crate::sched::timer_tick(); }
 }
 
 /// Return the current monotonic tick count.

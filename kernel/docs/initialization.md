@@ -416,7 +416,7 @@ calls `sched::enter()` to hand control to init.
    b. new_state(entry=init_image.entry_point, stack_top=kstack_top, arg=0, is_user=true)
       stores entry_point in saved_state.rip (x86-64) or .ra (RISC-V)
    c. Priority: INIT_PRIORITY (15)
-   d. cspace: null_mut() — root CSpace hand-off to init is deferred to Phase 10
+   d. cspace: set to ROOT_CSPACE raw pointer (handed off in Phase 10)
 6. Enqueue the init TCB on the BSP's run queue at INIT_PRIORITY
 7. Call sched::enter() — does not return:
    a. Dequeue the highest-priority ready thread (init)
@@ -430,7 +430,7 @@ calls `sched::enter()` to hand control to init.
 ```
 
 **Implementation notes:**
-- CSpace hand-off (step 5d) is deferred to Phase 10; init's cspace pointer is null.
+- CSpace hand-off (step 5d) is completed in Phase 10; init receives ROOT_CSPACE.
 - The x86-64 `switch_and_enter_user` function atomically switches the stack pointer
   BEFORE writing CR3. This is required because the boot stack is identity-mapped in
   PML4 entries 0–255 (the lower half), which are not copied into init's page tables.
@@ -445,38 +445,111 @@ failed step. Invalid init_image (zero segment_count or zero entry_point) halts w
 
 ---
 
-## Phase 10: SMP Bringup (Pending)
+## Phase 10: Functional Single-CPU Kernel
+
+**Status: Implemented.**
+
+The kernel becomes functionally complete on a single CPU. Init receives a real
+CSpace, context switching and timer preemption are wired, all IPC syscalls are
+implemented, and init exercises the IPC path end-to-end.
+
+```
+1. CSpace hand-off:
+   - take() ROOT_CSPACE from the global, Box::into_raw() → raw pointer
+   - Set init_tcb.cspace = root_cspace_ptr
+   - sched::enter() calls set_current(init_tcb) so current_tcb() returns
+     the init TCB during init's syscalls
+
+2. Context switching (schedule()):
+   a. Acquire SCHEDULERS[0].lock via lock_raw (avoids RAII borrow conflict)
+   b. If current thread is Running: set Ready, re-enqueue at its priority
+   c. dequeue_highest() to pick next thread
+   d. If next == current: release lock, return
+   e. Set next.state = Running, set_current(next)
+   f. x86-64: update TSS RSP0 and SYSCALL_KERNEL_RSP to next's kernel stack
+   g. If address spaces differ and next has one: activate next's address space
+   h. Release lock, call arch::current::context::switch(current_state, next_state)
+
+3. Timer preemption (timer_tick()):
+   - Decrement current thread's slice_remaining on each timer interrupt
+   - When slice_remaining reaches 0: reset to TIME_SLICE_TICKS, call schedule()
+
+4. IPC syscalls (kernel/src/syscall/ipc.rs):
+   - sys_ipc_call: lookup endpoint cap, read data from IPC buffer, call
+     endpoint_call, enqueue woken server or block, call schedule(), on
+     resume write reply into IPC buffer and return registers
+   - sys_ipc_recv: lookup endpoint cap, call endpoint_recv, deliver or
+     block, call schedule(), on resume write message into IPC buffer
+   - sys_ipc_reply: read data from IPC buffer, call endpoint_reply, write
+     to caller's IPC buffer, re-enqueue caller
+   - sys_signal_send: lookup signal cap, call signal_send, enqueue woken waiter
+   - sys_signal_wait: lookup signal cap, call signal_wait, block if no bits
+     set, on resume return wakeup_value from TCB
+
+5. IPC buffer registration (SYS_IPC_BUFFER_SET):
+   - Validates 4 KiB alignment; sets (*current_tcb).ipc_buffer = virt_addr
+
+6. Capability creation:
+   - SYS_CAP_CREATE_ENDPOINT: allocate EndpointState + EndpointObject via
+     Box, insert into current CSpace with SEND|RECEIVE|GRANT rights
+   - SYS_CAP_CREATE_SIGNAL: allocate SignalState + SignalObject, insert
+     with SIGNAL|WAIT rights
+
+7. Userspace syscall wrappers (shared/syscall/src/lib.rs):
+   - Thin inline-asm wrappers for all implemented syscalls; no_std, no heap
+
+8. Init test (init/src/main.rs):
+   - Registers IPC buffer, creates signal cap, signal_send(0x42),
+     signal_wait() returns 0x42 immediately, prints pass message, exits
+```
+
+**Implementation notes:**
+- `schedule()` uses `lock_raw`/`unlock_raw` on the scheduler spinlock instead
+  of the RAII guard to avoid borrow-checker conflicts when mutating the
+  scheduler's own fields while the lock is held.
+- User memory accesses (IPC buffer, debug_log string) use `user_access_begin`/
+  `user_access_end` (STAC/CLAC on x86-64; csrrs/csrrc sstatus.SUM on RISC-V)
+  to satisfy SMAP/SUM hardware protection.
+- `SYS_DEBUG_LOG` (44) is a temporary scaffold for pre-logd output; it will be
+  removed once the IPC logging path to logd is operational (see Phase 11).
+
+**Failure mode:** Allocation failures in capability creation return `OutOfMemory`
+to userspace. Other failures return appropriate `SyscallError` codes. The kernel
+itself does not halt on IPC errors.
+
+**Completion criterion:** Init completes the signal round-trip test and calls
+`SYS_THREAD_EXIT`.
+
+---
+
+## Phase 11: SMP Bringup (Pending)
 
 **Status: Pending.**
 
-Secondary CPUs are brought up. TLB shootdown, CSpace hand-off to init, and
-real context switching between multiple threads are implemented here.
+Secondary CPUs are brought up. Each runs its own idle thread and participates
+in the scheduler.
 
 ```
 BSP:
-1. Hand ROOT_CSPACE to init (set init_tcb.cspace = root_cspace_ptr)
-
-Secondary CPUs (in parallel):
-2. Each secondary CPU is signalled:
-   - x86-64: BSP sends INIT+SIPI to each AP's APIC ID
-   - RISC-V: BSP calls SBI HSM hart_start for each secondary hart
-3. Secondary CPUs execute a minimal AP/hart startup stub:
-   a. Load the kernel stack pointer (pre-allocated in Phase 8)
+1. For each secondary CPU:
+   - x86-64: send INIT+SIPI to the AP's APIC ID
+   - RISC-V: call SBI HSM hart_start for the secondary hart
+2. Each secondary CPU executes an AP startup stub:
+   a. Load pre-allocated kernel stack pointer
    b. Install the kernel page table (same root as BSP)
    c. Call arch::current::Interrupts::init()
    d. Call arch::current::Timer::init(TIMER_PERIOD_US)
    e. Call arch::current::Syscall::init()
    f. Call sched::enter() — begins running the idle thread for this CPU
-4. BSP waits for all secondaries to reach step 3f
-5. Emit: "SMP: N CPUs online"
+3. BSP waits for all secondaries to reach step 2f
+4. Emit: "SMP: N CPUs online"
 ```
 
 **Failure mode:** If a secondary CPU fails to come up within a timeout, emit a
 warning and mark that CPU offline. BSP continues; loss of secondary CPUs is not
 fatal.
 
-**Completion criterion:** All secondary CPUs are in their idle loops; init has a
-valid CSpace.
+**Completion criterion:** All secondary CPUs are in their idle loops.
 
 ---
 
@@ -520,4 +593,5 @@ BSP and other CPUs continue.
 | 7 | Capability system + root CSpace | Halt: OOM |
 | 8 | Scheduler + idle threads | Halt: OOM |
 | 9 | Init creation + scheduler entry (user mode) | Halt: invalid InitImage or OOM |
-| 10 | SMP bringup + CSpace hand-off (pending) | AP failure: warning; BSP failure: halt |
+| 10 | CSpace hand-off, context switching, IPC syscalls, init test | IPC errors returned to userspace |
+| 11 | SMP bringup (pending) | AP failure: warning; BSP failure: halt |

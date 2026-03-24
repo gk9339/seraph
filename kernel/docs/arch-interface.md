@@ -165,6 +165,13 @@ pub trait Context: Sized + Default
         is_user: bool,
     ) -> Self::SavedState;
 
+    /// Return the thread's resume instruction pointer from a `SavedState`.
+    ///
+    /// For a newly created thread this is the entry function address passed to
+    /// `new_state`. For a resumed thread it is the return address captured by
+    /// the previous `switch` call. On x86-64: `rip`. On RISC-V: `ra`.
+    fn entry_point(state: &Self::SavedState) -> VirtAddr;
+
     /// Switch from `current` to `next`.
     ///
     /// Saves all callee-saved registers into `current`, then restores all
@@ -177,13 +184,38 @@ pub trait Context: Sized + Default
     /// function must be called from a consistent kernel-stack context.
     unsafe fn switch(current: *mut Self::SavedState, next: *const Self::SavedState);
 
-    /// Return from an exception or syscall to userspace, restoring the full
-    /// user register state from `state`. Does not return.
+    /// Activate a new address space and enter user mode for the first time.
+    ///
+    /// Called once at the end of kernel boot. Switches to `root_phys` as the
+    /// active page-table root and transfers control to the user entry point
+    /// encoded in `tf`. Does not return.
+    ///
+    /// On x86-64: `switch_and_enter_user` atomically writes CR3 and switches
+    /// RSP to init's kernel stack before executing `iretq`. This is required
+    /// because the boot stack's identity mapping is absent from user address
+    /// spaces; any Rust call/return after the CR3 write would fault.
+    ///
+    /// On RISC-V: writes `satp` (with `sfence.vma` to serialise), then
+    /// executes `sret`. The boot stack lives in the direct-mapped region and
+    /// remains accessible after the `satp` write, so activation and entry can
+    /// be separate steps.
+    ///
+    /// `set_kernel_trap_stack` must be called before this function so that the
+    /// first U-mode trap lands on the correct kernel stack.
     ///
     /// # Safety
-    /// `state` must contain a valid user-mode register file. Interrupts must
-    /// be in the desired state before this call.
-    unsafe fn return_to_user(state: &Self::SavedState) -> !;
+    /// `root_phys` must be a valid page-table root. `tf` must point to a
+    /// `TrapFrame` on the init thread's kernel stack with entry and user-stack
+    /// fields populated via `TrapFrame::init_user`.
+    unsafe fn first_entry_to_user(root_phys: u64, tf: *const TrapFrame) -> !;
+
+    /// Return from an exception or syscall to userspace, restoring the full
+    /// user register state from `tf`. Does not return.
+    ///
+    /// # Safety
+    /// `tf` must point to a valid `TrapFrame` with correct user-mode register
+    /// state. `set_kernel_trap_stack` must already reflect the current thread.
+    unsafe fn return_to_user(tf: *const TrapFrame) -> !;
 }
 ```
 
@@ -353,13 +385,42 @@ pub trait Cpu: Sized
 
     /// Set the kernel stack pointer for the current CPU so that the next
     /// privilege-level transition (syscall or exception) uses `stack_top`.
-    /// On x86-64: writes `stack_top` to `TSS.RSP0`.
-    /// On RISC-V: writes `stack_top` to `sscratch`.
+    ///
+    /// On x86-64: writes `stack_top` to both `TSS.RSP0` (interrupt/exception
+    /// entry) and `SYSCALL_KERNEL_RSP` (fast SYSCALL entry). Both must be kept
+    /// in sync so that all privilege transitions land on the same kernel stack.
+    /// On RISC-V: writes `stack_top` to `sscratch`. The trap entry stub reads
+    /// `sscratch` on every trap to detect U-mode entry and switch stacks before
+    /// saving registers. The invariant is: `sscratch = kernel_stack_top` while
+    /// in U-mode, `sscratch = 0` while in S-mode.
+    ///
+    /// Must be called on every context switch to a user thread.
     ///
     /// # Safety
     /// `stack_top` must point to the top of a valid, mapped kernel stack that
     /// remains allocated for the lifetime of the thread that will run next.
-    unsafe fn set_kernel_stack(stack_top: VirtAddr);
+    unsafe fn set_kernel_trap_stack(stack_top: VirtAddr);
+
+    /// Disable interrupts and return the prior interrupt state as an opaque
+    /// value. Pass the returned value to `restore_interrupts` to restore.
+    ///
+    /// On x86-64: saves RFLAGS (specifically the IF bit) via `pushfq`, then
+    /// executes `cli`. On RISC-V: reads `sstatus` atomically while clearing
+    /// the SIE bit via `csrrci`.
+    ///
+    /// # Safety
+    /// Must execute at ring 0 / S-mode.
+    unsafe fn save_and_disable_interrupts() -> u64;
+
+    /// Restore the interrupt state saved by `save_and_disable_interrupts`.
+    ///
+    /// On x86-64: restores RFLAGS via `push`/`popfq`. On RISC-V: re-sets
+    /// `sstatus.SIE` if it was set in the saved value.
+    ///
+    /// # Safety
+    /// `saved` must be a value returned by `save_and_disable_interrupts` on
+    /// this CPU. Must execute at ring 0 / S-mode.
+    unsafe fn restore_interrupts(saved: u64);
 }
 ```
 
@@ -394,6 +455,50 @@ pub trait EarlyConsole
             Self::write_byte(b);
         }
     }
+}
+```
+
+---
+
+### `TrapFrame`
+
+The full user-mode register snapshot saved on the kernel stack at every privilege
+transition (syscall, exception, or interrupt from user mode). The struct layout is
+architecture-specific and defined in each arch's `trap_frame.rs`, but the following
+methods are required on every implementation so that shared kernel code (`syscall/`,
+`sched/`) can operate on trap frames without `#[cfg(target_arch)]` guards.
+
+```rust
+impl TrapFrame
+{
+    /// Return the syscall number.
+    /// On x86-64: `rax`. On RISC-V: `a7`.
+    pub fn syscall_nr(&self) -> u64;
+
+    /// Write the primary syscall return value.
+    /// On x86-64: `rax`. On RISC-V: `a0`.
+    pub fn set_return(&mut self, val: i64);
+
+    /// Read syscall argument `n` (0-indexed).
+    /// On x86-64: rdi/rsi/rdx/r10/r8/r9 for n=0..5.
+    /// On RISC-V: a0/a1/a2/a3/a4/a5 for n=0..5.
+    /// Returns 0 for n >= 6.
+    pub fn arg(&self, n: usize) -> u64;
+
+    /// Write IPC return values: primary result and message label.
+    /// On x86-64: primary → rax, label → rdx.
+    /// On RISC-V:  primary → a0,  label → a1.
+    pub fn set_ipc_return(&mut self, primary: u64, label: u64);
+
+    /// Initialise the frame for first entry to user mode.
+    ///
+    /// Sets the user entry point and user stack pointer. All other fields
+    /// must be zeroed by the caller before this method is invoked.
+    /// On x86-64: populates rip, rsp, cs (USER_CS), ss (USER_DS), rflags (IF=1).
+    /// On RISC-V: populates sepc (entry point) and sp (x2, user stack pointer).
+    ///            sstatus (SPP=0, SPIE=1) is set by `return_to_user` immediately
+    ///            before `sret`.
+    pub fn init_user(&mut self, entry: u64, stack: u64);
 }
 ```
 

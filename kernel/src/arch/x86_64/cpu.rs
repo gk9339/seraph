@@ -117,6 +117,42 @@ pub unsafe fn write_msr(msr: u32, val: u64)
     }
 }
 
+// ── SMAP user-access bracket ──────────────────────────────────────────────────
+
+/// Allow supervisor-mode access to user pages (sets AC flag via `stac`).
+///
+/// Must be paired with a matching `user_access_end` call. Nesting is not
+/// supported. Call immediately before reading/writing user memory, and call
+/// `user_access_end` immediately after.
+///
+/// # Safety
+/// Must execute at ring 0. Leaves AC set until `user_access_end` is called,
+/// so any faulting user-pointer dereference between the two calls will not
+/// produce a SMAP fault (but may still fault for other reasons).
+#[cfg(not(test))]
+#[inline]
+pub unsafe fn user_access_begin()
+{
+    // SAFETY: stac sets AC in RFLAGS; safe at ring 0 when SMAP is enabled.
+    unsafe {
+        core::arch::asm!("stac", options(nostack, nomem));
+    }
+}
+
+/// Revoke supervisor-mode access to user pages (clears AC flag via `clac`).
+///
+/// # Safety
+/// Must be called after a matching `user_access_begin`.
+#[cfg(not(test))]
+#[inline]
+pub unsafe fn user_access_end()
+{
+    // SAFETY: clac clears AC in RFLAGS; restores SMAP protection.
+    unsafe {
+        core::arch::asm!("clac", options(nostack, nomem));
+    }
+}
+
 // ── SMEP / SMAP ───────────────────────────────────────────────────────────────
 
 /// Enable Supervisor Mode Execution Prevention (SMEP) and Supervisor Mode
@@ -177,6 +213,69 @@ pub fn current_id() -> u32
 {
     let (_eax, ebx, _ecx, _edx) = cpuid(1);
     ebx >> 24
+}
+
+// ── Kernel trap stack ─────────────────────────────────────────────────────────
+
+/// Set the kernel stack pointer used when a trap fires from U-mode.
+///
+/// On x86-64 this requires two writes: TSS RSP0 (for hardware interrupt/
+/// exception entry) and `SYSCALL_KERNEL_RSP` (for the `SYSCALL` fast path).
+/// Must be called on every context switch to a user thread.
+///
+/// # Safety
+/// Must execute at ring 0. Caller must ensure the stack is valid.
+#[cfg(not(test))]
+#[inline]
+pub unsafe fn set_kernel_trap_stack(stack_top: u64)
+{
+    unsafe {
+        super::gdt::set_rsp0(stack_top);
+        super::syscall::set_kernel_rsp(stack_top);
+    }
+}
+
+/// Save the current interrupt-enable state and disable hardware interrupts.
+/// Returns an opaque value to pass to [`restore_interrupts`].
+///
+/// # Safety
+/// Must execute at ring 0.
+#[cfg(not(test))]
+#[inline]
+pub unsafe fn save_and_disable_interrupts() -> u64
+{
+    let flags: u64;
+    // SAFETY: pushfq/popfq are valid at ring 0; cli is safe here.
+    unsafe {
+        core::arch::asm!(
+            "pushfq",
+            "pop {flags}",
+            "cli",
+            flags = out(reg) flags,
+            options(nostack),
+        );
+    }
+    flags
+}
+
+/// Restore the interrupt-enable state saved by [`save_and_disable_interrupts`].
+///
+/// # Safety
+/// Must execute at ring 0. `saved` must be a value returned by
+/// `save_and_disable_interrupts` on this CPU.
+#[cfg(not(test))]
+#[inline]
+pub unsafe fn restore_interrupts(saved: u64)
+{
+    // SAFETY: restoring a previously captured FLAGS value is safe.
+    unsafe {
+        core::arch::asm!(
+            "push {flags}",
+            "popfq",
+            flags = in(reg) saved,
+            options(nostack),
+        );
+    }
 }
 
 // ── Interrupts (hardware state) ───────────────────────────────────────────────

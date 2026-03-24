@@ -51,6 +51,42 @@ impl<T> Spinlock<T>
         }
     }
 
+    /// Acquire the lock without RAII, returning the saved interrupt flags.
+    ///
+    /// The caller **must** release the lock with [`unlock_raw`][Self::unlock_raw]
+    /// after finishing the critical section. Use [`lock`][Self::lock] (RAII) in
+    /// preference wherever possible; `lock_raw` exists for cases where holding a
+    /// borrow to `Self` for the duration of the guard would create an aliasing
+    /// conflict (e.g., when other fields of the same struct must be mutated while
+    /// the lock is held).
+    ///
+    /// # Safety
+    /// The returned `u64` must be passed verbatim to `unlock_raw`. Failure to
+    /// release the lock will deadlock the CPU.
+    pub unsafe fn lock_raw(&self) -> u64
+    {
+        let saved = save_and_disable_interrupts();
+        let ticket = self.next_ticket.fetch_add(1, Ordering::Relaxed);
+        while self.now_serving.load(Ordering::Acquire) != ticket
+        {
+            core::hint::spin_loop();
+        }
+        saved
+    }
+
+    /// Release a lock acquired with [`lock_raw`][Self::lock_raw].
+    ///
+    /// Advances the now-serving counter and restores the interrupt state saved
+    /// by the matching `lock_raw` call.
+    ///
+    /// # Safety
+    /// `saved_flags` must be the value returned by the corresponding `lock_raw`.
+    pub unsafe fn unlock_raw(&self, saved_flags: u64)
+    {
+        self.now_serving.fetch_add(1, Ordering::Release);
+        restore_interrupts(saved_flags);
+    }
+
     /// Acquire the lock.
     ///
     /// Disables interrupts, takes a ticket, then spins until that ticket is
@@ -116,73 +152,24 @@ impl<T> DerefMut for SpinlockGuard<'_, T>
 }
 
 // ── Interrupt save/restore helpers ────────────────────────────────────────────
-// Architecture-specific: save and disable interrupts, return the prior state.
-// These are cfg-gated so host tests compile without ring-0 instructions.
 
 /// Save the current interrupt-enable flag and disable interrupts.
 /// Returns an opaque value to pass to [`restore_interrupts`].
+///
+/// Delegates to the arch-specific implementation in `cpu`.
 #[cfg(not(test))]
 fn save_and_disable_interrupts() -> u64
 {
-    #[cfg(target_arch = "x86_64")]
-    {
-        let flags: u64;
-        // SAFETY: pushfq/popfq are valid at ring 0; cli is safe here.
-        unsafe {
-            core::arch::asm!(
-                "pushfq",
-                "pop {flags}",
-                "cli",
-                flags = out(reg) flags,
-                options(nostack),
-            );
-        }
-        flags
-    }
-    #[cfg(target_arch = "riscv64")]
-    {
-        let sstatus: u64;
-        // SAFETY: csrrci atomically reads sstatus and clears the SIE bit.
-        unsafe {
-            core::arch::asm!(
-                "csrrci {sstatus}, sstatus, 2",
-                sstatus = out(reg) sstatus,
-                options(nostack, nomem),
-            );
-        }
-        sstatus
-    }
+    // SAFETY: called only in kernel context (ring 0 / S-mode).
+    unsafe { crate::arch::current::cpu::save_and_disable_interrupts() }
 }
 
 /// Restore interrupt state saved by [`save_and_disable_interrupts`].
 #[cfg(not(test))]
 fn restore_interrupts(saved: u64)
 {
-    #[cfg(target_arch = "x86_64")]
-    {
-        // Restore IF from the saved RFLAGS value by pushing and popfq.
-        // SAFETY: restoring a previously captured FLAGS value is safe.
-        unsafe {
-            core::arch::asm!(
-                "push {flags}",
-                "popfq",
-                flags = in(reg) saved,
-                options(nostack),
-            );
-        }
-    }
-    #[cfg(target_arch = "riscv64")]
-    {
-        // Restore SIE bit from the saved sstatus.
-        let sie_bit = (saved >> 1) & 1;
-        if sie_bit != 0
-        {
-            // SAFETY: re-enabling SIE after we previously cleared it.
-            unsafe {
-                core::arch::asm!("csrsi sstatus, 2", options(nostack, nomem),);
-            }
-        }
-    }
+    // SAFETY: `saved` came from a matching `save_and_disable_interrupts` call.
+    unsafe { crate::arch::current::cpu::restore_interrupts(saved); }
 }
 
 // In test builds, interrupts are not a concern; no-op stubs allow the rest of

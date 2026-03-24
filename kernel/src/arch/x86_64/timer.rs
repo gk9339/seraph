@@ -224,13 +224,17 @@ pub unsafe fn init(_period_us: u64) {}
 
 /// Timer ISR body — called from the naked stub in `idt.rs`.
 ///
-/// Increments the tick counter and sends EOI to the local APIC.
+/// Increments the tick counter, sends EOI to the local APIC, then calls
+/// the scheduler tick which may preempt the current thread.
 /// Must not allocate or block.
 #[cfg(not(test))]
 pub extern "C" fn timer_isr()
 {
     TICK_COUNT.fetch_add(1, Ordering::Relaxed);
+    // EOI must be sent before calling schedule() to avoid masking the APIC.
     interrupts::acknowledge(TIMER_VECTOR as u32);
+    // SAFETY: called from interrupt handler on a valid kernel stack.
+    unsafe { crate::sched::timer_tick(); }
 }
 
 /// Return the current monotonic tick count.

@@ -16,7 +16,11 @@
 //! - `trap_frame`: pointer to the user register snapshot on the kernel stack.
 //! - `is_user`: true for user-mode threads.
 //!
-//! # TODO Phase 10 (SMP)
+//! # Phase 10 fields
+//! - `ipc_buffer`: virtual address of the per-thread IPC buffer page (0 = none).
+//! - `wakeup_value`: value delivered by a signal sender to an unblocked waiter.
+//!
+//! # TODO Phase 11 (SMP)
 //! - Bind `cpu_affinity` and `preferred_cpu` to the actual CPU being started.
 
 use crate::arch::current::context::SavedState;
@@ -147,6 +151,19 @@ pub struct ThreadControlBlock
 
     /// CSpace bound to this thread.
     pub cspace: *mut crate::cap::cspace::CSpace,
+
+    // === IPC buffer (Phase 10) ===
+    /// Virtual address of the per-thread IPC buffer page (0 = not registered).
+    ///
+    /// Registered by `SYS_IPC_BUFFER_SET`. IPC data words are read from / written
+    /// to this page when `data_count > 0`.
+    pub ipc_buffer: u64,
+
+    /// Wakeup value delivered to this thread when unblocked from a signal wait.
+    ///
+    /// Set by `signal_send` when it wakes a blocked waiter: stores the bits that
+    /// were acquired on the waiter's behalf. Read by `sys_signal_wait` on resume.
+    pub wakeup_value: u64,
 
     // === Identity ===
     /// Unique thread identifier assigned at creation.

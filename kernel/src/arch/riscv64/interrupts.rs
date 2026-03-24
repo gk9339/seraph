@@ -72,51 +72,98 @@ unsafe fn plic_write(offset: u64, val: u32)
 
 /// Naked trap entry point installed in `stvec`.
 ///
-/// Saves all general-purpose registers and supervisor CSRs to a `TrapFrame`
-/// on the stack, calls `trap_dispatch`, then restores and executes `sret`.
+/// Handles traps from both U-mode (ecall, page faults) and S-mode (timer,
+/// external interrupts). Saves all GPRs and CSRs to a [`TrapFrame`], calls
+/// `trap_dispatch`, then restores and executes `sret`.
 ///
-/// `sp` is used as the frame pointer; caller must ensure the stack has at
-/// least `size_of::<TrapFrame>()` bytes available when a trap fires.
+/// ## Stack switching invariant
+///
+/// `sscratch` encodes the current privilege:
+/// - S-mode: `sscratch = 0`
+/// - U-mode: `sscratch = kernel stack top for the current thread`
+///
+/// On U-mode trap entry the handler atomically reads the kernel stack top
+/// from `sscratch` (via `csrrw t0, sscratch, t0`) and switches to it before
+/// building the [`TrapFrame`]. On exit, `sscratch` is reloaded with the
+/// kernel stack top before `sret` returns to U-mode.
+///
+/// `sscratch` must be initialised to the initial thread's kernel stack top
+/// before the first `sret` to U-mode (done in `sched::enter`).
 #[cfg(not(test))]
 #[unsafe(naked)]
 unsafe extern "C" fn trap_entry()
 {
-    // Frame size: 34 u64 values = 272 bytes.
+    // Frame layout: 34 × 8 = 272 bytes (verified by test below).
+    // Offsets: x1=0, x2=8, x3=16, x4=24, x5=32, …, x31=240,
+    //          sepc=248, scause=256, stval=264.
     core::arch::naked_asm!(
-        // Allocate TrapFrame on the stack.
+        // ── Determine source privilege ──────────────────────────────────────────
+        // Atomically swap t0 (x5) with sscratch:
+        //   t0    = old sscratch (kernel_sp_top if from U-mode, 0 if from S-mode)
+        //   sscratch = old t0 (saved here temporarily)
+        "csrrw t0, sscratch, t0",
+        "bnez t0, 1f",              // t0 != 0 → came from U-mode
+
+        // ── S-mode path ─────────────────────────────────────────────────────────
+        // t0 = 0; sscratch = old_t0; sp = kernel_sp (already correct)
+        // Restore t0: swap back so t0 = old_t0, sscratch = 0.
+        "csrrw t0, sscratch, t0",
+        // Allocate TrapFrame on the kernel stack.
         "addi sp, sp, -272",
-        // Save x1–x31 (skip x0 which is always 0).
-        "sd x1,   0(sp)",
-        "sd x2,   8(sp)",
-        "sd x3,  16(sp)",
-        "sd x4,  24(sp)",
-        "sd x5,  32(sp)",
+        // Save t0 (x5) before reusing x5 as a temporary.
+        "sd x5, 32(sp)",
+        // Record original sp (= current sp + 272, the pre-allocation value).
+        "addi x5, sp, 272",
+        "sd x5, 8(sp)",
+        "j 2f",
+
+        // ── U-mode path ─────────────────────────────────────────────────────────
+        // t0 = kernel_sp_top; sscratch = old_t0; sp = user_sp
+        "1:",
+        // Allocate TrapFrame at the top of the kernel stack (in t0).
+        "addi t0, t0, -272",
+        // Save user sp (x2) into the frame before overwriting sp.
+        "sd x2, 8(t0)",
+        // Switch to kernel stack.
+        "mv sp, t0",
+        // Retrieve original t0 from sscratch; clear sscratch (now in S-mode).
+        "csrr x5, sscratch",
+        "csrw sscratch, zero",
+        "sd x5, 32(sp)",            // frame.t0 = user t0
+
+        // ── Save remaining registers (x2 and x5 already saved above) ───────────
+        "2:",
+        "sd x1,   0(sp)",           // ra
+        // x2 (sp) saved above in both paths
+        "sd x3,  16(sp)",           // gp
+        "sd x4,  24(sp)",           // tp
+        // x5 (t0) saved above in both paths
         "sd x6,  40(sp)",
         "sd x7,  48(sp)",
         "sd x8,  56(sp)",
         "sd x9,  64(sp)",
-        "sd x10, 72(sp)",
+        "sd x10, 72(sp)",           // a0
         "sd x11, 80(sp)",
         "sd x12, 88(sp)",
         "sd x13, 96(sp)",
-        "sd x14, 104(sp)",
-        "sd x15, 112(sp)",
-        "sd x16, 120(sp)",
-        "sd x17, 128(sp)",
-        "sd x18, 136(sp)",
-        "sd x19, 144(sp)",
-        "sd x20, 152(sp)",
-        "sd x21, 160(sp)",
-        "sd x22, 168(sp)",
-        "sd x23, 176(sp)",
-        "sd x24, 184(sp)",
-        "sd x25, 192(sp)",
-        "sd x26, 200(sp)",
-        "sd x27, 208(sp)",
-        "sd x28, 216(sp)",
-        "sd x29, 224(sp)",
-        "sd x30, 232(sp)",
-        "sd x31, 240(sp)",
+        "sd x14,104(sp)",
+        "sd x15,112(sp)",
+        "sd x16,120(sp)",
+        "sd x17,128(sp)",           // a7 (syscall number)
+        "sd x18,136(sp)",
+        "sd x19,144(sp)",
+        "sd x20,152(sp)",
+        "sd x21,160(sp)",
+        "sd x22,168(sp)",
+        "sd x23,176(sp)",
+        "sd x24,184(sp)",
+        "sd x25,192(sp)",
+        "sd x26,200(sp)",
+        "sd x27,208(sp)",
+        "sd x28,216(sp)",
+        "sd x29,224(sp)",
+        "sd x30,232(sp)",
+        "sd x31,240(sp)",
         // Save supervisor CSRs.
         "csrr t0, sepc",
         "sd   t0, 248(sp)",
@@ -124,15 +171,30 @@ unsafe extern "C" fn trap_entry()
         "sd   t0, 256(sp)",
         "csrr t0, stval",
         "sd   t0, 264(sp)",
-        // Call trap_dispatch(&mut TrapFrame).
+
+        // ── Dispatch ────────────────────────────────────────────────────────────
         "mv a0, sp",
         "call {dispatch}",
-        // Restore sepc (may have been modified by syscall handler).
-        "ld   t0, 248(sp)",
+
+        // ── Restore sepc ────────────────────────────────────────────────────────
+        "ld t0, 248(sp)",
         "csrw sepc, t0",
-        // Restore x1–x31.
+
+        // ── Restore sscratch if returning to U-mode ─────────────────────────────
+        // Check sstatus.SPP (bit 8): 0 = return to U-mode, 1 = return to S-mode.
+        "csrr t0, sstatus",
+        "srli t0, t0, 8",
+        "andi t0, t0, 1",
+        "bnez t0, 3f",
+        // Returning to U-mode: sscratch = frame base + 272 = kernel stack top.
+        "addi t0, sp, 272",
+        "csrw sscratch, t0",
+
+        // ── Restore all registers ────────────────────────────────────────────────
+        // x2 (sp) is restored last since it changes the addressing base.
+        "3:",
         "ld x1,   0(sp)",
-        "ld x2,   8(sp)",
+        // x2 restored last
         "ld x3,  16(sp)",
         "ld x4,  24(sp)",
         "ld x5,  32(sp)",
@@ -144,27 +206,27 @@ unsafe extern "C" fn trap_entry()
         "ld x11, 80(sp)",
         "ld x12, 88(sp)",
         "ld x13, 96(sp)",
-        "ld x14, 104(sp)",
-        "ld x15, 112(sp)",
-        "ld x16, 120(sp)",
-        "ld x17, 128(sp)",
-        "ld x18, 136(sp)",
-        "ld x19, 144(sp)",
-        "ld x20, 152(sp)",
-        "ld x21, 160(sp)",
-        "ld x22, 168(sp)",
-        "ld x23, 176(sp)",
-        "ld x24, 184(sp)",
-        "ld x25, 192(sp)",
-        "ld x26, 200(sp)",
-        "ld x27, 208(sp)",
-        "ld x28, 216(sp)",
-        "ld x29, 224(sp)",
-        "ld x30, 232(sp)",
-        "ld x31, 240(sp)",
-        // Deallocate frame.
-        "addi sp, sp, 272",
+        "ld x14,104(sp)",
+        "ld x15,112(sp)",
+        "ld x16,120(sp)",
+        "ld x17,128(sp)",
+        "ld x18,136(sp)",
+        "ld x19,144(sp)",
+        "ld x20,152(sp)",
+        "ld x21,160(sp)",
+        "ld x22,168(sp)",
+        "ld x23,176(sp)",
+        "ld x24,184(sp)",
+        "ld x25,192(sp)",
+        "ld x26,200(sp)",
+        "ld x27,208(sp)",
+        "ld x28,216(sp)",
+        "ld x29,224(sp)",
+        "ld x30,232(sp)",
+        "ld x31,240(sp)",
+        "ld x2,   8(sp)",           // restore sp last (user sp or original kernel sp)
         "sret",
+
         dispatch = sym trap_dispatch,
     );
 }

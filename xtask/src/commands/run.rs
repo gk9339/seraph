@@ -23,6 +23,7 @@ const OVMF_CODE_PATHS: &[&str] = &[
     "/usr/share/OVMF/OVMF_CODE.fd",
     "/usr/share/edk2-ovmf/x64/OVMF_CODE.fd",
     "/usr/share/ovmf/OVMF.fd",
+    "/usr/share/edk2/x64/OVMF_CODE.4m.fd",
 ];
 
 /// edk2 RISC-V firmware search directories.
@@ -142,7 +143,8 @@ fn arch_setup_x86(args: &mut Vec<String>, run_args: &RunArgs) -> Result<ArchSetu
             anyhow::anyhow!(
                 "OVMF firmware not found\n\
                  Install with: dnf install edk2-ovmf  (Fedora)\n\
-                 or:           apt install ovmf        (Debian/Ubuntu)"
+                 or:           apt install ovmf        (Debian/Ubuntu)\n\
+                 or:           pacman -S edk2-ovmf     (Arch Linux)"
             )
         })?;
 
@@ -190,7 +192,9 @@ fn arch_setup_riscv(args: &mut Vec<String>, run_args: &RunArgs) -> Result<ArchSe
             anyhow::anyhow!(
                 "edk2 RISC-V firmware not found\n\
                  Install with: dnf install edk2-riscv64          (Fedora)\n\
-                 or:           apt install qemu-efi-riscv64       (Debian/Ubuntu)"
+                 or:           apt install qemu-efi-riscv64       (Debian/Ubuntu)\n\
+                 or on Arch:   download the Fedora edk2-riscv64 RPM and extract\n\
+                               RISCV_VIRT_CODE.fd + RISCV_VIRT_VARS.fd into /usr/share/edk2/riscv/"
             )
         })?;
 
@@ -232,15 +236,22 @@ fn arch_setup_riscv(args: &mut Vec<String>, run_args: &RunArgs) -> Result<ArchSe
 
     if !run_args.headless
     {
-        // ramfb provides a framebuffer; xhci + usb-kbd enable keyboard input.
-        args.extend([
-            "-device".into(),
-            "ramfb".into(),
-            "-device".into(),
-            "qemu-xhci".into(),
-            "-device".into(),
-            "usb-kbd".into(),
-        ]);
+        // The virt machine has no built-in display. ramfb provides a
+        // framebuffer, but without a graphical display backend QEMU falls back
+        // to VNC. Only add display devices when a graphical backend is available.
+        if let Some(backend) = preferred_display_backend(run_args.arch.qemu_binary())
+        {
+            args.extend([
+                "-device".into(),
+                "ramfb".into(),
+                "-device".into(),
+                "qemu-xhci".into(),
+                "-device".into(),
+                "usb-kbd".into(),
+                "-display".into(),
+                backend,
+            ]);
+        }
     }
 
     // QEMU virt loads OpenSBI automatically; no explicit firmware flag needed.
@@ -249,6 +260,36 @@ fn arch_setup_riscv(args: &mut Vec<String>, run_args: &RunArgs) -> Result<ArchSe
         desc: "riscv64, TCG, UEFI".into(),
         _temp_files: vec![code_tmp, vars_tmp],
     })
+}
+
+/// Returns the preferred graphical display backend for the given QEMU binary,
+/// or `None` if no graphical backend is available (e.g. headless server build).
+///
+/// Tries `gtk` first, then `sdl`. If neither is advertised by `qemu -display help`,
+/// returns `None` so callers can skip adding display devices entirely (avoiding the
+/// VNC fallback that QEMU starts when a display device exists but no backend is set).
+fn preferred_display_backend(qemu_binary: &str) -> Option<String>
+{
+    let output = Command::new(qemu_binary)
+        .args(["-display", "help"])
+        .stderr(Stdio::piped())
+        .stdout(Stdio::piped())
+        .output()
+        .ok()?;
+
+    // QEMU prints available backends to stdout; some versions use stderr.
+    let text = String::from_utf8_lossy(&output.stdout).into_owned()
+        + &String::from_utf8_lossy(&output.stderr);
+
+    for backend in ["gtk", "sdl"]
+    {
+        if text.contains(backend)
+        {
+            return Some(backend.to_string());
+        }
+    }
+
+    None
 }
 
 /// Extend a file with zero bytes until it reaches `target_size`.

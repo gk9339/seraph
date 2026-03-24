@@ -17,7 +17,7 @@ use core::panic::PanicInfo;
 
 /// Init entry point. Called by the kernel as the first userspace process.
 ///
-/// This stub halts immediately. Set a GDB breakpoint here to confirm
+/// This stub spins forever. Set a GDB breakpoint here to confirm
 /// kernel-to-userspace handoff succeeded.
 #[cfg(not(test))]
 #[no_mangle]
@@ -26,20 +26,12 @@ pub extern "C" fn _start() -> !
     halt_loop();
 }
 
-/// Disable interrupts and halt the CPU permanently.
+/// Spin forever. Placeholder until init is fully implemented.
 fn halt_loop() -> !
 {
     loop
     {
-        #[cfg(target_arch = "x86_64")]
-        unsafe {
-            core::arch::asm!("hlt", options(nomem, nostack));
-        }
-
-        #[cfg(target_arch = "riscv64")]
-        unsafe {
-            core::arch::asm!("wfi", options(nomem, nostack));
-        }
+        core::hint::spin_loop();
     }
 }
 

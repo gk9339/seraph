@@ -36,6 +36,7 @@ pub fn run(ctx: &BuildContext, args: &BuildArgs) -> Result<()>
         BuildComponent::Boot => build_boot(ctx, args)?,
         BuildComponent::Kernel => build_kernel(ctx, args)?,
         BuildComponent::Init => build_init(ctx, args)?,
+        BuildComponent::Ktest => build_ktest(ctx, args)?,
         BuildComponent::Procmgr => build_module(ctx, args, "procmgr")?,
         BuildComponent::Devmgr => build_module(ctx, args, "devmgr")?,
         BuildComponent::Vfsd => build_module(ctx, args, "vfsd")?,
@@ -46,6 +47,7 @@ pub fn run(ctx: &BuildContext, args: &BuildArgs) -> Result<()>
             build_boot(ctx, args)?;
             build_kernel(ctx, args)?;
             build_init(ctx, args)?;
+            build_ktest(ctx, args)?;
             build_modules(ctx, args)?;
             sysroot::install_rootfs(ctx)?;
         }
@@ -232,6 +234,48 @@ fn build_init(ctx: &BuildContext, args: &BuildArgs) -> Result<()>
         .with_context(|| format!("creating {}", ctx.sysroot_efi_seraph().display()))?;
     copy_file(&cargo_out, &dst)?;
     step(&format!("Init: {}", dst.display()));
+
+    Ok(())
+}
+
+fn build_ktest(ctx: &BuildContext, args: &BuildArgs) -> Result<()>
+{
+    step(&format!(
+        "Building ktest for {} ({})",
+        args.arch,
+        profile_name(args.release)
+    ));
+
+    let triple = args.arch.kernel_target_triple();
+    let mut cmd = cargo(&ctx.root);
+    cmd.args([
+        "build",
+        "-p",
+        "ktest",
+        "--bin",
+        "ktest",
+        "--target",
+        triple,
+        "-Zbuild-std=core,compiler_builtins",
+        "-Zbuild-std-features=compiler-builtins-mem",
+    ]);
+    if args.release
+    {
+        cmd.arg("--release");
+    }
+    run_cmd(&mut cmd)?;
+
+    let cargo_out = ctx.cargo_output_dir(triple, args.release).join("ktest");
+    if !cargo_out.exists()
+    {
+        bail!("expected ktest binary not found: {}", cargo_out.display());
+    }
+
+    let dst = ctx.sysroot_efi_seraph().join("ktest");
+    fs::create_dir_all(ctx.sysroot_efi_seraph())
+        .with_context(|| format!("creating {}", ctx.sysroot_efi_seraph().display()))?;
+    copy_file(&cargo_out, &dst)?;
+    step(&format!("Ktest: {}", dst.display()));
 
     Ok(())
 }

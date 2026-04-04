@@ -32,10 +32,10 @@ const EV_CURRENT: u8 = 1;
 const ET_EXEC: u16 = 2;
 
 /// Machine type: x86-64.
-#[allow(dead_code)]
+#[allow(dead_code)] // Both constants are defined; only one is referenced per target arch build.
 pub const EM_X86_64: u16 = 0x3E;
 /// Machine type: RISC-V.
-#[allow(dead_code)]
+#[allow(dead_code)] // Both constants are defined; only one is referenced per target arch build.
 pub const EM_RISCV: u16 = 0xF3;
 
 // ── Program header constants ──────────────────────────────────────────────────
@@ -48,7 +48,7 @@ const PF_X: u32 = 1;
 /// Segment flag: write permission.
 const PF_W: u32 = 2;
 /// Segment flag: read permission.
-#[allow(dead_code)]
+#[allow(dead_code)] // PF_X and PF_W are checked; PF_R is defined for completeness (all segments are readable).
 const PF_R: u32 = 4;
 
 // ── ELF e_ident index constants ───────────────────────────────────────────────

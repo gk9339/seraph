@@ -57,7 +57,7 @@ fn validate_resources_inner(info: &BootInfo) -> Vec<PlatformResource>
     // Fast path: no entries to validate.
     if pr.count == 0
     {
-        kprintln!("platform resources: 0 entries validated (0 skipped)");
+        kprintln!("platform resources: 0 validated (0 skipped)");
         return Vec::new();
     }
 
@@ -173,7 +173,7 @@ fn validate_resources_inner(info: &BootInfo) -> Vec<PlatformResource>
     let total_skipped = skip_count + overlap_count;
 
     kprintln!(
-        "platform resources: {} entries validated ({} skipped)",
+        "platform resources: {} validated ({} skipped)",
         validated.len(),
         total_skipped
     );

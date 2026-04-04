@@ -144,10 +144,16 @@ impl TrapFrame
     {
         self.rip    = entry;
         self.rsp    = stack;
-        self.cs     = 0x23; // USER_CS: ring 3, 64-bit code segment
-        self.ss     = 0x1B; // USER_DS: ring 3, data segment
+        self.cs     = super::gdt::USER_CS as u64;
+        self.ss     = super::gdt::USER_DS as u64;
         self.rflags = 0x202; // IF=1, reserved bit 1 set
     }
+
+    /// Set the first argument register (rdi) in the frame.
+    ///
+    /// Used by `SYS_THREAD_CONFIGURE` to pass the initial argument value to
+    /// the new thread when it first enters user mode.
+    pub fn set_arg0(&mut self, val: u64) { self.rdi = val; }
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────

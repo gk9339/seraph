@@ -44,6 +44,12 @@ pub struct EndpointState
     pub recv_head: *mut ThreadControlBlock,
     /// Tail of the blocked-receivers queue.
     pub recv_tail: *mut ThreadControlBlock,
+    /// Opaque pointer to the `WaitSetState` this endpoint is registered with,
+    /// or null if not in any wait set. Type-erased to avoid a circular import.
+    /// Cast to `*mut WaitSetState` only inside wait_set.rs.
+    pub wait_set: *mut u8,
+    /// Index of this endpoint's entry in `WaitSetState::members`.
+    pub wait_set_member_idx: u8,
 }
 
 // SAFETY: EndpointState is accessed only under the relevant scheduler lock.
@@ -60,6 +66,8 @@ impl EndpointState
             send_tail: core::ptr::null_mut(),
             recv_head: core::ptr::null_mut(),
             recv_tail: core::ptr::null_mut(),
+            wait_set: core::ptr::null_mut(),
+            wait_set_member_idx: 0,
         }
     }
 }
@@ -142,23 +150,36 @@ pub unsafe fn endpoint_call(
             (*server).reply_tcb = caller;
             (*server).state = ThreadState::Ready;
             (*server).ipc_state = IpcThreadState::None;
+            (*server).blocked_on_object = core::ptr::null_mut();
         }
-        // Block caller on reply.
+        // Block caller on reply; record the server as the blocking object so
+        // SYS_THREAD_STOP can cancel by clearing server.reply_tcb.
         // SAFETY: caller is a valid TCB.
         unsafe {
             (*caller).state = ThreadState::Blocked;
             (*caller).ipc_state = IpcThreadState::BlockedOnReply;
+            (*caller).blocked_on_object = server as *mut u8;
         }
         return Ok(server);
     }
 
     // No server available — block caller on send queue.
     // SAFETY: caller is valid.
+    let was_empty = ep.send_head.is_null();
     unsafe {
         (*caller).ipc_msg = *msg;
         (*caller).state = ThreadState::Blocked;
         (*caller).ipc_state = IpcThreadState::BlockedOnSend;
+        (*caller).blocked_on_object = ep as *mut EndpointState as *mut u8;
         enqueue(&mut ep.send_head, &mut ep.send_tail, caller);
+    }
+    // Notify a registered wait set on the transition from empty → non-empty.
+    // Only fire on the first pending sender to avoid duplicate wakes.
+    if was_empty && !ep.wait_set.is_null()
+    {
+        // SAFETY: wait_set is a valid *mut WaitSetState registered by
+        // sys_wait_set_add and cleared on removal or wait_set_drop.
+        unsafe { crate::ipc::wait_set::waitset_notify(ep.wait_set, ep.wait_set_member_idx) };
     }
     Err(())
 }
@@ -186,6 +207,14 @@ pub unsafe fn endpoint_recv(
         let msg = unsafe { (*caller).ipc_msg };
         // Record who the server should reply to.
         unsafe { (*server).reply_tcb = caller; }
+        // Update caller's blocking state: it is now waiting for this server's
+        // reply, not in the send queue. SYS_THREAD_STOP will use blocked_on_object
+        // (the server TCB) to cancel the reply if needed.
+        // SAFETY: caller is a valid TCB.
+        unsafe {
+            (*caller).ipc_state = IpcThreadState::BlockedOnReply;
+            (*caller).blocked_on_object = server as *mut u8;
+        }
         return Ok((caller, msg));
     }
 
@@ -193,6 +222,7 @@ pub unsafe fn endpoint_recv(
     unsafe {
         (*server).state = ThreadState::Blocked;
         (*server).ipc_state = IpcThreadState::BlockedOnRecv;
+        (*server).blocked_on_object = ep as *mut EndpointState as *mut u8;
         enqueue(&mut ep.recv_head, &mut ep.recv_tail, server);
     }
     Err(())
@@ -225,6 +255,62 @@ pub unsafe fn endpoint_reply(
         (*caller).ipc_msg = *msg;
         (*caller).state = ThreadState::Ready;
         (*caller).ipc_state = IpcThreadState::None;
+        (*caller).blocked_on_object = core::ptr::null_mut();
     }
     Some(caller)
+}
+
+// ── IPC block cancellation helper ────────────────────────────────────────────
+
+/// Remove `tcb` from a singly-linked IPC wait queue (chained through
+/// `ipc_wait_next`). Updates `head`/`tail` as needed.
+///
+/// Returns `true` if the TCB was found and removed, `false` if not present.
+///
+/// Used by `SYS_THREAD_STOP` to cancel a `BlockedOnSend` or `BlockedOnRecv`.
+///
+/// # Safety
+/// Must be called with the scheduler lock held. All pointers must be valid.
+pub unsafe fn unlink_from_wait_queue(
+    tcb: *mut ThreadControlBlock,
+    head: &mut *mut ThreadControlBlock,
+    tail: &mut *mut ThreadControlBlock,
+) -> bool
+{
+    let mut prev: *mut ThreadControlBlock = core::ptr::null_mut();
+    let mut cur = *head;
+
+    while !cur.is_null()
+    {
+        if core::ptr::eq(cur, tcb)
+        {
+            // SAFETY: cur is a valid TCB.
+            let next = unsafe { (*cur).ipc_wait_next.unwrap_or(core::ptr::null_mut()) };
+
+            if prev.is_null()
+            {
+                *head = next;
+            }
+            else
+            {
+                // SAFETY: prev is a valid TCB.
+                unsafe { (*prev).ipc_wait_next = if next.is_null() { None } else { Some(next) }; }
+            }
+
+            if core::ptr::eq(cur, *tail)
+            {
+                *tail = prev;
+            }
+
+            // SAFETY: cur is a valid TCB.
+            unsafe { (*cur).ipc_wait_next = None; }
+            return true;
+        }
+
+        prev = cur;
+        // SAFETY: cur is a valid TCB.
+        cur = unsafe { (*cur).ipc_wait_next.unwrap_or(core::ptr::null_mut()) };
+    }
+
+    false
 }

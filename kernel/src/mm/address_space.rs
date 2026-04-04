@@ -24,7 +24,7 @@
 //! On RISC-V the equivalent root entries are VPN[3] entries 256–511.
 //!
 //! ## Modification notes
-//! - For SMP (Phase 10): TLB shootdown is needed on each `map_page` when
+//! - For SMP (WSMP): TLB shootdown is needed on each `map_page` when
 //!   other CPUs may have the same address space loaded.
 //! - For W^X: `map_segment` already enforces no simultaneous W+X.
 
@@ -182,6 +182,7 @@ impl AddressSpace
                     readable: true,
                     writable: false,
                     executable: false,
+                    uncacheable: false,
                 }
             }
             SegmentFlags::ReadWrite =>
@@ -190,6 +191,7 @@ impl AddressSpace
                     readable: true,
                     writable: true,
                     executable: false,
+                    uncacheable: false,
                 }
             }
             SegmentFlags::ReadExecute =>
@@ -198,6 +200,7 @@ impl AddressSpace
                     readable: true,
                     writable: false,
                     executable: true,
+                    uncacheable: false,
                 }
             }
         };
@@ -247,6 +250,7 @@ impl AddressSpace
             readable: true,
             writable: true,
             executable: false,
+            uncacheable: false,
         };
 
         for i in 0..pages
@@ -275,6 +279,57 @@ impl AddressSpace
         // unmapped: accessing it will fault, catching stack overflows.
 
         Ok(())
+    }
+
+    /// Remove the mapping for a single 4 KiB page at `virt`.
+    ///
+    /// If `virt` is not mapped, this is a no-op (safe to call redundantly).
+    /// Does not free intermediate page table frames.
+    ///
+    /// # Safety
+    /// `virt` must be in the user half. Caller must not access `virt` after
+    /// this call; the TLB entry is invalidated.
+    #[cfg(not(test))]
+    pub unsafe fn unmap_page(&mut self, virt: u64)
+    {
+        use crate::arch::current::paging::unmap_user_page;
+        // SAFETY: root_virt is valid; virt is in user range (caller's contract).
+        unsafe { unmap_user_page(self.root_virt, virt) }
+    }
+
+    /// Change the permission flags on an existing 4 KiB leaf mapping at `virt`.
+    ///
+    /// Returns `Err(PagingError::NotMapped)` if `virt` is not mapped.
+    /// Caller is responsible for W^X and rights validation before calling.
+    ///
+    /// # Safety
+    /// `virt` must be in the user half and currently mapped.
+    #[cfg(not(test))]
+    pub unsafe fn protect_page(
+        &mut self,
+        virt: u64,
+        flags: crate::mm::paging::PageFlags,
+    ) -> Result<(), crate::mm::paging::PagingError>
+    {
+        use crate::arch::current::paging::protect_user_page;
+        // SAFETY: root_virt is valid; virt is in user range (caller's contract).
+        unsafe { protect_user_page(self.root_virt, virt, flags) }
+    }
+
+    /// Translate a user virtual address to its mapped physical address.
+    ///
+    /// Performs a read-only page table walk. Returns `Some((phys_addr,
+    /// raw_pte_bits))` if the page is present at every level, or `None`
+    /// if the address is not mapped.
+    ///
+    /// The page-alignment of `virt` is not enforced here; the caller is
+    /// responsible for aligning to `PAGE_SIZE` before calling if desired.
+    #[cfg(not(test))]
+    pub fn query_page(&self, virt: u64) -> Option<(u64, u64)>
+    {
+        use crate::arch::current::paging::translate_user_page;
+        // SAFETY: root_virt is the direct-map VA of a valid root page table.
+        unsafe { translate_user_page(self.root_virt, virt) }
     }
 
     /// Activate this address space on the current CPU.

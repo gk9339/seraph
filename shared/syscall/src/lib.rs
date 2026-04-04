@@ -21,9 +21,16 @@
 #![no_std]
 
 use syscall_abi::{
-    SYS_CAP_CREATE_ENDPOINT, SYS_CAP_CREATE_SIGNAL, SYS_DEBUG_LOG, SYS_IPC_BUFFER_SET,
-    SYS_IPC_CALL, SYS_IPC_RECV, SYS_IPC_REPLY, SYS_SIGNAL_SEND, SYS_SIGNAL_WAIT,
-    SYS_THREAD_EXIT, SYS_THREAD_YIELD, MSG_DATA_WORDS_MAX,
+    SYS_ASPACE_QUERY, SYS_CAP_COPY, SYS_CAP_CREATE_ASPACE, SYS_CAP_CREATE_CSPACE,
+    SYS_CAP_CREATE_ENDPOINT, SYS_CAP_CREATE_EVENT_Q, SYS_CAP_CREATE_SIGNAL, SYS_CAP_CREATE_THREAD,
+    SYS_CAP_CREATE_WAIT_SET, SYS_CAP_DELETE, SYS_CAP_DERIVE, SYS_CAP_INSERT, SYS_CAP_MOVE,
+    SYS_CAP_REVOKE, SYS_DEBUG_LOG, SYS_DMA_GRANT, SYS_EVENT_POST, SYS_EVENT_RECV, SYS_FRAME_SPLIT,
+    SYS_IPC_BUFFER_SET, SYS_IPC_CALL, SYS_IPC_RECV, SYS_IPC_REPLY, SYS_IOPORT_BIND, SYS_IRQ_ACK,
+    SYS_IRQ_REGISTER, SYS_MEM_MAP, SYS_MEM_PROTECT, SYS_MEM_UNMAP, SYS_MMIO_MAP, SYS_SIGNAL_SEND,
+    SYS_SIGNAL_WAIT, SYS_SYSTEM_INFO, SYS_THREAD_CONFIGURE, SYS_THREAD_EXIT,
+    SYS_THREAD_READ_REGS, SYS_THREAD_SET_AFFINITY, SYS_THREAD_SET_PRIORITY, SYS_THREAD_START,
+    SYS_THREAD_STOP, SYS_THREAD_WRITE_REGS, SYS_THREAD_YIELD, SYS_WAIT_SET_ADD,
+    SYS_WAIT_SET_REMOVE, SYS_WAIT_SET_WAIT, MSG_CAP_SLOTS_MAX, MSG_DATA_WORDS_MAX,
 };
 
 // ── Raw syscall entry ─────────────────────────────────────────────────────────
@@ -59,6 +66,90 @@ unsafe fn syscall2(nr: u64, a0: u64, a1: u64) -> i64
             "ecall",
             inout("a0") a0 as i64 => ret,
             in("a1") a1,
+            in("a7") nr,
+            options(nostack),
+        );
+    }
+    ret
+}
+
+/// Issue a syscall with up to 4 arguments.
+#[cfg(target_arch = "x86_64")]
+#[inline(always)]
+unsafe fn syscall4(nr: u64, a0: u64, a1: u64, a2: u64, a3: u64) -> i64
+{
+    let ret: i64;
+    unsafe {
+        core::arch::asm!(
+            "syscall",
+            inout("rax") nr as i64 => ret,
+            in("rdi") a0,
+            in("rsi") a1,
+            in("rdx") a2,
+            in("r10") a3,
+            out("rcx") _,
+            out("r11") _,
+            options(nostack),
+        );
+    }
+    ret
+}
+
+#[cfg(target_arch = "riscv64")]
+#[inline(always)]
+unsafe fn syscall4(nr: u64, a0: u64, a1: u64, a2: u64, a3: u64) -> i64
+{
+    let ret: i64;
+    unsafe {
+        core::arch::asm!(
+            "ecall",
+            inout("a0") a0 as i64 => ret,
+            in("a1") a1,
+            in("a2") a2,
+            in("a3") a3,
+            in("a7") nr,
+            options(nostack),
+        );
+    }
+    ret
+}
+
+/// Issue a syscall with up to 5 arguments. Returns the primary return value.
+#[cfg(target_arch = "x86_64")]
+#[inline(always)]
+unsafe fn syscall5(nr: u64, a0: u64, a1: u64, a2: u64, a3: u64, a4: u64) -> i64
+{
+    let ret: i64;
+    unsafe {
+        core::arch::asm!(
+            "syscall",
+            inout("rax") nr as i64 => ret,
+            in("rdi") a0,
+            in("rsi") a1,
+            in("rdx") a2,
+            in("r10") a3,
+            in("r8")  a4,
+            out("rcx") _,
+            out("r11") _,
+            options(nostack),
+        );
+    }
+    ret
+}
+
+#[cfg(target_arch = "riscv64")]
+#[inline(always)]
+unsafe fn syscall5(nr: u64, a0: u64, a1: u64, a2: u64, a3: u64, a4: u64) -> i64
+{
+    let ret: i64;
+    unsafe {
+        core::arch::asm!(
+            "ecall",
+            inout("a0") a0 as i64 => ret,
+            in("a1") a1,
+            in("a2") a2,
+            in("a3") a3,
+            in("a4") a4,
             in("a7") nr,
             options(nostack),
         );
@@ -151,6 +242,61 @@ unsafe fn syscall5_ret2(nr: u64, a0: u64, a1: u64, a2: u64, a3: u64, a4: u64) ->
     (ret, secondary)
 }
 
+// ── IPC capability slot helpers ───────────────────────────────────────────────
+
+/// Pack up to `MSG_CAP_SLOTS_MAX` CSpace slot indices into a single `u64`.
+///
+/// Each index occupies 16 bits (sufficient for max CSpace size of 16384 slots).
+/// Indices beyond `MSG_CAP_SLOTS_MAX` are silently ignored.
+///
+/// Pass the result as arg4 of `SYS_IPC_CALL` or arg3 of `SYS_IPC_REPLY`.
+pub fn pack_cap_slots(slots: &[u32]) -> u64
+{
+    let mut packed: u64 = 0;
+    for (i, &idx) in slots.iter().take(MSG_CAP_SLOTS_MAX).enumerate()
+    {
+        packed |= ((idx as u64) & 0xFFFF) << (i * 16);
+    }
+    packed
+}
+
+/// Unpack `count` CSpace slot indices from a `u64` packed by [`pack_cap_slots`].
+pub fn unpack_cap_slots(packed: u64, count: usize) -> [u32; MSG_CAP_SLOTS_MAX]
+{
+    let mut out = [0u32; MSG_CAP_SLOTS_MAX];
+    for i in 0..count.min(MSG_CAP_SLOTS_MAX)
+    {
+        out[i] = ((packed >> (i * 16)) & 0xFFFF) as u32;
+    }
+    out
+}
+
+/// Read cap transfer results from the IPC buffer after a receive or call.
+///
+/// The kernel writes the following layout starting at word index `MSG_DATA_WORDS_MAX`:
+/// ```text
+/// word[MSG_DATA_WORDS_MAX + 0] = cap_count as u64
+/// word[MSG_DATA_WORDS_MAX + 1] = idx[0] as u64
+/// word[MSG_DATA_WORDS_MAX + 2] = idx[1] as u64
+/// ...
+/// ```
+///
+/// Returns `(cap_count, [idx0, idx1, idx2, idx3])`.
+///
+/// # Safety
+/// `ipc_buf` must point to the registered IPC buffer page (4 KiB, aligned).
+pub unsafe fn read_recv_caps(ipc_buf: *const u64) -> (usize, [u32; MSG_CAP_SLOTS_MAX])
+{
+    let cap_count = (unsafe { core::ptr::read_volatile(ipc_buf.add(MSG_DATA_WORDS_MAX)) } as usize)
+        .min(MSG_CAP_SLOTS_MAX);
+    let mut indices = [0u32; MSG_CAP_SLOTS_MAX];
+    for i in 0..cap_count
+    {
+        indices[i] = unsafe { core::ptr::read_volatile(ipc_buf.add(MSG_DATA_WORDS_MAX + 1 + i)) } as u32;
+    }
+    (cap_count, indices)
+}
+
 // ── Public syscall wrappers ───────────────────────────────────────────────────
 
 /// Write a UTF-8 string to the kernel console.
@@ -160,7 +306,7 @@ unsafe fn syscall5_ret2(nr: u64, a0: u64, a1: u64, a2: u64, a3: u64, a4: u64) ->
 /// This is a thin wrapper around `SYS_DEBUG_LOG`, a development scaffold
 /// that exists only until `logd` and the IPC logging path are available.
 /// It will be removed once userspace can log via `logd`. Use it only in
-/// early-boot / Phase 10 test programs.
+/// early-boot test programs.
 #[inline]
 pub fn debug_log(msg: &str) -> Result<(), i64>
 {
@@ -197,24 +343,31 @@ pub fn ipc_buffer_set(virt: u64) -> Result<(), i64>
 
 /// Synchronous IPC call on an endpoint cap.
 ///
-/// Sends `label` and up to `MSG_DATA_WORDS_MAX` data words (written to the
-/// IPC buffer before the call). Blocks until a server replies.
-/// Returns `(reply_label, reply_data_count)`.
+/// Sends `label`, up to `MSG_DATA_WORDS_MAX` data words (written to the IPC
+/// buffer before the call), and up to `MSG_CAP_SLOTS_MAX` capability slots.
+/// Blocks until a server replies.
+///
+/// Returns `(reply_label, reply_data_count)`. After return, call
+/// [`read_recv_caps`] on the IPC buffer to retrieve any caps the server
+/// sent in its reply.
+///
+/// Requires endpoint cap to have `Rights::GRANT` when `cap_slots` is non-empty.
 ///
 /// # Note
 /// The caller must have registered an IPC buffer via [`ipc_buffer_set`].
-/// The reply data words are read from the same buffer after the call returns.
 #[inline]
-pub fn ipc_call(ep: u32, label: u64, data_count: usize) -> Result<(u64, usize), i64>
+pub fn ipc_call(ep: u32, label: u64, data_count: usize, cap_slots: &[u32]) -> Result<(u64, usize), i64>
 {
+    let cap_count = cap_slots.len().min(MSG_CAP_SLOTS_MAX);
+    let cap_packed = pack_cap_slots(cap_slots);
     let (ret, secondary) = unsafe {
         syscall5_ret2(
             SYS_IPC_CALL,
             ep as u64,
             label,
             data_count as u64,
-            0, // cap_slots — ignored Phase 10
-            0, // flags
+            cap_count as u64,
+            cap_packed,
         )
     };
     if ret < 0 { Err(ret) } else { Ok((secondary, 0)) }
@@ -233,11 +386,17 @@ pub fn ipc_recv(ep: u32) -> Result<(u64, usize), i64>
 
 /// Reply to the thread that called us.
 ///
-/// Sends `label` and `data_count` words from the IPC buffer back to the caller.
+/// Sends `label`, `data_count` words from the IPC buffer, and up to
+/// `MSG_CAP_SLOTS_MAX` capability slots from the current CSpace.
+///
+/// After the reply, `cap_slots` entries are moved to the caller's CSpace.
+/// The caller can read the resulting slot indices via [`read_recv_caps`].
 #[inline]
-pub fn ipc_reply(label: u64, data_count: usize) -> Result<(), i64>
+pub fn ipc_reply(label: u64, data_count: usize, cap_slots: &[u32]) -> Result<(), i64>
 {
-    let ret = unsafe { syscall3(SYS_IPC_REPLY, label, data_count as u64, 0) };
+    let cap_count = cap_slots.len().min(MSG_CAP_SLOTS_MAX);
+    let cap_packed = pack_cap_slots(cap_slots);
+    let ret = unsafe { syscall4(SYS_IPC_REPLY, label, data_count as u64, cap_count as u64, cap_packed) };
     if ret < 0 { Err(ret) } else { Ok(()) }
 }
 
@@ -271,6 +430,460 @@ pub fn cap_create_signal() -> Result<u32, i64>
 {
     let ret = unsafe { syscall2(SYS_CAP_CREATE_SIGNAL, 0, 0) };
     if ret < 0 { Err(ret) } else { Ok(ret as u32) }
+}
+
+/// Create a new AddressSpace object. Returns the CSpace slot index.
+#[inline]
+pub fn cap_create_aspace() -> Result<u32, i64>
+{
+    let ret = unsafe { syscall2(SYS_CAP_CREATE_ASPACE, 0, 0) };
+    if ret < 0 { Err(ret) } else { Ok(ret as u32) }
+}
+
+/// Create a new CSpace object. `max_slots` is clamped to [16, 16384] by the kernel.
+/// Returns the CSpace slot index.
+#[inline]
+pub fn cap_create_cspace(max_slots: u64) -> Result<u32, i64>
+{
+    let ret = unsafe { syscall2(SYS_CAP_CREATE_CSPACE, max_slots, 0) };
+    if ret < 0 { Err(ret) } else { Ok(ret as u32) }
+}
+
+/// Create a new Thread object bound to `aspace_cap` and `cspace_cap`.
+/// Returns the CSpace slot index of the new Thread capability.
+#[inline]
+pub fn cap_create_thread(aspace_cap: u32, cspace_cap: u32) -> Result<u32, i64>
+{
+    let ret = unsafe { syscall2(SYS_CAP_CREATE_THREAD, aspace_cap as u64, cspace_cap as u64) };
+    if ret < 0 { Err(ret) } else { Ok(ret as u32) }
+}
+
+/// Map `page_count` pages of a Frame cap into an address space.
+///
+/// - `frame_cap`: cap index of the source Frame.
+/// - `aspace_cap`: cap index of the target AddressSpace.
+/// - `virt`: virtual address to map at (page-aligned, < 0x0000_8000_0000_0000).
+/// - `offset_pages`: first page within the frame to map.
+/// - `page_count`: number of pages to map.
+#[inline]
+pub fn mem_map(
+    frame_cap: u32,
+    aspace_cap: u32,
+    virt: u64,
+    offset_pages: u64,
+    page_count: u64,
+) -> Result<(), i64>
+{
+    let ret = unsafe {
+        syscall5(
+            SYS_MEM_MAP,
+            frame_cap as u64,
+            aspace_cap as u64,
+            virt,
+            offset_pages,
+            page_count,
+        )
+    };
+    if ret < 0 { Err(ret) } else { Ok(()) }
+}
+
+/// Remove `page_count` mappings starting at `virt` from `aspace_cap`.
+///
+/// Unmapping a page that is not mapped is a no-op (not an error).
+/// `virt` must be page-aligned and in the user address range.
+#[inline]
+pub fn mem_unmap(aspace_cap: u32, virt: u64, page_count: u64) -> Result<(), i64>
+{
+    let ret = unsafe {
+        syscall3(SYS_MEM_UNMAP, aspace_cap as u64, virt, page_count)
+    };
+    if ret < 0 { Err(ret) } else { Ok(()) }
+}
+
+/// Change permission flags on `page_count` existing mappings in `aspace_cap`.
+///
+/// `frame_cap` authorises the requested permissions: they must be a subset of
+/// the Frame cap's rights. `prot` encoding: bit 1 = WRITE, bit 2 = EXECUTE.
+/// W^X is enforced. Returns an error if any page is not currently mapped.
+#[inline]
+pub fn mem_protect(
+    frame_cap: u32,
+    aspace_cap: u32,
+    virt: u64,
+    page_count: u64,
+    prot: u64,
+) -> Result<(), i64>
+{
+    let ret = unsafe {
+        syscall5(
+            SYS_MEM_PROTECT,
+            frame_cap as u64,
+            aspace_cap as u64,
+            virt,
+            page_count,
+            prot,
+        )
+    };
+    if ret < 0 { Err(ret) } else { Ok(()) }
+}
+
+/// Split `frame_cap` into two non-overlapping child Frame caps.
+///
+/// `split_offset` is in bytes and must be page-aligned, > 0, and < the frame
+/// size. The original cap is consumed. Returns `(slot1, slot2)` where slot1
+/// covers `[base, base+split_offset)` and slot2 covers `[base+split_offset, end)`.
+#[inline]
+pub fn frame_split(frame_cap: u32, split_offset: u64) -> Result<(u32, u32), i64>
+{
+    let ret = unsafe {
+        syscall3(SYS_FRAME_SPLIT, frame_cap as u64, split_offset, 0)
+    };
+    if ret < 0
+    {
+        Err(ret)
+    }
+    else
+    {
+        let v = ret as u64;
+        Ok(((v & 0xFFFF_FFFF) as u32, (v >> 32) as u32))
+    }
+}
+
+/// Set the entry point, stack, and initial argument for a thread cap.
+///
+/// The thread must be in `Created` state (not yet started). Call
+/// [`thread_start`] afterwards to make it runnable.
+#[inline]
+pub fn thread_configure(thread_cap: u32, entry: u64, stack_ptr: u64, arg: u64) -> Result<(), i64>
+{
+    let ret = unsafe {
+        syscall4(SYS_THREAD_CONFIGURE, thread_cap as u64, entry, stack_ptr, arg)
+    };
+    if ret < 0 { Err(ret) } else { Ok(()) }
+}
+
+/// Move a configured thread from `Created` to `Ready` (enqueue it).
+///
+/// The thread must have been configured via [`thread_configure`] first.
+#[inline]
+pub fn thread_start(thread_cap: u32) -> Result<(), i64>
+{
+    let ret = unsafe { syscall2(SYS_THREAD_START, thread_cap as u64, 0) };
+    if ret < 0 { Err(ret) } else { Ok(()) }
+}
+
+/// Copy a capability slot from the calling thread's CSpace into another CSpace.
+///
+/// - `src_slot`: slot index in the caller's CSpace.
+/// - `dest_cspace_cap`: cap index of the destination CSpace.
+/// - `rights_mask`: bitmask of rights to grant. The effective rights are the
+///   intersection of this mask and the source cap's rights — pass `!0u64` to
+///   copy with the same rights as the source.
+///
+/// Returns the slot index in the destination CSpace.
+#[inline]
+pub fn cap_copy(src_slot: u32, dest_cspace_cap: u32, rights_mask: u64) -> Result<u32, i64>
+{
+    let ret = unsafe {
+        syscall3(SYS_CAP_COPY, src_slot as u64, dest_cspace_cap as u64, rights_mask)
+    };
+    if ret < 0 { Err(ret) } else { Ok(ret as u32) }
+}
+
+/// Attenuate a capability within the caller's own CSpace (SYS_CAP_DERIVE).
+///
+/// Creates a new slot in the caller's CSpace with `rights_mask & src_rights`.
+/// The new slot is a derivation child of the source.
+///
+/// Returns the new slot index.
+pub fn cap_derive(src_slot: u32, rights_mask: u64) -> Result<u32, i64>
+{
+    let ret = unsafe { syscall2(SYS_CAP_DERIVE, src_slot as u64, rights_mask) };
+    if ret < 0 { Err(ret) } else { Ok(ret as u32) }
+}
+
+/// Delete a capability slot in the caller's CSpace (SYS_CAP_DELETE).
+///
+/// Reparents child derivations to the deleted slot's parent, unlinks from the
+/// derivation tree, and dec-refs the kernel object. Idempotent on Null slots.
+pub fn cap_delete(slot: u32) -> Result<(), i64>
+{
+    let ret = unsafe { syscall2(SYS_CAP_DELETE, slot as u64, 0) };
+    if ret < 0 { Err(ret) } else { Ok(()) }
+}
+
+/// Revoke all capabilities derived from a slot (SYS_CAP_REVOKE).
+///
+/// Clears the entire descendant subtree; the root slot is preserved.
+pub fn cap_revoke(slot: u32) -> Result<(), i64>
+{
+    let ret = unsafe { syscall2(SYS_CAP_REVOKE, slot as u64, 0) };
+    if ret < 0 { Err(ret) } else { Ok(()) }
+}
+
+/// Move a capability to another CSpace (SYS_CAP_MOVE).
+///
+/// `dest_index` = 0 auto-allocates a slot; non-zero inserts at that index.
+/// The source slot is cleared; object refcount is unchanged.
+///
+/// Returns the destination slot index.
+pub fn cap_move(src_slot: u32, dest_cspace_cap: u32, dest_index: u32) -> Result<u32, i64>
+{
+    let ret = unsafe {
+        syscall3(SYS_CAP_MOVE, src_slot as u64, dest_cspace_cap as u64, dest_index as u64)
+    };
+    if ret < 0 { Err(ret) } else { Ok(ret as u32) }
+}
+
+/// Insert a capability at a specific slot index in another CSpace (SYS_CAP_INSERT).
+///
+/// Like `cap_copy` but the destination slot index is caller-chosen.
+pub fn cap_insert(src_slot: u32, dest_cspace_cap: u32, dest_index: u32, rights_mask: u64) -> Result<(), i64>
+{
+    let ret = unsafe {
+        syscall4(SYS_CAP_INSERT, src_slot as u64, dest_cspace_cap as u64, dest_index as u64, rights_mask)
+    };
+    if ret < 0 { Err(ret) } else { Ok(()) }
+}
+
+/// Query system information by `SystemInfoType` discriminant.
+///
+/// `kind` is the `u64` value of the desired [`syscall_abi::SystemInfoType`]
+/// variant. Returns the queried value as a `u64` on success.
+///
+/// # Example
+/// ```no_run
+/// use syscall::system_info;
+/// // KernelVersion = 0; packed (major << 32) | (minor << 16) | patch
+/// let ver = system_info(0).unwrap();
+/// let major = ver >> 32;
+/// let minor = (ver >> 16) & 0xFFFF;
+/// let patch = ver & 0xFFFF;
+/// ```
+#[inline]
+pub fn system_info(kind: u64) -> Result<u64, i64>
+{
+    // Unused second arg is required because no syscall1 raw variant exists.
+    let ret = unsafe { syscall2(SYS_SYSTEM_INFO, kind, 0) };
+    if ret < 0 { Err(ret) } else { Ok(ret as u64) }
+}
+
+/// Translate a virtual address in an address space to its mapped physical address.
+///
+/// `aspace_cap` — cap slot of the AddressSpace (must have READ right).
+/// `virt` — page-aligned virtual address in the user half.
+///
+/// Returns the physical address on success, or a negative `SyscallError`
+/// code if the address is not mapped or the cap is invalid.
+#[inline]
+pub fn aspace_query(aspace_cap: u32, virt: u64) -> Result<u64, i64>
+{
+    let ret = unsafe { syscall2(SYS_ASPACE_QUERY, aspace_cap as u64, virt) };
+    if ret < 0 { Err(ret) } else { Ok(ret as u64) }
+}
+
+// ── Event Queue wrappers ──────────────────────────────────────────────────────
+
+/// Create a new EventQueue with the given capacity (1..=4096).
+///
+/// Returns the CSpace slot index with POST | RECV rights, or a negative
+/// `SyscallError` code on failure.
+#[inline]
+pub fn event_queue_create(capacity: u32) -> Result<u32, i64>
+{
+    let ret = unsafe { syscall2(SYS_CAP_CREATE_EVENT_Q, capacity as u64, 0) };
+    if ret < 0 { Err(ret) } else { Ok(ret as u32) }
+}
+
+/// Append `payload` to an event queue (non-blocking).
+///
+/// Returns `SyscallError::QueueFull` (-13) if the queue is at capacity.
+#[inline]
+pub fn event_post(queue_cap: u32, payload: u64) -> Result<(), i64>
+{
+    let ret = unsafe { syscall2(SYS_EVENT_POST, queue_cap as u64, payload) };
+    if ret < 0 { Err(ret) } else { Ok(()) }
+}
+
+/// Dequeue the next entry from an event queue, blocking if empty.
+///
+/// Returns the payload word. The primary return register holds 0 on success;
+/// the payload is in the secondary return register (rdx / a1).
+#[inline]
+pub fn event_recv(queue_cap: u32) -> Result<u64, i64>
+{
+    // Payload is delivered in the secondary return register.
+    let (ret, payload) = unsafe { syscall5_ret2(SYS_EVENT_RECV, queue_cap as u64, 0, 0, 0, 0) };
+    if ret < 0 { Err(ret) } else { Ok(payload) }
+}
+
+// ── Wait Set wrappers ─────────────────────────────────────────────────────────
+
+/// Create a new WaitSet. Returns the CSpace slot index with MODIFY | WAIT rights.
+#[inline]
+pub fn wait_set_create() -> Result<u32, i64>
+{
+    let ret = unsafe { syscall2(SYS_CAP_CREATE_WAIT_SET, 0, 0) };
+    if ret < 0 { Err(ret) } else { Ok(ret as u32) }
+}
+
+/// Register `source_cap` (Endpoint/Signal/EventQueue) in `ws_cap` with a
+/// caller-chosen opaque `token`. The token is returned by `wait_set_wait`
+/// when this source fires.
+///
+/// Returns `SyscallError::InvalidArgument` (-5) if the wait set is full
+/// or the source is already in a wait set.
+#[inline]
+pub fn wait_set_add(ws_cap: u32, source_cap: u32, token: u64) -> Result<(), i64>
+{
+    let ret = unsafe { syscall3(SYS_WAIT_SET_ADD, ws_cap as u64, source_cap as u64, token) };
+    if ret < 0 { Err(ret) } else { Ok(()) }
+}
+
+/// Remove `source_cap` from `ws_cap`.
+#[inline]
+pub fn wait_set_remove(ws_cap: u32, source_cap: u32) -> Result<(), i64>
+{
+    let ret = unsafe { syscall2(SYS_WAIT_SET_REMOVE, ws_cap as u64, source_cap as u64) };
+    if ret < 0 { Err(ret) } else { Ok(()) }
+}
+
+/// Block until any registered source in `ws_cap` becomes ready.
+///
+/// Returns the opaque token chosen at `wait_set_add` time for the source that
+/// fired. The token is delivered in the secondary return register (rdx / a1).
+/// If multiple sources are ready, each call returns one token without re-blocking.
+#[inline]
+pub fn wait_set_wait(ws_cap: u32) -> Result<u64, i64>
+{
+    let (ret, token) = unsafe { syscall5_ret2(SYS_WAIT_SET_WAIT, ws_cap as u64, 0, 0, 0, 0) };
+    if ret < 0 { Err(ret) } else { Ok(token) }
+}
+
+// ── Hardware access wrappers (W6) ─────────────────────────────────────────────
+
+/// Bind `signal_cap` to receive notifications when `irq_cap`'s interrupt fires.
+///
+/// After registration the IRQ is masked until the first `irq_ack`. The driver
+/// must call `irq_ack` after servicing each interrupt to re-enable delivery.
+#[inline]
+pub fn irq_register(irq_cap: u32, signal_cap: u32) -> Result<(), i64>
+{
+    let ret = unsafe { syscall2(SYS_IRQ_REGISTER, irq_cap as u64, signal_cap as u64) };
+    if ret < 0 { Err(ret) } else { Ok(()) }
+}
+
+/// Re-enable interrupt delivery for `irq_cap` after handling the interrupt.
+///
+/// Must be called once the interrupt source in the device has been cleared,
+/// otherwise the interrupt will fire again immediately on unmask.
+#[inline]
+pub fn irq_ack(irq_cap: u32) -> Result<(), i64>
+{
+    let ret = unsafe { syscall2(SYS_IRQ_ACK, irq_cap as u64, 0) };
+    if ret < 0 { Err(ret) } else { Ok(()) }
+}
+
+/// Map `mmio_cap` into `aspace_cap` at virtual address `virt`.
+///
+/// - `virt` must be page-aligned and in the user address range.
+/// - `flags` bit 1 (`0x2`) makes the mapping writable; executable is always denied.
+/// - All pages are mapped uncacheable (PCD|PWT on x86_64).
+#[inline]
+pub fn mmio_map(aspace_cap: u32, mmio_cap: u32, virt: u64, flags: u64) -> Result<(), i64>
+{
+    let ret = unsafe {
+        syscall4(SYS_MMIO_MAP, aspace_cap as u64, mmio_cap as u64, virt, flags)
+    };
+    if ret < 0 { Err(ret) } else { Ok(()) }
+}
+
+/// Bind `ioport_cap` to `thread_cap`, granting it in/out access to the port range.
+///
+/// On RISC-V this always returns an error (`NotSupported`).
+#[inline]
+pub fn ioport_bind(thread_cap: u32, ioport_cap: u32) -> Result<(), i64>
+{
+    let ret = unsafe { syscall2(SYS_IOPORT_BIND, thread_cap as u64, ioport_cap as u64) };
+    if ret < 0 { Err(ret) } else { Ok(()) }
+}
+
+/// Return the physical address of `frame_cap` for use as a DMA buffer.
+///
+/// `flags` must include [`syscall_abi::FLAG_DMA_UNSAFE`] to acknowledge that
+/// the DMA transfer is not IOMMU-isolated. Without the flag `DmaUnsafe` (-14)
+/// is returned. `device_id` is reserved; pass 0.
+///
+/// Returns the physical base address of the frame on success.
+#[inline]
+pub fn dma_grant(frame_cap: u32, device_id: u64, flags: u64) -> Result<u64, i64>
+{
+    let ret = unsafe { syscall3(SYS_DMA_GRANT, frame_cap as u64, device_id, flags) };
+    if ret < 0 { Err(ret) } else { Ok(ret as u64) }
+}
+
+/// Stop a running, ready, or blocked thread. The thread transitions to `Stopped`.
+///
+/// If the thread was blocked on IPC, the blocking syscall returns `Interrupted`.
+/// A thread may stop itself (pass its own thread cap).
+#[inline]
+pub fn thread_stop(thread_cap: u32) -> Result<(), i64>
+{
+    let ret = unsafe { syscall2(SYS_THREAD_STOP, thread_cap as u64, 0) };
+    if ret < 0 { Err(ret) } else { Ok(()) }
+}
+
+/// Change a thread's scheduling priority.
+///
+/// `priority` must be in `[1, PRIORITY_MAX]`. Priorities `>= SCHED_ELEVATED_MIN`
+/// require a valid `sched_cap` with Elevate rights. Pass `sched_cap = 0` for
+/// normal-range changes.
+#[inline]
+pub fn thread_set_priority(thread_cap: u32, priority: u8, sched_cap: u32) -> Result<(), i64>
+{
+    let ret = unsafe {
+        syscall3(SYS_THREAD_SET_PRIORITY, thread_cap as u64, priority as u64, sched_cap as u64)
+    };
+    if ret < 0 { Err(ret) } else { Ok(()) }
+}
+
+/// Set a thread's CPU affinity.
+///
+/// `cpu_id` must be a valid CPU ID or `u32::MAX` (clear affinity / any CPU).
+/// On single-CPU systems this is recorded but not yet enforced until WSMP.
+#[inline]
+pub fn thread_set_affinity(thread_cap: u32, cpu_id: u32) -> Result<(), i64>
+{
+    let ret = unsafe { syscall2(SYS_THREAD_SET_AFFINITY, thread_cap as u64, cpu_id as u64) };
+    if ret < 0 { Err(ret) } else { Ok(()) }
+}
+
+/// Copy the register state of a stopped thread into `buf`.
+///
+/// The thread must be in `Stopped` state. `buf` must be at least
+/// `size_of::<TrapFrame>()` bytes (architecture-defined). Returns the number
+/// of bytes written on success.
+#[inline]
+pub fn thread_read_regs(thread_cap: u32, buf: *mut u8, buf_size: usize) -> Result<u64, i64>
+{
+    let ret = unsafe {
+        syscall3(SYS_THREAD_READ_REGS, thread_cap as u64, buf as u64, buf_size as u64)
+    };
+    if ret < 0 { Err(ret) } else { Ok(ret as u64) }
+}
+
+/// Write register state from `buf` into a stopped thread.
+///
+/// The thread must be in `Stopped` state. `buf` must contain a complete
+/// `TrapFrame` (`buf_size >= size_of::<TrapFrame>()`). The kernel validates
+/// that no privilege bits are set before applying the registers.
+#[inline]
+pub fn thread_write_regs(thread_cap: u32, buf: *const u8, buf_size: usize) -> Result<(), i64>
+{
+    let ret = unsafe {
+        syscall3(SYS_THREAD_WRITE_REGS, thread_cap as u64, buf as u64, buf_size as u64)
+    };
+    if ret < 0 { Err(ret) } else { Ok(()) }
 }
 
 // Silence "unused import" if user only uses some functions.

@@ -18,7 +18,7 @@
 //! - Invoke `arch::current::gdt::set_rsp0` (x86-64) or update `sscratch` (RISC-V)
 //!   with `next_tcb.kernel_stack_top` inside `context_switch`.
 //!
-//! # TODO Phase 10 (SMP)
+//! # TODO WSMP (SMP)
 //! - Implement `load_balance` across CPUs.
 //! - Add `preemption_pending: bool` flag per CPU.
 
@@ -85,6 +85,42 @@ impl RunQueue
     {
         self.head.is_none()
     }
+
+    /// Remove a specific TCB from the queue. Returns `true` if found.
+    ///
+    /// O(n) in queue length. Used by `change_priority` to relocate a thread.
+    fn remove(&mut self, tcb: *mut ThreadControlBlock) -> bool
+    {
+        let mut prev: Option<*mut ThreadControlBlock> = None;
+        let mut cur = self.head;
+
+        while let Some(c) = cur
+        {
+            if core::ptr::eq(c, tcb)
+            {
+                // SAFETY: c is a valid TCB.
+                let next = unsafe { (*c).run_queue_next };
+                match prev
+                {
+                    None => self.head = next,
+                    // SAFETY: prev is a valid TCB.
+                    Some(p) => unsafe { (*p).run_queue_next = next },
+                }
+                if self.tail == Some(c)
+                {
+                    self.tail = prev;
+                }
+                // SAFETY: c is a valid TCB.
+                unsafe { (*c).run_queue_next = None };
+                return true;
+            }
+            prev = cur;
+            // SAFETY: c is a valid TCB.
+            cur = unsafe { (*c).run_queue_next };
+        }
+
+        false
+    }
 }
 
 // ── PerCpuScheduler ───────────────────────────────────────────────────────────
@@ -109,7 +145,7 @@ pub struct PerCpuScheduler
     ///
     /// Acquire before any enqueue/dequeue/set_current operation.
     /// The lock disables interrupts while held, preventing timer-driven deadlock.
-    pub lock: crate::sync::Spinlock<()>,
+    pub lock: crate::sync::Spinlock,
 }
 
 // SAFETY: scheduler is protected by `lock` (Phase 9+) and only accessed
@@ -139,7 +175,7 @@ impl PerCpuScheduler
             non_empty: 0,
             current: core::ptr::null_mut(),
             idle: core::ptr::null_mut(),
-            lock: crate::sync::Spinlock::new(()),
+            lock: crate::sync::Spinlock::new(),
         }
     }
 
@@ -193,6 +229,52 @@ impl PerCpuScheduler
     {
         self.non_empty != 0
     }
+
+    /// Remove `tcb` from its priority queue. No-op if not found.
+    ///
+    /// Used by `dealloc_object(Thread)` to prevent use-after-free:
+    /// the TCB must be removed from the run queue before its memory
+    /// is freed.
+    ///
+    /// Caller must hold `self.lock`.
+    pub fn remove_from_queue(&mut self, tcb: *mut ThreadControlBlock, priority: u8)
+    {
+        let p = priority as usize;
+        if p >= NUM_PRIORITY_LEVELS { return; }
+        if self.queues[p].remove(tcb) && self.queues[p].is_empty()
+        {
+            self.non_empty &= !(1 << p);
+        }
+    }
+
+    /// Move a `Ready` TCB from `old_prio` queue to `new_prio` queue.
+    ///
+    /// Used by `SYS_THREAD_SET_PRIORITY` to immediately reflect a priority
+    /// change for a thread already in the run queue.
+    ///
+    /// If the TCB is not found in `old_prio` (possible if it was removed
+    /// between the state check and this call), it is enqueued at `new_prio`.
+    pub fn change_priority(&mut self, tcb: *mut ThreadControlBlock, old_prio: u8, new_prio: u8)
+    {
+        if old_prio == new_prio
+        {
+            return;
+        }
+
+        let old = old_prio as usize;
+        let new = new_prio as usize;
+        debug_assert!(old < NUM_PRIORITY_LEVELS && new < NUM_PRIORITY_LEVELS);
+
+        // Remove from old queue (best-effort; TCB may have been dequeued already).
+        if self.queues[old].remove(tcb) && self.queues[old].is_empty()
+        {
+            self.non_empty &= !(1 << old);
+        }
+
+        // Enqueue at new priority.
+        self.queues[new].enqueue(tcb);
+        self.non_empty |= 1 << new;
+    }
 }
 
 // RunQueue is not Copy, so derive Copy on the containing const is not possible.
@@ -203,5 +285,279 @@ impl Clone for RunQueue
     fn clone(&self) -> Self
     {
         *self
+    }
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests
+{
+    use super::*;
+    use crate::sched::thread::ThreadControlBlock;
+
+    /// Allocate a zero-initialized TCB for tests.
+    ///
+    /// SAFETY: only `run_queue_next` is accessed by RunQueue/PerCpuScheduler;
+    /// all other TCB fields remain zero/null for the duration of these tests.
+    fn make_tcb() -> Box<ThreadControlBlock>
+    {
+        unsafe { Box::new(core::mem::zeroed()) }
+    }
+
+    // ── RunQueue tests (exercised through PerCpuScheduler at priority 0) ──────
+
+    #[test]
+    fn enqueue_dequeue_fifo()
+    {
+        let mut sched = PerCpuScheduler::new();
+        let mut a = make_tcb();
+        let mut b = make_tcb();
+        let mut c = make_tcb();
+        let pa = &mut *a as *mut _;
+        let pb = &mut *b as *mut _;
+        let pc = &mut *c as *mut _;
+
+        sched.enqueue(pa, 0);
+        sched.enqueue(pb, 0);
+        sched.enqueue(pc, 0);
+
+        // idle must be set so dequeue_highest doesn't read a null pointer.
+        sched.set_idle(pa);
+
+        assert_eq!(sched.dequeue_highest(), pa);
+        assert_eq!(sched.dequeue_highest(), pb);
+        assert_eq!(sched.dequeue_highest(), pc);
+        // After emptying, next dequeue should return idle.
+        assert_eq!(sched.dequeue_highest(), pa);
+    }
+
+    #[test]
+    fn dequeue_highest_empty_returns_idle()
+    {
+        let mut sched = PerCpuScheduler::new();
+        let mut idle_tcb = make_tcb();
+        let idle = &mut *idle_tcb as *mut _;
+        sched.set_idle(idle);
+        assert_eq!(sched.dequeue_highest(), idle);
+    }
+
+    #[test]
+    fn has_runnable_reflects_state()
+    {
+        let mut sched = PerCpuScheduler::new();
+        let mut a = make_tcb();
+        let pa = &mut *a as *mut _;
+
+        assert!(!sched.has_runnable());
+        sched.enqueue(pa, 5);
+        assert!(sched.has_runnable());
+        sched.set_idle(pa);
+        sched.dequeue_highest();
+        assert!(!sched.has_runnable());
+    }
+
+    #[test]
+    fn enqueue_sets_non_empty_bit()
+    {
+        let mut sched = PerCpuScheduler::new();
+        let mut a = make_tcb();
+        let pa = &mut *a as *mut _;
+
+        assert_eq!(sched.non_empty, 0);
+        sched.enqueue(pa, 7);
+        assert_eq!(sched.non_empty, 1 << 7);
+        sched.enqueue(pa, 15);
+        assert_eq!(sched.non_empty, (1 << 7) | (1 << 15));
+    }
+
+    #[test]
+    fn dequeue_highest_selects_max_priority()
+    {
+        let mut sched = PerCpuScheduler::new();
+        let mut a = make_tcb();
+        let mut b = make_tcb();
+        let mut c = make_tcb();
+        let pa = &mut *a as *mut _;
+        let pb = &mut *b as *mut _;
+        let pc = &mut *c as *mut _;
+
+        // Enqueue at priorities 0, 5, 15 — expect 15 first, then 5, then 0.
+        sched.enqueue(pa, 0);
+        sched.enqueue(pb, 5);
+        sched.enqueue(pc, 15);
+        sched.set_idle(pa);
+
+        assert_eq!(sched.dequeue_highest(), pc);
+        assert_eq!(sched.dequeue_highest(), pb);
+        assert_eq!(sched.dequeue_highest(), pa);
+    }
+
+    #[test]
+    fn dequeue_highest_clears_bit_when_queue_empties()
+    {
+        let mut sched = PerCpuScheduler::new();
+        let mut a = make_tcb();
+        let pa = &mut *a as *mut _;
+
+        sched.enqueue(pa, 3);
+        assert_ne!(sched.non_empty & (1 << 3), 0);
+        sched.set_idle(pa);
+        sched.dequeue_highest();
+        // Queue at priority 3 is now empty; bit must be cleared.
+        assert_eq!(sched.non_empty & (1 << 3), 0);
+    }
+
+    #[test]
+    fn remove_from_queue_clears_bitmask()
+    {
+        let mut sched = PerCpuScheduler::new();
+        let mut a = make_tcb();
+        let pa = &mut *a as *mut _;
+
+        sched.enqueue(pa, 10);
+        assert_ne!(sched.non_empty & (1 << 10), 0);
+        sched.remove_from_queue(pa, 10);
+        assert_eq!(sched.non_empty & (1 << 10), 0);
+    }
+
+    #[test]
+    fn remove_not_present_is_noop()
+    {
+        let mut sched = PerCpuScheduler::new();
+        let mut a = make_tcb();
+        let pa = &mut *a as *mut _;
+        // remove on a TCB that was never enqueued must not panic.
+        sched.remove_from_queue(pa, 5);
+        assert_eq!(sched.non_empty, 0);
+    }
+
+    #[test]
+    fn remove_from_middle_preserves_order()
+    {
+        let mut sched = PerCpuScheduler::new();
+        let mut a = make_tcb();
+        let mut b = make_tcb();
+        let mut c = make_tcb();
+        let pa = &mut *a as *mut _;
+        let pb = &mut *b as *mut _;
+        let pc = &mut *c as *mut _;
+
+        sched.enqueue(pa, 1);
+        sched.enqueue(pb, 1);
+        sched.enqueue(pc, 1);
+        sched.set_idle(pa);
+
+        // Remove the middle element; A and C should remain in order.
+        sched.remove_from_queue(pb, 1);
+        assert_eq!(sched.dequeue_highest(), pa);
+        assert_eq!(sched.dequeue_highest(), pc);
+    }
+
+    #[test]
+    fn change_priority_moves_thread()
+    {
+        let mut sched = PerCpuScheduler::new();
+        let mut a = make_tcb();
+        let pa = &mut *a as *mut _;
+
+        sched.enqueue(pa, 2);
+        assert_ne!(sched.non_empty & (1 << 2), 0);
+        sched.change_priority(pa, 2, 8);
+        // Old priority queue must be empty; new priority queue must be set.
+        assert_eq!(sched.non_empty & (1 << 2), 0);
+        assert_ne!(sched.non_empty & (1 << 8), 0);
+        sched.set_idle(pa);
+        assert_eq!(sched.dequeue_highest(), pa);
+    }
+
+    #[test]
+    fn change_priority_same_is_noop()
+    {
+        let mut sched = PerCpuScheduler::new();
+        let mut a = make_tcb();
+        let pa = &mut *a as *mut _;
+
+        sched.enqueue(pa, 4);
+        let before = sched.non_empty;
+        sched.change_priority(pa, 4, 4);
+        // No state change when old == new.
+        assert_eq!(sched.non_empty, before);
+    }
+
+    #[test]
+    fn five_threads_same_priority_fifo_order()
+    {
+        // Enqueue 5 TCBs at the same priority and verify FIFO dequeue order.
+        let mut sched = PerCpuScheduler::new();
+        let mut tcbs: Vec<Box<ThreadControlBlock>> = (0..5).map(|_| make_tcb()).collect();
+        let ptrs: Vec<*mut ThreadControlBlock> =
+            tcbs.iter_mut().map(|t| &mut **t as *mut _).collect();
+
+        for &p in &ptrs {
+            sched.enqueue(p, 7);
+        }
+        sched.set_idle(ptrs[0]);
+
+        for &expected in &ptrs {
+            assert_eq!(sched.dequeue_highest(), expected, "FIFO order violated");
+        }
+        // Queue exhausted; returns idle.
+        assert_eq!(sched.dequeue_highest(), ptrs[0]);
+    }
+
+    #[test]
+    fn interleaved_priority_always_dequeues_highest()
+    {
+        // Interleave P=5 and P=10 enqueues; every dequeue must return P=10 until
+        // that queue is empty, then P=5 threads in their enqueue order.
+        let mut sched = PerCpuScheduler::new();
+        let mut a = make_tcb();
+        let mut b = make_tcb();
+        let mut c = make_tcb();
+        let mut d = make_tcb();
+        let pa = &mut *a as *mut _;
+        let pb = &mut *b as *mut _;
+        let pc = &mut *c as *mut _;
+        let pd = &mut *d as *mut _;
+
+        sched.enqueue(pa, 5);
+        sched.enqueue(pb, 10);
+        sched.enqueue(pc, 5);
+        sched.enqueue(pd, 10);
+        sched.set_idle(pa);
+
+        // P=10 threads come out first (FIFO within their priority).
+        assert_eq!(sched.dequeue_highest(), pb);
+        assert_eq!(sched.dequeue_highest(), pd);
+        // Then P=5 threads in original enqueue order.
+        assert_eq!(sched.dequeue_highest(), pa);
+        assert_eq!(sched.dequeue_highest(), pc);
+    }
+
+    #[test]
+    fn change_priority_while_multiple_queued()
+    {
+        // Three TCBs at P=3; raise the middle one to P=7.
+        // It must dequeue first (higher priority); A and C follow in original order.
+        let mut sched = PerCpuScheduler::new();
+        let mut a = make_tcb();
+        let mut b = make_tcb();
+        let mut c = make_tcb();
+        let pa = &mut *a as *mut _;
+        let pb = &mut *b as *mut _;
+        let pc = &mut *c as *mut _;
+
+        sched.enqueue(pa, 3);
+        sched.enqueue(pb, 3);
+        sched.enqueue(pc, 3);
+        sched.set_idle(pa);
+
+        // Raise middle thread.
+        sched.change_priority(pb, 3, 7);
+
+        assert_eq!(sched.dequeue_highest(), pb, "raised thread must dequeue first");
+        assert_eq!(sched.dequeue_highest(), pa, "then A in original order");
+        assert_eq!(sched.dequeue_highest(), pc, "then C in original order");
     }
 }

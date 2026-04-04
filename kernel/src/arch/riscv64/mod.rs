@@ -28,6 +28,10 @@ pub const MIN_IRQ_ID: u32 = 1;
 /// RISC-V has no I/O port space; IoPortRange resources are silently skipped.
 pub const HAS_IO_PORTS: bool = false;
 
+/// Size of the I/O Permission Bitmap. Zero on RISC-V (no I/O port concept).
+/// Used to size the `iopb` field in `ThreadControlBlock` uniformly across arches.
+pub const IOPB_SIZE: usize = 0;
+
 /// MMIO regions that must be direct-mapped during Phase 3 page table setup.
 ///
 /// RISC-V uses memory-mapped PLIC/CLINT, but those are already within the

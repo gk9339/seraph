@@ -7,7 +7,7 @@
 //!
 //! Each kernel thread has exactly one TCB. TCBs are heap-allocated via `Box`.
 //!
-//! # Phase 9 fields
+//! Key fields:
 //! - `address_space`: typed pointer to the user address space (null for kernel threads).
 //! - `cspace`: typed pointer to the capability space.
 //! - `ipc_state`: IPC blocking state.
@@ -15,12 +15,10 @@
 //! - `reply_tcb`: pointer to the thread to wake on IPC reply.
 //! - `trap_frame`: pointer to the user register snapshot on the kernel stack.
 //! - `is_user`: true for user-mode threads.
-//!
-//! # Phase 10 fields
 //! - `ipc_buffer`: virtual address of the per-thread IPC buffer page (0 = none).
 //! - `wakeup_value`: value delivered by a signal sender to an unblocked waiter.
 //!
-//! # TODO Phase 11 (SMP)
+//! # TODO WSMP (SMP)
 //! - Bind `cpu_affinity` and `preferred_cpu` to the actual CPU being started.
 
 use crate::arch::current::context::SavedState;
@@ -43,6 +41,10 @@ pub enum IpcThreadState
     BlockedOnReply,
     /// Blocked waiting for a signal bitmask to become non-zero.
     BlockedOnSignal,
+    /// Blocked waiting for an event queue to receive an entry.
+    BlockedOnEventQueue,
+    /// Blocked waiting for any member of a wait set to become ready.
+    BlockedOnWaitSet,
 }
 
 // ── ThreadState ───────────────────────────────────────────────────────────────
@@ -104,11 +106,11 @@ pub struct ThreadControlBlock
     pub slice_remaining: u32,
 
     /// Hard CPU affinity (AFFINITY_ANY = 0xFFFF_FFFF means no hard affinity).
-    /// TODO Phase 10: enforce during thread migration / load balancing.
+    /// TODO WSMP: enforce during thread migration / load balancing.
     pub cpu_affinity: u32,
 
     /// Soft affinity: last CPU this thread ran on (hint for the load balancer).
-    /// TODO Phase 10: update on each context switch.
+    /// TODO WSMP: update on each context switch.
     pub preferred_cpu: u32,
 
     /// Intrusive run-queue link — next TCB at the same priority.
@@ -152,7 +154,7 @@ pub struct ThreadControlBlock
     /// CSpace bound to this thread.
     pub cspace: *mut crate::cap::cspace::CSpace,
 
-    // === IPC buffer (Phase 10) ===
+    // === IPC buffer ===
     /// Virtual address of the per-thread IPC buffer page (0 = not registered).
     ///
     /// Registered by `SYS_IPC_BUFFER_SET`. IPC data words are read from / written
@@ -164,6 +166,32 @@ pub struct ThreadControlBlock
     /// Set by `signal_send` when it wakes a blocked waiter: stores the bits that
     /// were acquired on the waiter's behalf. Read by `sys_signal_wait` on resume.
     pub wakeup_value: u64,
+
+    // === I/O port permissions (x86_64 only) ===
+    /// Per-thread I/O Permission Bitmap (8 KiB, heap-allocated on first
+    /// `SYS_IOPORT_BIND`). Null if this thread has no port bindings.
+    ///
+    /// On context switch, if non-null, this bitmap is copied into the TSS
+    /// IOPB region so `in`/`out` instructions work for this thread.
+    ///
+    // TODO: When an IoPortRange cap (or ancestor) is revoked,
+    // the relevant bits must be re-denied in this bitmap and reloaded into
+    // the TSS if this thread is currently running. Requires tracking which
+    // threads hold which IoPortRange bindings. Pick up alongside general
+    // cap revocation side-effect cleanup.
+    pub iopb: *mut [u8; crate::arch::current::IOPB_SIZE],
+
+    // === IPC block cancellation ===
+    /// Pointer to the kernel IPC object this thread is currently blocked on
+    /// (null when not blocked). Cast to the concrete type using `ipc_state`:
+    /// - `BlockedOnSend`/`BlockedOnRecv` → `*mut EndpointState`
+    /// - `BlockedOnSignal` → `*mut SignalState`
+    /// - `BlockedOnEventQueue` → `*mut EventQueueState`
+    /// - `BlockedOnWaitSet` → `*mut WaitSetState`
+    ///
+    /// Set when entering any IPC-blocked state; cleared on wakeup.
+    /// Used by `SYS_THREAD_STOP` to unlink the thread from the blocking queue.
+    pub blocked_on_object: *mut u8,
 
     // === Identity ===
     /// Unique thread identifier assigned at creation.

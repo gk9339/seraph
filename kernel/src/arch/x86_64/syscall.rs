@@ -23,7 +23,7 @@
 //! shuttle user RSP to `SYSCALL_USER_RSP`, switch to `SYSCALL_KERNEL_RSP`,
 //! then rebuild R11 from the scratch before saving the full TrapFrame.
 //!
-//! ## Per-CPU note (Phase 10)
+//! ## Per-CPU note (WSMP)
 //! Both scratch statics must become per-CPU (GS-relative or TSS scratch)
 //! for SMP correctness.
 
@@ -46,8 +46,8 @@ const SFMASK_CLEAR_IF: u64 = 1 << 9;
 const STAR_VALUE: u64 = (0x0010u64 << 48) | (0x0008u64 << 32);
 
 // ── Per-CPU scratch statics ───────────────────────────────────────────────────
-// Phase 9: single CPU — these are plain statics.
-// Phase 10: must become per-CPU (GS-relative or per-CPU struct).
+// Single CPU until WSMP — these are plain statics.
+// WSMP: must become per-CPU (GS-relative or per-CPU struct).
 
 /// Kernel RSP loaded at SYSCALL entry. Set by `set_kernel_rsp` before
 /// every return to user mode.

@@ -143,6 +143,74 @@ pub unsafe fn console_write_fmt(args: core::fmt::Arguments)
     let _ = console.write_fmt(args);
 }
 
+/// Write a `[S.NNNNNN] ` timestamp prefix to the kernel console before each line.
+///
+/// Format: `[S.NNNNNN] ` where S is whole seconds (variable width) and NNNNNN
+/// is zero-padded microseconds (6 digits). Source: TSC on x86-64,
+/// the `time` CSR on RISC-V — both are interrupt-independent and give
+/// sub-microsecond raw resolution.
+///
+/// Before the timer is calibrated (pre-Phase 5), prints `[--------] ` — 8
+/// dashes inside brackets to match the width of `[0.000000]`.
+///
+/// Called by `kprintln!` at the start of every line. The bare `kprint!` macro
+/// does not prepend a timestamp (it is for partial-line writes only).
+///
+/// No effect in test builds (no hardware timer available).
+///
+/// # Modification notes
+/// - To add nanosecond resolution: change the `elapsed_us` call to an
+///   `elapsed_ns` variant and update the format field to `{:09}`.
+/// - To change the width of the fallback: match the inner char count of the
+///   format string (currently 8: one digit + dot + six digits).
+#[cfg(not(test))]
+pub fn print_timestamp()
+{
+    use crate::arch::current::timer;
+
+    let Some(us) = timer::elapsed_us() else {
+        // Timer not yet calibrated (pre-Phase 5). Fixed-width placeholder so
+        // pre-boot lines are visually distinct from timed lines.
+        // Width matches "[0.000000]": 8 inner chars → 8 dashes.
+        // SAFETY: console is initialised before kprintln! is used.
+        unsafe { console_write_fmt(format_args!("[--------] ")); }
+        return;
+    };
+
+    let sec    = us / 1_000_000;
+    let us_frac = us % 1_000_000;
+
+    // Format seconds into a small stack buffer (no heap, no float).
+    // Handles up to u64::MAX seconds without overflow.
+    let mut sec_buf = [0u8; 20]; // 20 ASCII digits covers u64::MAX
+    let sec_str = {
+        let mut n = sec;
+        let mut len = 0usize;
+        if n == 0 {
+            sec_buf[0] = b'0';
+            len = 1;
+        } else {
+            while n > 0 {
+                sec_buf[len] = b'0' + (n % 10) as u8;
+                n /= 10;
+                len += 1;
+            }
+            sec_buf[..len].reverse();
+        }
+        // SAFETY: buf contains only ASCII digit bytes.
+        unsafe { core::str::from_utf8_unchecked(&sec_buf[..len]) }
+    };
+
+    // SAFETY: console is initialised before kprintln! is used.
+    unsafe {
+        console_write_fmt(format_args!("[{}.{:06}] ", sec_str, us_frac));
+    }
+}
+
+/// No-op stub for test builds (no hardware timer).
+#[cfg(test)]
+pub fn print_timestamp() {}
+
 /// Print a formatted string to the kernel console.
 ///
 /// Accepts the same format arguments as `std::print!`. Requires
@@ -159,14 +227,21 @@ macro_rules! kprint {
 
 /// Print a formatted string followed by `\n` to the kernel console.
 ///
+/// Prepends a `[S.NNNNNN] kernel: ` prefix before each line: timestamp
+/// (seconds elapsed since timer calibration) followed by the component
+/// identifier `kernel: `. Pre-Phase 5 lines show `[--------] kernel: ` instead.
 /// Accepts the same format arguments as `std::println!`. Requires
 /// `console::init()` to have been called.
+///
+/// Use `kprint!` (without the `ln`) for partial-line writes where the
+/// timestamp should not be inserted mid-line.
 #[macro_export]
 macro_rules! kprintln {
     () => {
         $crate::kprint!("\n")
     };
-    ($($arg:tt)*) => {
-        $crate::kprint!("{}\n", format_args!($($arg)*))
-    };
+    ($($arg:tt)*) => {{
+        $crate::console::print_timestamp();
+        $crate::kprint!("kernel: {}\n", format_args!($($arg)*))
+    }};
 }

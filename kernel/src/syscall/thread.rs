@@ -1,0 +1,775 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 George Kottler <mail@kottlerg.com>
+
+// kernel/src/syscall/thread.rs
+
+//! Thread lifecycle syscall handlers.
+//!
+//! # Adding new thread syscalls
+//! 1. Add a `pub fn sys_thread_*` here.
+//! 2. Add the syscall constant import to `syscall/mod.rs`.
+//! 3. Add a dispatch arm to `syscall/mod.rs`.
+//! 4. Add a userspace wrapper to `shared/syscall/src/lib.rs`.
+
+use crate::arch::current::trap_frame::TrapFrame;
+use syscall::SyscallError;
+
+/// SYS_THREAD_CONFIGURE (23): set entry point, stack, and argument for a thread.
+///
+/// arg0 = Thread cap index (must have CONTROL).
+/// arg1 = user entry point (virtual address).
+/// arg2 = user stack pointer (virtual address).
+/// arg3 = argument value (passed in rdi/a0 when the thread first runs).
+///
+/// The thread must be in `Created` state (not yet started). Builds the initial
+/// user-mode TrapFrame on the thread's kernel stack. The thread is not enqueued;
+/// call `SYS_THREAD_START` to start it.
+///
+/// Returns 0 on success.
+#[cfg(not(test))]
+pub fn sys_thread_configure(tf: &mut TrapFrame) -> Result<u64, SyscallError>
+{
+    use crate::arch::current::trap_frame::TrapFrame as ArchTrapFrame;
+    use crate::cap::object::ThreadObject;
+    use crate::cap::slot::{CapTag, Rights};
+    use crate::sched::thread::ThreadState;
+    use crate::syscall::current_tcb;
+    use core::mem::size_of;
+
+    let thread_idx = tf.arg(0) as u32;
+    let entry = tf.arg(1);
+    let stack_ptr = tf.arg(2);
+    let arg = tf.arg(3);
+
+    let caller_tcb = unsafe { current_tcb() };
+    if caller_tcb.is_null()
+    {
+        return Err(SyscallError::InvalidCapability);
+    }
+    let caller_cspace = unsafe { (*caller_tcb).cspace };
+
+    let thread_slot = unsafe {
+        super::lookup_cap(caller_cspace, thread_idx, CapTag::Thread, Rights::CONTROL)
+    }?;
+
+    let target_tcb = {
+        let obj = thread_slot.object.ok_or(SyscallError::InvalidCapability)?;
+        // SAFETY: tag confirmed Thread; pointer is valid.
+        let to = unsafe { &*(obj.as_ptr() as *const ThreadObject) };
+        to.tcb
+    };
+
+    if target_tcb.is_null()
+    {
+        return Err(SyscallError::InvalidCapability);
+    }
+
+    // Thread must be in Created state to configure.
+    // SAFETY: target_tcb is valid (lives for the duration of the ThreadObject).
+    if unsafe { (*target_tcb).state } != ThreadState::Created
+    {
+        return Err(SyscallError::InvalidArgument);
+    }
+
+    let kstack_top = unsafe { (*target_tcb).kernel_stack_top };
+
+    // Build the initial TrapFrame on the thread's kernel stack, just below
+    // the stack top. This mirrors the setup in `sched::enter()`.
+    let tf_size = size_of::<ArchTrapFrame>() as u64;
+    let tf_ptr = (kstack_top - tf_size) as *mut ArchTrapFrame;
+
+    // Zero then populate user-mode entry fields.
+    // SAFETY: kstack_top - tf_size is within the allocated kernel stack (4 pages).
+    unsafe {
+        core::ptr::write_bytes(tf_ptr as *mut u8, 0, tf_size as usize);
+        (*tf_ptr).init_user(entry, stack_ptr);
+        // Pass the argument in the first argument register.
+        (*tf_ptr).set_arg0(arg);
+    }
+
+    // Store the trap frame pointer so sched::schedule() can find it.
+    // SAFETY: target_tcb is valid.
+    unsafe { (*target_tcb).trap_frame = tf_ptr; }
+
+    Ok(0)
+}
+
+/// SYS_THREAD_START (19): move a configured thread from Created to Ready.
+///
+/// arg0 = Thread cap index (must have CONTROL).
+///
+/// The thread must have been configured via `SYS_THREAD_CONFIGURE` first
+/// (trap_frame must be non-null). Enqueues the thread on the BSP scheduler.
+///
+/// Returns 0 on success.
+#[cfg(not(test))]
+pub fn sys_thread_start(tf: &mut TrapFrame) -> Result<u64, SyscallError>
+{
+    use crate::cap::object::ThreadObject;
+    use crate::cap::slot::{CapTag, Rights};
+    use crate::sched::thread::ThreadState;
+    use crate::syscall::current_tcb;
+
+    let thread_idx = tf.arg(0) as u32;
+
+    let caller_tcb = unsafe { current_tcb() };
+    if caller_tcb.is_null()
+    {
+        return Err(SyscallError::InvalidCapability);
+    }
+    let caller_cspace = unsafe { (*caller_tcb).cspace };
+
+    let thread_slot = unsafe {
+        super::lookup_cap(caller_cspace, thread_idx, CapTag::Thread, Rights::CONTROL)
+    }?;
+
+    let target_tcb = {
+        let obj = thread_slot.object.ok_or(SyscallError::InvalidCapability)?;
+        let to = unsafe { &*(obj.as_ptr() as *const ThreadObject) };
+        to.tcb
+    };
+
+    if target_tcb.is_null()
+    {
+        return Err(SyscallError::InvalidCapability);
+    }
+
+    // Thread must be in Created or Stopped state with a configured trap_frame.
+    // Stopped → Ready acts as a resume operation (no new trap_frame needed).
+    // SAFETY: target_tcb is valid.
+    unsafe {
+        let state = (*target_tcb).state;
+        if state != ThreadState::Created && state != ThreadState::Stopped
+        {
+            return Err(SyscallError::InvalidArgument);
+        }
+        if (*target_tcb).trap_frame.is_null()
+        {
+            return Err(SyscallError::InvalidArgument);
+        }
+
+        (*target_tcb).state = ThreadState::Ready;
+        let prio = (*target_tcb).priority;
+        // Enqueue on the BSP scheduler. WSMP (SMP) will use cpu_affinity.
+        crate::sched::scheduler_for(0).enqueue(target_tcb, prio);
+    }
+
+    Ok(0)
+}
+
+/// SYS_THREAD_STOP (20): transition a thread to the Stopped state.
+///
+/// arg0 = Thread cap index (must have CONTROL).
+///
+/// Cancels any pending IPC block (the stopped thread's blocked syscall returns
+/// `Interrupted`). If the thread is already Stopped or Exited, returns
+/// `InvalidState`. A thread may stop itself (arg0 refers to the calling thread).
+///
+/// Returns 0 on success.
+#[cfg(not(test))]
+pub fn sys_thread_stop(tf: &mut TrapFrame) -> Result<u64, SyscallError>
+{
+    use crate::cap::object::ThreadObject;
+    use crate::cap::slot::{CapTag, Rights};
+    use crate::sched::thread::ThreadState;
+    use crate::syscall::current_tcb;
+
+    let thread_idx = tf.arg(0) as u32;
+
+    let caller_tcb = unsafe { current_tcb() };
+    if caller_tcb.is_null()
+    {
+        return Err(SyscallError::InvalidCapability);
+    }
+    let caller_cspace = unsafe { (*caller_tcb).cspace };
+
+    let thread_slot = unsafe {
+        super::lookup_cap(caller_cspace, thread_idx, CapTag::Thread, Rights::CONTROL)
+    }?;
+
+    let target_tcb = {
+        let obj = thread_slot.object.ok_or(SyscallError::InvalidCapability)?;
+        let to = unsafe { &*(obj.as_ptr() as *const ThreadObject) };
+        to.tcb
+    };
+
+    if target_tcb.is_null()
+    {
+        return Err(SyscallError::InvalidCapability);
+    }
+
+    // SAFETY: target_tcb is valid for the duration of the ThreadObject.
+    unsafe {
+        let state = (*target_tcb).state;
+
+        match state
+        {
+            ThreadState::Created | ThreadState::Exited | ThreadState::Stopped =>
+            {
+                return Err(SyscallError::InvalidState);
+            }
+
+            ThreadState::Blocked =>
+            {
+                // Cancel the IPC block: unlink the thread from whatever it is
+                // blocked on and set its trap-frame return to Interrupted.
+                cancel_ipc_block(target_tcb);
+            }
+
+            ThreadState::Ready =>
+            {
+                // Thread is in a run queue. Set state to Stopped; the
+                // scheduler's skip loop will ignore it on dequeue.
+            }
+
+            ThreadState::Running =>
+            {
+                // On single-CPU, the only running thread is the caller. If the
+                // target is the caller, stop self and yield.
+                // TODO(Phase-11): send IPI when target is running on another CPU.
+            }
+        }
+
+        (*target_tcb).state = ThreadState::Stopped;
+
+        // If stopping self (Running → Stopped): yield so another thread runs.
+        if core::ptr::eq(target_tcb, caller_tcb)
+        {
+            crate::sched::schedule();
+        }
+    }
+
+    Ok(0)
+}
+
+/// Cancel the IPC block on a thread that is in `Blocked` state.
+///
+/// Unlinks the thread from the relevant IPC queue and sets its trap-frame
+/// return value to `Interrupted` so the halted syscall returns that error.
+///
+/// # Safety
+/// `tcb` must be a valid TCB in `Blocked` state. Must be called with the
+/// scheduler lock held (or in single-CPU context).
+#[cfg(not(test))]
+unsafe fn cancel_ipc_block(tcb: *mut crate::sched::thread::ThreadControlBlock)
+{
+    use crate::ipc::endpoint::{EndpointState, unlink_from_wait_queue};
+    use crate::ipc::event_queue::EventQueueState;
+    use crate::ipc::signal::SignalState;
+    use crate::ipc::wait_set::WaitSetState;
+    use crate::sched::thread::IpcThreadState;
+    use syscall::SyscallError;
+
+    // SAFETY: tcb is a valid Blocked TCB.
+    let ipc_state = unsafe { (*tcb).ipc_state };
+    let blocked_on = unsafe { (*tcb).blocked_on_object };
+
+    match ipc_state
+    {
+        IpcThreadState::BlockedOnSend =>
+        {
+            if !blocked_on.is_null()
+            {
+                let ep = blocked_on as *mut EndpointState;
+                // SAFETY: blocked_on_object is a valid EndpointState ptr.
+                unsafe {
+                    unlink_from_wait_queue(tcb, &mut (*ep).send_head, &mut (*ep).send_tail);
+                }
+            }
+        }
+
+        IpcThreadState::BlockedOnRecv =>
+        {
+            if !blocked_on.is_null()
+            {
+                let ep = blocked_on as *mut EndpointState;
+                // SAFETY: blocked_on_object is a valid EndpointState ptr.
+                unsafe {
+                    unlink_from_wait_queue(tcb, &mut (*ep).recv_head, &mut (*ep).recv_tail);
+                }
+            }
+        }
+
+        IpcThreadState::BlockedOnReply =>
+        {
+            // blocked_on_object is the server TCB. Clear the server's reply
+            // target so its next reply call is a no-op for this caller.
+            if !blocked_on.is_null()
+            {
+                let server = blocked_on as *mut crate::sched::thread::ThreadControlBlock;
+                // SAFETY: server is a valid TCB pointer.
+                unsafe { (*server).reply_tcb = core::ptr::null_mut(); }
+            }
+        }
+
+        IpcThreadState::BlockedOnSignal =>
+        {
+            if !blocked_on.is_null()
+            {
+                let sig = blocked_on as *mut SignalState;
+                // SAFETY: blocked_on_object is a valid SignalState ptr.
+                unsafe {
+                    if core::ptr::eq((*sig).waiter, tcb)
+                    {
+                        (*sig).waiter = core::ptr::null_mut();
+                    }
+                }
+            }
+        }
+
+        IpcThreadState::BlockedOnEventQueue =>
+        {
+            if !blocked_on.is_null()
+            {
+                let eq = blocked_on as *mut EventQueueState;
+                // SAFETY: blocked_on_object is a valid EventQueueState ptr.
+                unsafe {
+                    if core::ptr::eq((*eq).waiter, tcb)
+                    {
+                        (*eq).waiter = core::ptr::null_mut();
+                    }
+                }
+            }
+        }
+
+        IpcThreadState::BlockedOnWaitSet =>
+        {
+            if !blocked_on.is_null()
+            {
+                let ws = blocked_on as *mut WaitSetState;
+                // SAFETY: blocked_on_object is a valid WaitSetState ptr.
+                unsafe {
+                    if core::ptr::eq((*ws).waiter, tcb)
+                    {
+                        (*ws).waiter = core::ptr::null_mut();
+                    }
+                }
+            }
+        }
+
+        IpcThreadState::None => {}
+    }
+
+    // Reset IPC state and blocked_on_object.
+    // SAFETY: tcb is valid.
+    unsafe {
+        (*tcb).ipc_state = IpcThreadState::None;
+        (*tcb).blocked_on_object = core::ptr::null_mut();
+    }
+
+    // Write Interrupted into the stopped thread's trap-frame return slot so
+    // when the thread eventually resumes its original blocking syscall returns
+    // this error code.
+    // SAFETY: trap_frame is set for all user threads that have been configured.
+    unsafe {
+        let trap_frame = (*tcb).trap_frame;
+        if !trap_frame.is_null()
+        {
+            (*trap_frame).set_return(SyscallError::Interrupted as i64);
+        }
+    }
+}
+
+/// SYS_THREAD_SET_PRIORITY (37): change a thread's scheduling priority.
+///
+/// arg0 = Thread cap index (must have CONTROL).
+/// arg1 = New priority (1–PRIORITY_MAX; 0 and 31 are rejected).
+/// arg2 = SchedControl cap index (required only when priority ≥ SCHED_ELEVATED_MIN).
+///
+/// The change takes effect at the next scheduler invocation. If the thread is
+/// currently in the Ready state, it is moved to the new priority queue immediately.
+///
+/// Returns 0 on success.
+#[cfg(not(test))]
+pub fn sys_thread_set_priority(tf: &mut TrapFrame) -> Result<u64, SyscallError>
+{
+    use crate::cap::object::ThreadObject;
+    use crate::cap::slot::{CapTag, Rights};
+    use crate::sched::thread::ThreadState;
+    use crate::syscall::current_tcb;
+    use syscall::{PRIORITY_MAX, SCHED_ELEVATED_MIN};
+
+    let thread_idx = tf.arg(0) as u32;
+    let priority   = tf.arg(1) as u8;
+    let sched_idx  = tf.arg(2) as u32;
+
+    // Validate priority range: 0 (idle) and 31 (reserved) are rejected.
+    if priority == 0 || priority > PRIORITY_MAX
+    {
+        return Err(SyscallError::InvalidArgument);
+    }
+
+    let caller_tcb = unsafe { current_tcb() };
+    if caller_tcb.is_null()
+    {
+        return Err(SyscallError::InvalidCapability);
+    }
+    let caller_cspace = unsafe { (*caller_tcb).cspace };
+
+    // Elevated priorities require a SchedControl cap with ELEVATE rights.
+    if priority >= SCHED_ELEVATED_MIN
+    {
+        unsafe {
+            super::lookup_cap(caller_cspace, sched_idx, CapTag::SchedControl, Rights::ELEVATE)
+        }?;
+    }
+
+    let thread_slot = unsafe {
+        super::lookup_cap(caller_cspace, thread_idx, CapTag::Thread, Rights::CONTROL)
+    }?;
+
+    let target_tcb = {
+        let obj = thread_slot.object.ok_or(SyscallError::InvalidCapability)?;
+        let to = unsafe { &*(obj.as_ptr() as *const ThreadObject) };
+        to.tcb
+    };
+
+    if target_tcb.is_null()
+    {
+        return Err(SyscallError::InvalidCapability);
+    }
+
+    // SAFETY: target_tcb is valid.
+    unsafe {
+        let old_prio = (*target_tcb).priority;
+        (*target_tcb).priority = priority;
+
+        // If the thread is Ready, move it to the new priority queue immediately.
+        if (*target_tcb).state == ThreadState::Ready
+        {
+            // WSMP: use the correct per-CPU scheduler for the thread's CPU.
+            crate::sched::scheduler_for(0).change_priority(target_tcb, old_prio, priority);
+        }
+    }
+
+    Ok(0)
+}
+
+/// SYS_THREAD_SET_AFFINITY (38): set a thread's CPU affinity.
+///
+/// arg0 = Thread cap index (must have CONTROL).
+/// arg1 = CPU ID, or AFFINITY_ANY (u32::MAX) to clear hard affinity.
+///
+/// The change is recorded immediately. On single-CPU systems this is a
+/// bookkeeping operation; WSMP (SMP) will enforce it during migration.
+///
+/// Returns 0 on success.
+#[cfg(not(test))]
+pub fn sys_thread_set_affinity(tf: &mut TrapFrame) -> Result<u64, SyscallError>
+{
+    use crate::cap::object::ThreadObject;
+    use crate::cap::slot::{CapTag, Rights};
+    use crate::sched::AFFINITY_ANY;
+    use crate::syscall::current_tcb;
+    use core::sync::atomic::Ordering;
+
+    let thread_idx = tf.arg(0) as u32;
+    let cpu_id     = tf.arg(1) as u32;
+
+    let caller_tcb = unsafe { current_tcb() };
+    if caller_tcb.is_null()
+    {
+        return Err(SyscallError::InvalidCapability);
+    }
+    let caller_cspace = unsafe { (*caller_tcb).cspace };
+
+    let thread_slot = unsafe {
+        super::lookup_cap(caller_cspace, thread_idx, CapTag::Thread, Rights::CONTROL)
+    }?;
+
+    let target_tcb = {
+        let obj = thread_slot.object.ok_or(SyscallError::InvalidCapability)?;
+        let to = unsafe { &*(obj.as_ptr() as *const ThreadObject) };
+        to.tcb
+    };
+
+    if target_tcb.is_null()
+    {
+        return Err(SyscallError::InvalidCapability);
+    }
+
+    // Validate: must be AFFINITY_ANY or a known online CPU.
+    if cpu_id != AFFINITY_ANY
+    {
+        let cpu_count = crate::sched::CPU_COUNT.load(Ordering::Relaxed);
+        if cpu_id >= cpu_count
+        {
+            return Err(SyscallError::InvalidArgument);
+        }
+    }
+
+    // SAFETY: target_tcb is valid.
+    unsafe { (*target_tcb).cpu_affinity = cpu_id; }
+
+    Ok(0)
+}
+
+/// SYS_THREAD_READ_REGS (39): read register state of a stopped thread.
+///
+/// arg0 = Thread cap index (must have OBSERVE).
+/// arg1 = Pointer to caller-supplied buffer (user VA).
+/// arg2 = Size of the buffer in bytes.
+///
+/// The thread must be in Stopped state. Copies the full `TrapFrame` to the
+/// caller's buffer. Returns the number of bytes written on success.
+#[cfg(not(test))]
+pub fn sys_thread_read_regs(tf: &mut TrapFrame) -> Result<u64, SyscallError>
+{
+    use crate::arch::current::trap_frame::TrapFrame as ArchTF;
+    use crate::cap::object::ThreadObject;
+    use crate::cap::slot::{CapTag, Rights};
+    use crate::sched::thread::ThreadState;
+    use crate::syscall::current_tcb;
+    use core::mem::size_of;
+
+    let thread_idx = tf.arg(0) as u32;
+    let buf_ptr    = tf.arg(1);
+    let buf_size   = tf.arg(2) as usize;
+
+    let caller_tcb = unsafe { current_tcb() };
+    if caller_tcb.is_null()
+    {
+        return Err(SyscallError::InvalidCapability);
+    }
+    let caller_cspace = unsafe { (*caller_tcb).cspace };
+
+    // OBSERVE right is sufficient for reading registers.
+    let thread_slot = unsafe {
+        super::lookup_cap(caller_cspace, thread_idx, CapTag::Thread, Rights::OBSERVE)
+    }?;
+
+    let target_tcb = {
+        let obj = thread_slot.object.ok_or(SyscallError::InvalidCapability)?;
+        let to = unsafe { &*(obj.as_ptr() as *const ThreadObject) };
+        to.tcb
+    };
+
+    if target_tcb.is_null()
+    {
+        return Err(SyscallError::InvalidCapability);
+    }
+
+    // SAFETY: target_tcb is valid.
+    unsafe {
+        if (*target_tcb).state != ThreadState::Stopped
+        {
+            return Err(SyscallError::InvalidState);
+        }
+        if (*target_tcb).trap_frame.is_null()
+        {
+            return Err(SyscallError::InvalidArgument);
+        }
+    }
+
+    let copy_size = size_of::<ArchTF>();
+    if buf_size < copy_size || buf_ptr == 0
+    {
+        return Err(SyscallError::InvalidArgument);
+    }
+
+    // Copy TrapFrame to user buffer under SMAP/SUM bracket.
+    // SAFETY: trap_frame is valid; buf_ptr is a user VA checked to be non-null.
+    unsafe {
+        let src = (*target_tcb).trap_frame as *const u8;
+        let dst = buf_ptr as *mut u8;
+        crate::arch::current::cpu::user_access_begin();
+        core::ptr::copy_nonoverlapping(src, dst, copy_size);
+        crate::arch::current::cpu::user_access_end();
+    }
+
+    Ok(copy_size as u64)
+}
+
+/// SYS_THREAD_WRITE_REGS (40): write register state into a stopped thread.
+///
+/// arg0 = Thread cap index (must have CONTROL).
+/// arg1 = Pointer to register-file buffer in caller's address space.
+/// arg2 = Size of the buffer in bytes.
+///
+/// The thread must be in Stopped state. The kernel validates register values
+/// for safety (no privilege escalation) before writing. Returns 0 on success.
+#[cfg(not(test))]
+pub fn sys_thread_write_regs(tf: &mut TrapFrame) -> Result<u64, SyscallError>
+{
+    use crate::arch::current::trap_frame::TrapFrame as ArchTF;
+    use crate::cap::object::ThreadObject;
+    use crate::cap::slot::{CapTag, Rights};
+    use crate::sched::thread::ThreadState;
+    use crate::syscall::current_tcb;
+    use core::mem::{size_of, MaybeUninit};
+
+    let thread_idx = tf.arg(0) as u32;
+    let buf_ptr    = tf.arg(1);
+    let buf_size   = tf.arg(2) as usize;
+
+    let caller_tcb = unsafe { current_tcb() };
+    if caller_tcb.is_null()
+    {
+        return Err(SyscallError::InvalidCapability);
+    }
+    let caller_cspace = unsafe { (*caller_tcb).cspace };
+
+    let thread_slot = unsafe {
+        super::lookup_cap(caller_cspace, thread_idx, CapTag::Thread, Rights::CONTROL)
+    }?;
+
+    let target_tcb = {
+        let obj = thread_slot.object.ok_or(SyscallError::InvalidCapability)?;
+        let to = unsafe { &*(obj.as_ptr() as *const ThreadObject) };
+        to.tcb
+    };
+
+    if target_tcb.is_null()
+    {
+        return Err(SyscallError::InvalidCapability);
+    }
+
+    // SAFETY: target_tcb is valid.
+    unsafe {
+        if (*target_tcb).state != ThreadState::Stopped
+        {
+            return Err(SyscallError::InvalidState);
+        }
+        if (*target_tcb).trap_frame.is_null()
+        {
+            return Err(SyscallError::InvalidArgument);
+        }
+    }
+
+    let copy_size = size_of::<ArchTF>();
+    if buf_size < copy_size || buf_ptr == 0
+    {
+        return Err(SyscallError::InvalidArgument);
+    }
+
+    // Copy from user into a stack-local TrapFrame, then validate.
+    // Never write directly to the target's trap_frame before validation.
+    let mut tmp: MaybeUninit<ArchTF> = MaybeUninit::zeroed();
+    // SAFETY: buf_ptr is a non-null user VA; copy_size matches the struct.
+    unsafe {
+        crate::arch::current::cpu::user_access_begin();
+        core::ptr::copy_nonoverlapping(
+            buf_ptr as *const u8,
+            tmp.as_mut_ptr() as *mut u8,
+            copy_size,
+        );
+        crate::arch::current::cpu::user_access_end();
+    }
+
+    // SAFETY: all bytes just written by copy_nonoverlapping above.
+    let mut regs = unsafe { tmp.assume_init() };
+
+    // Architecture-specific register safety validation.
+    validate_write_regs(&mut regs)?;
+
+    // Write the validated TrapFrame into the target thread.
+    // SAFETY: target_tcb and trap_frame are valid.
+    unsafe {
+        core::ptr::copy_nonoverlapping(
+            &regs as *const ArchTF as *const u8,
+            (*target_tcb).trap_frame as *mut u8,
+            copy_size,
+        );
+    }
+
+    Ok(0)
+}
+
+/// Validate and sanitize a user-supplied TrapFrame before writing it into a
+/// thread. Enforces that no privilege bits are set and instruction/stack
+/// pointers are in the canonical user address range.
+///
+/// Mutates `regs` in place to force safe segment/flag values.
+///
+/// # Adding new checks
+/// Add per-field validation below the existing blocks. Use `InvalidArgument`
+/// for bad user data (not a kernel invariant violation).
+#[cfg(not(test))]
+fn validate_write_regs(regs: &mut crate::arch::current::trap_frame::TrapFrame) -> Result<(), SyscallError>
+{
+    #[cfg(target_arch = "x86_64")]
+    {
+        // Canonical user address: bits [63:47] must all be zero.
+        const USER_ADDR_MASK: u64 = 0xFFFF_8000_0000_0000;
+
+        if regs.rip & USER_ADDR_MASK != 0
+        {
+            return Err(SyscallError::InvalidArgument);
+        }
+        if regs.rsp & USER_ADDR_MASK != 0
+        {
+            return Err(SyscallError::InvalidArgument);
+        }
+
+        // Force segment selectors to user-mode values (ring 3, RPL=3).
+        regs.cs = crate::arch::current::gdt::USER_CS as u64;
+        regs.ss = crate::arch::current::gdt::USER_DS as u64;
+
+        // rflags: must have IF (bit 9) set. Clear IOPL (bits 12-13), VM (bit
+        // 17), VIF (bit 19), VIP (bit 20) — none of which should be set in
+        // user mode. Bit 1 (reserved) must be 1 per the x86 spec.
+        regs.rflags = (regs.rflags | 0x202) & !0x0013_F000;
+    }
+
+    #[cfg(target_arch = "riscv64")]
+    {
+        // sepc must be a valid user address. On RV64, virtual addresses in
+        // the supervisor range start at 0xFFFF_FFC0_0000_0000 (sv39). Any
+        // address ≥ 0x8000_0000_0000_0000 is non-user.
+        const USER_ADDR_LIMIT: u64 = 0x8000_0000_0000_0000;
+        if regs.sepc >= USER_ADDR_LIMIT
+        {
+            return Err(SyscallError::InvalidArgument);
+        }
+
+        // scause and stval are kernel-internal; zero them out to prevent
+        // spurious fault handling on resume.
+        regs.scause = 0;
+        regs.stval  = 0;
+    }
+
+    Ok(())
+}
+
+// Test stubs.
+#[cfg(test)]
+pub fn sys_thread_configure(_tf: &mut TrapFrame) -> Result<u64, SyscallError>
+{
+    Err(SyscallError::NotSupported)
+}
+
+#[cfg(test)]
+pub fn sys_thread_start(_tf: &mut TrapFrame) -> Result<u64, SyscallError>
+{
+    Err(SyscallError::NotSupported)
+}
+
+#[cfg(test)]
+pub fn sys_thread_stop(_tf: &mut TrapFrame) -> Result<u64, SyscallError>
+{
+    Err(SyscallError::NotSupported)
+}
+
+#[cfg(test)]
+pub fn sys_thread_set_priority(_tf: &mut TrapFrame) -> Result<u64, SyscallError>
+{
+    Err(SyscallError::NotSupported)
+}
+
+#[cfg(test)]
+pub fn sys_thread_set_affinity(_tf: &mut TrapFrame) -> Result<u64, SyscallError>
+{
+    Err(SyscallError::NotSupported)
+}
+
+#[cfg(test)]
+pub fn sys_thread_read_regs(_tf: &mut TrapFrame) -> Result<u64, SyscallError>
+{
+    Err(SyscallError::NotSupported)
+}
+
+#[cfg(test)]
+pub fn sys_thread_write_regs(_tf: &mut TrapFrame) -> Result<u64, SyscallError>
+{
+    Err(SyscallError::NotSupported)
+}

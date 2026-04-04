@@ -249,15 +249,14 @@ extern "C" fn trap_dispatch(frame: &mut TrapFrame)
             5 => super::timer::handle_tick(), // Supervisor timer interrupt
             9 =>
             {
-                // Supervisor external interrupt: claim, dispatch, complete.
+                // Supervisor external interrupt: claim, then dispatch.
+                // dispatch_external -> dispatch_device_irq calls acknowledge(irq),
+                // which writes the PLIC claim/complete register. Do NOT write it
+                // again here.
                 let irq = plic_read(PLIC_CLAIM_COMPLETE);
                 if irq != 0
                 {
                     dispatch_external(irq);
-                    // SAFETY: direct map active; PLIC MMIO accessible.
-                    unsafe {
-                        plic_write(PLIC_CLAIM_COMPLETE, irq);
-                    }
                 }
             }
             _ =>
@@ -279,9 +278,16 @@ extern "C" fn trap_dispatch(frame: &mut TrapFrame)
             {
                 // U-mode ecall: dispatch via the kernel syscall table.
                 // SAFETY: frame is a valid TrapFrame on the kernel stack.
+                let sepc_before = frame.sepc;
                 unsafe { crate::syscall::dispatch(frame as *mut _); }
-                // Advance sepc past the ecall instruction (4 bytes on RV64).
-                frame.sepc += 4;
+                // Advance sepc past the ecall instruction ONLY if dispatch did
+                // not modify sepc. SYS_THREAD_WRITE_REGS may redirect a blocked
+                // thread to a new instruction pointer; in that case sepc is
+                // already the target address and must not be incremented.
+                if frame.sepc == sepc_before
+                {
+                    frame.sepc += 4;
+                }
             }
             _ =>
             {
@@ -297,14 +303,79 @@ extern "C" fn trap_dispatch(frame: &mut TrapFrame)
     }
 }
 
-/// Dispatch an external interrupt from the PLIC.
+/// Enable PLIC source `source` for hart 0 S-mode context.
 ///
-/// Phase 5 has no device drivers, so all external IRQs are unexpected.
-/// Extend this function in later phases to route IRQs to their handlers.
+/// Each source has one bit in a 32-bit enable word. Context 1 (hart 0 S-mode)
+/// enable registers start at `PLIC_ENABLE_BASE` in 4-byte words.
+///
+/// # Safety
+/// Direct map must be active; PLIC MMIO must be accessible.
+#[cfg(not(test))]
+pub fn plic_enable(source: u32)
+{
+    if source == 0 || source > PLIC_NUM_SOURCES
+    {
+        return;
+    }
+    let word_idx = source / 32;
+    let bit_idx = source % 32;
+    let offset = PLIC_ENABLE_BASE + (word_idx as u64 * 4);
+    let current = plic_read(offset);
+    // SAFETY: direct map active; PLIC MMIO is accessible.
+    unsafe { plic_write(offset, current | (1 << bit_idx)) };
+}
+
+/// Disable PLIC source `source` for hart 0 S-mode context.
+///
+/// # Safety
+/// Direct map must be active; PLIC MMIO must be accessible.
+#[cfg(not(test))]
+pub fn plic_disable(source: u32)
+{
+    if source == 0 || source > PLIC_NUM_SOURCES
+    {
+        return;
+    }
+    let word_idx = source / 32;
+    let bit_idx = source % 32;
+    let offset = PLIC_ENABLE_BASE + (word_idx as u64 * 4);
+    let current = plic_read(offset);
+    // SAFETY: direct map active; PLIC MMIO is accessible.
+    unsafe { plic_write(offset, current & !(1 << bit_idx)) };
+}
+
+/// Mask (disable) PLIC source `irq`.
+pub fn mask(irq: u32)
+{
+    #[cfg(not(test))]
+    plic_disable(irq);
+    #[cfg(test)]
+    let _ = irq;
+}
+
+/// Unmask (enable) PLIC source `irq`.
+pub fn unmask(irq: u32)
+{
+    #[cfg(not(test))]
+    plic_enable(irq);
+    #[cfg(test)]
+    let _ = irq;
+}
+
+/// Dispatch an external interrupt from the PLIC to its registered signal.
+///
+/// Called from `trap_dispatch` after claiming the interrupt. Routing is
+/// handled by [`crate::irq::dispatch_device_irq`], which masks the source
+/// and sends EOI via [`acknowledge`].
+///
+/// Note: the PLIC complete write (EOI) is performed inside
+/// `dispatch_device_irq` via `acknowledge(irq)`, so the caller (`trap_dispatch`)
+/// must NOT also write the complete register.
 #[cfg(not(test))]
 fn dispatch_external(irq: u32)
 {
-    crate::kprintln!("unexpected external IRQ: {}", irq);
+    // SAFETY: called from interrupt context with interrupts disabled.
+    unsafe { crate::irq::dispatch_device_irq(irq) };
 }
 
 // ── Public interface ──────────────────────────────────────────────────────────
@@ -328,6 +399,16 @@ pub unsafe fn init()
         );
     }
 
+    // Clear sscratch so trap_entry correctly identifies S-mode traps.
+    // The UEFI firmware uses sscratch for its own trap handling and may leave
+    // it non-zero after ExitBootServices (especially if keyboard interrupts
+    // occurred during the firmware phase). A stale non-zero sscratch causes
+    // trap_entry to take the U-mode path for an S-mode trap, writing the
+    // TrapFrame to a bogus address and faulting.
+    unsafe {
+        core::arch::asm!("csrw sscratch, zero", options(nostack, nomem));
+    }
+
     // Clear sstatus.SIE (bit 1), sstatus.SPP (bit 8), sstatus.SUM (bit 18).
     // SIE: global interrupt enable — starts disabled, timer::init() enables it.
     // SPP: previous privilege (0 = U-mode return target).
@@ -349,6 +430,19 @@ pub unsafe fn init()
         );
     }
 
+    // Allow U-mode to read the hardware cycle performance counter
+    // (scounteren.CY = bit 0). Required for userspace cycle-count benchmarks
+    // (equivalent to rdtsc on x86-64). OpenSBI sets mcounteren.CY on QEMU
+    // virt so S-mode access is already granted; this propagates it to U-mode.
+    // Also enables the VDSO-style clock_gettime fast path in the future libc.
+    unsafe {
+        core::arch::asm!(
+            "csrs scounteren, {cy}",
+            cy = in(reg) 1u64,
+            options(nostack, nomem),
+        );
+    }
+
     // Initialise PLIC:
     // - Set priority 1 for all sources (0 = disabled, 1 = lowest priority).
     // - Set threshold to 0 for hart 0 S-mode context (accept all sources ≥ 1).
@@ -363,6 +457,7 @@ pub unsafe fn init()
 }
 
 /// Disable supervisor interrupts. Returns previous SIE state.
+#[allow(dead_code)] // Required by arch interface: kernel/docs/arch-interface.md
 pub fn disable() -> bool
 {
     let prev: u64;
@@ -388,6 +483,7 @@ pub unsafe fn enable()
 }
 
 /// Return `true` if supervisor interrupts are currently enabled.
+#[allow(dead_code)] // Required by arch interface: kernel/docs/arch-interface.md
 pub fn are_enabled() -> bool
 {
     let sstatus: u64;

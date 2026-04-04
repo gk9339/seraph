@@ -25,18 +25,18 @@ use boot_protocol::{PlatformResource, ResourceType};
 //  16: rsdt_address(u32)  20: length(u32)  24: xsdt_address(u64)
 //  32: extended_checksum  33: reserved[3]
 
-const RSDP_SIG: &[u8; 8] = b"RSD PTR ";
-const RSDP_OFF_REVISION: usize = 15;
-const RSDP_OFF_XSDT: usize = 24;
+pub(crate) const RSDP_SIG: &[u8; 8] = b"RSD PTR ";
+pub(crate) const RSDP_OFF_REVISION: usize = 15;
+pub(crate) const RSDP_OFF_XSDT: usize = 24;
 
 // SDT header (36 bytes, common to all ACPI description tables):
 //   0: signature[4]  4: length(u32)  8: revision  9: checksum
 //  10: oemid[6]  16: oemtableid[8]  24: oemrev(u32)  28: creatorid(u32)
 //  32: creatorrev(u32)
 
-const SDT_HDR_LEN: usize = 36;
-const SDT_OFF_SIGNATURE: usize = 0;
-const SDT_OFF_LENGTH: usize = 4;
+pub(crate) const SDT_HDR_LEN: usize = 36;
+pub(crate) const SDT_OFF_SIGNATURE: usize = 0;
+pub(crate) const SDT_OFF_LENGTH: usize = 4;
 
 // MADT offsets (relative to table start, after SDT header):
 const MADT_OFF_LAPIC_BASE: usize = SDT_HDR_LEN; // u32
@@ -51,19 +51,10 @@ const MADT_TYPE_ISO: u8 = 2;
 const MCFG_ENTRIES_OFF: usize = SDT_HDR_LEN + 8;
 const MCFG_ENTRY_SIZE: usize = 16;
 
-// SPCR GAS base_address field offset from table start:
-//   36: interface_type(u8)  37-39: reserved  40: GAS(12 bytes)
-//   GAS layout: address_space_id(u8), bit_width(u8), bit_offset(u8),
-//               access_size(u8), address(u64)
-const SPCR_OFF_IFACE: usize = SDT_HDR_LEN;
-const SPCR_OFF_GAS: usize = SDT_HDR_LEN + 4;
-const SPCR_GAS_ADDR_SPACE_ID: usize = SPCR_OFF_GAS; // u8, 0=MMIO
-const SPCR_GAS_ADDRESS: usize = SPCR_OFF_GAS + 4; // u64
-
 // ── Byte-level read helpers ───────────────────────────────────────────────────
 
 /// Read a little-endian u32 at byte `off` within `buf`. Returns 0 on short read.
-fn read_u32(buf: &[u8], off: usize) -> u32
+pub(crate) fn read_u32(buf: &[u8], off: usize) -> u32
 {
     if off + 4 > buf.len()
     {
@@ -73,7 +64,7 @@ fn read_u32(buf: &[u8], off: usize) -> u32
 }
 
 /// Read a little-endian u64 at byte `off` within `buf`. Returns 0 on short read.
-fn read_u64(buf: &[u8], off: usize) -> u64
+pub(crate) fn read_u64(buf: &[u8], off: usize) -> u64
 {
     if off + 8 > buf.len()
     {
@@ -92,7 +83,7 @@ fn read_u64(buf: &[u8], off: usize) -> u64
 }
 
 /// Read a u8 at byte `off` within `buf`. Returns 0 on short read.
-fn read_u8(buf: &[u8], off: usize) -> u8
+pub(crate) fn read_u8(buf: &[u8], off: usize) -> u8
 {
     buf.get(off).copied().unwrap_or(0)
 }
@@ -112,7 +103,7 @@ fn read_u16(buf: &[u8], off: usize) -> u16
 /// # Safety
 /// `phys` must be a valid, identity-mapped physical address with at least
 /// `len` accessible bytes. The caller must ensure the region lives long enough.
-unsafe fn phys_slice<'a>(phys: u64, len: usize) -> &'a [u8]
+pub(crate) unsafe fn phys_slice<'a>(phys: u64, len: usize) -> &'a [u8]
 {
     unsafe { core::slice::from_raw_parts(phys as *const u8, len) }
 }
@@ -153,18 +144,18 @@ pub unsafe fn parse_acpi_resources(rsdp_addr: u64, out: &mut [PlatformResource])
     let rsdp = unsafe { phys_slice(rsdp_addr, 36) };
     if &rsdp[..8] != RSDP_SIG
     {
-        bprintln!("seraph-boot:     ACPI: bad RSDP signature, skipping");
+        bprintln!("[--------] boot:     ACPI: bad RSDP signature, skipping");
         return 0;
     }
     if read_u8(rsdp, RSDP_OFF_REVISION) < 2
     {
-        bprintln!("seraph-boot:     ACPI: RSDP revision < 2 (no XSDT), skipping");
+        bprintln!("[--------] boot:     ACPI: RSDP revision < 2 (no XSDT), skipping");
         return 0;
     }
     let xsdt_addr = read_u64(rsdp, RSDP_OFF_XSDT);
     if xsdt_addr == 0
     {
-        bprintln!("seraph-boot:     ACPI: XSDT address is zero, skipping");
+        bprintln!("[--------] boot:     ACPI: XSDT address is zero, skipping");
         return 0;
     }
 
@@ -182,13 +173,13 @@ pub unsafe fn parse_acpi_resources(rsdp_addr: u64, out: &mut [PlatformResource])
     let xsdt_hdr = unsafe { phys_slice(xsdt_addr, SDT_HDR_LEN) };
     if &xsdt_hdr[SDT_OFF_SIGNATURE..SDT_OFF_SIGNATURE + 4] != b"XSDT"
     {
-        bprintln!("seraph-boot:     ACPI: bad XSDT signature, skipping subtables");
+        bprintln!("[--------] boot:     ACPI: bad XSDT signature, skipping subtables");
         return count;
     }
     let xsdt_len = read_u32(xsdt_hdr, SDT_OFF_LENGTH) as usize;
     if xsdt_len < SDT_HDR_LEN
     {
-        bprintln!("seraph-boot:     ACPI: XSDT length too small, skipping subtables");
+        bprintln!("[--------] boot:     ACPI: XSDT length too small, skipping subtables");
         return count;
     }
     let xsdt = unsafe { phys_slice(xsdt_addr, xsdt_len) };
@@ -264,75 +255,6 @@ pub unsafe fn parse_acpi_resources(rsdp_addr: u64, out: &mut [PlatformResource])
     let _ = found_madt;
 
     count
-}
-
-/// Find the UART base address from the ACPI SPCR table.
-///
-/// Returns `None` if RSDP is invalid, SPCR is not found, or the base address
-/// space is not MMIO (address_space_id != 0).
-///
-/// # Safety
-/// `rsdp_addr` must be a physical address of a valid, identity-mapped RSDP.
-pub unsafe fn find_spcr_uart_base(rsdp_addr: u64) -> Option<u64>
-{
-    let rsdp = unsafe { phys_slice(rsdp_addr, 36) };
-    if &rsdp[..8] != RSDP_SIG || read_u8(rsdp, RSDP_OFF_REVISION) < 2
-    {
-        return None;
-    }
-    let xsdt_addr = read_u64(rsdp, RSDP_OFF_XSDT);
-    if xsdt_addr == 0
-    {
-        return None;
-    }
-
-    let xsdt_hdr = unsafe { phys_slice(xsdt_addr, SDT_HDR_LEN) };
-    if &xsdt_hdr[SDT_OFF_SIGNATURE..SDT_OFF_SIGNATURE + 4] != b"XSDT"
-    {
-        return None;
-    }
-    let xsdt_len = read_u32(xsdt_hdr, SDT_OFF_LENGTH) as usize;
-    if xsdt_len < SDT_HDR_LEN
-    {
-        return None;
-    }
-    let xsdt = unsafe { phys_slice(xsdt_addr, xsdt_len) };
-    let entries_bytes = &xsdt[SDT_HDR_LEN..];
-    let entry_count = entries_bytes.len() / 8;
-
-    for i in 0..entry_count
-    {
-        let table_addr = read_u64(entries_bytes, i * 8);
-        if table_addr == 0
-        {
-            continue;
-        }
-        let hdr = unsafe { phys_slice(table_addr, SDT_HDR_LEN) };
-        let sig = &hdr[SDT_OFF_SIGNATURE..SDT_OFF_SIGNATURE + 4];
-        if sig != b"SPCR"
-        {
-            continue;
-        }
-        let table_len = read_u32(hdr, SDT_OFF_LENGTH) as usize;
-        if table_len < SPCR_GAS_ADDRESS + 8
-        {
-            return None;
-        }
-        let table = unsafe { phys_slice(table_addr, table_len) };
-        let addr_space = read_u8(table, SPCR_GAS_ADDR_SPACE_ID);
-        if addr_space != 0
-        {
-            // 0 = System Memory (MMIO). I/O port (1) not useful for our mapping.
-            return None;
-        }
-        let uart_base = read_u64(table, SPCR_GAS_ADDRESS);
-        if uart_base != 0
-        {
-            return Some(uart_base);
-        }
-    }
-
-    None
 }
 
 // ── Private table parsers ─────────────────────────────────────────────────────

@@ -337,7 +337,7 @@ fn launch_qemu(binary: &str, args: &[String], desc: &str, verbose: bool) -> Resu
     else
     {
         step(&format!(
-            "Starting QEMU ({}) [output filtered until 'seraph-boot'; --verbose to disable]",
+            "Starting QEMU ({}) [output filtered until '[--------] boot:'; --verbose to disable]",
             desc
         ));
         let mut child = Command::new(binary)
@@ -346,7 +346,7 @@ fn launch_qemu(binary: &str, args: &[String], desc: &str, verbose: bool) -> Resu
             .spawn()
             .with_context(|| format!("failed to launch {}", binary))?;
 
-        // Pipe stdout: suppress all output until 'seraph-boot' appears.
+        // Pipe stdout: suppress all output until '[--------] boot:' appears.
         // This filters out UEFI DEBUG spam and OpenSBI banners on RISC-V.
         // Note: piping stdout disables the QEMU monitor (Ctrl+A c).
         let stdout = child.stdout.take().expect("stdout was piped");
@@ -356,7 +356,7 @@ fn launch_qemu(binary: &str, args: &[String], desc: &str, verbose: bool) -> Resu
         for line in reader.lines()
         {
             let line = line.context("reading QEMU stdout")?;
-            if !show && line.contains("seraph-boot")
+            if !show && line.contains("[--------] boot:")
             {
                 show = true;
             }

@@ -132,10 +132,14 @@ are never reassigned or reused.
                               44  SYS_DEBUG_LOG  [temporary scaffold]
 ```
 
-**Phase 10 implementation status:** Handlers for 0–4 (IPC/signal), 7–8
-(capability creation), 21–22 (yield/exit), 42 (IPC buffer set), and 44
-(debug log) are implemented. All other numbers return `UnknownSyscall`.
-Syscall 44 is a temporary scaffold; see the `SYS_DEBUG_LOG` section below.
+**W6 implementation status:** Handlers implemented as of W6: 0–9 (IPC,
+signal, event queue creation and I/O), 7–8 (endpoint/signal creation),
+10–13 (thread, aspace, cspace, wait set creation), 14–18 (cap management
+and memory), 21–28 (thread lifecycle, wait set operations), 29–30 (IRQ ACK
+and register), 31–36 (cap delete/insert, frame split, MMIO map, ioport bind,
+DMA grant), 41–44 (aspace query, ipc buffer set, system info, debug log).
+All other numbers return `UnknownSyscall`. Syscall 44 is a temporary
+scaffold; see the `SYS_DEBUG_LOG` section below.
 
 ---
 
@@ -159,7 +163,7 @@ pub enum SyscallError
     /// The target endpoint has no receiver waiting (non-blocking variant only).
     WouldBlock         = -5,
     /// The event queue is full; the post was rejected.
-    QueueFull          = -6,
+    QueueFull          = -13,
     /// The referenced object is in a state that does not permit this operation.
     InvalidState       = -7,
     /// The syscall number is not recognised.
@@ -447,7 +451,7 @@ the new address space automatically.
 
 ---
 
-### `SYS_CAP_CREATE_WAIT_SET` (12)
+### `SYS_CAP_CREATE_WAIT_SET` (13)
 
 Create a new wait set.
 
@@ -668,7 +672,7 @@ This is the correct way for any thread to terminate itself, including init.
 
 ## Wait Set Syscalls
 
-### `SYS_WAIT_SET_ADD` (23)
+### `SYS_WAIT_SET_ADD` (26)
 
 Add an IPC primitive to a wait set.
 
@@ -692,7 +696,7 @@ Receive/Wait/Recv rights on the source).
 
 ---
 
-### `SYS_WAIT_SET_REMOVE` (24)
+### `SYS_WAIT_SET_REMOVE` (27)
 
 Remove a previously added source from a wait set.
 
@@ -712,7 +716,7 @@ this wait set).
 
 ---
 
-### `SYS_WAIT_SET_WAIT` (25)
+### `SYS_WAIT_SET_WAIT` (28)
 
 Block until any member of the wait set becomes ready.
 
@@ -738,7 +742,7 @@ are ready simultaneously, subsequent calls return them without blocking.
 
 ## Interrupt Syscall
 
-### `SYS_IRQ_ACK` (26)
+### `SYS_IRQ_ACK` (29)
 
 Acknowledge a hardware interrupt line after handling. Re-enables the line at the
 interrupt controller.
@@ -918,7 +922,7 @@ is already a single page), `OutOfMemory` (no free CSpace slot for second cap).
 
 ---
 
-### `SYS_MMIO_MAP` (33)
+### `SYS_MMIO_MAP` (34)
 
 Map an MMIO region capability into an address space. MMIO mappings use uncacheable
 page attributes (`PAT` write-combine or uncacheable on x86-64; device-ordered on
@@ -947,42 +951,42 @@ regardless of the flags value; callers may not override this.
 
 ---
 
-### `SYS_DMA_GRANT` (35)
+### `SYS_DMA_GRANT` (36)
 
-Program the IOMMU to permit a specific device to perform DMA to or from a physical
-frame. The kernel records the grant in the IOMMU's device-to-domain mapping.
+Return the physical address of a frame for use as a DMA buffer. Currently implements
+the no-IOMMU fallback path only; full IOMMU support is deferred to a later work item.
 
 **Arguments:**
 
 | # | Name | Description |
 |---|---|---|
-| 0 | `process_cap` | Process capability (Control rights) of the owning process |
-| 1 | `frame_cap` | Frame capability (Map rights) to grant DMA access to |
-| 2 | `device_id` | Opaque, platform-specific device identifier (e.g. PCI BDF on x86-64) |
-| 3 | `flags` | Bit 0 = DMA read permitted, bit 1 = DMA write permitted, bit 2 = `FLAG_DMA_UNSAFE` |
+| 0 | `frame_cap` | Frame capability (Map rights) to grant DMA access to |
+| 1 | `device_id` | Reserved; pass 0. Will be used for IOMMU domain lookup when an IOMMU driver is present. |
+| 2 | `flags` | Must include `FLAG_DMA_UNSAFE` (bit 2) to acknowledge no hardware isolation. |
 
-**Return:** `rax`/`a0`: 0 on success; `SyscallError` on failure.
+**Return:** `rax`/`a0`: physical base address of the frame on success;
+`SyscallError` on failure.
 
-The grant is revoked automatically when `frame_cap` is revoked or deleted.
+**DMA safety:** Without an IOMMU, the granting device can access the entire physical
+frame without hardware-enforced isolation. The caller must set `FLAG_DMA_UNSAFE`
+(bit 2 of `flags`) to explicitly acknowledge this. If the flag is absent,
+`DmaUnsafe` is returned and no physical address is disclosed. This is a security
+declaration, not a bypass — callers accept responsibility for limiting the device's
+DMA scope through other means (e.g. only sharing frames owned by the driver process).
 
-**DMA safety:** When no IOMMU is present or the IOMMU has not been configured for
-the specified device, DMA isolation cannot be enforced. In this case the syscall
-returns `DmaUnsafe` unless the caller sets bit 2 (`FLAG_DMA_UNSAFE`) in `flags`,
-explicitly acknowledging that DMA will be unprotected. This flag is not a security
-bypass — it is a declaration that the caller has made a policy decision to proceed
-without hardware isolation. Callers should use `SYS_SYSTEM_INFO(DMA_MODE)` to
-query whether IOMMU protection is available before issuing DMA grants.
+**Deferred:** Full IOMMU support (VT-d programming, device domain isolation, grant
+revocation) is deferred until a real hardware driver requires it. See
+`TODO(W6-deferred)` comments in `kernel/src/syscall/hw.rs`.
 
-**Capability requirements:** `process_cap` (Control), `frame_cap` (Map).
+**Capability requirements:** `frame_cap` (Map rights).
 
-**Errors:** `InvalidCapability`, `AccessDenied`, `InvalidArgument` (unknown
-device_id or invalid flags), `DmaUnsafe` (no IOMMU and `FLAG_DMA_UNSAFE` not set).
+**Errors:** `InvalidCapability`, `DmaUnsafe` (FLAG_DMA_UNSAFE not set).
 
 ---
 
 ## Interrupt Syscalls (continued)
 
-### `SYS_IRQ_REGISTER` (29)
+### `SYS_IRQ_REGISTER` (30)
 
 Register a signal to receive interrupt notifications for a hardware interrupt line.
 When the interrupt fires, the kernel delivers it by ORing a notification bit into
@@ -1008,14 +1012,14 @@ delivering the notification; the driver must call `SYS_IRQ_ACK` to re-enable it.
 
 ---
 
-### `SYS_IOPORT_BIND` (34)
+### `SYS_IOPORT_BIND` (35)
 
 Bind an IoPortRange capability to a thread, granting that thread permission to
 execute `in`/`out` instructions for the capability's port range via the TSS I/O
 Permission Bitmap (IOPB). Ports not authorised by a bound IoPortRange remain
 inaccessible from userspace.
 
-**x86-64 only.** On RISC-V this syscall returns `UnknownSyscall` immediately;
+**x86-64 only.** On RISC-V this syscall returns `NotSupported` immediately;
 there is no port I/O concept.
 
 **Arguments:**
@@ -1044,7 +1048,7 @@ Access is always revocable; there is no persistent, irrevocable grant.
 
 ## Thread Syscalls (continued)
 
-### `SYS_THREAD_SET_PRIORITY` (36)
+### `SYS_THREAD_SET_PRIORITY` (37)
 
 Change a thread's scheduling priority after creation.
 
@@ -1082,7 +1086,7 @@ of range).
 
 ---
 
-### `SYS_THREAD_SET_AFFINITY` (37)
+### `SYS_THREAD_SET_AFFINITY` (38)
 
 Set or change a thread's CPU affinity.
 
@@ -1107,7 +1111,7 @@ out of range).
 
 ---
 
-### `SYS_THREAD_READ_REGS` (38)
+### `SYS_THREAD_READ_REGS` (39)
 
 Read the full register state of a stopped thread into a caller-supplied buffer.
 
@@ -1132,7 +1136,7 @@ is smaller than the required size, the call fails with `InvalidArgument`.
 
 ---
 
-### `SYS_THREAD_WRITE_REGS` (39)
+### `SYS_THREAD_WRITE_REGS` (40)
 
 Write register state into a stopped thread from a caller-supplied buffer.
 
@@ -1159,7 +1163,7 @@ be set). Writing a malformed register file returns `InvalidArgument`.
 
 ## Address Space Syscall
 
-### `SYS_ASPACE_QUERY` (40)
+### `SYS_ASPACE_QUERY` (41)
 
 Query the mapping at a virtual address in an address space.
 
@@ -1216,67 +1220,91 @@ mapped or not writable; checked at registration time).
 
 ---
 
-## System Info Syscall
+## System Info Syscalls
 
-### `SYS_SYSTEM_INFO` (42)
+### `SYS_SYSTEM_INFO` (43)
 
-Query static system information. Allows userspace to make informed policy decisions
-about hardware capabilities without requiring privileged access.
+Query a scalar system value. Returns a single `u64` in `rax`/`a0` — no buffer required.
 
 **Arguments:**
 
 | # | Name | Description |
 |---|---|---|
-| 0 | `info_kind` | Which information to query (see `SystemInfoKind` below) |
-| 1 | `buf_ptr` | Pointer to a caller-supplied buffer to receive the result |
-| 2 | `buf_size` | Size of the buffer in bytes |
+| 0 | `info_type` | Which value to query (see `SystemInfoType` below) |
+| 1 | _(unused)_ | Must be 0 |
 
-**Return:** `rax`/`a0`: number of bytes written on success; `SyscallError` on failure.
+**Return:** `rax`/`a0`: the queried value on success; negative `SyscallError` on failure.
 
-**Capability requirement:** None — this syscall requires no capability. The
-information it returns is non-sensitive platform topology data.
+**Capability requirement:** None.
 
-**Errors:** `InvalidArgument` (unknown `info_kind`, buffer too small, or invalid
-pointer).
+**Errors:** `InvalidArgument` (unknown `info_type`).
 
-### `SystemInfoKind`
+### `SystemInfoType`
 
 ```rust
 #[repr(u64)]
-pub enum SystemInfoKind
+pub enum SystemInfoType
 {
-    /// DMA protection status. Returns a `DmaModeInfo` struct.
+    /// Kernel version packed as `(major as u64) << 32 | (minor as u64) << 16 | patch`.
     ///
-    /// Reports whether an IOMMU is present and active. Userspace (devmgr)
-    /// uses this to decide whether to require `FLAG_DMA_UNSAFE` acknowledgement
-    /// before binding drivers that perform DMA.
-    DmaMode       = 0,
+    /// Semver semantics: major=breaking ABI change, minor=new syscalls added,
+    /// patch=bug fix. Major is 0 while the kernel ABI is pre-stable and
+    /// may change freely between any releases.
+    ///
+    /// Userspace extracts components with:
+    ///   major = version >> 32
+    ///   minor = (version >> 16) & 0xFFFF
+    ///   patch = version & 0xFFFF
+    KernelVersion       = 0,
 
-    /// CPU topology. Returns a `CpuTopologyInfo` struct.
-    ///
-    /// Reports the number of online CPUs, physical core count, and SMT topology.
-    CpuTopology   = 1,
+    /// Number of logical CPUs initialised at boot.
+    CpuCount            = 1,
 
-    /// Platform flags. Returns a `PlatformFlagsInfo` struct.
-    ///
-    /// Reports boolean platform capabilities (e.g. IoPortRange support, IOMMU
-    /// presence, available platform resource types). The exact layout is defined
-    /// in the kernel ABI headers.
-    PlatformFlags = 2,
+    /// Number of free 4 KiB physical frames at the time of the call.
+    FreeFrames          = 2,
+
+    /// Total number of 4 KiB physical frames detected at boot (fixed after boot).
+    /// `FreeFrames / TotalFrames` gives current memory pressure.
+    TotalFrames         = 3,
+
+    /// Size of a physical page in bytes (always 4096 on supported platforms).
+    PageSize            = 4,
+
+    /// Boot protocol version used by the bootloader (see `abi/boot-protocol`).
+    /// Userspace can use this to interpret fields in the boot info struct.
+    BootProtocolVersion = 5,
 }
 ```
 
-The layout of each result struct is defined in the kernel ABI headers. Structs are
-versioned; the first field of each is a `u32` version number so that future additions
-can be detected by userspace.
+---
+
+### `SYS_ASPACE_QUERY` (41)
+
+Translate a user virtual address to its mapped physical address.
+
+**Arguments:**
+
+| # | Name | Description |
+|---|---|---|
+| 0 | `aspace_cap` | AddressSpace cap slot (must have `READ` right) |
+| 1 | `virt` | Page-aligned virtual address to translate (user half only) |
+
+**Return:** `rax`/`a0`: the mapped physical address on success; negative `SyscallError` on failure.
+
+**Capability requirement:** `READ` right on the AddressSpace cap.
+
+**Errors:**
+- `InvalidAddress` — `virt` is not page-aligned, outside the user half (`>= 0x0000_8000_0000_0000`), or not currently mapped.
+- `InvalidCapability` — cap slot is null, wrong type, or object is gone.
+- `InsufficientRights` — cap does not have `READ` right.
 
 ---
 
 ### `SYS_DEBUG_LOG` (44) — TEMPORARY SCAFFOLD
 
 **This syscall is a development scaffold. It will be removed once `logd`
-and the IPC logging path are operational. Do not use it in any component
-that is intended to survive past Phase 10.**
+and the IPC logging path are operational (W11). Do not use it in production
+components.**
 
 Write a UTF-8 string directly to the kernel serial console via `kprintln!`.
 This bypasses the proper userspace logging path (`init` → `logd` via IPC)
@@ -1299,7 +1327,7 @@ The correct production approach is for userspace to send log messages to
 
 **Errors:** `InvalidArgument` (null pointer).
 
-**Removal target:** Phase 11 (once `logd` is running and init uses IPC logging).
+**Removal target:** W11 (once `logd` is running and init uses IPC logging).
 
 ---
 

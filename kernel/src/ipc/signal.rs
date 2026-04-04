@@ -43,6 +43,12 @@ pub struct SignalState
     /// Access to this field is serialised by the owning thread's scheduler
     /// lock. Never read/write from multiple CPUs simultaneously.
     pub waiter: *mut ThreadControlBlock,
+    /// Opaque pointer to the `WaitSetState` this signal is registered with,
+    /// or null if not in any wait set. Type-erased to avoid a circular import.
+    /// Cast to `*mut WaitSetState` only inside wait_set.rs.
+    pub wait_set: *mut u8,
+    /// Index of this signal's entry in `WaitSetState::members`.
+    pub wait_set_member_idx: u8,
 }
 
 // SAFETY: SignalState is accessed only under the relevant scheduler lock.
@@ -57,6 +63,8 @@ impl SignalState
         Self {
             bits: AtomicU64::new(0),
             waiter: core::ptr::null_mut(),
+            wait_set: core::ptr::null_mut(),
+            wait_set_member_idx: 0,
         }
     }
 }
@@ -94,12 +102,20 @@ pub unsafe fn signal_send(sig: *mut SignalState, bits: u64) -> Option<*mut Threa
             (*waiter).wakeup_value = delivered;
             (*waiter).state = crate::sched::thread::ThreadState::Ready;
             (*waiter).ipc_state = IpcThreadState::None;
+            (*waiter).blocked_on_object = core::ptr::null_mut();
         }
         Some(waiter)
     }
     else
     {
         sig.bits.fetch_or(bits, Ordering::Release);
+        // Notify any registered wait set that this signal now has bits pending.
+        if !sig.wait_set.is_null()
+        {
+            // SAFETY: wait_set is a valid *mut WaitSetState registered by
+            // sys_wait_set_add and cleared on removal or wait_set_drop.
+            unsafe { crate::ipc::wait_set::waitset_notify(sig.wait_set, sig.wait_set_member_idx) };
+        }
         None
     }
 }
@@ -133,9 +149,87 @@ pub unsafe fn signal_wait(
     unsafe {
         (*caller).state = crate::sched::thread::ThreadState::Blocked;
         (*caller).ipc_state = IpcThreadState::BlockedOnSignal;
+        (*caller).blocked_on_object = sig as *mut SignalState as *mut u8;
     }
     Err(())
 }
 
 // Import IpcThreadState here to avoid a circular import; it lives in thread.rs.
 use crate::sched::thread::IpcThreadState;
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests
+{
+    use super::*;
+    use core::sync::atomic::Ordering;
+
+    #[test]
+    fn new_state_is_zeroed()
+    {
+        let s = SignalState::new();
+        assert_eq!(s.bits.load(Ordering::Relaxed), 0);
+        assert!(s.waiter.is_null());
+        assert!(s.wait_set.is_null());
+        assert_eq!(s.wait_set_member_idx, 0);
+    }
+
+    #[test]
+    fn bits_fetch_or_accumulates()
+    {
+        let s = SignalState::new();
+        s.bits.fetch_or(0x0F, Ordering::Relaxed);
+        s.bits.fetch_or(0xF0, Ordering::Relaxed);
+        assert_eq!(s.bits.load(Ordering::Relaxed), 0xFF);
+    }
+
+    #[test]
+    fn bits_swap_clears_and_returns_value()
+    {
+        let s = SignalState::new();
+        s.bits.fetch_or(0xDEAD_BEEF, Ordering::Relaxed);
+        let got = s.bits.swap(0, Ordering::Relaxed);
+        assert_eq!(got, 0xDEAD_BEEF);
+        assert_eq!(s.bits.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn bits_independent_after_swap()
+    {
+        // After a swap-to-zero, subsequent ORs start fresh.
+        let s = SignalState::new();
+        s.bits.fetch_or(0xFF, Ordering::Relaxed);
+        s.bits.swap(0, Ordering::Relaxed);
+        s.bits.fetch_or(0x01, Ordering::Relaxed);
+        assert_eq!(s.bits.load(Ordering::Relaxed), 0x01);
+    }
+
+    #[test]
+    fn multiple_fetch_or_accumulates_all_bits()
+    {
+        // Four non-overlapping ORs must accumulate into a single value.
+        let s = SignalState::new();
+        s.bits.fetch_or(0x1, Ordering::Relaxed);
+        s.bits.fetch_or(0x2, Ordering::Relaxed);
+        s.bits.fetch_or(0x4, Ordering::Relaxed);
+        s.bits.fetch_or(0x8, Ordering::Relaxed);
+        let result = s.bits.swap(0, Ordering::Relaxed);
+        assert_eq!(result, 0xF, "all four bit groups must be accumulated");
+    }
+
+    #[test]
+    fn swap_after_multiple_ors_leaves_state_zero()
+    {
+        // swap-to-zero clears all accumulated bits; subsequent ORs start fresh.
+        let s = SignalState::new();
+        s.bits.fetch_or(0xDEAD, Ordering::Relaxed);
+        s.bits.fetch_or(0xBEEF, Ordering::Relaxed);
+        let before = s.bits.swap(0, Ordering::Relaxed);
+        assert_eq!(before, 0xDEAD | 0xBEEF, "swap must return OR of all previous fetches");
+        assert_eq!(s.bits.load(Ordering::Relaxed), 0, "state must be zero after swap");
+        // New OR starts from zero.
+        s.bits.fetch_or(0x1234, Ordering::Relaxed);
+        assert_eq!(s.bits.load(Ordering::Relaxed), 0x1234);
+    }
+}

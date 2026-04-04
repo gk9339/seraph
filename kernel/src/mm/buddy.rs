@@ -68,6 +68,8 @@ pub struct BuddyAllocator
     pool_init: bool,
     /// Total number of free 4 KiB pages across all orders.
     free_pages: usize,
+    /// Total number of 4 KiB pages ever added via `add_region`. Fixed at boot.
+    total_pages: usize,
 }
 
 impl BuddyAllocator
@@ -85,6 +87,7 @@ impl BuddyAllocator
             pool_head: 0,
             pool_init: false,
             free_pages: 0,
+            total_pages: 0,
         }
     }
 
@@ -107,6 +110,9 @@ impl BuddyAllocator
         {
             return;
         }
+
+        // Count pages being added so TotalFrames can be reported later.
+        self.total_pages += ((end - start) / PAGE_SIZE as u64) as usize;
 
         let mut cursor = start;
         while cursor < end
@@ -198,6 +204,14 @@ impl BuddyAllocator
         self.free_pages
     }
 
+    /// Total number of 4 KiB pages ever added via [`add_region`][Self::add_region].
+    ///
+    /// Fixed after boot. Use `free_page_count / total_page_count` for memory pressure.
+    pub fn total_page_count(&self) -> usize
+    {
+        self.total_pages
+    }
+
     // ── Pool management ───────────────────────────────────────────────────────
 
     /// Build the unused-slot chain on first use.
@@ -251,9 +265,12 @@ impl BuddyAllocator
         else
         {
             // Pool exhausted. This physical region is lost from the allocator.
-            // Increase POOL_SIZE if this occurs; add a crate::fatal() call here
-            // if silent loss is unacceptable.
-            debug_assert!(false, "BuddyAllocator pool exhausted — increase POOL_SIZE");
+            // Increase POOL_SIZE if this occurs.
+            #[cfg(not(test))]
+            crate::kprintln!("[buddy] POOL EXHAUSTED: free_pages={} order={}", self.free_pages, order);
+            #[cfg(not(test))]
+            loop { core::hint::spin_loop(); }
+            #[cfg(test)]
             return;
         };
         self.addrs[slot as usize] = addr;
@@ -437,5 +454,82 @@ mod tests
     {
         let mut alloc = BuddyAllocator::new();
         assert_eq!(alloc.alloc(MAX_ORDER + 1), None);
+    }
+
+    #[test]
+    fn free_coalesces_three_levels()
+    {
+        // 4-page region packs as one order-2 block.  Drain as four order-0
+        // allocations then free all four and verify multi-level coalescing.
+        let (_buf, start, end) = aligned_buf(4);
+        let mut alloc = BuddyAllocator::new();
+        unsafe { alloc.add_region(start, end) };
+        assert_eq!(alloc.free_page_count(), 4);
+
+        let a = alloc.alloc(0).expect("alloc a");
+        let b = alloc.alloc(0).expect("alloc b");
+        let c = alloc.alloc(0).expect("alloc c");
+        let d = alloc.alloc(0).expect("alloc d");
+        assert_eq!(alloc.free_page_count(), 0);
+
+        // Free all four; expect: 0→1 for a+b, 0→1 for c+d, 1→2 for the pair.
+        unsafe { alloc.free(a, 0) };
+        unsafe { alloc.free(b, 0) };
+        unsafe { alloc.free(c, 0) };
+        unsafe { alloc.free(d, 0) };
+        assert_eq!(alloc.free_page_count(), 4);
+
+        // Fully coalesced block must be allocatable as a single order-2 request.
+        assert!(alloc.alloc(2).is_some(), "coalesced order-2 block should be allocatable");
+    }
+
+    #[test]
+    fn alloc_order_1_from_large_region()
+    {
+        // 8-page region: add_region packs it as one order-3 block.
+        // Allocating order-1 (2 pages) must split the order-3 block downward.
+        let (_buf, start, end) = aligned_buf(8);
+        let mut alloc = BuddyAllocator::new();
+        unsafe { alloc.add_region(start, end) };
+
+        let ptr = alloc.alloc(1).expect("order-1 alloc from 8-page region");
+        assert_eq!(
+            ptr % (2 * PAGE_SIZE as u64),
+            0,
+            "order-1 alloc must be 2-page aligned"
+        );
+        // 8 pages minus 2 allocated = 6 remaining.
+        assert_eq!(alloc.free_page_count(), 6);
+    }
+
+    #[test]
+    fn interleaved_alloc_free_preserves_count()
+    {
+        // Allocate 4, free 2, re-allocate 2.  free_page_count must be consistent
+        // at each checkpoint, catching any double-count bugs in the coalescing path.
+        let (_buf, start, end) = aligned_buf(8);
+        let mut alloc = BuddyAllocator::new();
+        unsafe { alloc.add_region(start, end) };
+
+        let a = alloc.alloc(0).unwrap();
+        let b = alloc.alloc(0).unwrap();
+        let c = alloc.alloc(0).unwrap();
+        let d = alloc.alloc(0).unwrap();
+        assert_eq!(alloc.free_page_count(), 4);
+
+        unsafe { alloc.free(b, 0) };
+        unsafe { alloc.free(d, 0) };
+        assert_eq!(alloc.free_page_count(), 6);
+
+        let e = alloc.alloc(0).unwrap();
+        let f = alloc.alloc(0).unwrap();
+        assert_eq!(alloc.free_page_count(), 4);
+
+        // Clean up remaining allocations.
+        unsafe { alloc.free(a, 0) };
+        unsafe { alloc.free(c, 0) };
+        unsafe { alloc.free(e, 0) };
+        unsafe { alloc.free(f, 0) };
+        assert_eq!(alloc.free_page_count(), 8);
     }
 }

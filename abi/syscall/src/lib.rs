@@ -129,7 +129,7 @@ pub const SYS_SYSTEM_INFO: u64 = 43;
 /// userspace directly to the kernel's internal console. It will be removed
 /// once `logd` and the IPC logging path are implemented.
 ///
-/// Do not use in any code that is intended to survive past Phase 10.
+/// Do not use in any production code; removed once logd is running (W11).
 pub const SYS_DEBUG_LOG: u64 = 44;
 
 // ── Error codes ───────────────────────────────────────────────────────────────
@@ -166,7 +166,44 @@ pub enum SyscallError
     MsgTooLarge = -11,
     /// Deadlock would occur (IPC cycle detected).
     Deadlock = -12,
+    /// Event queue is full; post would be lost.
+    QueueFull = -13,
+    /// DMA grant requested but no IOMMU is present; caller must set
+    /// `FLAG_DMA_UNSAFE` to acknowledge the absence of hardware isolation.
+    DmaUnsafe = -14,
+    /// The target object is not in the required state for this operation
+    /// (e.g. thread not Stopped for read_regs/write_regs).
+    InvalidState = -15,
+    /// A blocking operation was cancelled because the thread was stopped.
+    /// The stopped thread sees this as the return value of its blocked syscall.
+    Interrupted = -16,
 }
+
+// ── Scheduling constants ──────────────────────────────────────────────────────
+
+/// Default scheduling priority for newly created threads.
+pub const PRIORITY_DEFAULT: u8 = 10;
+/// First priority level requiring a SchedControl capability with Elevate rights.
+pub const SCHED_ELEVATED_MIN: u8 = 21;
+/// Maximum priority available to userspace threads.
+pub const PRIORITY_MAX: u8 = 30;
+
+// ── DMA constants ─────────────────────────────────────────────────────────────
+
+/// Flag for `SYS_DMA_GRANT`: caller acknowledges DMA will not be
+/// IOMMU-isolated and accepts the security implications.
+///
+/// Required when no IOMMU is present (or not configured for the device).
+// TODO(W6-deferred): When an IOMMU driver is added, this flag is ignored for
+// devices covered by an active IOMMU domain; it only applies to the
+// no-IOMMU fallback path. Pick up alongside the VT-d / IOMMU driver.
+pub const FLAG_DMA_UNSAFE: u64 = 1 << 2;
+
+// ── Event Queue constants ─────────────────────────────────────────────────────
+
+/// Maximum capacity (entry count) for an event queue created via
+/// `SYS_CAP_CREATE_EVENT_Q`. Must be in the range 1..=EVENT_QUEUE_MAX_CAPACITY.
+pub const EVENT_QUEUE_MAX_CAPACITY: u32 = 4096;
 
 // ── Message constants ─────────────────────────────────────────────────────────
 
@@ -182,15 +219,52 @@ pub const MSG_REGS_DATA_MAX: usize = 6;
 
 // ── System info ───────────────────────────────────────────────────────────────
 
+/// Kernel version packed as a single `u64`.
+///
+/// Layout: `(major as u64) << 32 | (minor as u64) << 16 | (patch as u64)`
+///
+/// Versioning semantics (semver-style):
+/// - **major** — incremented on breaking syscall ABI changes (syscall removed,
+///   argument layout changed, error code semantics changed). Once the kernel
+///   ABI stabilises this will be `>= 1`; while major is `0` the ABI is
+///   explicitly unstable and may change freely between any releases.
+/// - **minor** — incremented when new syscalls are added without breaking
+///   existing ones.
+/// - **patch** — incremented for bug fixes that do not affect the ABI.
+///
+/// Userspace extracts components with:
+/// ```text
+/// major = version >> 32
+/// minor = (version >> 16) & 0xFFFF
+/// patch = version & 0xFFFF
+/// ```
+///
+/// The version is `0.0.1` during initial kernel development. Major will remain
+/// `0` until the kernel reaches a meaningful level of completeness; during this
+/// phase all ABI changes are considered fully fluid regardless of minor/patch.
+pub const KERNEL_VERSION: u64 = (0u64 << 32) | (0u64 << 16) | 1u64; // 0.0.1
+
 /// Discriminant for `SYS_SYSTEM_INFO` queries.
+///
+/// Each variant returns a single `u64` in the primary return register.
+/// No buffer is required.
 #[repr(u64)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SystemInfoKind
+pub enum SystemInfoType
 {
-    /// Return the kernel protocol version number.
-    KernelVersion = 0,
-    /// Return the number of CPUs detected.
-    CpuCount = 1,
-    /// Return the number of free physical frames.
-    FreeFrames = 2,
+    /// Kernel version packed as `(major << 32) | (minor << 16) | patch`.
+    /// See [`KERNEL_VERSION`] for the current value and encoding details.
+    KernelVersion      = 0,
+    /// Number of logical CPUs initialised at boot.
+    CpuCount           = 1,
+    /// Number of free 4 KiB physical frames at the time of the call.
+    FreeFrames         = 2,
+    /// Total number of 4 KiB physical frames detected at boot.
+    /// `FreeFrames / TotalFrames` gives current memory pressure.
+    TotalFrames        = 3,
+    /// Size of a physical page in bytes (always 4096 on supported platforms).
+    PageSize           = 4,
+    /// Boot protocol version used by the bootloader.
+    /// Userspace can use this to interpret fields in the boot info struct.
+    BootProtocolVersion = 5,
 }

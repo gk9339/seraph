@@ -18,9 +18,8 @@
 //! - Phase 5: architecture hardware init (GDT/IDT/APIC or stvec/PLIC, timer, syscall).
 //! - Phase 6: validate `platform_resources` slice; reject malformed entries before capability minting.
 //! - Phase 7: initialise capability subsystem; mint root CSpace with initial hardware caps.
-//! - Phase 8: initialise per-CPU scheduler state and idle threads (BSP only; SMP in Phase 11).
-//! - Phase 9: create init process address space + TCB; enter user mode.
-//! - Phase 10: CSpace handoff to init; context switching + timer preemption; IPC syscalls.
+//! - Phase 8: initialise per-CPU scheduler state and idle threads (BSP only; SMP in WSMP work item).
+//! - Phase 9: create init process address space + TCB; hand off root CSpace; enter user mode.
 
 #![cfg_attr(not(test), no_std)]
 #![cfg_attr(not(test), no_main)]
@@ -40,6 +39,7 @@ mod cap;
 mod console;
 mod framebuffer;
 mod ipc;
+pub mod irq;
 mod mm;
 mod platform;
 mod sched;
@@ -77,9 +77,13 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
         console::init(info);
     }
 
-    kprintln!("Seraph kernel starting");
-    kprintln!("  boot protocol version: {}", info.version);
-    kprintln!("  architecture: {}", arch::current::ARCH_NAME);
+    // Decode KERNEL_VERSION — the same constant the SYS_SYSTEM_INFO syscall returns —
+    // so the banner and the queryable version are guaranteed to stay in sync.
+    let kver = ::syscall::KERNEL_VERSION;
+    let (kmaj, kmin, kpat) = (kver >> 32, (kver >> 16) & 0xFFFF, kver & 0xFFFF);
+    kprintln!("Seraph kernel v{}.{}.{} ({})", kmaj, kmin, kpat, arch::current::ARCH_NAME);
+    kprintln!("Phase 1: Early Console");
+    kprintln!("boot protocol v{}", info.version);
 
     // ── Phase 2: physical memory ────────────────────────────────────────────
     // Parse the memory map, subtract reserved regions, populate the buddy
@@ -87,9 +91,10 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
     //
     // SAFETY: single-threaded boot; FRAME_ALLOCATOR is not accessed elsewhere.
     let allocator = unsafe { &mut *core::ptr::addr_of_mut!(mm::FRAME_ALLOCATOR) };
+    kprintln!("Phase 2: Memory Map Parsing and Buddy Allocator");
     mm::init::init_physical_memory(info, allocator);
     kprintln!(
-        "  usable RAM: {} MiB",
+        "RAM: {} MiB",
         allocator.free_page_count() * mm::PAGE_SIZE / (1024 * 1024)
     );
 
@@ -119,8 +124,9 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
         }
         console::rebase_framebuffer(fb_phys);
     }
+    kprintln!("Phase 3: Kernel Page Tables");
     kprintln!(
-        "  page tables: active (direct map at {:#x})",
+        "page tables active (direct map {:#x})",
         mm::paging::DIRECT_MAP_BASE
     );
 
@@ -136,45 +142,48 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
     //      physical addresses, so they cannot be identified. Future enhancement:
     //      have the bootloader pass old CR3/satp in BootInfo.
     mm::heap::init();
-    kprintln!("  kernel heap active");
+    kprintln!("Phase 4: Slab Allocator and Kernel Heap");
+    kprintln!("kernel heap active");
 
     // ── Phase 5: architecture hardware initialization ─────────────────────────
-    kprintln!("  phase 5: hardware init");
+    kprintln!("Phase 5: Architecture Hardware Initialisation");
     // SAFETY: single-threaded boot; heap active; direct map active.
     unsafe {
         arch::current::interrupts::init();
     }
-    kprintln!("  interrupts: initialized");
+    kprintln!("interrupts ok");
     // Enable preemption timer at 10 ms period.
     // timer::init() enables interrupts as its final step.
     unsafe {
         arch::current::timer::init(10_000);
     }
-    kprintln!("  timer: running");
+    kprintln!("timer ok");
     unsafe {
         arch::current::syscall::init();
     }
-    kprintln!("  syscall: entry installed");
-    kprintln!("  phase 5: complete");
+    kprintln!("syscall ok");
 
     // ── Phase 6: platform resource validation ─────────────────────────────────
     // Validate platform_resources from BootInfo before Phase 7 mints
     // capabilities from them. Returns only valid, non-overlapping entries.
+    kprintln!("Phase 6: Platform Resource Validation");
     let platform_resources = platform::validate_platform_resources(boot_info as u64);
 
     // ── Phase 7: capability system ─────────────────────────────────────────────
     // Initialises the root CSpace and mints initial capabilities for all
     // boot-provided hardware resources.
+    kprintln!("Phase 7: Capability System");
     let cap_count = cap::init_capability_system(platform_resources, boot_info as u64);
-    kprintln!("  capability system: {} slots populated", cap_count);
+    kprintln!("capability system initialised, {} slots populated", cap_count);
 
     // ── Phase 8: scheduler ────────────────────────────────────────────────────
     // Initialise per-CPU scheduler state and create idle threads.
-    // BSP only (cpu_count = 1); SMP bringup in Phase 10.
+    // BSP only (cpu_count = 1); SMP bringup in WSMP work item.
     //
     // SAFETY: single-threaded boot; heap and page tables are active.
+    kprintln!("Phase 8: Scheduler");
     let cpu_count = sched::init(1, allocator);
-    kprintln!("  scheduler: initialised, {} CPU", cpu_count);
+    kprintln!("scheduler initialised, {} CPU", cpu_count);
 
     // ── Phase 9: create and launch init ───────────────────────────────────────
     // Gated #[cfg(not(test))]: Phase 9 uses heap allocation and arch-specific
@@ -189,12 +198,18 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
             &*(mm::paging::phys_to_virt(boot_info as u64) as *const boot_protocol::BootInfo)
         };
 
-        kprintln!("  phase 9: init image segments: {}", info9.init_image.segment_count);
+        kprintln!("Phase 9: Init Creation and Scheduler Entry");
 
         if info9.init_image.segment_count == 0 || info9.init_image.entry_point == 0
         {
             fatal("Phase 9: init image missing or has no entry point");
         }
+
+        kprintln!(
+            "init: {} segments entry={:#x}",
+            info9.init_image.segment_count,
+            info9.init_image.entry_point
+        );
 
         // Create init's user address space (PML4 / Sv48 root + kernel entries).
         // SAFETY: Phase 3 active, Phase 4 heap active; single-threaded boot.
@@ -212,6 +227,69 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
             .unwrap_or_else(|_| fatal("Phase 9: failed to map init segment"));
         }
 
+        // Insert an AddressSpace cap for init's own address space into the root
+        // CSpace, followed by Frame caps for each init segment. These are needed
+        // so init can create child threads bound to its own address space and map
+        // its code pages into child processes once a process manager is available.
+        //
+        // The AddressSpace cap slot index is passed to init as its initial
+        // argument (a0/rdi). Init locates the segment Frame caps at slots
+        // (init_aspace_slot + 1) through (init_aspace_slot + segment_count).
+        let init_aspace_cap_slot = {
+            use alloc::boxed::Box;
+            use cap::object::{AddressSpaceObject, FrameObject, KernelObjectHeader, ObjectType};
+            use cap::slot::{CapTag, Rights};
+            use boot_protocol::SegmentFlags;
+            use core::ptr::NonNull;
+
+            // SAFETY: ROOT_CSPACE is still owned by the kernel (not yet taken
+            // for init); single-threaded boot.
+            let cs = unsafe { cap::root_cspace_mut() }
+                .unwrap_or_else(|| fatal("Phase 9: ROOT_CSPACE missing"));
+
+            // AddressSpace cap: init can use this to spawn threads in its space.
+            let as_obj = Box::new(AddressSpaceObject {
+                header: KernelObjectHeader::new(ObjectType::AddressSpace),
+                address_space: init_as_ptr,
+            });
+            let as_nn = unsafe {
+                NonNull::new_unchecked(Box::into_raw(as_obj) as *mut KernelObjectHeader)
+            };
+            let slot = cs
+                .insert_cap(CapTag::AddressSpace, Rights::MAP | Rights::READ, as_nn)
+                .unwrap_or_else(|_| fatal("Phase 9: cannot insert init AddressSpace cap"));
+
+            // Frame caps for each init segment (phys base + size + permissions).
+            // Stored in order: slot+1 = segment[0], slot+2 = segment[1], etc.
+            let seg_count = info9.init_image.segment_count as usize;
+            for i in 0..seg_count
+            {
+                let seg = &info9.init_image.segments[i];
+                let rights = match seg.flags
+                {
+                    SegmentFlags::Read        => Rights::MAP,
+                    SegmentFlags::ReadWrite   => Rights::MAP | Rights::WRITE,
+                    SegmentFlags::ReadExecute => Rights::MAP | Rights::EXECUTE,
+                };
+                let fo = Box::new(FrameObject {
+                    header: KernelObjectHeader::new(ObjectType::Frame),
+                    base:   seg.phys_addr,
+                    size:   seg.size,
+                });
+                let fo_nn = unsafe {
+                    NonNull::new_unchecked(Box::into_raw(fo) as *mut KernelObjectHeader)
+                };
+                cs.insert_cap(CapTag::Frame, rights, fo_nn)
+                    .unwrap_or_else(|_| fatal("Phase 9: cannot insert init segment Frame cap"));
+            }
+            kprintln!(
+                "init: aspace cap={} + {} frame caps",
+                slot,
+                seg_count,
+            );
+            slot
+        };
+
         // Map init's user stack (INIT_STACK_PAGES pages below INIT_STACK_TOP).
         // SAFETY: stack_top is page-aligned and within the user address range.
         unsafe {
@@ -222,8 +300,6 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
             )
         }
         .unwrap_or_else(|_| fatal("Phase 9: failed to map init stack"));
-
-        kprintln!("  phase 9: init address space ready");
 
         // Allocate init's kernel stack (KERNEL_STACK_PAGES = 4 pages = 16 KiB).
         let init_kstack_phys = allocator
@@ -238,7 +314,7 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
         let init_saved = arch::current::context::new_state(
             info9.init_image.entry_point,
             init_kstack_top,
-            0, // arg (unused for user threads)
+            init_aspace_cap_slot as u64, // forwarded to init's a0/rdi on first entry
             true,
         );
 
@@ -261,12 +337,14 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
                 address_space:   init_as_ptr,
                 ipc_buffer:      0,
                 wakeup_value:    0,
+                iopb:            core::ptr::null_mut(),
+                blocked_on_object: core::ptr::null_mut(),
                 cspace:          {
                     // Transfer root CSpace ownership to init. ROOT_CSPACE is
                     // an Option<Box<CSpace>> set in Phase 7; take it here so
                     // the raw pointer is valid for the lifetime of the process.
                     // SAFETY: single-threaded boot; ROOT_CSPACE not yet accessed.
-                    let cs = unsafe { cap::ROOT_CSPACE.take() }
+                    let cs = unsafe { cap::take_root_cspace() }
                         .unwrap_or_else(|| fatal("Phase 9: ROOT_CSPACE missing"));
                     alloc::boxed::Box::into_raw(cs)
                 },
@@ -281,7 +359,11 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
             sched.enqueue(init_tcb, sched::INIT_PRIORITY);
         }
 
-        kprintln!("  phase 9: init TCB enqueued (priority {})", sched::INIT_PRIORITY);
+        kprintln!(
+            "init: TCB tid=1 priority={} stack={:#x}",
+            sched::INIT_PRIORITY,
+            init_kstack_top
+        );
 
         // Hand off to the scheduler. Never returns.
         sched::enter();

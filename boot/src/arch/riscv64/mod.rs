@@ -15,10 +15,28 @@ pub use handoff::{perform_handoff, trampoline_page_range};
 pub use paging::BootPageTable;
 
 use crate::elf::EM_RISCV;
-use crate::uefi::{
-    EfiBootServices, EfiRiscvBootProtocol, EfiStatus, EfiSystemTable, EFI_RISCV_BOOT_PROTOCOL_GUID,
-    EFI_SUCCESS,
+use crate::uefi::{EfiGuid, EfiStatus, EfiSystemTable, EFI_SUCCESS};
+
+/// `EFI_RISCV_BOOT_PROTOCOL_GUID`
+/// `{CCD15FEC-6F73-4EEC-8395-3E69E4B940BF}`
+const EFI_RISCV_BOOT_PROTOCOL_GUID: EfiGuid = EfiGuid {
+    data1: 0xCCD1_5FEC,
+    data2: 0x6F73,
+    data3: 0x4EEC,
+    data4: [0x83, 0x95, 0x3E, 0x69, 0xE4, 0xB9, 0x40, 0xBF],
 };
+
+/// `EFI_RISCV_BOOT_PROTOCOL` — provides the boot hart ID on RISC-V platforms.
+///
+/// Located via `LocateProtocol` using [`EFI_RISCV_BOOT_PROTOCOL_GUID`].
+#[repr(C)]
+struct EfiRiscvBootProtocol
+{
+    /// Protocol revision (unused by us).
+    pub revision: u64,
+    /// Query the boot hart ID.
+    pub get_boot_hartid: unsafe extern "efiapi" fn(this: *mut Self, hart_id: *mut u64) -> EfiStatus,
+}
 
 /// ELF machine type expected for RISC-V 64-bit kernel binaries.
 pub const EXPECTED_ELF_MACHINE: u16 = EM_RISCV;

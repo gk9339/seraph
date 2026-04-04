@@ -129,13 +129,22 @@ pub unsafe fn write_msr(msr: u32, val: u64)
 /// Must execute at ring 0. Leaves AC set until `user_access_end` is called,
 /// so any faulting user-pointer dereference between the two calls will not
 /// produce a SMAP fault (but may still fault for other reasons).
+///
+/// # Compiler barrier
+/// `nomem` is intentionally absent so the compiler treats this as a memory
+/// operation. This prevents the compiler from reordering user-memory accesses
+/// (loads OR stores) to before the stac at opt-level ≥ 1. Mirrors Linux's
+/// `stac()` which uses an asm "memory" clobber for the same reason.
 #[cfg(not(test))]
 #[inline]
 pub unsafe fn user_access_begin()
 {
     // SAFETY: stac sets AC in RFLAGS; safe at ring 0 when SMAP is enabled.
+    // nostack: stac does not modify RSP.
+    // (no nomem): acts as a compiler memory barrier — prevents the optimizer
+    // from hoisting user-memory accesses above this instruction.
     unsafe {
-        core::arch::asm!("stac", options(nostack, nomem));
+        core::arch::asm!("stac", options(nostack));
     }
 }
 
@@ -143,13 +152,17 @@ pub unsafe fn user_access_begin()
 ///
 /// # Safety
 /// Must be called after a matching `user_access_begin`.
+///
+/// # Compiler barrier
+/// Like `user_access_begin`, `nomem` is absent to prevent the compiler from
+/// sinking user-memory accesses to after the clac.
 #[cfg(not(test))]
 #[inline]
 pub unsafe fn user_access_end()
 {
     // SAFETY: clac clears AC in RFLAGS; restores SMAP protection.
     unsafe {
-        core::arch::asm!("clac", options(nostack, nomem));
+        core::arch::asm!("clac", options(nostack));
     }
 }
 
@@ -209,6 +222,7 @@ pub fn halt_until_interrupt()
 ///
 /// Phase 5 only starts the BSP (Bootstrap Processor); this will return 0
 /// on a single-CPU QEMU configuration.
+#[allow(dead_code)] // Required by arch interface: kernel/docs/arch-interface.md
 pub fn current_id() -> u32
 {
     let (_eax, ebx, _ecx, _edx) = cpuid(1);

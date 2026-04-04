@@ -3,7 +3,7 @@
 
 // kernel/src/syscall/mod.rs
 
-//! Kernel syscall dispatch (Phase 9).
+//! Kernel syscall dispatch.
 //!
 //! `dispatch` is called from the architecture-specific trap/syscall entry
 //! with a pointer to the current thread's [`TrapFrame`]. It reads the syscall
@@ -23,7 +23,11 @@
 extern crate alloc;
 
 pub mod cap;
+pub mod hw;
 pub mod ipc;
+pub mod mem;
+pub mod sysinfo;
+pub mod thread;
 
 use crate::arch::current::trap_frame::TrapFrame;
 #[cfg(not(test))]
@@ -31,9 +35,16 @@ use syscall::SyscallError;
 
 #[cfg(not(test))]
 use syscall::{
-    SYS_CAP_CREATE_ENDPOINT, SYS_CAP_CREATE_SIGNAL, SYS_DEBUG_LOG, SYS_IPC_BUFFER_SET,
-    SYS_IPC_CALL, SYS_IPC_RECV, SYS_IPC_REPLY, SYS_SIGNAL_SEND, SYS_SIGNAL_WAIT, SYS_THREAD_EXIT,
-    SYS_THREAD_YIELD,
+    SYS_ASPACE_QUERY, SYS_CAP_COPY, SYS_CAP_CREATE_ASPACE, SYS_CAP_CREATE_CSPACE,
+    SYS_CAP_CREATE_ENDPOINT, SYS_CAP_CREATE_EVENT_Q, SYS_CAP_CREATE_SIGNAL,
+    SYS_CAP_CREATE_THREAD, SYS_CAP_CREATE_WAIT_SET, SYS_CAP_DELETE, SYS_CAP_DERIVE,
+    SYS_CAP_INSERT, SYS_CAP_MOVE, SYS_CAP_REVOKE, SYS_DEBUG_LOG, SYS_DMA_GRANT, SYS_EVENT_POST,
+    SYS_EVENT_RECV, SYS_FRAME_SPLIT, SYS_IPC_BUFFER_SET, SYS_IPC_CALL, SYS_IPC_RECV,
+    SYS_IPC_REPLY, SYS_IOPORT_BIND, SYS_IRQ_ACK, SYS_IRQ_REGISTER, SYS_MEM_MAP, SYS_MEM_PROTECT,
+    SYS_MEM_UNMAP, SYS_MMIO_MAP, SYS_SIGNAL_SEND, SYS_SIGNAL_WAIT, SYS_SYSTEM_INFO,
+    SYS_THREAD_CONFIGURE, SYS_THREAD_EXIT, SYS_THREAD_READ_REGS, SYS_THREAD_SET_AFFINITY,
+    SYS_THREAD_SET_PRIORITY, SYS_THREAD_START, SYS_THREAD_STOP, SYS_THREAD_WRITE_REGS,
+    SYS_THREAD_YIELD, SYS_WAIT_SET_ADD, SYS_WAIT_SET_REMOVE, SYS_WAIT_SET_WAIT,
 };
 
 // ── TrapFrame accessor shims ──────────────────────────────────────────────────
@@ -70,10 +81,44 @@ pub unsafe fn dispatch(tf: *mut TrapFrame)
         SYS_SIGNAL_WAIT => ipc::sys_signal_wait(tf),
         SYS_CAP_CREATE_ENDPOINT => cap::sys_cap_create_endpoint(tf),
         SYS_CAP_CREATE_SIGNAL => cap::sys_cap_create_signal(tf),
+        SYS_CAP_CREATE_ASPACE => cap::sys_cap_create_aspace(tf),
+        SYS_CAP_CREATE_CSPACE => cap::sys_cap_create_cspace(tf),
+        SYS_CAP_CREATE_THREAD => cap::sys_cap_create_thread(tf),
+        SYS_CAP_COPY => cap::sys_cap_copy(tf),
+        SYS_CAP_DERIVE => cap::sys_cap_derive(tf),
+        SYS_CAP_DELETE => cap::sys_cap_delete(tf),
+        SYS_CAP_REVOKE => cap::sys_cap_revoke(tf),
+        SYS_CAP_MOVE => cap::sys_cap_move(tf),
+        SYS_CAP_INSERT => cap::sys_cap_insert(tf),
+        SYS_MEM_MAP => mem::sys_mem_map(tf),
+        SYS_MEM_UNMAP => mem::sys_mem_unmap(tf),
+        SYS_MEM_PROTECT => mem::sys_mem_protect(tf),
+        SYS_FRAME_SPLIT => mem::sys_frame_split(tf),
+        SYS_THREAD_CONFIGURE    => thread::sys_thread_configure(tf),
+        SYS_THREAD_START        => thread::sys_thread_start(tf),
+        SYS_THREAD_STOP         => thread::sys_thread_stop(tf),
+        SYS_THREAD_SET_PRIORITY => thread::sys_thread_set_priority(tf),
+        SYS_THREAD_SET_AFFINITY => thread::sys_thread_set_affinity(tf),
+        SYS_THREAD_READ_REGS    => thread::sys_thread_read_regs(tf),
+        SYS_THREAD_WRITE_REGS   => thread::sys_thread_write_regs(tf),
         SYS_IPC_BUFFER_SET => sys_ipc_buffer_set(tf),
         SYS_THREAD_YIELD => sys_yield(tf),
         SYS_THREAD_EXIT => sys_exit(tf),
         SYS_DEBUG_LOG => sys_debug_log(tf),
+        SYS_SYSTEM_INFO => sysinfo::sys_system_info(tf),
+        SYS_ASPACE_QUERY => sysinfo::sys_aspace_query(tf),
+        SYS_EVENT_POST => ipc::sys_event_post(tf),
+        SYS_EVENT_RECV => ipc::sys_event_recv(tf),
+        SYS_CAP_CREATE_EVENT_Q => cap::sys_cap_create_event_queue(tf),
+        SYS_CAP_CREATE_WAIT_SET => cap::sys_cap_create_wait_set(tf),
+        SYS_WAIT_SET_ADD => ipc::sys_wait_set_add(tf),
+        SYS_WAIT_SET_REMOVE => ipc::sys_wait_set_remove(tf),
+        SYS_WAIT_SET_WAIT => ipc::sys_wait_set_wait(tf),
+        SYS_IRQ_ACK => hw::sys_irq_ack(tf),
+        SYS_IRQ_REGISTER => hw::sys_irq_register(tf),
+        SYS_MMIO_MAP => hw::sys_mmio_map(tf),
+        SYS_IOPORT_BIND => hw::sys_ioport_bind(tf),
+        SYS_DMA_GRANT => hw::sys_dma_grant(tf),
         _ => Err(SyscallError::UnknownSyscall),
     };
 
@@ -99,18 +144,33 @@ fn sys_yield(_tf: &mut TrapFrame) -> Result<u64, SyscallError>
 
 /// SYS_THREAD_EXIT (22): terminate the calling thread.
 ///
-/// Phase 9: print a diagnostic and halt. A real implementation would free
-/// the TCB and context-switch to the next runnable thread.
+/// Marks the current thread as `Exited` and calls `schedule()` to switch
+/// to the next runnable thread. The exited thread is never re-enqueued.
+///
+/// Note: full resource cleanup (freeing kernel stack, TCB, CSpace entries)
+/// requires a process-manager teardown path that does not yet exist. For now
+/// the TCB is abandoned in place — it will not be scheduled again.
 #[cfg(not(test))]
 fn sys_exit(_tf: &mut TrapFrame) -> Result<u64, SyscallError>
 {
-    crate::kprintln!("init: SYS_THREAD_EXIT called - halting");
+    use crate::sched::thread::ThreadState;
+    let tcb = unsafe { current_tcb() };
+    if !tcb.is_null()
+    {
+        unsafe { (*tcb).state = ThreadState::Exited; }
+    }
+    // Switch to the next runnable thread. The exited thread is in Exited state
+    // so schedule() will not re-enqueue it.
+    // SAFETY: called from syscall handler on a valid kernel stack.
+    unsafe { crate::sched::schedule(); }
+    // schedule() returns here if the same thread is re-selected (shouldn't
+    // happen for an Exited thread, but halt as a safety net).
     crate::arch::current::cpu::halt_loop();
 }
 
 // ── Scheduler / IPC helpers ───────────────────────────────────────────────────
 
-/// Get the current thread's TCB pointer (BSP only, Phase 10).
+/// Get the current thread's TCB pointer (BSP only; single-CPU until WSMP).
 ///
 /// # Safety
 /// Must be called from a kernel context. SCHEDULERS[0] must have been
@@ -118,7 +178,7 @@ fn sys_exit(_tf: &mut TrapFrame) -> Result<u64, SyscallError>
 #[cfg(not(test))]
 pub(crate) unsafe fn current_tcb() -> *mut crate::sched::thread::ThreadControlBlock
 {
-    // SAFETY: SCHEDULERS[0] is initialised; single-CPU Phase 10.
+    // SAFETY: SCHEDULERS[0] is initialised; single-CPU until WSMP.
     unsafe { crate::sched::scheduler_for(0).current }
 }
 
@@ -191,11 +251,12 @@ fn sys_ipc_buffer_set(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 /// `logd` is available. It reads user memory directly and prints via the
 /// kernel's own console (`kprintln!`). The correct production path is for
 /// userspace to log via IPC to `logd`; this syscall will be removed once
-/// that path is implemented. It must not be used in code that is intended
-/// to survive past Phase 10.
+/// that path is implemented (W11). It must not be used in production code.
 ///
 /// Arguments: arg0 = pointer to string data (user virtual address),
 ///            arg1 = byte length (clamped to 1024).
+///
+/// Removed once logd is running and init uses IPC logging (W11).
 #[cfg(not(test))]
 fn sys_debug_log(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 {

@@ -4,5 +4,10 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 
+[[bin]]
+name = "virtio-blk"
+path = "src/main.rs"
+test = false
+
 [dependencies]
 virtio-core = { path = "../core" }

@@ -8,3 +8,5 @@ publish = false
 # kernel (no_std) and userspace contexts.
 [lib]
 name = "syscall_abi"
+test = false
+doctest = false

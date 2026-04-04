@@ -9,8 +9,9 @@
 //! firmware tables were discovered, allocates a physical page for the result
 //! array, and sorts by `(resource_type, base)` before returning.
 //!
-//! Called between firmware discovery (Step 5) and page table construction
-//! (Step 6) so the allocation can be included in the identity-map budget.
+//! Invoked as part of Step 5 (firmware discovery and platform resources),
+//! before page table construction (Step 6), so the allocation can be included
+//! in the identity-map budget.
 
 use crate::acpi;
 use crate::dtb;
@@ -56,9 +57,9 @@ pub unsafe fn parse_platform_resources(
         // SAFETY: acpi_rsdp is a valid identity-mapped physical address from UEFI.
         let n = unsafe { acpi::parse_acpi_resources(firmware.acpi_rsdp, &mut buf[count..]) };
         count += n;
-        bprint!("seraph-boot:     ACPI: ");
+        bprint!("[--------] boot: ACPI: ");
         unsafe { crate::console::console_write_dec32(n as u32) };
-        bprintln!(" resources parsed");
+        bprintln!(" resources");
     }
 
     // Parse Device Tree blob (present on RISC-V without ACPI, or alongside it).
@@ -67,9 +68,9 @@ pub unsafe fn parse_platform_resources(
         // SAFETY: device_tree is a valid identity-mapped physical address from UEFI.
         let n = unsafe { dtb::parse_dtb_resources(firmware.device_tree, &mut buf[count..]) };
         count += n;
-        bprint!("seraph-boot:     DTB:  ");
+        bprint!("[--------] boot: DTB: ");
         unsafe { crate::console::console_write_dec32(n as u32) };
-        bprintln!(" resources parsed");
+        bprintln!(" resources");
     }
 
     if count == 0

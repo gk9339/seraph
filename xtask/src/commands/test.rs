@@ -56,9 +56,9 @@ fn cargo(ctx: &BuildContext) -> Command
 {
     let mut cmd = Command::new("cargo");
     cmd.current_dir(&ctx.root);
-    // Suppress dead_code warnings in test builds. Stubs intentionally define
-    // functions (e.g. halt_loop) that are only reachable in non-test cfg.
-    // Real dead code will still warn during normal builds.
-    cmd.env("RUSTFLAGS", "-A dead_code");
+    // Suppress all warnings in test builds. Many imports and stubs are
+    // cfg-gated for bare-metal and appear unused on the host target.
+    // Warnings are caught during normal `cargo xtask build` and `run`.
+    cmd.env("RUSTFLAGS", "-A warnings");
     cmd
 }

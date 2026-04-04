@@ -141,13 +141,20 @@ unsafe extern "C" fn common_exception_handler(frame: *const ExceptionFrame) -> !
 {
     // SAFETY: frame pointer is valid — constructed by ISR stubs on this stack.
     let f = unsafe { &*frame };
+    // Read CR2 (faulting address) for page faults (vector 14).
+    let cr2: u64 = if f.vector == 14 {
+        let v: u64;
+        unsafe { core::arch::asm!("mov {}, cr2", out(reg) v, options(nostack, nomem)); }
+        v
+    } else { 0 };
     crate::kprintln!(
-        "EXCEPTION: vector={} error_code={:#x} rip={:#x} cs={:#x} rflags={:#x}",
+        "EXCEPTION: vector={} error_code={:#x} rip={:#x} cs={:#x} rflags={:#x} cr2={:#x}",
         f.vector,
         f.error_code,
         f.rip,
         f.cs,
-        f.rflags
+        f.rflags,
+        cr2,
     );
     fatal("unhandled exception");
 }
@@ -258,6 +265,93 @@ isr_stub!(isr31, 31, has_error_code = false, ist = 0);
 
 // ── Timer and spurious stubs ──────────────────────────────────────────────────
 
+// ── Device IRQ stubs ──────────────────────────────────────────────────────────
+
+/// Generate a naked device IRQ stub for IDT vector `$vector`.
+///
+/// Each stub:
+/// 1. Saves all caller-saved registers.
+/// 2. Calls `irq::dispatch_device_irq(gsi)` where `gsi = vector - 33`.
+/// 3. Restores registers and executes `iretq`.
+///
+/// `dispatch_device_irq` handles masking and EOI internally; the stub itself
+/// does not interact with the APIC or IOAPIC.
+///
+/// # Modification notes
+/// - To add more GSIs: invoke `device_irq_stub!(isr_devN, N)` for each
+///   new vector N, then add `set(N, isr_devN, 0)` in `init()`.
+/// Generate a naked device IRQ stub for IDT vector `DEVICE_VECTOR_BASE + $gsi`.
+///
+/// Each stub:
+/// 1. Saves all caller-saved registers.
+/// 2. Loads the GSI number into `edi` (first argument register).
+/// 3. Calls `irq::dispatch_device_irq(gsi)`.
+/// 4. Restores registers and executes `iretq`.
+///
+/// `dispatch_device_irq` handles masking, signal delivery, and EOI internally.
+///
+/// # Modification notes
+/// - To add more GSIs: `device_irq_stub!(isr_devN, N)` then `set(33+N, isr_devN, 0)`.
+macro_rules! device_irq_stub {
+    ($name:ident, $gsi:literal) => {
+        #[cfg(not(test))]
+        #[unsafe(naked)]
+        unsafe extern "C" fn $name()
+        {
+            core::arch::naked_asm!(
+                "push rax",
+                "push rcx",
+                "push rdx",
+                "push rsi",
+                "push rdi",
+                "push r8",
+                "push r9",
+                "push r10",
+                "push r11",
+                concat!("mov edi, ", $gsi), // GSI as first argument
+                "call {dispatch}",
+                "pop r11",
+                "pop r10",
+                "pop r9",
+                "pop r8",
+                "pop rdi",
+                "pop rsi",
+                "pop rdx",
+                "pop rcx",
+                "pop rax",
+                "iretq",
+                dispatch = sym crate::irq::dispatch_device_irq,
+            );
+        }
+    };
+}
+
+device_irq_stub!(isr_dev0,   0);
+device_irq_stub!(isr_dev1,   1);
+device_irq_stub!(isr_dev2,   2);
+device_irq_stub!(isr_dev3,   3);
+device_irq_stub!(isr_dev4,   4);
+device_irq_stub!(isr_dev5,   5);
+device_irq_stub!(isr_dev6,   6);
+device_irq_stub!(isr_dev7,   7);
+device_irq_stub!(isr_dev8,   8);
+device_irq_stub!(isr_dev9,   9);
+device_irq_stub!(isr_dev10, 10);
+device_irq_stub!(isr_dev11, 11);
+device_irq_stub!(isr_dev12, 12);
+device_irq_stub!(isr_dev13, 13);
+device_irq_stub!(isr_dev14, 14);
+device_irq_stub!(isr_dev15, 15);
+device_irq_stub!(isr_dev16, 16);
+device_irq_stub!(isr_dev17, 17);
+device_irq_stub!(isr_dev18, 18);
+device_irq_stub!(isr_dev19, 19);
+device_irq_stub!(isr_dev20, 20);
+device_irq_stub!(isr_dev21, 21);
+device_irq_stub!(isr_dev22, 22);
+
+// ── Timer and spurious stubs ──────────────────────────────────────────────────
+
 /// APIC timer ISR stub (vector 32).
 ///
 /// Calls `timer::timer_isr`, which increments the tick counter and sends EOI.
@@ -358,6 +452,31 @@ pub unsafe fn init()
     // APIC timer and spurious.
     set(32, isr_timer, 0);
     set(255, isr_spurious, 0);
+
+    // Device IRQ stubs for IOAPIC GSIs 0–22 (vectors 33–55).
+    set(33, isr_dev0,  0);
+    set(34, isr_dev1,  0);
+    set(35, isr_dev2,  0);
+    set(36, isr_dev3,  0);
+    set(37, isr_dev4,  0);
+    set(38, isr_dev5,  0);
+    set(39, isr_dev6,  0);
+    set(40, isr_dev7,  0);
+    set(41, isr_dev8,  0);
+    set(42, isr_dev9,  0);
+    set(43, isr_dev10, 0);
+    set(44, isr_dev11, 0);
+    set(45, isr_dev12, 0);
+    set(46, isr_dev13, 0);
+    set(47, isr_dev14, 0);
+    set(48, isr_dev15, 0);
+    set(49, isr_dev16, 0);
+    set(50, isr_dev17, 0);
+    set(51, isr_dev18, 0);
+    set(52, isr_dev19, 0);
+    set(53, isr_dev20, 0);
+    set(54, isr_dev21, 0);
+    set(55, isr_dev22, 0);
 
     // Load IDTR.
     let idtr = Idtr {

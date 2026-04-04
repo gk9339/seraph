@@ -1,0 +1,15 @@
+
+[package]
+name = "ktest"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "ktest"
+path = "src/main.rs"
+test = false
+
+[dependencies]
+syscall     = { path = "../shared/syscall" }
+syscall-abi = { path = "../abi/syscall" }

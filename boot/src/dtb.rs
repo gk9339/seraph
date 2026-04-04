@@ -37,9 +37,6 @@ const MAX_DEPTH: usize = 8;
 /// Maximum `reg` entries (address+size pairs) extracted per node.
 const MAX_REG_ENTRIES: usize = 8;
 
-/// Maximum interrupt cells extracted per node.
-const MAX_IRQ_ENTRIES: usize = 8;
-
 // ── Public types ──────────────────────────────────────────────────────────────
 
 /// A validated reference to an FDT blob in identity-mapped physical memory.
@@ -70,10 +67,6 @@ pub struct FdtNode
     pub reg_entries: [(u64, u64); MAX_REG_ENTRIES],
     /// Number of valid entries in [`reg_entries`].
     pub reg_count: usize,
-    /// Interrupt numbers from the `interrupts` property (one cell each).
-    pub interrupts: [u32; MAX_IRQ_ENTRIES],
-    /// Number of valid entries in [`interrupts`].
-    pub irq_count: usize,
 }
 
 // ── Per-depth traversal state (private) ───────────────────────────────────────
@@ -85,8 +78,6 @@ struct NodeState
     compatible_matched: bool,
     reg_entries: [(u64, u64); MAX_REG_ENTRIES],
     reg_count: usize,
-    interrupts: [u32; MAX_IRQ_ENTRIES],
-    irq_count: usize,
 }
 
 impl NodeState
@@ -97,8 +88,6 @@ impl NodeState
             compatible_matched: false,
             reg_entries: [(0, 0); MAX_REG_ENTRIES],
             reg_count: 0,
-            interrupts: [0; MAX_IRQ_ENTRIES],
-            irq_count: 0,
         }
     }
 }
@@ -250,8 +239,6 @@ impl Fdt
                         let node = FdtNode {
                             reg_entries: s.reg_entries,
                             reg_count: s.reg_count,
-                            interrupts: s.interrupts,
-                            irq_count: s.irq_count,
                         };
                         if !callback(node)
                         {
@@ -308,44 +295,13 @@ impl Fdt
                             i += 16;
                         }
                     }
-                    else if name == b"interrupts"
-                    {
-                        // One u32 per interrupt cell.
-                        let data = self.struct_slice(data_off, prop_len);
-                        let mut i = 0;
-                        while i + 4 <= data.len() && state.irq_count < MAX_IRQ_ENTRIES
-                        {
-                            let irq = u32::from_be_bytes([
-                                data[i],
-                                data[i + 1],
-                                data[i + 2],
-                                data[i + 3],
-                            ]);
-                            state.interrupts[state.irq_count] = irq;
-                            state.irq_count += 1;
-                            i += 4;
-                        }
-                    }
                 }
                 FDT_NOP =>
                 {}
-                // FDT_END or unknown token: stop walking.
-                _ => break,
+                FDT_END => break, // end of struct block
+                _ => break,       // malformed or unknown token
             }
         }
-    }
-
-    /// Find the first node with a `compatible` string matching `compat`.
-    ///
-    /// Returns `None` if no match is found or the tree is malformed.
-    pub fn find_compatible(&self, compat: &[u8]) -> Option<FdtNode>
-    {
-        let mut result: Option<FdtNode> = None;
-        self.walk_compatible(compat, |node| {
-            result = Some(node);
-            false // stop after first match
-        });
-        result
     }
 
     /// Call `f` for each node whose `compatible` property contains `compat`.
@@ -409,27 +365,6 @@ fn read_be64(buf: &[u8]) -> u64
 
 // ── Public parsing functions ──────────────────────────────────────────────────
 
-/// Return the MMIO base address of the first `ns16550a`-compatible UART node.
-///
-/// Returns `None` if no DTB is present at `dtb_addr`, the magic is invalid,
-/// or no matching node is found.
-///
-/// # Safety
-/// `dtb_addr` must be a physical address of a valid, identity-mapped FDT blob.
-pub unsafe fn find_uart_base(dtb_addr: u64) -> Option<u64>
-{
-    let fdt = unsafe { Fdt::from_raw(dtb_addr) }?;
-    let node = fdt.find_compatible(b"ns16550a")?;
-    if node.reg_count > 0
-    {
-        Some(node.reg_entries[0].0)
-    }
-    else
-    {
-        None
-    }
-}
-
 /// Parse DTB and extract [`PlatformResource`] entries into `out`.
 ///
 /// Returns the number of entries written. Non-fatal on malformed nodes —
@@ -451,7 +386,7 @@ pub unsafe fn parse_dtb_resources(dtb_addr: u64, out: &mut [PlatformResource]) -
         Some(f) => f,
         None =>
         {
-            bprintln!("seraph-boot:     DTB: invalid magic, skipping");
+            bprintln!("[--------] boot:     DTB: invalid magic, skipping");
             return 0;
         }
     };

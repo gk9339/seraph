@@ -12,6 +12,10 @@
 //! Call `discover_uart(st)` before `serial_init()` to update the base. If
 //! discovery is skipped or fails, the hardcoded QEMU default is used silently.
 
+use crate::acpi::{
+    phys_slice, read_u32, read_u64, read_u8, RSDP_OFF_REVISION, RSDP_OFF_XSDT, RSDP_SIG,
+    SDT_HDR_LEN, SDT_OFF_LENGTH, SDT_OFF_SIGNATURE,
+};
 use crate::uefi::{EfiSystemTable, EFI_ACPI_20_TABLE_GUID, EFI_DTB_TABLE_GUID};
 
 /// UART MMIO base address; updated by `discover_uart` before first use.
@@ -22,6 +26,107 @@ static mut UART_BASE_ADDR: usize = 0x1000_0000;
 /// UART register offsets (byte-addressed).
 const UART_TX: usize = 0; // transmit holding register
 const UART_LSR: usize = 5; // line status register
+
+// ── SPCR layout constants ─────────────────────────────────────────────────────
+
+// SPCR GAS base_address field offset from table start:
+//   36: interface_type(u8)  37-39: reserved  40: GAS(12 bytes)
+//   GAS layout: address_space_id(u8), bit_width(u8), bit_offset(u8),
+//               access_size(u8), address(u64)
+const SPCR_OFF_GAS: usize = SDT_HDR_LEN + 4;
+const SPCR_GAS_ADDR_SPACE_ID: usize = SPCR_OFF_GAS; // u8, 0=MMIO
+const SPCR_GAS_ADDRESS: usize = SPCR_OFF_GAS + 4; // u64
+
+// ── UART discovery ────────────────────────────────────────────────────────────
+
+/// Find the UART base address from the ACPI SPCR table.
+///
+/// Returns `None` if RSDP is invalid, SPCR is not found, or the base address
+/// space is not MMIO (address_space_id != 0).
+///
+/// # Safety
+/// `rsdp_addr` must be a physical address of a valid, identity-mapped RSDP.
+unsafe fn find_spcr_uart_base(rsdp_addr: u64) -> Option<u64>
+{
+    let rsdp = unsafe { phys_slice(rsdp_addr, 36) };
+    if &rsdp[..8] != RSDP_SIG || read_u8(rsdp, RSDP_OFF_REVISION) < 2
+    {
+        return None;
+    }
+    let xsdt_addr = read_u64(rsdp, RSDP_OFF_XSDT);
+    if xsdt_addr == 0
+    {
+        return None;
+    }
+
+    let xsdt_hdr = unsafe { phys_slice(xsdt_addr, SDT_HDR_LEN) };
+    if &xsdt_hdr[SDT_OFF_SIGNATURE..SDT_OFF_SIGNATURE + 4] != b"XSDT"
+    {
+        return None;
+    }
+    let xsdt_len = read_u32(xsdt_hdr, SDT_OFF_LENGTH) as usize;
+    if xsdt_len < SDT_HDR_LEN
+    {
+        return None;
+    }
+    let xsdt = unsafe { phys_slice(xsdt_addr, xsdt_len) };
+    let entries_bytes = &xsdt[SDT_HDR_LEN..];
+    let entry_count = entries_bytes.len() / 8;
+
+    for i in 0..entry_count
+    {
+        let table_addr = read_u64(entries_bytes, i * 8);
+        if table_addr == 0
+        {
+            continue;
+        }
+        let hdr = unsafe { phys_slice(table_addr, SDT_HDR_LEN) };
+        let sig = &hdr[SDT_OFF_SIGNATURE..SDT_OFF_SIGNATURE + 4];
+        if sig != b"SPCR"
+        {
+            continue;
+        }
+        let table_len = read_u32(hdr, SDT_OFF_LENGTH) as usize;
+        if table_len < SPCR_GAS_ADDRESS + 8
+        {
+            return None;
+        }
+        let table = unsafe { phys_slice(table_addr, table_len) };
+        let addr_space = read_u8(table, SPCR_GAS_ADDR_SPACE_ID);
+        if addr_space != 0
+        {
+            // 0 = System Memory (MMIO). I/O port (1) not useful for our mapping.
+            return None;
+        }
+        let uart_base = read_u64(table, SPCR_GAS_ADDRESS);
+        if uart_base != 0
+        {
+            return Some(uart_base);
+        }
+    }
+
+    None
+}
+
+/// Find the UART base from a Device Tree (ns16550a-compatible node).
+///
+/// Returns `None` if `dtb_addr` is invalid or no ns16550a node has a `reg`
+/// entry.
+///
+/// # Safety
+/// `dtb_addr` must be a physical address of a valid, identity-mapped FDT blob.
+unsafe fn find_dtb_uart_base(dtb_addr: u64) -> Option<u64>
+{
+    let fdt = unsafe { crate::dtb::Fdt::from_raw(dtb_addr) }?;
+    let mut base: Option<u64> = None;
+    fdt.for_each_compatible(b"ns16550a", |node| {
+        if base.is_none() && node.reg_count > 0
+        {
+            base = Some(node.reg_entries[0].0);
+        }
+    });
+    base
+}
 
 /// Discover the UART MMIO base from ACPI SPCR or Device Tree.
 ///
@@ -38,7 +143,7 @@ pub unsafe fn discover_uart(st: *mut EfiSystemTable)
     if let Some(rsdp_ptr) = unsafe { crate::uefi::find_config_table(st, &EFI_ACPI_20_TABLE_GUID) }
     {
         let rsdp_addr = rsdp_ptr as u64;
-        if let Some(base) = unsafe { crate::acpi::find_spcr_uart_base(rsdp_addr) }
+        if let Some(base) = unsafe { find_spcr_uart_base(rsdp_addr) }
         {
             unsafe { UART_BASE_ADDR = base as usize };
             return;
@@ -49,7 +154,7 @@ pub unsafe fn discover_uart(st: *mut EfiSystemTable)
     if let Some(dtb_ptr) = unsafe { crate::uefi::find_config_table(st, &EFI_DTB_TABLE_GUID) }
     {
         let dtb_addr = dtb_ptr as u64;
-        if let Some(base) = unsafe { crate::dtb::find_uart_base(dtb_addr) }
+        if let Some(base) = unsafe { find_dtb_uart_base(dtb_addr) }
         {
             unsafe { UART_BASE_ADDR = base as usize };
             return;

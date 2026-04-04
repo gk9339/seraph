@@ -103,16 +103,26 @@ for identity mapping so they remain accessible after page table switch.
 
 Detail: [elf-loading.md](elf-loading.md)
 
-### Step 5: Firmware Discovery
+### Step 5: Firmware Discovery and Platform Resources
 
 The UEFI configuration table is scanned for two GUIDs:
 - `EFI_ACPI_20_TABLE_GUID` → physical address of the ACPI RSDP
 - `EFI_DTB_TABLE_GUID` → physical address of the Device Tree blob
 
 Both GUIDs are searched unconditionally; absent entries produce a zero field in
-`BootInfo`. No ACPI or Device Tree content is parsed here — that is deferred to
-`devmgr` in userspace. The `platform_resources` slice in `BootInfo` is empty at
-this stage (count = 0).
+`BootInfo`. After discovery, the bootloader immediately parses whichever firmware
+tables are present:
+
+- If ACPI is present: `parse_acpi_resources()` walks the XSDT and extracts MADT
+  (local APIC base, I/O APIC addresses), MCFG (PCI ECAM windows), and SPCR entries
+  into `PlatformResource` descriptors.
+- If a DTB is present: `parse_dtb_resources()` walks the FDT and extracts PLIC,
+  CLINT, PCIe ECAM, and UART nodes.
+
+The resulting descriptors are sorted by `(resource_type, base)` and stored in a
+physical page that is passed to the kernel via `BootInfo.platform_resources`. Deep
+interpretation of these resources (driver binding, DMA configuration) is left to
+`devmgr` in userspace; the bootloader only produces the raw descriptors.
 
 Detail: [firmware-parsing.md](firmware-parsing.md)
 
@@ -167,7 +177,7 @@ Fields are populated as follows:
 | `framebuffer` | GOP framebuffer from step 1 (zeroed if GOP is absent) |
 | `acpi_rsdp` | Physical address of ACPI RSDP from step 5; zero if GUID absent |
 | `device_tree` | Physical address of DTB from step 5; zero if GUID absent |
-| `platform_resources` | Empty (count = 0); `PlatformResource` extraction deferred to a future milestone |
+| `platform_resources` | Sorted `PlatformResource` array from step 5 (ACPI/DTB parsing); count = 0 if no firmware tables found |
 | `command_line` | Physical address of null-terminated ASCII string; may be empty |
 
 All arrays pointed to by `BootInfo` fields reside in physical memory that the UEFI
@@ -232,7 +242,7 @@ until the kernel installs its own. SSE/AVX are not initialised.
 ```
 
 Secondary harts remain in the UEFI firmware's spin loop or halted state. The kernel
-releases them in Phase 10 of its initialisation sequence via SBI HSM calls.
+will release them during SMP bringup (WSMP work item) via SBI HSM calls.
 
 ---
 

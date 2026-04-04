@@ -115,11 +115,17 @@ impl KernelHeap
         F: FnOnce(&mut KernelHeapInner, &mut BuddyAllocator) -> R,
     {
         // Spin until we acquire the lock.
+        let mut spins = 0u64;
         while self
             .lock
             .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
             .is_err()
         {
+            spins += 1;
+            if spins > 500_000 {
+                crate::kprintln!("[heap] DEADLOCK after {}k spins", spins / 1000);
+                loop { core::hint::spin_loop(); }
+            }
             core::hint::spin_loop();
         }
 
@@ -171,8 +177,7 @@ unsafe impl core::alloc::GlobalAlloc for KernelHeap
             return core::ptr::null_mut();
         }
         self.with_lock(|inner, buddy| {
-            inner
-                .alloc(layout.size(), layout.align(), buddy)
+            inner.alloc(layout.size(), layout.align(), buddy)
                 .unwrap_or(core::ptr::null_mut())
         })
     }

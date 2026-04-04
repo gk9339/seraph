@@ -7,6 +7,8 @@ publish = false
 [[bin]]
 name = "init"
 path = "src/main.rs"
+test = false
 
 [dependencies]
-seraph-syscall = { path = "../shared/syscall" }
+syscall = { path = "../shared/syscall" }
+syscall-abi    = { path = "../abi/syscall" }

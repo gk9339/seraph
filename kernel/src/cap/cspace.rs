@@ -155,10 +155,15 @@ impl CSpace
         let base = page_idx * L2_SIZE;
         // Skip slot 0 in the first page (permanently null, not in free list).
         let start_slot = if page_idx == 0 { 1usize } else { 0usize };
-        let new_free = L2_SIZE - start_slot;
 
-        // Enforce the configured max_slots ceiling.
-        if self.allocated_slots + new_free > self.max_slots
+        // Clamp to the remaining quota. A full page may exceed max_slots (e.g.
+        // when max_slots < L2_SIZE); only add the permitted number of slots to
+        // the free list. The rest of the page is allocated but left unused.
+        let available = L2_SIZE - start_slot;
+        let remaining_quota = self.max_slots.saturating_sub(self.allocated_slots);
+        let new_free = available.min(remaining_quota);
+
+        if new_free == 0
         {
             return Err(CapError::OutOfSlots);
         }
@@ -168,11 +173,12 @@ impl CSpace
         // (Null tag = 0, Rights::NONE = 0, NonNull/Option niches encode None at 0).
         let mut page = Box::new(unsafe { core::mem::zeroed::<CSpacePage>() });
 
-        // Thread slots onto the free list in reverse order so ascending indices
-        // are popped in ascending order (not required for correctness but nice).
+        // Thread only the permitted slots onto the free list in reverse order so
+        // ascending indices are popped in ascending order.
+        let end_slot = start_slot + new_free;
         let old_head = self.free_head;
         let mut next = old_head;
-        for i in (start_slot..L2_SIZE).rev()
+        for i in (start_slot..end_slot).rev()
         {
             let idx = (base + i) as u32;
             page.slots[i].set_next_free(next);
@@ -265,12 +271,143 @@ impl CSpace
         Ok(())
     }
 
+    /// Remove a specific slot index from the free list.
+    ///
+    /// Returns `true` if the index was found and removed, `false` if not on the list.
+    ///
+    /// O(n) walk of the singly-linked free list. Acceptable because callers
+    /// (`insert_cap_at`) are infrequent (only init populating child CSpaces).
+    pub fn remove_from_free_list(&mut self, target: u32) -> bool
+    {
+        if self.free_head == Some(target)
+        {
+            // Target is the head: pop it.
+            let next = self
+                .slot(target)
+                .and_then(|s| s.next_free());
+            self.free_head = next;
+            self.free_count -= 1;
+            return true;
+        }
+        // Walk the list looking for the predecessor.
+        let mut cur_idx = match self.free_head
+        {
+            Some(i) => i,
+            None => return false,
+        };
+        loop
+        {
+            let next_idx = match self.slot(cur_idx).and_then(|s| s.next_free())
+            {
+                Some(i) => i,
+                None => return false,
+            };
+            if next_idx == target
+            {
+                // Splice out: cur.next = target.next
+                let after = self.slot(target).and_then(|s| s.next_free());
+                self.slot_mut(cur_idx).unwrap().set_next_free(after);
+                self.free_count -= 1;
+                return true;
+            }
+            cur_idx = next_idx;
+        }
+    }
+
+    /// Insert a capability at a caller-chosen slot index.
+    ///
+    /// Used by `SYS_CAP_INSERT` to place a cap at a well-known index (e.g.,
+    /// init populating a child's CSpace). The target slot must currently be Null.
+    ///
+    /// # Errors
+    ///
+    /// - [`CapError::InvalidIndex`] — index is 0, out of range, or occupied.
+    /// - [`CapError::WxViolation`] — `rights` has both WRITE and EXECUTE.
+    /// - [`CapError::OutOfMemory`] — backing page allocation failed during grow.
+    pub fn insert_cap_at(
+        &mut self,
+        index: u32,
+        tag: CapTag,
+        rights: Rights,
+        object: core::ptr::NonNull<KernelObjectHeader>,
+    ) -> Result<(), CapError>
+    {
+        if violates_wx(rights)
+        {
+            return Err(CapError::WxViolation);
+        }
+        if index == 0
+        {
+            return Err(CapError::InvalidIndex); // slot 0 is permanently null
+        }
+
+        // Ensure the page covering this index is allocated.
+        let page_idx = index as usize / L2_SIZE;
+        while self.directory[page_idx].is_none()
+        {
+            self.grow()?;
+        }
+
+        // Verify slot is currently Null (free).
+        {
+            let slot = self.slot(index).ok_or(CapError::InvalidIndex)?;
+            if !slot.is_null()
+            {
+                return Err(CapError::InvalidIndex);
+            }
+        }
+
+        // Remove from free list (may or may not be on it if page was just grown).
+        self.remove_from_free_list(index);
+
+        // Populate the slot.
+        let slot = self.slot_mut(index).ok_or(CapError::InvalidIndex)?;
+        slot.tag = tag;
+        slot.rights = rights;
+        slot.object = Some(object);
+        slot.deriv_parent = None;
+        slot.deriv_first_child = None;
+        slot.deriv_next_sibling = None;
+        slot.deriv_prev_sibling = None;
+
+        Ok(())
+    }
+
     /// Count the number of non-null (occupied) slots.
     ///
     /// O(1): derived from `allocated_slots - free_count`.
     pub fn populated_count(&self) -> usize
     {
         self.allocated_slots - self.free_count
+    }
+
+    /// Call `f` for each non-null slot's kernel object pointer.
+    ///
+    /// Used by `dealloc_object(CSpaceObj)` to dec-ref all objects before
+    /// the CSpace pages are freed. Skips slot 0 (permanently null) and
+    /// unallocated pages.
+    pub fn for_each_object<F>(&self, mut f: F)
+    where
+        F: FnMut(NonNull<KernelObjectHeader>),
+    {
+        for page_idx in 0..L1_SIZE
+        {
+            if let Some(page) = &self.directory[page_idx]
+            {
+                let start = if page_idx == 0 { 1 } else { 0 };
+                for slot_idx in start..L2_SIZE
+                {
+                    let slot = &page.slots[slot_idx];
+                    if slot.tag != CapTag::Null
+                    {
+                        if let Some(obj) = slot.object
+                        {
+                            f(obj);
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -410,5 +547,43 @@ mod tests
         let obj = dummy_object();
         cs.insert_cap(CapTag::Frame, Rights::MAP, obj).unwrap();
         assert_eq!(cs.populated_count(), 1);
+    }
+
+    #[test]
+    fn free_list_prioritized_over_new_slots()
+    {
+        // Allocate 3 slots; free the first; verify next alloc reuses it rather
+        // than consuming a brand-new slot beyond the current high-water mark.
+        let mut cs = CSpace::new(0, 16384);
+        let s1 = cs.allocate_slot().unwrap();
+        let s2 = cs.allocate_slot().unwrap();
+        let s3 = cs.allocate_slot().unwrap();
+
+        cs.free_slot(s1);
+
+        // Must return s1 (from free list), not a fresh slot past s3.
+        let s4 = cs.allocate_slot().unwrap();
+        assert_eq!(s4, s1, "free list entry must be reused before consuming new slot space");
+        assert_ne!(s4, s3 + 1, "should not allocate a brand-new slot when free list is non-empty");
+        let _ = (s2, s3);
+    }
+
+    #[test]
+    fn populated_count_accurate_after_repeated_inserts()
+    {
+        // populated_count must increment by exactly 1 for each successful insert.
+        let mut cs = CSpace::new(0, 16384);
+        let obj = dummy_object();
+
+        for expected in 1..=5usize {
+            cs.insert_cap(CapTag::Frame, Rights::MAP, obj).unwrap();
+            assert_eq!(
+                cs.populated_count(),
+                expected,
+                "populated_count should be {} after {} inserts",
+                expected,
+                expected
+            );
+        }
     }
 }

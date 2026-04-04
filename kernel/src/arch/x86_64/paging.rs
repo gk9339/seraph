@@ -23,6 +23,11 @@ use crate::mm::paging::{PageFlags, PagingError, PoolState};
 const PRESENT: u64 = 1 << 0;
 /// Read/Write — 1 allows writes, 0 makes the mapping read-only.
 const WRITABLE: u64 = 1 << 1;
+/// Page Write-Through — used with PCD to select strong uncacheable memory type.
+const PWT: u64 = 1 << 3;
+/// Page Cache Disable — set to force uncacheable mapping (e.g., MMIO).
+/// When combined with PWT (UC-), or used alone per PAT, gives strong UC.
+const PCD: u64 = 1 << 4;
 /// Page Size (PS) — set in a PDE/PDPTE to make it a large-page leaf.
 const LARGE_PAGE: u64 = 1 << 7;
 /// No-Execute — blocks instruction fetch; requires IA32_EFER.NXE = 1.
@@ -69,6 +74,12 @@ impl PageTableEntry
         {
             bits |= NO_EXECUTE;
         }
+        if flags.uncacheable
+        {
+            // PCD|PWT selects the strong uncacheable (UC) memory type,
+            // regardless of PAT configuration. Required for MMIO mappings.
+            bits |= PCD | PWT;
+        }
         Self(bits)
     }
 
@@ -86,6 +97,12 @@ impl PageTableEntry
         if !flags.executable
         {
             bits |= NO_EXECUTE;
+        }
+        if flags.uncacheable
+        {
+            // For large pages, bit 12 in the PDE is the PAT bit, but PCD|PWT
+            // still select the strong UC type when PAT is in default config.
+            bits |= PCD | PWT;
         }
         Self(bits)
     }
@@ -401,6 +418,144 @@ fn user_walk_or_alloc(
     Ok(frame_pa)
 }
 
+/// Flush the TLB entry for a single page at `virt` using `invlpg`.
+///
+/// Must be called after modifying or clearing a leaf PTE so the CPU stops
+/// using the cached translation.
+///
+/// # Safety
+/// Must execute at ring 0. `virt` need not be mapped; `invlpg` on an
+/// unmapped address is safe (architecturally a no-op with respect to faults).
+#[cfg(not(test))]
+pub unsafe fn flush_page(virt: u64)
+{
+    // SAFETY: invlpg is safe at ring 0 for any virtual address.
+    unsafe {
+        core::arch::asm!(
+            "invlpg [{}]",
+            in(reg) virt,
+            options(nostack),
+        );
+    }
+}
+
+/// Remove a single user-space mapping at `virt` from the page table rooted at
+/// `root_virt`.
+///
+/// Walks PML4 → PDPT → PD → PT. If any intermediate level is not present,
+/// returns immediately (nothing to unmap). On reaching the leaf, zeros the
+/// PTE and calls `flush_page`.
+///
+/// Intermediate page table frames are left in place even if they become
+/// empty. Full teardown is deferred until address space destruction.
+///
+/// # Safety
+/// `root_virt` must be the direct-map virtual address of a valid 4 KiB PML4
+/// frame. Called from a kernel context with the frame allocator lock NOT held
+/// (this function does not allocate).
+#[cfg(not(test))]
+pub unsafe fn unmap_user_page(root_virt: u64, virt: u64)
+{
+    use crate::mm::paging::phys_to_virt;
+
+    // Walk PML4 → PDPT → PD → PT, bailing silently at any absent level.
+    let pml4 = unsafe { table_at(root_virt) };
+    let e = pml4[pml4_index(virt)];
+    if !e.is_present() { return; }
+
+    let pdpt = unsafe { table_at(phys_to_virt(e.phys_addr())) };
+    let e = pdpt[pdpt_index(virt)];
+    if !e.is_present() { return; }
+
+    let pd = unsafe { table_at(phys_to_virt(e.phys_addr())) };
+    let e = pd[pd_index(virt)];
+    if !e.is_present() { return; }
+
+    let pt = unsafe { table_at(phys_to_virt(e.phys_addr())) };
+    pt[pt_index(virt)] = PageTableEntry(0);
+
+    unsafe { flush_page(virt) };
+}
+
+/// Change the permission flags on an existing user-space leaf PTE at `virt`.
+///
+/// Walks PML4 → PDPT → PD → PT. Returns `Err(PagingError::NotMapped)` if
+/// the page is not present at any level. On success, rewrites the leaf PTE
+/// with the new `flags` (preserving the physical address and USER bit) and
+/// calls `flush_page`.
+///
+/// # Safety
+/// `root_virt` must be the direct-map virtual address of a valid 4 KiB PML4
+/// frame. Caller must have validated W^X and rights before calling.
+#[cfg(not(test))]
+pub unsafe fn protect_user_page(
+    root_virt: u64,
+    virt: u64,
+    flags: crate::mm::paging::PageFlags,
+) -> Result<(), crate::mm::paging::PagingError>
+{
+    use crate::mm::paging::{phys_to_virt, PagingError};
+
+    let pml4 = unsafe { table_at(root_virt) };
+    let e = pml4[pml4_index(virt)];
+    if !e.is_present() { return Err(PagingError::NotMapped); }
+
+    let pdpt = unsafe { table_at(phys_to_virt(e.phys_addr())) };
+    let e = pdpt[pdpt_index(virt)];
+    if !e.is_present() { return Err(PagingError::NotMapped); }
+
+    let pd = unsafe { table_at(phys_to_virt(e.phys_addr())) };
+    let e = pd[pd_index(virt)];
+    if !e.is_present() { return Err(PagingError::NotMapped); }
+
+    let pt = unsafe { table_at(phys_to_virt(e.phys_addr())) };
+    let leaf = &mut pt[pt_index(virt)];
+    if !leaf.is_present() { return Err(PagingError::NotMapped); }
+
+    let phys = leaf.phys_addr();
+    // Set USER bit (bit 2) to preserve user accessibility.
+    const USER: u64 = 1 << 2;
+    let mut new_pte = PageTableEntry::new_page(phys, flags);
+    new_pte.0 |= USER;
+    *leaf = new_pte;
+
+    unsafe { flush_page(virt) };
+    Ok(())
+}
+
+/// Translate a user virtual address to its mapped physical address and raw PTE.
+///
+/// Walks PML4 → PDPT → PD → PT without modifying any entry or flushing the
+/// TLB. Returns `Some((phys_addr, raw_pte_bits))` if the page is present at
+/// every level, or `None` if any level is not present.
+///
+/// # Safety
+/// `root_virt` must be the direct-map virtual address of a valid 4 KiB PML4
+/// frame.
+#[cfg(not(test))]
+pub unsafe fn translate_user_page(root_virt: u64, virt: u64) -> Option<(u64, u64)>
+{
+    use crate::mm::paging::phys_to_virt;
+
+    let pml4 = unsafe { table_at(root_virt) };
+    let e = pml4[pml4_index(virt)];
+    if !e.is_present() { return None; }
+
+    let pdpt = unsafe { table_at(phys_to_virt(e.phys_addr())) };
+    let e = pdpt[pdpt_index(virt)];
+    if !e.is_present() { return None; }
+
+    let pd = unsafe { table_at(phys_to_virt(e.phys_addr())) };
+    let e = pd[pd_index(virt)];
+    if !e.is_present() { return None; }
+
+    let pt = unsafe { table_at(phys_to_virt(e.phys_addr())) };
+    let leaf = pt[pt_index(virt)];
+    if !leaf.is_present() { return None; }
+
+    Some((leaf.phys_addr(), leaf.0))
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -433,6 +588,7 @@ mod tests
             readable: true,
             writable: false,
             executable: true,
+            uncacheable: false,
         };
         let pte = PageTableEntry::new_page(0x2000, flags);
         assert!(pte.is_present());
@@ -447,11 +603,40 @@ mod tests
             readable: true,
             writable: true,
             executable: false,
+            uncacheable: false,
         };
         let pte = PageTableEntry::new_page(0x3000, flags);
         assert!(pte.is_present());
         assert!(pte.0 & WRITABLE != 0);
         assert!(pte.0 & NO_EXECUTE != 0);
+    }
+
+    #[test]
+    fn new_page_uncacheable_sets_pcd_pwt()
+    {
+        let flags = PageFlags {
+            readable: true,
+            writable: false,
+            executable: false,
+            uncacheable: true,
+        };
+        let pte = PageTableEntry::new_page(0x4000, flags);
+        assert!(pte.0 & PCD != 0, "PCD must be set for uncacheable");
+        assert!(pte.0 & PWT != 0, "PWT must be set for uncacheable");
+    }
+
+    #[test]
+    fn new_page_cacheable_clears_pcd_pwt()
+    {
+        let flags = PageFlags {
+            readable: true,
+            writable: false,
+            executable: false,
+            uncacheable: false,
+        };
+        let pte = PageTableEntry::new_page(0x4000, flags);
+        assert_eq!(pte.0 & PCD, 0, "PCD must be clear for cacheable");
+        assert_eq!(pte.0 & PWT, 0, "PWT must be clear for cacheable");
     }
 
     #[test]
@@ -461,6 +646,7 @@ mod tests
             readable: true,
             writable: true,
             executable: false,
+            uncacheable: false,
         };
         let pte = PageTableEntry::new_large_page(0x20_0000, flags);
         assert!(pte.0 & LARGE_PAGE != 0);

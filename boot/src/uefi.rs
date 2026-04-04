@@ -26,7 +26,7 @@ pub type EfiBool = u8;
 pub const EFI_SUCCESS: EfiStatus = 0;
 pub const EFI_BUFFER_TOO_SMALL: EfiStatus = 0x8000_0000_0000_0005;
 pub const EFI_INVALID_PARAMETER: EfiStatus = 0x8000_0000_0000_0002;
-#[allow(dead_code)]
+#[allow(dead_code)] // Defined for completeness; not all EFI error codes are used in every boot path.
 pub const EFI_NOT_FOUND: EfiStatus = 0x8000_0000_0000_000E;
 
 /// Allocate pages at any available physical address.
@@ -85,15 +85,6 @@ pub const EFI_DTB_TABLE_GUID: EfiGuid = EfiGuid {
     data2: 0xF19C,
     data3: 0x41A5,
     data4: [0x83, 0x0B, 0xD9, 0x15, 0x2C, 0x69, 0xAA, 0xE0],
-};
-
-/// `EFI_RISCV_BOOT_PROTOCOL_GUID`
-/// `{CCD15FEC-6F73-4EEC-8395-3E69E4B940BF}`
-pub const EFI_RISCV_BOOT_PROTOCOL_GUID: EfiGuid = EfiGuid {
-    data1: 0xCCD1_5FEC,
-    data2: 0x6F73,
-    data3: 0x4EEC,
-    data4: [0x83, 0x95, 0x3E, 0x69, 0xE4, 0xB9, 0x40, 0xBF],
 };
 
 /// `EFI_FILE_INFO_ID` GUID
@@ -416,18 +407,6 @@ pub struct EfiGopMode
     pub size_of_info: usize,
     pub frame_buffer_base: u64,
     pub frame_buffer_size: usize,
-}
-
-/// `EFI_RISCV_BOOT_PROTOCOL` — provides the boot hart ID on RISC-V platforms.
-///
-/// Located via `LocateProtocol` using [`EFI_RISCV_BOOT_PROTOCOL_GUID`].
-#[repr(C)]
-pub struct EfiRiscvBootProtocol
-{
-    /// Protocol revision (unused by us).
-    pub revision: u64,
-    /// Query the boot hart ID.
-    pub get_boot_hartid: unsafe extern "efiapi" fn(this: *mut Self, hart_id: *mut u64) -> EfiStatus,
 }
 
 /// `EFI_GRAPHICS_OUTPUT_PROTOCOL` — provides framebuffer information.

@@ -78,6 +78,12 @@ impl SavedState
     /// For a newly created thread this is the entry function address; for a
     /// resumed thread it is the return address from the previous `switch` call.
     pub fn entry_point(&self) -> u64 { self.ra }
+
+    /// Return the initial user-mode argument stored at thread creation.
+    ///
+    /// `new_state` stashes `arg` in `a0`; `sched::enter` reads it back here
+    /// and forwards it to the user-mode TrapFrame via `set_arg0`.
+    pub fn user_arg(&self) -> u64 { self.a0 }
 }
 
 // ── new_state ─────────────────────────────────────────────────────────────────
@@ -90,8 +96,16 @@ impl SavedState
 /// `_is_user`  — unused; user-mode entry uses `return_to_user`.
 pub fn new_state(entry: u64, stack_top: u64, arg: u64, _is_user: bool) -> SavedState
 {
-    // sstatus.SIE (bit 1) — enable supervisor interrupts when thread runs.
-    let sstatus: u64 = 1 << 1;
+    // sstatus.SIE must be 0 here. switch() restores sstatus via csrw before
+    // sp is switched; if SIE=1 an interrupt during that window sees sscratch
+    // non-zero (set by schedule() for user threads) and incorrectly takes the
+    // U-mode trap path, clearing sscratch. The thread then enters U-mode with
+    // sscratch=0, causing the next trap to misidentify S-mode vs U-mode.
+    //
+    // Interrupts are enabled later:
+    //   - User threads: sret in return_to_user sets SIE ← SPIE (=1).
+    //   - Idle thread:  explicitly calls interrupts::enable() in its entry.
+    let sstatus: u64 = 0;
 
     SavedState {
         ra:      entry,

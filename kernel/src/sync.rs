@@ -6,15 +6,19 @@
 //! Kernel synchronisation primitives.
 //!
 //! Provides a ticket spinlock that disables interrupts on lock acquisition and
-//! restores them on drop, preventing timer-driven deadlock when the scheduler
+//! restores them on release, preventing timer-driven deadlock when the scheduler
 //! lock is held.
+//!
+//! # Interface
+//! Use `lock_raw` / `unlock_raw` exclusively. RAII guard support is intentionally
+//! omitted: all current lock sites acquire the lock via `lock_raw` so that the
+//! borrow of the containing struct ends before other fields are mutated inside the
+//! critical section.
 //!
 //! # Adding new primitives
 //! Place reader-writer locks, semaphores, etc. as additional `pub mod` entries
 //! in this file.
 
-use core::cell::UnsafeCell;
-use core::ops::{Deref, DerefMut};
 use core::sync::atomic::{AtomicU32, Ordering};
 
 // ── Spinlock ──────────────────────────────────────────────────────────────────
@@ -25,40 +29,34 @@ use core::sync::atomic::{AtomicU32, Ordering};
 /// `now_serving` (ticket currently allowed to hold the lock). Fairness is
 /// guaranteed: waiters are served in acquisition order.
 ///
-/// Interrupts are disabled on `lock()` and restored to their prior state on
-/// `SpinlockGuard` drop, preventing deadlock from timer preemption.
-pub struct Spinlock<T>
+/// Interrupts are disabled on `lock_raw` and restored on `unlock_raw`,
+/// preventing deadlock from timer preemption.
+pub struct Spinlock
 {
     next_ticket: AtomicU32,
     now_serving: AtomicU32,
-    data: UnsafeCell<T>,
 }
 
-// SAFETY: The spinlock serialises access to T and disables interrupts while
-// held, so T can be sent across thread/CPU boundaries safely.
-unsafe impl<T: Send> Send for Spinlock<T> {}
-unsafe impl<T: Send> Sync for Spinlock<T> {}
+// SAFETY: The spinlock serialises access and disables interrupts while held,
+// so it can safely be sent across thread/CPU boundaries.
+unsafe impl Send for Spinlock {}
+unsafe impl Sync for Spinlock {}
 
-impl<T> Spinlock<T>
+impl Spinlock
 {
-    /// Create a new, unlocked spinlock wrapping `value`.
-    pub const fn new(value: T) -> Self
+    /// Create a new, unlocked spinlock.
+    pub const fn new() -> Self
     {
         Self {
             next_ticket: AtomicU32::new(0),
             now_serving: AtomicU32::new(0),
-            data: UnsafeCell::new(value),
         }
     }
 
-    /// Acquire the lock without RAII, returning the saved interrupt flags.
+    /// Acquire the lock, returning the saved interrupt flags.
     ///
     /// The caller **must** release the lock with [`unlock_raw`][Self::unlock_raw]
-    /// after finishing the critical section. Use [`lock`][Self::lock] (RAII) in
-    /// preference wherever possible; `lock_raw` exists for cases where holding a
-    /// borrow to `Self` for the duration of the guard would create an aliasing
-    /// conflict (e.g., when other fields of the same struct must be mutated while
-    /// the lock is held).
+    /// after finishing the critical section.
     ///
     /// # Safety
     /// The returned `u64` must be passed verbatim to `unlock_raw`. Failure to
@@ -85,69 +83,6 @@ impl<T> Spinlock<T>
     {
         self.now_serving.fetch_add(1, Ordering::Release);
         restore_interrupts(saved_flags);
-    }
-
-    /// Acquire the lock.
-    ///
-    /// Disables interrupts, takes a ticket, then spins until that ticket is
-    /// served. Returns a [`SpinlockGuard`] that re-enables interrupts on drop.
-    pub fn lock(&self) -> SpinlockGuard<'_, T>
-    {
-        // Disable interrupts before taking a ticket to prevent a timer
-        // interrupt from arriving after we check the lock but before we
-        // disable interrupts, which would leave interrupts disabled
-        // unexpectedly.
-        let saved = save_and_disable_interrupts();
-
-        let ticket = self.next_ticket.fetch_add(1, Ordering::Relaxed);
-        while self.now_serving.load(Ordering::Acquire) != ticket
-        {
-            core::hint::spin_loop();
-        }
-
-        SpinlockGuard {
-            lock: self,
-            saved_flags: saved,
-        }
-    }
-}
-
-/// RAII guard returned by [`Spinlock::lock`].
-///
-/// Releases the lock and restores interrupt state when dropped.
-pub struct SpinlockGuard<'a, T>
-{
-    lock: &'a Spinlock<T>,
-    saved_flags: u64,
-}
-
-impl<T> Drop for SpinlockGuard<'_, T>
-{
-    fn drop(&mut self)
-    {
-        // Release the lock by advancing now_serving, then restore interrupts.
-        self.lock.now_serving.fetch_add(1, Ordering::Release);
-        restore_interrupts(self.saved_flags);
-    }
-}
-
-impl<T> Deref for SpinlockGuard<'_, T>
-{
-    type Target = T;
-
-    fn deref(&self) -> &T
-    {
-        // SAFETY: we hold the lock; no other holder can exist.
-        unsafe { &*self.lock.data.get() }
-    }
-}
-
-impl<T> DerefMut for SpinlockGuard<'_, T>
-{
-    fn deref_mut(&mut self) -> &mut T
-    {
-        // SAFETY: we hold the lock exclusively.
-        unsafe { &mut *self.lock.data.get() }
     }
 }
 
@@ -191,28 +126,28 @@ mod tests
     use super::*;
 
     #[test]
-    fn lock_unlock()
+    fn lock_unlock_sequence()
     {
-        let sl = Spinlock::new(42u32);
-        {
-            let mut g = sl.lock();
-            assert_eq!(*g, 42);
-            *g = 99;
+        let sl = Spinlock::new();
+        unsafe {
+            let s1 = sl.lock_raw();
+            sl.unlock_raw(s1);
+            let s2 = sl.lock_raw();
+            sl.unlock_raw(s2);
         }
-        let g = sl.lock();
-        assert_eq!(*g, 99);
+        // No deadlock means the ticket counter advanced correctly.
     }
 
     #[test]
-    fn sequential_acquisition()
+    fn sequential_locks()
     {
-        let sl = Spinlock::new(0u32);
-        for i in 0..10u32
+        let sl = Spinlock::new();
+        for _ in 0..10
         {
-            let mut g = sl.lock();
-            *g = i;
+            unsafe {
+                let s = sl.lock_raw();
+                sl.unlock_raw(s);
+            }
         }
-        let g = sl.lock();
-        assert_eq!(*g, 9);
     }
 }

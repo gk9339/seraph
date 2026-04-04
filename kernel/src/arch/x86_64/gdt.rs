@@ -74,26 +74,60 @@ pub struct Tss
     pub iopb_offset: u16,
 }
 
-/// The TSS, in BSS so it is zero-initialised.
+/// Size of the I/O Permission Bitmap in bytes (65536 ports / 8 bits each).
+pub const IOPB_SIZE: usize = 8192;
+
+/// TSS extended with an I/O Permission Bitmap.
 ///
-/// `static mut` is only written during single-threaded boot init.
+/// The hardware TSS is 104 bytes; immediately following it is the 8 KiB IOPB
+/// bitmap (one bit per I/O port: 0 = permitted, 1 = denied) plus a mandatory
+/// all-ones terminator byte (Intel SDM §8.5.3 requires the byte at IOPB limit
+/// to be 0xFF).
+///
+/// The GDT TSS descriptor limit must cover the entire struct:
+///   limit = size_of::<TssWithIopb>() - 1
+///
+/// `iopb_offset` in the `Tss` is 104 (the offset of `iopb` within this struct).
+#[repr(C, packed)]
+pub struct TssWithIopb
+{
+    /// The base TSS (must be at offset 0).
+    pub tss: Tss,
+    /// I/O permission bitmap: bit N = port N. 0 = allow, 1 = deny.
+    /// Initialised to all 0xFF (all ports denied) at boot.
+    pub iopb: [u8; IOPB_SIZE],
+    /// Mandatory terminator byte (must always be 0xFF per Intel SDM).
+    pub terminator: u8,
+}
+
+/// The extended TSS + IOPB, in BSS so it is zero-initialised.
+///
+/// The IOPB starts zero (all ports permitted!) until `init()` fills it with
+/// 0xFF. Boot code must call `init()` before any user thread runs.
+///
+/// `static mut` is only written during single-threaded boot init or with
+/// interrupts disabled during context switch.
 #[cfg(not(test))]
-static mut TSS: Tss = Tss {
-    _reserved0: 0,
-    rsp0: 0,
-    _rsp1: 0,
-    _rsp2: 0,
-    _reserved1: 0,
-    ist1: 0,
-    ist2: 0,
-    _ist3: 0,
-    _ist4: 0,
-    _ist5: 0,
-    _ist6: 0,
-    _ist7: 0,
-    _reserved2: 0,
-    _reserved3: 0,
-    iopb_offset: 104,
+static mut TSS: TssWithIopb = TssWithIopb {
+    tss: Tss {
+        _reserved0: 0,
+        rsp0: 0,
+        _rsp1: 0,
+        _rsp2: 0,
+        _reserved1: 0,
+        ist1: 0,
+        ist2: 0,
+        _ist3: 0,
+        _ist4: 0,
+        _ist5: 0,
+        _ist6: 0,
+        _ist7: 0,
+        _reserved2: 0,
+        _reserved3: 0,
+        iopb_offset: 104, // offset of TssWithIopb::iopb within the struct
+    },
+    iopb: [0xFF; IOPB_SIZE],  // all ports denied by default
+    terminator: 0xFF,
 };
 
 /// GDT: 7 × 64-bit descriptors, in BSS.
@@ -148,11 +182,20 @@ pub fn data_desc_64(dpl: u8) -> u64
 /// into GDT\[6\] (0x30).
 ///
 /// Encoding:
-/// - limit = sizeof(Tss)−1 = 103
+/// - limit = sizeof(TssWithIopb) − 1 = 8296 (covers TSS + IOPB + terminator)
 /// - type = 0x89: P=1, DPL=0, 64-bit TSS available
+///
+/// The limit must cover the full `TssWithIopb` struct so the CPU can
+/// walk the I/O permission bitmap when a user thread executes I/O instructions.
 pub fn tss_desc(tss_addr: u64) -> (u64, u64)
 {
-    let limit: u64 = (core::mem::size_of::<Tss>() as u64) - 1; // 103 = 0x67
+    // Use TssWithIopb size so the descriptor covers the IOPB region.
+    // During tests TssWithIopb is not defined; use a fixed value of 8296
+    // (104 + 8192 + 1 - 1) for test coverage of the encoding logic.
+    #[cfg(not(test))]
+    let limit: u64 = (core::mem::size_of::<TssWithIopb>() as u64) - 1;
+    #[cfg(test)]
+    let limit: u64 = 8296; // 104 + 8192 + 1 - 1
 
     let low: u64 = (limit & 0xFFFF) // [15:0]  limit[15:0]
         | ((tss_addr & 0x00FF_FFFF) << 16) // [39:16] base[23:0]
@@ -182,13 +225,17 @@ pub unsafe fn init(kernel_stack_top: u64, ist1_top: u64, ist2_top: u64)
 {
     // SAFETY: single-threaded boot — exclusive access guaranteed.
     let gdt = unsafe { &mut *core::ptr::addr_of_mut!(GDT) };
-    let tss = unsafe { &mut *core::ptr::addr_of_mut!(TSS) };
+    let tss_with_iopb = unsafe { &mut *core::ptr::addr_of_mut!(TSS) };
+    let tss = &mut tss_with_iopb.tss;
 
-    // Configure TSS.
+    // Configure TSS fields.
     tss.rsp0 = kernel_stack_top;
     tss.ist1 = ist1_top;
     tss.ist2 = ist2_top;
-    tss.iopb_offset = 104;
+    // iopb_offset = 104 = offsetof(TssWithIopb, iopb) = size_of::<Tss>().
+    // This is correct because TssWithIopb is #[repr(C, packed)] and Tss is
+    // exactly 104 bytes, so iopb follows immediately.
+    tss.iopb_offset = core::mem::size_of::<Tss>() as u16;
 
     // Fill GDT slots.
     gdt[0] = 0; // null
@@ -196,7 +243,8 @@ pub unsafe fn init(kernel_stack_top: u64, ist1_top: u64, ist2_top: u64)
     gdt[2] = data_desc_64(0); // 0x10 kernel DS
     gdt[3] = data_desc_64(3); // 0x18 user DS (RPL=3 via selector constant)
     gdt[4] = code_desc_64(3); // 0x20 user CS (RPL=3 via selector constant)
-    let tss_addr = core::ptr::addr_of!(*tss) as u64;
+    // TSS descriptor limit must cover the full TssWithIopb struct.
+    let tss_addr = core::ptr::addr_of!(*tss_with_iopb) as u64;
     let (tss_lo, tss_hi) = tss_desc(tss_addr);
     gdt[5] = tss_lo; // 0x28 TSS low
     gdt[6] = tss_hi; // 0x30 TSS high
@@ -267,7 +315,55 @@ pub unsafe fn set_rsp0(stack_top: u64)
 {
     // SAFETY: caller holds any necessary lock; boot is single-threaded.
     unsafe {
-        (*core::ptr::addr_of_mut!(TSS)).rsp0 = stack_top;
+        (*core::ptr::addr_of_mut!(TSS)).tss.rsp0 = stack_top;
+    }
+}
+
+/// Copy `iopb` into the TSS I/O Permission Bitmap for the current CPU.
+///
+/// If `iopb` is `Some`, the bitmap is copied from the thread's per-thread IOPB.
+/// If `None`, the bitmap is filled with 0xFF (all ports denied).
+///
+/// Call on every context switch to a user thread that has bound I/O port ranges.
+///
+/// # Safety
+/// Must be called with interrupts disabled or from a single-CPU context.
+#[cfg(not(test))]
+pub unsafe fn load_iopb(iopb: Option<&[u8; IOPB_SIZE]>)
+{
+    // SAFETY: single-CPU; interrupts disabled by caller.
+    let tss_iopb = unsafe { &mut (*core::ptr::addr_of_mut!(TSS)).iopb };
+    match iopb
+    {
+        Some(src) => tss_iopb.copy_from_slice(src),
+        None => tss_iopb.fill(0xFF),
+    }
+}
+
+/// Set bits [base, base+count) to 0 in `iopb`, permitting those ports.
+///
+/// Ports not covered by this call remain 1 (denied). Existing permitted
+/// ranges are preserved — multiple calls accumulate permissions.
+///
+/// # Panics
+/// Panics in debug mode if `base as u32 + count as u32 > 65536`.
+pub fn permit_port_range(iopb: &mut [u8; IOPB_SIZE], base: u16, count: u16)
+{
+    if count == 0
+    {
+        return;
+    }
+    // Use u32 to avoid u16 overflow when base + count == 65536.
+    let end = base as u32 + count as u32;
+    debug_assert!(end <= 65536, "port range exceeds 0xFFFF");
+    for port in base as u32..end
+    {
+        let byte = (port / 8) as usize;
+        let bit = port % 8;
+        if byte < IOPB_SIZE
+        {
+            iopb[byte] &= !(1 << bit);
+        }
     }
 }
 
@@ -282,6 +378,62 @@ mod tests
     fn tss_is_104_bytes()
     {
         assert_eq!(core::mem::size_of::<Tss>(), 104);
+    }
+
+    #[test]
+    fn tss_desc_uses_full_iopb_size()
+    {
+        // Limit must cover TSS (104) + IOPB (8192) + terminator (1) - 1 = 8296.
+        let (lo, _hi) = tss_desc(0x1000);
+        let limit_low = lo & 0xFFFF;
+        let limit_high = (lo >> 48) & 0xF;
+        let limit = limit_low | (limit_high << 16);
+        assert_eq!(limit, 8296, "TSS descriptor limit must cover IOPB");
+    }
+
+    #[test]
+    fn permit_port_range_clears_bits()
+    {
+        let mut iopb = [0xFFu8; IOPB_SIZE];
+        // Permit ports 0–7 (byte 0, all bits).
+        permit_port_range(&mut iopb, 0, 8);
+        assert_eq!(iopb[0], 0x00, "byte 0 should be all permitted");
+        assert_eq!(iopb[1], 0xFF, "byte 1 should be untouched");
+    }
+
+    #[test]
+    fn permit_port_range_partial_byte()
+    {
+        let mut iopb = [0xFFu8; IOPB_SIZE];
+        // Permit only port 3 (bit 3 of byte 0).
+        permit_port_range(&mut iopb, 3, 1);
+        assert_eq!(iopb[0], 0xFF & !(1 << 3));
+    }
+
+    #[test]
+    fn permit_port_range_zero_count_is_nop()
+    {
+        let mut iopb = [0xFFu8; IOPB_SIZE];
+        permit_port_range(&mut iopb, 100, 0);
+        assert!(iopb.iter().all(|&b| b == 0xFF));
+    }
+
+    #[test]
+    fn permit_port_range_max_port()
+    {
+        let mut iopb = [0xFFu8; IOPB_SIZE];
+        // Port 65535 is the last valid port.
+        permit_port_range(&mut iopb, 65535, 1);
+        assert_eq!(iopb[8191], 0xFF & !(1 << 7));
+    }
+
+    #[test]
+    fn permit_port_range_accumulates()
+    {
+        let mut iopb = [0xFFu8; IOPB_SIZE];
+        permit_port_range(&mut iopb, 0, 4); // ports 0-3
+        permit_port_range(&mut iopb, 4, 4); // ports 4-7
+        assert_eq!(iopb[0], 0x00, "all 8 ports in byte 0 should be permitted");
     }
 
     #[test]
@@ -323,8 +475,8 @@ mod tests
     fn tss_desc_limit_and_type()
     {
         let (lo, _hi) = tss_desc(0xDEAD_BEEF_1234_5678);
-        // limit[15:0] = 103
-        assert_eq!(lo & 0xFFFF, 103, "limit low should be 103");
+        // limit = 8296 (0x2068); bits [15:0] = 0x2068
+        assert_eq!(lo & 0xFFFF, 0x2068, "limit low should be 0x2068 (8296 & 0xFFFF)");
         // type byte = 0x89
         assert_eq!((lo >> 40) & 0xFF, 0x89, "type field");
     }

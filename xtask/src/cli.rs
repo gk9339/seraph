@@ -66,6 +66,7 @@ pub enum BuildComponent
     Boot,
     Kernel,
     Init,
+    Ktest,
     Procmgr,
     Devmgr,
     Vfsd,
@@ -101,7 +102,7 @@ pub struct RunArgs
     /// Show all serial output including pre-boot firmware noise (filtered by default).
     ///
     /// By default, output is suppressed until the first line containing
-    /// 'seraph-boot', hiding UEFI/OpenSBI debug spam.
+    /// '[--------] boot:', hiding UEFI/OpenSBI debug spam.
     #[arg(long)]
     pub verbose: bool,
 

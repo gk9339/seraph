@@ -120,6 +120,12 @@ impl TrapFrame
         self.sepc = entry;
         self.sp   = stack; // x2 = user stack pointer
     }
+
+    /// Set the first argument register (a0 = x10) in the frame.
+    ///
+    /// Used by `SYS_THREAD_CONFIGURE` to pass the initial argument value to
+    /// the new thread when it first enters user mode.
+    pub fn set_arg0(&mut self, val: u64) { self.a0 = val; }
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────

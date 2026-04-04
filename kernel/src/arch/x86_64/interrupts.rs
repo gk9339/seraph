@@ -155,6 +155,12 @@ pub unsafe fn init()
         apic_write(APIC_LVT_THERMAL, LVT_MASK);
         apic_write(APIC_LVT_PERF, LVT_MASK);
     }
+
+    // 7. Initialise the I/O APIC: discover entry count and mask all entries.
+    // SAFETY: direct map is active; IOAPIC MMIO region is in MMIO_DIRECT_MAP_REGIONS.
+    unsafe {
+        super::ioapic::init();
+    }
 }
 
 /// No-op test stub: interrupt initialisation cannot run in host unit tests.
@@ -164,6 +170,7 @@ pub unsafe fn init() {}
 /// Disable interrupts and return the previous IF state.
 ///
 /// Returns `true` if interrupts were enabled before the call.
+#[allow(dead_code)] // Required by arch interface: kernel/docs/arch-interface.md
 pub fn disable() -> bool
 {
     let rflags: u64;
@@ -193,6 +200,7 @@ pub unsafe fn enable()
 }
 
 /// Return `true` if the interrupt flag (IF) is set in RFLAGS.
+#[allow(dead_code)] // Required by arch interface: kernel/docs/arch-interface.md
 pub fn are_enabled() -> bool
 {
     let rflags: u64;
@@ -224,25 +232,38 @@ pub fn acknowledge(_irq: u32)
 #[cfg(test)]
 pub fn acknowledge(_irq: u32) {}
 
-/// Register a handler for IRQ `irq`.
-///
-/// Stub only — dynamic IRQ routing is deferred to a later phase.
+/// Mask (disable delivery of) GSI `irq` at the I/O APIC.
 ///
 /// # Safety
-/// Caller must ensure `handler` is correct for the given IRQ.
-pub unsafe fn register_handler(_irq: u32, _handler: fn(u32))
+/// Must be called after Phase 5 init (IOAPIC initialised).
+#[cfg(not(test))]
+pub fn mask(irq: u32)
 {
-    // TODO: implement dynamic handler table in a later phase.
+    // SAFETY: IOAPIC is initialised in Phase 5 before any device IRQs fire.
+    unsafe { super::ioapic::mask(irq) }
 }
 
-/// Mask (disable delivery of) IRQ `irq`.
-///
-/// Stub — extended in a later phase when the IOAPIC is configured.
+/// No-op test stub.
+#[cfg(test)]
 pub fn mask(_irq: u32) {}
 
-/// Unmask (enable delivery of) IRQ `irq`.
+/// Unmask (enable delivery of) GSI `irq` at the I/O APIC.
 ///
-/// Stub — extended in a later phase when the IOAPIC is configured.
+/// Call after `SYS_IRQ_REGISTER` routes the GSI and after `SYS_IRQ_ACK`
+/// re-enables delivery following interrupt handling.
+///
+/// # Safety
+/// Must be called after Phase 5 init and after the GSI has been routed
+/// via [`ioapic::route`].
+#[cfg(not(test))]
+pub fn unmask(irq: u32)
+{
+    // SAFETY: IOAPIC is initialised in Phase 5.
+    unsafe { super::ioapic::unmask(irq) }
+}
+
+/// No-op test stub.
+#[cfg(test)]
 pub fn unmask(_irq: u32) {}
 
 // ── Tests ─────────────────────────────────────────────────────────────────────

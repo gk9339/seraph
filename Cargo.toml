@@ -4,6 +4,7 @@ members = [
     "kernel",
     "boot",
     "init",
+    "ktest",
     "procmgr",
     "svcmgr",
     "devmgr",
@@ -38,4 +39,4 @@ opt-level = 1
 panic = "abort"
 lto = true
 codegen-units = 1
-opt-level = 2
+opt-level = "s"

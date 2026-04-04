@@ -8,6 +8,7 @@ publish = false
 [[bin]]
 name = "xtask"
 path = "src/main.rs"
+test = false
 
 [dependencies]
 # Declarative CLI with auto-generated help text.

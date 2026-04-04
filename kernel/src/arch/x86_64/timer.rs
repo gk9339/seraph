@@ -67,6 +67,41 @@ static TICK_COUNT: AtomicU64 = AtomicU64::new(0);
 /// APIC ticks per second (computed during calibration).
 static TICKS_PER_SEC: AtomicU64 = AtomicU64::new(0);
 
+// ── High-resolution time state ────────────────────────────────────────────────
+
+/// TSC value recorded at the end of APIC timer calibration ("boot time = 0").
+/// Zero means not yet calibrated.
+static BOOT_TSC: AtomicU64 = AtomicU64::new(0);
+
+/// TSC ticks per microsecond, measured over the 10 ms PIT calibration window.
+/// Zero means not yet calibrated.
+static TSC_PER_US: AtomicU64 = AtomicU64::new(0);
+
+// ── TSC helper ───────────────────────────────────────────────────────────────
+
+/// Read the Time Stamp Counter.
+///
+/// `rdtsc` is accessible from U-mode (CR4.TSD is not set) and from ring 0.
+/// Returns a 64-bit cycle count. Use deltas; the absolute value is arbitrary.
+#[cfg(not(test))]
+#[inline(always)]
+fn read_tsc() -> u64
+{
+    let lo: u32;
+    let hi: u32;
+    // SAFETY: rdtsc does not fault at ring 0 (or ring 3 with TSD=0).
+    // preserves_flags: rdtsc only writes EAX/EDX.
+    unsafe {
+        core::arch::asm!(
+            "rdtsc",
+            out("eax") lo,
+            out("edx") hi,
+            options(nostack, nomem, preserves_flags),
+        );
+    }
+    (hi as u64) << 32 | lo as u64
+}
+
 // ── APIC register helpers ─────────────────────────────────────────────────────
 
 #[cfg(not(test))]
@@ -156,6 +191,9 @@ unsafe fn calibrate_apic_timer() -> u64
     }
 
     // Enable PIT channel 2 gate (bit 0 of port 0x61).
+    // Read TSC immediately before starting the gate so the measurement window
+    // starts as close to gate-enable as possible.
+    let tsc_start = read_tsc();
     unsafe {
         let gate = inb(PIT_GATE);
         outb(PIT_GATE, gate | 0x01);
@@ -168,6 +206,14 @@ unsafe fn calibrate_apic_timer() -> u64
             core::hint::spin_loop();
         }
     }
+    let tsc_end = read_tsc();
+
+    // Store TSC calibration data: ticks per µs and the "zero" reference.
+    // This is used by elapsed_us() for high-resolution timestamps that do not
+    // depend on the APIC timer interrupt having fired.
+    let tsc_per_10ms = tsc_end.saturating_sub(tsc_start);
+    TSC_PER_US.store((tsc_per_10ms / 10_000).max(1), Ordering::Relaxed);
+    BOOT_TSC.store(tsc_end, Ordering::Relaxed);
 
     // Stop the APIC timer.
     let remaining = apic_read(APIC_TIMER_CURRENT);
@@ -238,15 +284,31 @@ pub extern "C" fn timer_isr()
 }
 
 /// Return the current monotonic tick count.
+#[allow(dead_code)] // Required by arch interface: kernel/docs/arch-interface.md
 pub fn current_tick() -> u64
 {
     TICK_COUNT.load(Ordering::Relaxed)
 }
 
 /// Return the number of APIC ticks per second (calibrated at boot).
+#[allow(dead_code)] // Required by arch interface: kernel/docs/arch-interface.md
 pub fn ticks_per_second() -> u64
 {
     TICKS_PER_SEC.load(Ordering::Relaxed)
+}
+
+/// Return microseconds elapsed since timer calibration, or `None` if the
+/// timer has not yet been calibrated (pre-Phase 5).
+///
+/// Uses `rdtsc` directly — no interrupt dependency, sub-microsecond source.
+/// The TSC frequency is measured against the PIT during `init()`.
+#[cfg(not(test))]
+pub fn elapsed_us() -> Option<u64>
+{
+    let per_us = TSC_PER_US.load(Ordering::Relaxed);
+    if per_us == 0 { return None; }
+    let boot = BOOT_TSC.load(Ordering::Relaxed);
+    Some(read_tsc().saturating_sub(boot) / per_us)
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────

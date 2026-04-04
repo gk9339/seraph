@@ -134,13 +134,11 @@ impl SizeClassAllocator
         {
             let bin_size = effective.next_power_of_two().max(16);
             let idx = bin_index(bin_size)?;
+
             self.bins[idx].alloc(buddy)
         }
         else
         {
-            // Large allocation: ask buddy directly. The returned block is
-            // page-aligned (at least 4 KiB alignment), so any alignment
-            // requirement ≤ PAGE_SIZE is automatically satisfied.
             let order = large_order(size);
             if order > super::buddy::MAX_ORDER
             {

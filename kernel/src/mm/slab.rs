@@ -62,7 +62,7 @@ pub struct Slab
     /// Number of slots currently in use.
     pub used: u16,
     /// Total number of slots in this slab. Used in future stats/debug output.
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Read by future stats/debug paths; not yet called.
     pub capacity: u16,
 }
 
@@ -83,7 +83,7 @@ pub struct Slab
 pub struct SlabCache
 {
     /// Diagnostic label (shown in future debug/stats output).
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Read by future stats/debug paths; not yet called.
     pub name: &'static str,
     /// Effective slot size in bytes (>= 8, multiple of 8).
     pub obj_size: usize,
@@ -435,6 +435,60 @@ mod tests
         // Buddy is now empty; next alloc should fail.
         let result = cache.alloc(&mut buddy);
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn two_independent_caches_dont_interfere()
+    {
+        // Two caches backed by the same buddy but with different object sizes must
+        // not share any slot — allocs from each should return non-overlapping addresses.
+        let (_buf, mut buddy) = test_buddy(2);
+        let mut cache_a = SlabCache::new("a", 64);
+        let mut cache_b = SlabCache::new("b", 128);
+
+        let pa = cache_a.alloc(&mut buddy).expect("cache_a alloc failed");
+        let pb = cache_b.alloc(&mut buddy).expect("cache_b alloc failed");
+
+        assert!(!pa.is_null());
+        assert!(!pb.is_null());
+        // Different caches must not alias.
+        assert_ne!(pa as usize, pb as usize, "caches should not share slots");
+
+        // Free and re-alloc from each cache; LIFO reuse must work independently.
+        cache_a.free(pa, &mut buddy);
+        let pa2 = cache_a.alloc(&mut buddy).unwrap();
+        assert_eq!(pa, pa2, "cache_a must reuse freed slot");
+
+        cache_b.free(pb, &mut buddy);
+        let pb2 = cache_b.alloc(&mut buddy).unwrap();
+        assert_eq!(pb, pb2, "cache_b must reuse freed slot");
+    }
+
+    #[test]
+    fn realloc_after_full_drain_works()
+    {
+        // Fill an entire slab, free all slots, then re-allocate them.
+        // Verifies slab growth + collapse + regrowth path.
+        let (_buf, mut buddy) = test_buddy(3);
+        let mut cache = SlabCache::new("a", 64);
+        let capacity = PAGE_SIZE / 64; // 64 slots per order-0 slab
+
+        // Fill first slab to capacity.
+        let mut ptrs: Vec<*mut u8> =
+            (0..capacity).map(|_| cache.alloc(&mut buddy).unwrap()).collect();
+        assert_eq!(cache.slab_count, 1);
+
+        // Free all slots; slab may collapse back to buddy (keep-one rule: stays at 1).
+        for p in ptrs.drain(..) {
+            cache.free(p, &mut buddy);
+        }
+
+        // Re-allocate capacity slots; must all succeed and be non-null.
+        let ptrs2: Vec<*mut u8> =
+            (0..capacity).map(|_| cache.alloc(&mut buddy).unwrap()).collect();
+        for &p in &ptrs2 {
+            assert!(!p.is_null(), "re-allocated pointer must be non-null");
+        }
     }
 
     #[test]

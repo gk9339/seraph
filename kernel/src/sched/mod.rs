@@ -3,18 +3,16 @@
 
 // kernel/src/sched/mod.rs
 
-//! Kernel scheduler — Phase 8/9/10: per-CPU state, idle threads, init launch,
-//! and context switching.
+//! Kernel scheduler — per-CPU state, idle threads, init launch, and context switching.
 //!
 //! Phase 8 allocates a kernel stack and idle TCB for each CPU.
 //! Phase 9 adds `enter()`, which dequeues the init thread, builds its initial
 //! user-mode [`TrapFrame`], activates its address space, and calls
-//! `return_to_user` to start init running.
-//! Phase 10 adds `schedule()` for preemptive context switching and wires
-//! timer preemption.
+//! `return_to_user` to start init running. `schedule()` provides preemptive
+//! context switching; timer preemption decrements `slice_remaining` per tick.
 //!
 //! # Deferred work
-//! - Phase 11: SMP bringup, secondary CPU idle threads, load balancing.
+//! - WSMP: SMP bringup, secondary CPU idle threads, load balancing.
 
 #[cfg(not(test))]
 extern crate alloc;
@@ -49,7 +47,7 @@ pub const TIME_SLICE_TICKS: u32 = 10;
 pub const KERNEL_STACK_PAGES: usize = 4;
 
 /// Maximum number of CPUs. Matches the `u64` TLB-shootdown cpu-mask width.
-/// TODO Phase 10: enforce during SMP bringup if cpu_count exceeds this.
+/// TODO WSMP: enforce during SMP bringup if cpu_count exceeds this.
 pub const MAX_CPUS: usize = 64;
 
 /// Hard affinity sentinel: no hard CPU affinity.
@@ -69,9 +67,9 @@ pub const INIT_PRIORITY: u8 = 15;
 /// initialised by `init`.
 ///
 /// # Safety
-/// Accessed exclusively from the owning CPU after SMP bringup (Phase 10).
+/// Accessed exclusively from the owning CPU after SMP bringup (WSMP).
 /// During Phase 8 there is only one CPU, so no concurrent access is possible.
-// SAFETY: single-threaded Phase 8 boot; SMP lock enforced from Phase 10.
+// SAFETY: single-threaded Phase 8 boot; real per-CPU locks required for WSMP.
 #[cfg(not(test))]
 static mut SCHEDULERS: [PerCpuScheduler; MAX_CPUS] = {
     // Manual const-init: PerCpuScheduler is not Copy, so we cannot use
@@ -96,8 +94,17 @@ static mut SCHEDULERS: [PerCpuScheduler; MAX_CPUS] = {
 /// Atomic counter for assigning unique thread IDs.
 static NEXT_THREAD_ID: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
 
+/// Number of CPUs initialised by `sched::init`.
+///
+/// Written once during boot by `init`, then read by `SYS_SYSTEM_INFO(CpuCount)`.
+pub static CPU_COUNT: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+
+/// Allocate a unique thread ID.
+///
+/// Called during idle thread creation, init TCB creation, and
+/// `SYS_CAP_CREATE_THREAD`. IDs are monotonically increasing and never reused.
 #[cfg(not(test))]
-fn alloc_thread_id() -> u32
+pub fn alloc_thread_id() -> u32
 {
     NEXT_THREAD_ID.fetch_add(1, core::sync::atomic::Ordering::Relaxed)
 }
@@ -112,17 +119,26 @@ fn alloc_thread_id() -> u32
 /// `_cpu_id` — logical CPU index (0-based).
 fn idle_thread_entry(_cpu_id: u64) -> !
 {
+    // Enable supervisor interrupts so wfi can be woken by the timer.
+    // new_state() sets sstatus.SIE=0 to prevent a race in switch() where
+    // an interrupt during the register-restore window corrupts sscratch
+    // (see context.rs comment). Idle must enable SIE explicitly here;
+    // sscratch=0 at this point (idle is !is_user) so any S-mode interrupt
+    // correctly takes the S-mode trap path.
+    #[cfg(not(test))]
+    unsafe { crate::arch::current::interrupts::enable(); }
+
     loop
     {
         // Check non_empty before halting; if any threads are ready, schedule
         // them rather than spinning idle. SAFETY: SCHEDULERS[0] is owned by
-        // the BSP; single-CPU Phase 10.
+        // the BSP; single-CPU until WSMP.
         #[cfg(not(test))]
         {
             let has_work = unsafe { SCHEDULERS[0].has_runnable() };
             if has_work
             {
-                // SAFETY: single-CPU Phase 10; called from scheduler context.
+                // SAFETY: single-CPU until WSMP; called from scheduler context.
                 unsafe { schedule(); }
             }
         }
@@ -153,6 +169,8 @@ fn idle_thread_entry(_cpu_id: u64) -> !
 #[cfg(not(test))]
 pub fn init(cpu_count: u32, allocator: &mut BuddyAllocator) -> u32
 {
+    CPU_COUNT.store(cpu_count, core::sync::atomic::Ordering::Relaxed);
+
     // Order for KERNEL_STACK_PAGES (4 pages = order 2).
     // 2^order pages >= KERNEL_STACK_PAGES.
     let stack_order = {
@@ -204,6 +222,8 @@ pub fn init(cpu_count: u32, allocator: &mut BuddyAllocator) -> u32
             cspace: core::ptr::null_mut(),
             ipc_buffer: 0,
             wakeup_value: 0,
+            iopb: core::ptr::null_mut(),
+            blocked_on_object: core::ptr::null_mut(),
             thread_id: alloc_thread_id(),
         }));
 
@@ -241,7 +261,7 @@ pub fn init(_cpu_count: u32, _allocator: &mut crate::mm::BuddyAllocator) -> u32
 /// this CPU. No concurrent mutable access may occur without holding the
 /// scheduler lock (Phase 9+).
 #[cfg(not(test))]
-#[allow(dead_code)]
+#[allow(dead_code)] // Multi-CPU accessor; called once SMP bringup is implemented.
 pub unsafe fn scheduler_for(id: usize) -> &'static mut PerCpuScheduler
 {
     debug_assert!(id < MAX_CPUS);
@@ -254,7 +274,7 @@ pub unsafe fn scheduler_for(id: usize) -> &'static mut PerCpuScheduler
 /// Select the next thread to run and switch to it.
 ///
 /// Called from `sys_yield`, timer preemption, and the idle thread. On a
-/// single CPU (Phase 10) this always uses `SCHEDULERS[0]`.
+/// single CPU (until WSMP) this always uses `SCHEDULERS[0]`.
 ///
 /// If the current thread is still `Running` it is re-queued at its priority
 /// before selection. If the selected next thread is the same as the current
@@ -300,7 +320,20 @@ pub unsafe fn schedule()
         }
     }
 
-    let next = sched.dequeue_highest();
+    // Skip any Stopped or Exited threads that may still be in the run queue.
+    // A thread can be Stopped while Ready (before it was dequeued); the skip
+    // loop drains those stale entries without deadlock because dequeue_highest
+    // returns idle when all queues are empty.
+    let mut next = sched.dequeue_highest();
+    while !core::ptr::eq(next, sched.idle)
+        && matches!(
+            // SAFETY: next is a valid TCB from the run queue.
+            unsafe { (*next).state },
+            ThreadState::Stopped | ThreadState::Exited
+        )
+    {
+        next = sched.dequeue_highest();
+    }
 
     // If the scheduler selected the same thread, nothing to do.
     if next == current
@@ -324,8 +357,16 @@ pub unsafe fn schedule()
     // Update the kernel trap stack pointer so the next ring-3 → ring-0
     // transition (interrupt, exception, or syscall) lands on the correct
     // kernel stack for the incoming thread.
+    //
+    // For kernel threads (idle, is_user=false): set sscratch=0 so S-mode
+    // timer and external traps take the S-mode path (sp -= frame_size).
+    // A non-zero sscratch while running in S-mode causes trap_entry to
+    // incorrectly take the U-mode path, corrupt sscratch, and build a
+    // TrapFrame at an unexpected stack location.
+    //
     // SAFETY: next is a valid TCB; called with interrupts disabled.
-    unsafe { crate::arch::current::cpu::set_kernel_trap_stack((*next).kernel_stack_top); }
+    let trap_stack = if unsafe { (*next).is_user } { unsafe { (*next).kernel_stack_top } } else { 0 };
+    unsafe { crate::arch::current::cpu::set_kernel_trap_stack(trap_stack); }
 
     // Switch address space if different (both non-null).
     // SAFETY: address_space pointers were set up by Phase 9 init or future
@@ -336,6 +377,19 @@ pub unsafe fn schedule()
         if !nxt_as.is_null() && nxt_as != cur_as
         {
             (*nxt_as).activate();
+        }
+    }
+
+    // Load the per-thread IOPB into the TSS (x86_64 only).
+    // If the thread has no port bindings, fill the TSS IOPB with 0xFF (deny all).
+    // SAFETY: iopb pointer is null or a valid heap-allocated [u8; IOPB_SIZE].
+    #[cfg(all(not(test), target_arch = "x86_64"))]
+    unsafe {
+        let iopb_ptr = (*next).iopb;
+        if iopb_ptr.is_null() {
+            crate::arch::current::gdt::load_iopb(None);
+        } else {
+            crate::arch::current::gdt::load_iopb(Some(&*iopb_ptr));
         }
     }
 
@@ -401,6 +455,37 @@ pub unsafe fn timer_tick()
     }
 }
 
+// ── user_thread_trampoline ────────────────────────────────────────────────────
+
+/// Entry point for new user threads created via `SYS_CAP_CREATE_THREAD`.
+///
+/// `switch()` jumps here when the thread runs for the first time (instead of
+/// returning to a previous `switch` call site). By the time execution reaches
+/// here, `schedule()` has already:
+/// 1. Set the current TCB via `set_current(next)`.
+/// 2. Switched the address space via `(*next.address_space).activate()`.
+/// 3. Updated the kernel trap stack pointer.
+///
+/// The thread's [`TrapFrame`] was written by `SYS_THREAD_CONFIGURE`. This
+/// function simply retrieves it and calls `return_to_user`, which restores user
+/// registers and executes `iretq` / `sret`. Never returns.
+///
+/// # Safety
+/// Must only be called as a `switch()` return target (i.e., stored as
+/// `saved_state.rip`/`saved_state.ra` in a newly created user TCB). The TCB's
+/// `trap_frame` must be non-null and point to a valid, initialized `TrapFrame`.
+#[cfg(not(test))]
+pub(crate) unsafe extern "C" fn user_thread_trampoline() -> !
+{
+    // SAFETY: current_tcb is set by schedule() before switch() is called.
+    let tcb = unsafe { crate::syscall::current_tcb() };
+    // SAFETY: trap_frame was set by sys_thread_configure and is valid.
+    // The initial RSP for this function is set below the TrapFrame
+    // (see sys_cap_create_thread: trampoline_rsp = kstack_top - tf_size - TRAMPOLINE_FRAME)
+    // so this C function's stack frame does not overlap the TrapFrame.
+    unsafe { crate::arch::current::context::return_to_user((*tcb).trap_frame) }
+}
+
 // ── enter ─────────────────────────────────────────────────────────────────────
 
 /// Start executing the highest-priority ready thread and never return.
@@ -446,6 +531,16 @@ pub fn enter() -> !
     // Retrieve the user entry point stored in saved_state at TCB creation.
     let entry_point = init_tcb.saved_state.entry_point();
 
+    // On RISC-V, there is a race between set_kernel_trap_stack (sscratch ≠ 0
+    // → U-mode trap path assumed) and the `csrw sstatus, 0x20` inside
+    // return_to_user (which clears SIE). An S-mode interrupt arriving in that
+    // window sees sscratch ≠ 0 and incorrectly takes the U-mode path,
+    // corrupting sscratch and the init kernel stack. Disable interrupts first;
+    // return_to_user leaves SIE=0, and sret re-enables them (SIE←SPIE=1) only
+    // after transitioning to U-mode where sscratch is valid.
+    // SAFETY: single-boot-thread; disable before arming sscratch.
+    unsafe { crate::arch::current::cpu::disable_interrupts(); }
+
     // Set the kernel trap stack pointer before entering user mode so the first
     // ring-3 → ring-0 transition lands on the correct kernel stack.
     // On x86-64: writes TSS RSP0 + SYSCALL_KERNEL_RSP.
@@ -464,6 +559,12 @@ pub fn enter() -> !
     unsafe {
         core::ptr::write_bytes(tf_ptr as *mut u8, 0, tf_size as usize);
         (*tf_ptr).init_user(entry_point, INIT_STACK_TOP);
+        // Forward the initial user argument (cap slot, etc.) stored in
+        // saved_state at TCB creation via new_state(…, arg, …).
+        let user_arg = init_tcb.saved_state.user_arg();
+        if user_arg != 0 {
+            (*tf_ptr).set_arg0(user_arg);
+        }
     }
 
     // Record the trap_frame pointer in the TCB so future trap handlers can
@@ -474,7 +575,7 @@ pub fn enter() -> !
     // SAFETY: init_tcb.address_space was set up in main.rs Phase 9 init.
     let root_phys = unsafe { (*init_tcb.address_space).root_phys };
 
-    crate::kprintln!("  sched::enter: handing control to init");
+    crate::kprintln!("sched: enter - handing control to init");
 
     // Activate init's address space and enter user mode.
     // `first_entry_to_user` handles the arch-specific sequence:

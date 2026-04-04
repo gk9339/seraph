@@ -66,7 +66,7 @@ pub fn virt_to_phys(virt: u64) -> u64
 
 // ── Error and flags types ─────────────────────────────────────────────────────
 
-/// Errors that can occur during page table construction.
+/// Errors that can occur during page table construction or modification.
 #[derive(Debug, PartialEq, Eq)]
 pub enum PagingError
 {
@@ -75,6 +75,8 @@ pub enum PagingError
     /// Increase [`BOOT_TABLE_POOL_SIZE`] and rebuild, or reduce the amount of
     /// RAM being direct-mapped.
     OutOfFrames,
+    /// The target virtual address is not mapped (used by protect/unmap walks).
+    NotMapped,
 }
 
 /// Page permission flags for a mapping.
@@ -93,6 +95,16 @@ pub struct PageFlags
     pub writable: bool,
     /// Page is executable (if `false`, the NX/X bit blocks instruction fetch).
     pub executable: bool,
+    /// Force device/uncacheable memory type.
+    ///
+    /// On x86-64: sets PCD|PWT in the PTE (strong uncacheable).
+    /// On RISC-V: QEMU virt MMIO regions are inherently device-ordered by
+    /// physical address; this field is a documentation marker only.
+    ///
+    // TODO: On real RISC-V hardware with Svpbmt, set PTE bits
+    // [62:61] = 01 (NC) when this is true. Pick up when targeting non-QEMU
+    // RISC-V hardware.
+    pub uncacheable: bool,
 }
 
 // ── Static boot table pool ────────────────────────────────────────────────────
@@ -328,6 +340,7 @@ pub fn init_kernel_page_tables(
         readable: true,
         writable: true,
         executable: false,
+        uncacheable: false,
     };
     let mut phys: u64 = 0;
     while phys < max_phys_rounded
@@ -361,6 +374,7 @@ pub fn init_kernel_page_tables(
             readable: true,
             writable: true,
             executable: false,
+            uncacheable: false,
         };
         let mut phys = start;
         while phys < end
@@ -412,6 +426,7 @@ fn map_kernel_image(root_va: u64, info: &BootInfo, pool: &mut PoolState)
         readable: true,
         writable: false,
         executable: true,
+        uncacheable: false,
     };
     let text_start = core::ptr::addr_of!(__text_start) as u64;
     let text_end = core::ptr::addr_of!(__text_end) as u64;
@@ -422,6 +437,7 @@ fn map_kernel_image(root_va: u64, info: &BootInfo, pool: &mut PoolState)
         readable: true,
         writable: false,
         executable: false,
+        uncacheable: false,
     };
     let rodata_start = core::ptr::addr_of!(__rodata_start) as u64;
     let rodata_end = core::ptr::addr_of!(__rodata_end) as u64;
@@ -432,6 +448,7 @@ fn map_kernel_image(root_va: u64, info: &BootInfo, pool: &mut PoolState)
         readable: true,
         writable: true,
         executable: false,
+        uncacheable: false,
     };
     let data_start = core::ptr::addr_of!(__data_start) as u64;
     let bss_end = core::ptr::addr_of!(__bss_end) as u64;
@@ -464,6 +481,7 @@ fn map_boot_stack(root_va: u64, info: &BootInfo, pool: &mut PoolState) -> Result
         readable: true,
         writable: true,
         executable: false,
+        uncacheable: false,
     };
     let mut virt = stack_base;
     while virt < stack_base + 0x10000
@@ -502,6 +520,7 @@ fn map_framebuffer_if_needed(
         readable: true,
         writable: true,
         executable: false,
+        uncacheable: false,
     };
     let mut phys = start;
     while phys < end
@@ -728,10 +747,12 @@ mod tests
             readable: true,
             writable: false,
             executable: true,
+            uncacheable: false,
         };
         assert!(f.readable);
         assert!(!f.writable);
         assert!(f.executable);
+        assert!(!f.uncacheable);
     }
 
     #[test]
@@ -741,6 +762,7 @@ mod tests
             readable: true,
             writable: false,
             executable: false,
+            uncacheable: false,
         };
         assert!(f.readable);
         assert!(!f.writable);
@@ -754,9 +776,34 @@ mod tests
             readable: true,
             writable: true,
             executable: false,
+            uncacheable: false,
         };
         assert!(f.readable);
         assert!(f.writable);
         assert!(!f.executable);
+    }
+
+    #[test]
+    fn page_flags_uncacheable_default_false()
+    {
+        let f = PageFlags {
+            readable: true,
+            writable: false,
+            executable: false,
+            uncacheable: false,
+        };
+        assert!(!f.uncacheable);
+    }
+
+    #[test]
+    fn page_flags_uncacheable_set()
+    {
+        let f = PageFlags {
+            readable: true,
+            writable: false,
+            executable: false,
+            uncacheable: true,
+        };
+        assert!(f.uncacheable);
     }
 }

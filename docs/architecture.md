@@ -142,7 +142,7 @@ enforces isolation via AddressSpace and CSpace boundaries, not via a process abs
 Bootloader → kernel_entry
     → Phase 0–8: memory, paging, caps, scheduler init
     → Phase 9: map init from pre-parsed InitImage segments
-    → Phase 10: scheduler handoff — init runs in userspace
+    → Phase 9: scheduler handoff — init runs in userspace
 
 init
     → start procmgr (built-in ELF parser + raw syscalls)

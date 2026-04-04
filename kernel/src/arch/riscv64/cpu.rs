@@ -29,6 +29,7 @@ pub fn halt_until_interrupt()
 /// Phase 5: only the BSP is running; returns 0.
 /// Future: read `mhartid` via SBI `sbi_get_marchid` or from the boot-info
 /// structure when SMP is brought up.
+#[allow(dead_code)] // Required by arch interface: kernel/docs/arch-interface.md
 pub fn current_id() -> u32
 {
     0
@@ -68,17 +69,26 @@ pub unsafe fn set_kernel_trap_stack(stack_top: u64)
 ///
 /// # Safety
 /// Must execute in supervisor mode. Leaves SUM set until `user_access_end`.
+///
+/// # Compiler barrier
+/// `nomem` is intentionally absent so the compiler treats this CSR write as a
+/// memory operation. This prevents the compiler from reordering user-memory
+/// loads to before the csrrs at opt-level ≥ 1, matching Linux's "memory"
+/// clobber on equivalent operations.
 #[cfg(not(test))]
 #[inline]
 pub unsafe fn user_access_begin()
 {
     // SAFETY: csrrs sets bit 18 (SUM) in sstatus; safe in supervisor mode.
     // csrsi/csrci only accept 5-bit immediates (0-31); bit 18 must use a register.
+    // nostack: CSR write does not modify sp.
+    // (no nomem): compiler memory barrier — prevents hoisting user-memory loads
+    // above this instruction at opt-level ≥ 1.
     unsafe {
         core::arch::asm!(
             "csrrs zero, sstatus, {sum}",
             sum = in(reg) (1u64 << 18),
-            options(nomem, nostack),
+            options(nostack),
         );
     }
 }
@@ -87,6 +97,10 @@ pub unsafe fn user_access_begin()
 ///
 /// # Safety
 /// Must be called after a matching `user_access_begin`.
+///
+/// # Compiler barrier
+/// Like `user_access_begin`, `nomem` is absent to prevent the compiler from
+/// sinking user-memory stores to after the csrrc.
 #[cfg(not(test))]
 #[inline]
 pub unsafe fn user_access_end()
@@ -96,7 +110,7 @@ pub unsafe fn user_access_end()
         core::arch::asm!(
             "csrrc zero, sstatus, {sum}",
             sum = in(reg) (1u64 << 18),
-            options(nomem, nostack),
+            options(nostack),
         );
     }
 }

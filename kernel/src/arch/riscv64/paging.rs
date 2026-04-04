@@ -65,6 +65,13 @@ impl PageTableEntry
     /// Construct a 4 KiB leaf page entry with `flags`.
     ///
     /// `phys` must be 4 KiB-aligned.
+    ///
+    /// Note: `flags.uncacheable` has no effect on RISC-V QEMU virt — MMIO
+    /// physical addresses are inherently device-ordered by the platform memory
+    /// map. No PTE bits need to be set for correct behavior on this target.
+    // TODO: On hardware with Svpbmt, set PTE bits [62:61] = 01
+    // (NC) when flags.uncacheable is true. Pick up when targeting non-QEMU
+    // RISC-V hardware.
     pub fn new_page(phys: u64, flags: PageFlags) -> Self
     {
         debug_assert!(phys & 0xFFF == 0, "page PA not 4 KiB-aligned");
@@ -353,6 +360,134 @@ fn rv_walk_or_alloc(
     Ok(frame_pa)
 }
 
+/// Flush the TLB entry for a single virtual address using `sfence.vma addr`.
+///
+/// # Safety
+/// Must execute in S-mode or higher. `virt` need not be mapped.
+#[cfg(not(test))]
+pub unsafe fn flush_page(virt: u64)
+{
+    // SAFETY: sfence.vma is safe in S-mode for any virtual address.
+    unsafe {
+        core::arch::asm!(
+            "sfence.vma {}, zero",
+            in(reg) virt,
+            options(nostack),
+        );
+    }
+}
+
+/// Remove a single user-space mapping at `virt` from the Sv48 page table
+/// rooted at `root_virt`.
+///
+/// Walks VPN[3] → VPN[2] → VPN[1] → VPN[0]. If any intermediate level is
+/// not present, returns immediately (nothing to unmap). On reaching the leaf,
+/// zeros the PTE and calls `flush_page`.
+///
+/// # Safety
+/// `root_virt` must be the direct-map virtual address of a valid 4 KiB Sv48
+/// root frame. Does not allocate.
+#[cfg(not(test))]
+pub unsafe fn unmap_user_page(root_virt: u64, virt: u64)
+{
+    use crate::mm::paging::phys_to_virt;
+
+    let root = unsafe { table_at(root_virt) };
+    let e = root[vpn3_index(virt)];
+    if !e.is_present() { return; }
+
+    let l2 = unsafe { table_at(phys_to_virt(e.phys_addr())) };
+    let e = l2[vpn2_index(virt)];
+    if !e.is_present() { return; }
+
+    let l1 = unsafe { table_at(phys_to_virt(e.phys_addr())) };
+    let e = l1[vpn1_index(virt)];
+    if !e.is_present() { return; }
+
+    let l0 = unsafe { table_at(phys_to_virt(e.phys_addr())) };
+    l0[vpn0_index(virt)] = PageTableEntry(0);
+
+    unsafe { flush_page(virt) };
+}
+
+/// Change the permission flags on an existing user-space leaf PTE at `virt`.
+///
+/// Returns `Err(PagingError::NotMapped)` if any level is not present. On
+/// success, rewrites the leaf PTE with the new `flags` (preserving physical
+/// address and USER bit) and calls `flush_page`.
+///
+/// # Safety
+/// `root_virt` must be the direct-map virtual address of a valid 4 KiB Sv48
+/// root frame. Caller must have validated W^X and rights before calling.
+#[cfg(not(test))]
+pub unsafe fn protect_user_page(
+    root_virt: u64,
+    virt: u64,
+    flags: crate::mm::paging::PageFlags,
+) -> Result<(), crate::mm::paging::PagingError>
+{
+    use crate::mm::paging::{phys_to_virt, PagingError};
+
+    let root = unsafe { table_at(root_virt) };
+    let e = root[vpn3_index(virt)];
+    if !e.is_present() { return Err(PagingError::NotMapped); }
+
+    let l2 = unsafe { table_at(phys_to_virt(e.phys_addr())) };
+    let e = l2[vpn2_index(virt)];
+    if !e.is_present() { return Err(PagingError::NotMapped); }
+
+    let l1 = unsafe { table_at(phys_to_virt(e.phys_addr())) };
+    let e = l1[vpn1_index(virt)];
+    if !e.is_present() { return Err(PagingError::NotMapped); }
+
+    let l0 = unsafe { table_at(phys_to_virt(e.phys_addr())) };
+    let leaf = &mut l0[vpn0_index(virt)];
+    if !leaf.is_present() { return Err(PagingError::NotMapped); }
+
+    let phys = leaf.phys_addr();
+    // Set USER (U) bit (bit 4) to preserve user accessibility.
+    const USER: u64 = 1 << 4;
+    let mut new_pte = PageTableEntry::new_page(phys, flags);
+    new_pte.0 |= USER;
+    *leaf = new_pte;
+
+    unsafe { flush_page(virt) };
+    Ok(())
+}
+
+/// Translate a user virtual address to its mapped physical address and raw PTE.
+///
+/// Walks L3 → L2 → L1 → L0 (Sv48) without modifying any entry or flushing the
+/// TLB. Returns `Some((phys_addr, raw_pte_bits))` if the page is present at
+/// every level, or `None` if any level is not present.
+///
+/// # Safety
+/// `root_virt` must be the direct-map virtual address of a valid 4 KiB L3
+/// page table frame.
+#[cfg(not(test))]
+pub unsafe fn translate_user_page(root_virt: u64, virt: u64) -> Option<(u64, u64)>
+{
+    use crate::mm::paging::phys_to_virt;
+
+    let root = unsafe { table_at(root_virt) };
+    let e = root[vpn3_index(virt)];
+    if !e.is_present() { return None; }
+
+    let l2 = unsafe { table_at(phys_to_virt(e.phys_addr())) };
+    let e = l2[vpn2_index(virt)];
+    if !e.is_present() { return None; }
+
+    let l1 = unsafe { table_at(phys_to_virt(e.phys_addr())) };
+    let e = l1[vpn1_index(virt)];
+    if !e.is_present() { return None; }
+
+    let l0 = unsafe { table_at(phys_to_virt(e.phys_addr())) };
+    let leaf = l0[vpn0_index(virt)];
+    if !leaf.is_present() { return None; }
+
+    Some((leaf.phys_addr(), leaf.0))
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -380,6 +515,7 @@ mod tests
             readable: true,
             writable: true,
             executable: false,
+            uncacheable: false,
         };
         let pte = PageTableEntry::new_page(0x2000, flags);
         assert!(pte.is_present());
@@ -395,6 +531,7 @@ mod tests
             readable: true,
             writable: false,
             executable: true,
+            uncacheable: false,
         };
         let pte = PageTableEntry::new_page(0x3000, flags);
         assert!(pte.0 & READ != 0);

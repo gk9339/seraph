@@ -47,6 +47,15 @@ static TICKS_PER_SEC: AtomicU64 = AtomicU64::new(0);
 /// Ticks per period (stored to rearm the timer on each interrupt).
 static TIMER_PERIOD_TICKS: AtomicU64 = AtomicU64::new(0);
 
+// ── High-resolution time state ────────────────────────────────────────────────
+
+/// `time` CSR value recorded at the end of `init()` ("boot time = 0").
+/// Zero means not yet initialised.
+static BOOT_TIME_TICKS: AtomicU64 = AtomicU64::new(0);
+
+/// `time` CSR ticks per microsecond. At 10 MHz: 10 ticks/µs.
+const TIME_TICKS_PER_US: u64 = TIMEBASE_FREQ / 1_000_000;
+
 // ── SBI helper ────────────────────────────────────────────────────────────────
 
 /// Call the SBI timer extension to set the next timer deadline.
@@ -99,8 +108,13 @@ pub unsafe fn init(period_us: u64)
     TIMER_PERIOD_TICKS.store(period_ticks, Ordering::Relaxed);
     TICKS_PER_SEC.store(1_000_000 / period_us, Ordering::Relaxed);
 
-    let deadline = read_time() + period_ticks;
+    let now = read_time();
+    let deadline = now + period_ticks;
     sbi_set_timer(deadline);
+
+    // Record the high-resolution boot reference: the `time` CSR value at the
+    // moment the timer is armed. Used by elapsed_us() for timestamps.
+    BOOT_TIME_TICKS.store(now, Ordering::Relaxed);
 
     // Enable supervisor interrupts — the timer will now fire.
     // SAFETY: stvec is installed.
@@ -127,15 +141,30 @@ pub fn handle_tick()
 }
 
 /// Return the current monotonic tick count.
+#[allow(dead_code)] // Required by arch interface: kernel/docs/arch-interface.md
 pub fn current_tick() -> u64
 {
     TICK_COUNT.load(Ordering::Relaxed)
 }
 
 /// Return the configured number of ticks per second.
+#[allow(dead_code)] // Required by arch interface: kernel/docs/arch-interface.md
 pub fn ticks_per_second() -> u64
 {
     TICKS_PER_SEC.load(Ordering::Relaxed)
+}
+
+/// Return microseconds elapsed since timer initialisation, or `None` if
+/// `init()` has not yet been called (pre-Phase 5).
+///
+/// Uses the `time` CSR directly — no interrupt dependency. At 10 MHz the
+/// resolution is 100 ns (0.1 µs); returned value is truncated to whole µs.
+#[cfg(not(test))]
+pub fn elapsed_us() -> Option<u64>
+{
+    let boot = BOOT_TIME_TICKS.load(Ordering::Relaxed);
+    if boot == 0 { return None; }
+    Some((read_time().saturating_sub(boot)) / TIME_TICKS_PER_US)
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────

@@ -64,6 +64,12 @@ impl SavedState
     /// For a newly created thread this is the entry function address; for a
     /// resumed thread it is the return address from the previous `switch` call.
     pub fn entry_point(&self) -> u64 { self.rip }
+
+    /// Return the initial user-mode argument stored at thread creation.
+    ///
+    /// `new_state` stashes `arg` in `rbx`; `sched::enter` reads it back here
+    /// and forwards it to the user-mode TrapFrame via `set_arg0`.
+    pub fn user_arg(&self) -> u64 { self.rbx }
 }
 
 // ── new_state ─────────────────────────────────────────────────────────────────

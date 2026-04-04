@@ -36,6 +36,7 @@ No support for 32-bit or legacy x86.
 | `svcmgr/` | Service health monitor and restart manager |
 | `targets/` | Custom Rust target JSON specs for cross-compilation |
 | `vfsd/` | Virtual filesystem daemon |
+| `ktest/` | In-kernel test binary — loaded as init to exercise syscalls, integration scenarios, and benchmarks |
 | `xtask/` | Build task runner (`cargo xtask`) |
 
 ## Usage
@@ -53,6 +54,11 @@ cargo xtask clean                        # remove sysroot/
 cargo xtask clean --all                  # remove sysroot/ and target/
 cargo xtask test                         # run all workspace tests on the host
 ```
+
+`cargo xtask test` runs host-side unit tests (fast, no QEMU). For in-kernel tests, set
+`init=ktest` in `rootfs/EFI/seraph/boot.conf`, then run `cargo xtask run`. ktest exercises
+every syscall through real trap/return paths, runs cross-subsystem integration scenarios,
+and measures hardware cycle counts for key operations. See [`ktest/README.md`](ktest/README.md).
 
 ---
 

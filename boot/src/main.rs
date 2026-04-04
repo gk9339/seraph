@@ -113,7 +113,7 @@ unsafe fn boot_sequence(image: EfiHandle, st: *mut EfiSystemTable) -> Result<!, 
 
     // ── Step 1: UEFI protocol discovery ──────────────────────────────────────
 
-    bprintln!("seraph-boot: step 1/10: UEFI protocol discovery");
+    bprintln!("[--------] boot: step 1/10: UEFI protocol discovery");
 
     // SAFETY: bs is valid boot services; image is the EFI application handle.
     let loaded_image = unsafe { get_loaded_image(bs, image)? };
@@ -140,23 +140,23 @@ unsafe fn boot_sequence(image: EfiHandle, st: *mut EfiSystemTable) -> Result<!, 
 
     if framebuffer.physical_base != 0
     {
-        bprintln!("seraph-boot:   GOP: present");
+        bprintln!("[--------] boot: GOP: present");
     }
     else
     {
-        bprintln!("seraph-boot:   GOP: absent (headless)");
+        bprintln!("[--------] boot: GOP: absent (headless)");
     }
 
     // ── Step 2: Load boot configuration ──────────────────────────────────────
 
-    bprintln!("seraph-boot: step 2/10: load boot configuration");
+    bprintln!("[--------] boot: step 2/10: load boot configuration");
 
     // SAFETY: esp_root is a valid EFI_FILE_PROTOCOL directory handle.
     let config = unsafe { load_boot_config(esp_root)? };
 
     // ── Step 3: Load kernel ELF ───────────────────────────────────────────────
 
-    bprintln!("seraph-boot: step 3/10: loading kernel ELF");
+    bprintln!("[--------] boot: step 3/10: load kernel ELF");
 
     // SAFETY: esp_root is a valid directory handle; path is a null-terminated UTF-16.
     let kernel_file =
@@ -179,7 +179,7 @@ unsafe fn boot_sequence(image: EfiHandle, st: *mut EfiSystemTable) -> Result<!, 
     // dispatch. On RISC-V, the PE .reloc section is currently empty, so the
     // firmware does not patch vtable entries when relocating the image;
     // core::fmt::write's write_str call through a fat pointer faults.
-    bprint!("seraph-boot:   kernel entry=");
+    bprint!("[--------] boot: kernel entry=");
     unsafe {
         crate::console::console_write_hex64(kernel_info.entry_virtual);
     }
@@ -191,7 +191,7 @@ unsafe fn boot_sequence(image: EfiHandle, st: *mut EfiSystemTable) -> Result<!, 
 
     // ── Step 4: Load and pre-parse init ELF ──────────────────────────────────
 
-    bprintln!("seraph-boot: step 4/10: loading and pre-parsing init ELF");
+    bprintln!("[--------] boot: step 4/10: load init ELF and boot modules");
 
     // SAFETY: esp_root is a valid directory handle; path is null-terminated UTF-16.
     let init_file = unsafe { open_file(esp_root, config.init_path.as_ptr(), "init (boot.conf)")? };
@@ -211,6 +211,20 @@ unsafe fn boot_sequence(image: EfiHandle, st: *mut EfiSystemTable) -> Result<!, 
     // The kernel receives phys_addr+virt_addr pairs to map init without an ELF parser.
     // SAFETY: bs is valid; init_buf contains the complete ELF file.
     let init_image = unsafe { load_init(bs, init_buf, arch::current::EXPECTED_ELF_MACHINE)? };
+
+    // Print init entry point and file size, matching the kernel ELF info in step 3.
+    // Direct-write helpers are used here (instead of format-arg bprintln!) to avoid
+    // vtable dispatch. On RISC-V the PE .reloc section is empty so the firmware does
+    // not patch vtable entries; core::fmt::write's fat-pointer write_str call faults.
+    bprint!("[--------] boot: init entry=");
+    unsafe {
+        crate::console::console_write_hex64(init_image.entry_point);
+    }
+    bprint!("  size=");
+    unsafe {
+        crate::console::console_write_hex64(init_file_sz as u64);
+    }
+    bprintln!(" bytes");
 
     // ── Step 4b: Load additional boot modules ─────────────────────────────────
     //
@@ -263,7 +277,7 @@ unsafe fn boot_sequence(image: EfiHandle, st: *mut EfiSystemTable) -> Result<!, 
 
     // ── Step 5: Firmware discovery ────────────────────────────────────────────
 
-    bprintln!("seraph-boot: step 5/10: firmware discovery");
+    bprintln!("[--------] boot: step 5/10: firmware discovery and platform resources");
 
     // Scan the UEFI configuration table for the ACPI RSDP and Device Tree GUIDs.
     // SAFETY: st is a valid UEFI system table pointer.
@@ -271,19 +285,19 @@ unsafe fn boot_sequence(image: EfiHandle, st: *mut EfiSystemTable) -> Result<!, 
 
     if firmware.acpi_rsdp != 0
     {
-        bprintln!("seraph-boot:   ACPI RSDP: found");
+        bprintln!("[--------] boot: ACPI RSDP: found");
     }
     else
     {
-        bprintln!("seraph-boot:   ACPI RSDP: not found");
+        bprintln!("[--------] boot: ACPI RSDP: not found");
     }
     if firmware.device_tree != 0
     {
-        bprintln!("seraph-boot:   DTB: found");
+        bprintln!("[--------] boot: DTB: found");
     }
     else
     {
-        bprintln!("seraph-boot:   DTB: not found");
+        bprintln!("[--------] boot: DTB: not found");
     }
 
     // Query the boot hart ID via EFI_RISCV_BOOT_PROTOCOL (RISC-V only).
@@ -291,17 +305,13 @@ unsafe fn boot_sequence(image: EfiHandle, st: *mut EfiSystemTable) -> Result<!, 
     // SAFETY: st is a valid UEFI system table pointer.
     let boot_hart_id = unsafe { arch::current::discover_boot_hart_id(st) };
 
-    // ── Step 5b: Parse platform resources ────────────────────────────────────
-
-    bprintln!("seraph-boot: step 5b/10: parsing platform resources");
-
     // Parse ACPI and/or DTB tables into a sorted PlatformResource array.
     // SAFETY: bs is valid boot services; firmware addresses are from UEFI config table.
     let (resources_phys, resource_count) =
         unsafe { platform::parse_platform_resources(bs, &firmware)? };
-    bprint!("seraph-boot:   ");
+    bprint!("[--------] boot: platform resources: ");
     unsafe { crate::console::console_write_dec32(resource_count as u32) };
-    bprintln!(" platform resources found");
+    bprintln!(" parsed");
 
     // ── Step 6: Pre-allocate boot structures and build page tables ────────────
 
@@ -428,7 +438,7 @@ unsafe fn boot_sequence(image: EfiHandle, st: *mut EfiSystemTable) -> Result<!, 
         track_region!(resources_phys, (resource_array_size + 4095) & !4095);
     }
 
-    bprintln!("seraph-boot: step 6/10: building page tables");
+    bprintln!("[--------] boot: step 6/10: allocate and build page tables");
 
     // Build the initial page tables. All AllocatePages calls for page table
     // frames happen here, before ExitBootServices.
@@ -472,7 +482,7 @@ unsafe fn boot_sequence(image: EfiHandle, st: *mut EfiSystemTable) -> Result<!, 
 
     // ── Step 7: Query final memory map ────────────────────────────────────────
 
-    bprintln!("seraph-boot: step 7/10: querying memory map");
+    bprintln!("[--------] boot: step 7/10: query final memory map");
 
     // This must be the last allocation-generating operation before ExitBootServices.
     // AllocatePages inside get_memory_map invalidates any prior map key; this call
@@ -482,7 +492,7 @@ unsafe fn boot_sequence(image: EfiHandle, st: *mut EfiSystemTable) -> Result<!, 
 
     // ── Step 8: ExitBootServices ──────────────────────────────────────────────
 
-    bprintln!("seraph-boot: step 8/10: ExitBootServices");
+    bprintln!("[--------] boot: step 8/10: ExitBootServices");
 
     // SAFETY: bs and image are valid; uefi_map was produced by the preceding
     // get_memory_map call with no intervening allocations.
@@ -495,7 +505,7 @@ unsafe fn boot_sequence(image: EfiHandle, st: *mut EfiSystemTable) -> Result<!, 
 
     // ── Step 9: Populate BootInfo ─────────────────────────────────────────────
 
-    bprintln!("seraph-boot: step 9/10: populating BootInfo");
+    bprintln!("[--------] boot: step 9/10: populate BootInfo");
 
     // Write loaded BootModule descriptors into the pre-allocated modules page.
     // Each BootModule is 16 bytes; MAX_MODULES (16) entries fit in one 4096-byte page.
@@ -567,7 +577,7 @@ unsafe fn boot_sequence(image: EfiHandle, st: *mut EfiSystemTable) -> Result<!, 
 
     // ── Step 10: Kernel handoff ───────────────────────────────────────────────
 
-    bprintln!("seraph-boot: step 10/10: handoff to kernel");
+    bprintln!("[--------] boot: step 10/10: kernel handoff");
 
     // Transfer control to the kernel. Installs new page tables, sets the
     // stack, and jumps to the kernel entry point. Does not return.

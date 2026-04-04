@@ -98,3 +98,9 @@ pub unsafe fn discover_boot_hart_id(st: *mut EfiSystemTable) -> u64
         hart_id
     }
 }
+
+/// Return 0: on RISC-V, the BSP hardware ID (hart ID) comes from
+/// `discover_boot_hart_id` (EFI_RISCV_BOOT_PROTOCOL). This function is a
+/// placeholder to satisfy the x86-64 arch interface; callers should use
+/// the value from `discover_boot_hart_id` directly.
+pub fn bsp_hardware_id() -> u32 { 0 }

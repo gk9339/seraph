@@ -40,3 +40,38 @@ pub unsafe fn discover_boot_hart_id(_st: *mut EfiSystemTable) -> u64
 {
     0
 }
+
+/// Return the APIC ID of the current (bootstrap) processor.
+///
+/// Reads CPUID leaf 01H: EBX[31:24] contains the initial APIC ID of the
+/// processor executing the instruction. This is the xAPIC ID, which is 8
+/// bits and valid for systems with up to 256 logical CPUs.
+///
+/// For x2APIC systems (> 256 CPUs), CPUID leaf 0x0B would be needed, but
+/// Seraph WSMP is limited to 64 CPUs so xAPIC IDs suffice.
+#[cfg(not(test))]
+pub fn bsp_hardware_id() -> u32
+{
+    let ebx: u32;
+    // SAFETY: CPUID is always available on x86-64; leaf 1 is required.
+    // rbx is callee-saved and used by LLVM as the base register in some
+    // codegen modes. We must save/restore it manually when using CPUID.
+    unsafe {
+        core::arch::asm!(
+            "push rbx",
+            "cpuid",
+            "mov {ebx:e}, ebx",
+            "pop rbx",
+            inout("eax") 1u32 => _,
+            ebx = out(reg) ebx,
+            out("ecx") _,
+            out("edx") _,
+            options(nostack, nomem),
+        );
+    }
+    // APIC ID is in EBX[31:24].
+    (ebx >> 24) & 0xFF
+}
+
+#[cfg(test)]
+pub fn bsp_hardware_id() -> u32 { 0 }

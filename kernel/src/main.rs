@@ -70,6 +70,12 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
     // SAFETY: validate_boot_info confirmed non-null, aligned, and readable.
     let info = unsafe { &*boot_info };
 
+    // Capture SMP fields from BootInfo while it is still identity-mapped
+    // (before Phase 3 replaces the bootloader's page tables). After Phase 3,
+    // `info` is no longer accessible via the physical address; use the direct
+    // map (info9 in Phase 9) instead.
+    let boot_cpu_count = info.cpu_count.max(1);
+
     // ── Phase 1: early console ──────────────────────────────────────────────
     // SAFETY: called exactly once, from the single kernel boot thread, after
     // Phase 0 confirmed boot_info is valid.
@@ -178,12 +184,14 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
 
     // ── Phase 8: scheduler ────────────────────────────────────────────────────
     // Initialise per-CPU scheduler state and create idle threads.
-    // BSP only (cpu_count = 1); SMP bringup in WSMP work item.
+    // cpu_count from BootInfo (populated by bootloader from ACPI MADT / DTB).
+    // APs are not yet started; sched::init allocates idle threads for all CPUs
+    // so Phase C (AP startup) can call sched::ap_enter without re-allocating.
     //
     // SAFETY: single-threaded boot; heap and page tables are active.
     kprintln!("Phase 8: Scheduler");
-    let cpu_count = sched::init(1, allocator);
-    kprintln!("scheduler initialised, {} CPU", cpu_count);
+    let cpu_count = sched::init(boot_cpu_count, allocator);
+    kprintln!("scheduler initialised, {} CPU{}", cpu_count, if cpu_count == 1 { "" } else { "s" });
 
     // ── Phase 9: create and launch init ───────────────────────────────────────
     // Gated #[cfg(not(test))]: Phase 9 uses heap allocation and arch-specific

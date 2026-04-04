@@ -312,6 +312,125 @@ impl Fdt
             true
         });
     }
+
+    /// Walk CPU nodes (compatible = "riscv") and call `callback(hart_id)` for
+    /// each enabled CPU. CPU nodes use `#address-cells=1, #size-cells=0`, so
+    /// `reg` is a single big-endian u32 hart ID.
+    ///
+    /// `callback` returns `true` to continue or `false` to stop early.
+    ///
+    /// CPU nodes without a `status` property (or with `status = "okay"`) are
+    /// counted as enabled. `status = "disabled"` is skipped.
+    pub fn walk_cpu_nodes<F>(&self, mut callback: F)
+    where
+        F: FnMut(u32) -> bool,
+    {
+        // Node state for one open node during traversal.
+        #[derive(Clone, Copy)]
+        struct CpuNodeState {
+            is_riscv_cpu: bool,
+            reg_u32: u32,
+            has_reg: bool,
+            disabled: bool,
+        }
+
+        let mut states = [CpuNodeState {
+            is_riscv_cpu: false,
+            reg_u32: 0,
+            has_reg: false,
+            disabled: false,
+        }; MAX_DEPTH];
+
+        let mut depth: usize = 0;
+        let mut off: u32 = 0;
+
+        loop
+        {
+            let token = match self.read_struct_u32(off)
+            {
+                Some(t) => t,
+                None => break,
+            };
+            off += 4;
+
+            match token
+            {
+                FDT_BEGIN_NODE =>
+                {
+                    if depth < MAX_DEPTH
+                    {
+                        states[depth] = CpuNodeState {
+                            is_riscv_cpu: false,
+                            reg_u32: 0,
+                            has_reg: false,
+                            disabled: false,
+                        };
+                    }
+                    depth += 1;
+                    off = skip_node_name(self, off);
+                }
+                FDT_END_NODE =>
+                {
+                    if depth == 0 { break; }
+                    depth -= 1;
+                    if depth < MAX_DEPTH
+                    {
+                        let s = &states[depth];
+                        if s.is_riscv_cpu && s.has_reg && !s.disabled
+                        {
+                            if !callback(s.reg_u32) { break; }
+                        }
+                    }
+                }
+                FDT_PROP =>
+                {
+                    let prop_len = match self.read_struct_u32(off) { Some(l) => l, None => break };
+                    off += 4;
+                    let nameoff = match self.read_struct_u32(off) { Some(n) => n, None => break };
+                    off += 4;
+                    let data_off = off;
+                    off += (prop_len + 3) & !3;
+
+                    if depth == 0 || depth > MAX_DEPTH { continue; }
+                    let state = &mut states[depth - 1];
+                    let name = self.string_at(nameoff);
+
+                    if name == b"compatible"
+                    {
+                        let data = self.struct_slice(data_off, prop_len);
+                        // "riscv" appears as a standalone compatible string in CPU nodes,
+                        // or as a prefix in strings like "riscv,sv48". Match either.
+                        if prop_contains(data, b"riscv")
+                        {
+                            state.is_riscv_cpu = true;
+                        }
+                    }
+                    else if name == b"reg" && prop_len >= 4
+                    {
+                        // #address-cells=1 under /cpus: reg is a single BE u32.
+                        let data = self.struct_slice(data_off, 4);
+                        if data.len() >= 4
+                        {
+                            state.reg_u32 = u32::from_be_bytes([data[0], data[1], data[2], data[3]]);
+                            state.has_reg = true;
+                        }
+                    }
+                    else if name == b"status"
+                    {
+                        let data = self.struct_slice(data_off, prop_len);
+                        // "disabled\0" means skip this CPU.
+                        if data.starts_with(b"disabled")
+                        {
+                            state.disabled = true;
+                        }
+                    }
+                }
+                FDT_NOP => {}
+                FDT_END => break,
+                _ => break,
+            }
+        }
+    }
 }
 
 // ── Private helpers ───────────────────────────────────────────────────────────
@@ -361,6 +480,47 @@ fn read_be64(buf: &[u8]) -> u64
     u64::from_be_bytes([
         buf[0], buf[1], buf[2], buf[3], buf[4], buf[5], buf[6], buf[7],
     ])
+}
+
+// ── CPU topology parsing ──────────────────────────────────────────────────────
+
+/// Parse DTB CPU nodes and return `(cpu_count, hart_ids)`.
+///
+/// Walks nodes with `compatible = "riscv"`, which is the standard compatible
+/// string for RISC-V CPU nodes. Under `/cpus`, `#address-cells=1, #size-cells=0`
+/// so the `reg` property is a single big-endian u32 hart ID.
+///
+/// The generic [`Fdt::walk_compatible`] assumes `#address-cells=2`, so this
+/// function contains its own property reader for the u32 `reg` field.
+///
+/// Returns `(0, [0;64])` if no CPU nodes are found or DTB is invalid — the
+/// caller falls back to ACPI or single-CPU operation.
+///
+/// # Safety
+/// `dtb_addr` must be the physical address of a valid, identity-mapped FDT.
+pub unsafe fn parse_cpu_count(dtb_addr: u64) -> (u32, [u32; 64])
+{
+    let fdt = match unsafe { Fdt::from_raw(dtb_addr) }
+    {
+        Some(f) => f,
+        None => return (0, [0u32; 64]),
+    };
+
+    let mut hart_ids = [0u32; 64];
+    let mut count: u32 = 0;
+
+    // Walk nodes compatible with "riscv". Each CPU node will have this as
+    // a (prefix) compatible string. We extract reg as a single BE u32.
+    fdt.walk_cpu_nodes(|reg_u32| {
+        if count < 64
+        {
+            hart_ids[count as usize] = reg_u32;
+            count += 1;
+        }
+        true // continue
+    });
+
+    (count, hart_ids)
 }
 
 // ── Public parsing functions ──────────────────────────────────────────────────

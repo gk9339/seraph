@@ -44,8 +44,10 @@ const MADT_OFF_LAPIC_BASE: usize = SDT_HDR_LEN; // u32
 const MADT_ENTRIES_OFF: usize = 44;
 
 // MADT entry types:
+const MADT_TYPE_LAPIC: u8 = 0;   // x86-64: Processor Local APIC, length 8
 const MADT_TYPE_IOAPIC: u8 = 1;
 const MADT_TYPE_ISO: u8 = 2;
+const MADT_TYPE_RINTC: u8 = 0x18; // RISC-V INTC (MADT type 24), length 36
 
 // MCFG: entries start at offset 44 (SDT_HDR_LEN + 8 reserved bytes).
 const MCFG_ENTRIES_OFF: usize = SDT_HDR_LEN + 8;
@@ -255,6 +257,175 @@ pub unsafe fn parse_acpi_resources(rsdp_addr: u64, out: &mut [PlatformResource])
     let _ = found_madt;
 
     count
+}
+
+/// Walk the ACPI MADT starting from `rsdp_addr` and collect CPU topology.
+///
+/// Returns `(cpu_count, bsp_id, cpu_ids)`:
+/// - `cpu_count`: number of enabled CPUs (at most 64).
+/// - `bsp_id`: hardware identifier of the bootstrap processor, passed in by
+///   the caller (LAPIC ID on x86-64 from CPUID; boot hart ID on RISC-V from
+///   `EFI_RISCV_BOOT_PROTOCOL`).
+/// - `cpu_ids`: per-CPU hardware IDs indexed by logical CPU index; `[0]` is
+///   always the BSP, `[1..cpu_count]` are APs in MADT discovery order.
+///
+/// Parses MADT entry types:
+/// - Type 0 (Processor Local APIC, x86-64): enabled if `flags & 1 || flags & 2`.
+/// - Type 0x18 (RISC-V INTC, RINTC): enabled if `flags & 1`.
+///
+/// Returns `(1, bsp_id, [bsp_id, 0, …])` on any parse failure so the system
+/// falls back to single-CPU operation rather than refusing to boot.
+///
+/// # Safety
+/// `rsdp_addr` must be a physical address of a valid, identity-mapped ACPI RSDP.
+pub unsafe fn parse_cpu_topology(rsdp_addr: u64, bsp_id: u32) -> (u32, u32, [u32; 64])
+{
+    let mut cpu_ids = [0u32; 64];
+    cpu_ids[0] = bsp_id;
+
+    if rsdp_addr == 0
+    {
+        return (1, bsp_id, cpu_ids);
+    }
+
+    // Validate RSDP.
+    let rsdp = unsafe { phys_slice(rsdp_addr, 36) };
+    if &rsdp[..8] != RSDP_SIG || read_u8(rsdp, RSDP_OFF_REVISION) < 2
+    {
+        return (1, bsp_id, cpu_ids);
+    }
+    let xsdt_addr = read_u64(rsdp, RSDP_OFF_XSDT);
+    if xsdt_addr == 0
+    {
+        return (1, bsp_id, cpu_ids);
+    }
+
+    // Validate XSDT.
+    let xsdt_hdr = unsafe { phys_slice(xsdt_addr, SDT_HDR_LEN) };
+    if &xsdt_hdr[SDT_OFF_SIGNATURE..SDT_OFF_SIGNATURE + 4] != b"XSDT"
+    {
+        return (1, bsp_id, cpu_ids);
+    }
+    let xsdt_len = read_u32(xsdt_hdr, SDT_OFF_LENGTH) as usize;
+    if xsdt_len < SDT_HDR_LEN
+    {
+        return (1, bsp_id, cpu_ids);
+    }
+    let xsdt = unsafe { phys_slice(xsdt_addr, xsdt_len) };
+    let entries_bytes = &xsdt[SDT_HDR_LEN..];
+    let entry_count = entries_bytes.len() / 8;
+
+    for i in 0..entry_count
+    {
+        let table_addr = read_u64(entries_bytes, i * 8);
+        if table_addr == 0
+        {
+            continue;
+        }
+        let hdr = unsafe { phys_slice(table_addr, SDT_HDR_LEN) };
+        if &hdr[SDT_OFF_SIGNATURE..SDT_OFF_SIGNATURE + 4] == b"APIC"
+        {
+            let table_len = read_u32(hdr, SDT_OFF_LENGTH) as usize;
+            if table_len >= SDT_HDR_LEN
+            {
+                let table = unsafe { phys_slice(table_addr, table_len) };
+                return parse_madt_topology(table, bsp_id, cpu_ids);
+            }
+        }
+    }
+
+    (1, bsp_id, cpu_ids)
+}
+
+/// Walk MADT entries to collect CPU hardware IDs (LAPIC or RINTC).
+///
+/// Returns `(cpu_count, bsp_id, cpu_ids)`. The BSP is placed at index 0,
+/// APs fill indices 1..cpu_count in MADT order.
+fn parse_madt_topology(table: &[u8], bsp_id: u32, mut cpu_ids: [u32; 64]) -> (u32, u32, [u32; 64])
+{
+    // cpu_count starts at 0; BSP is inserted at index 0, APs appended after.
+    // We collect all enabled IDs first, then place BSP at index 0.
+    let mut all_ids = [0u32; 64];
+    let mut all_count: usize = 0;
+
+    let mut off = MADT_ENTRIES_OFF;
+    while off + 2 <= table.len()
+    {
+        let entry_type = read_u8(table, off);
+        let entry_len = read_u8(table, off + 1) as usize;
+        if entry_len < 2 || off + entry_len > table.len()
+        {
+            break;
+        }
+
+        match entry_type
+        {
+            MADT_TYPE_LAPIC =>
+            {
+                // Type 0 (Processor Local APIC), length 8:
+                //   off+0: type  off+1: length  off+2: acpi_proc_id  off+3: apic_id
+                //   off+4: flags(u32)  bit0=enabled  bit1=online-capable
+                if entry_len >= 8
+                {
+                    let apic_id = read_u8(table, off + 3) as u32;
+                    let flags = read_u32(table, off + 4);
+                    if (flags & 0x1 != 0) || (flags & 0x2 != 0)
+                    {
+                        if all_count < 64
+                        {
+                            all_ids[all_count] = apic_id;
+                            all_count += 1;
+                        }
+                    }
+                }
+            }
+            MADT_TYPE_RINTC =>
+            {
+                // Type 0x18 (RISC-V INTC / RINTC), length 36:
+                //   off+0: type  off+1: length  off+2: version  off+3: reserved
+                //   off+4: flags(u32)  bit0=enabled
+                //   off+8: hart_id(u64)  off+16: acpi_proc_uid(u32)  …
+                if entry_len >= 20
+                {
+                    let flags = read_u32(table, off + 4);
+                    let hart_id = read_u64(table, off + 8) as u32;
+                    if flags & 0x1 != 0
+                    {
+                        if all_count < 64
+                        {
+                            all_ids[all_count] = hart_id;
+                            all_count += 1;
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        off += entry_len;
+    }
+
+    if all_count == 0
+    {
+        // No processors found in MADT — single-CPU fallback.
+        return (1, bsp_id, cpu_ids);
+    }
+
+    // Place BSP at index 0, APs at subsequent indices.
+    let mut logical_idx: usize = 1;
+    cpu_ids[0] = bsp_id;
+    for i in 0..all_count
+    {
+        if all_ids[i] != bsp_id && logical_idx < 64
+        {
+            cpu_ids[logical_idx] = all_ids[i];
+            logical_idx += 1;
+        }
+    }
+
+    // If BSP was not found in the MADT, count still includes it at [0].
+    let cpu_count = (all_count as u32).min(64);
+    (cpu_count, bsp_id, cpu_ids)
 }
 
 // ── Private table parsers ─────────────────────────────────────────────────────

@@ -305,6 +305,60 @@ unsafe fn boot_sequence(image: EfiHandle, st: *mut EfiSystemTable) -> Result<!, 
     // SAFETY: st is a valid UEFI system table pointer.
     let boot_hart_id = unsafe { arch::current::discover_boot_hart_id(st) };
 
+    // ── CPU topology discovery ────────────────────────────────────────────────
+    // BSP hardware ID: APIC ID on x86-64 (from CPUID), boot hart ID on RISC-V.
+    #[cfg(target_arch = "x86_64")]
+    let bsp_hw_id: u32 = arch::current::bsp_hardware_id();
+    #[cfg(not(target_arch = "x86_64"))]
+    let bsp_hw_id: u32 = boot_hart_id as u32;
+
+    // Primary: ACPI MADT (works on both x86-64 and RISC-V UEFI).
+    // Fallback on RISC-V: DTB /cpus if ACPI is absent.
+    // SAFETY: firmware.acpi_rsdp / firmware.device_tree are identity-mapped.
+    let (cpu_count, boot_cpu_id, boot_cpu_ids) = if firmware.acpi_rsdp != 0
+    {
+        let (n, b, ids) = unsafe { acpi::parse_cpu_topology(firmware.acpi_rsdp, bsp_hw_id) };
+        bprint!("[--------] boot: ACPI: ");
+        unsafe { crate::console::console_write_dec32(n) };
+        bprintln!(" CPU(s) found via MADT");
+        (n, b, ids)
+    }
+    else if firmware.device_tree != 0
+    {
+        let (n, hart_ids) = unsafe { dtb::parse_cpu_count(firmware.device_tree) };
+        if n > 0
+        {
+            bprint!("[--------] boot: DTB: ");
+            unsafe { crate::console::console_write_dec32(n) };
+            bprintln!(" hart(s) found");
+            // BSP is first; re-order so bsp_hw_id is at index 0.
+            let mut ids = [0u32; 64];
+            ids[0] = bsp_hw_id;
+            let mut ap_idx = 1usize;
+            for i in 0..n as usize {
+                if hart_ids[i] != bsp_hw_id && ap_idx < 64 {
+                    ids[ap_idx] = hart_ids[i];
+                    ap_idx += 1;
+                }
+            }
+            (n, bsp_hw_id, ids)
+        }
+        else
+        {
+            bprintln!("[--------] boot: DTB: no CPU nodes found, defaulting to 1");
+            let mut ids = [0u32; 64];
+            ids[0] = bsp_hw_id;
+            (1, bsp_hw_id, ids)
+        }
+    }
+    else
+    {
+        bprintln!("[--------] boot: CPU topology: no firmware tables, defaulting to 1");
+        let mut ids = [0u32; 64];
+        ids[0] = bsp_hw_id;
+        (1, bsp_hw_id, ids)
+    };
+
     // Parse ACPI and/or DTB tables into a sorted PlatformResource array.
     // SAFETY: bs is valid boot services; firmware addresses are from UEFI config table.
     let (resources_phys, resource_count) =
@@ -571,6 +625,12 @@ unsafe fn boot_sequence(image: EfiHandle, st: *mut EfiSystemTable) -> Result<!, 
                 },
                 command_line: cmdline_phys as *const u8,
                 command_line_len: config.cmdline_len as u64,
+                cpu_count: cpu_count.max(1),
+                bsp_id: boot_cpu_id,
+                cpu_ids: boot_cpu_ids,
+                // AP trampoline page: allocated below 1 MiB in Phase C (WSMP).
+                // Requires AllocateMaxAddress UEFI policy; deferred to that phase.
+                ap_trampoline_page: 0,
             },
         )
     };

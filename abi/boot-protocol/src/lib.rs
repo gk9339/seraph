@@ -17,7 +17,10 @@
 
 /// Current boot protocol version. Increment when `BootInfo` layout or the
 /// CPU entry contract changes in a non-backwards-compatible way.
-pub const BOOT_PROTOCOL_VERSION: u32 = 3;
+///
+/// v4: Added `cpu_count`, `bsp_id`, `cpu_ids`, and `ap_trampoline_page` for
+///     SMP bringup (WSMP work item).
+pub const BOOT_PROTOCOL_VERSION: u32 = 4;
 
 // ── Memory map ───────────────────────────────────────────────────────────────
 
@@ -364,6 +367,39 @@ pub struct BootInfo
     pub command_line: *const u8,
     /// Length of the command line string in bytes, excluding the null terminator.
     pub command_line_len: u64,
+
+    // ── SMP fields (added in protocol version 4) ──────────────────────────────
+
+    /// Number of logical CPUs present and usable.
+    ///
+    /// On x86-64: count of enabled LAPIC entries from the ACPI MADT.
+    /// On RISC-V: count of enabled RINTC (MADT type 0x18) entries, or hart
+    /// count from the DTB if ACPI is absent.
+    /// Always at least 1 (the BSP).
+    pub cpu_count: u32,
+
+    /// Hardware identifier of the bootstrap processor (BSP).
+    ///
+    /// On x86-64: APIC ID of the BSP (read from CPUID.01H:EBX[31:24]).
+    /// On RISC-V: hart ID of the booting hart (from EFI_RISCV_BOOT_PROTOCOL).
+    pub bsp_id: u32,
+
+    /// Hardware identifiers for all CPUs, indexed by logical CPU index.
+    ///
+    /// `cpu_ids[0]` is always the BSP (`bsp_id`). `cpu_ids[1..cpu_count]` are
+    /// the APs in discovery order. Entries beyond `cpu_count` are zero.
+    ///
+    /// On x86-64: APIC IDs. On RISC-V: hart IDs.
+    pub cpu_ids: [u32; 64],
+
+    /// Physical address of the AP startup trampoline page (x86-64 only).
+    ///
+    /// On x86-64: a 4 KiB frame below 1 MiB reserved by the bootloader before
+    /// ExitBootServices for use as the SIPI real-mode entry point. The kernel
+    /// writes AP startup code here before sending INIT/SIPI IPIs.
+    ///
+    /// On RISC-V (or when no trampoline is needed): zero.
+    pub ap_trampoline_page: u64,
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -398,11 +434,11 @@ mod tests
         assert_eq!(FramebufferInfo::empty().pixel_format, PixelFormat::Rgbx8);
     }
 
-    /// BOOT_PROTOCOL_VERSION must be 3 after the InitImage addition.
+    /// BOOT_PROTOCOL_VERSION must be 4 after the SMP (WSMP) cpu_count addition.
     #[test]
-    fn protocol_version_is_3()
+    fn protocol_version_is_4()
     {
-        assert_eq!(BOOT_PROTOCOL_VERSION, 3);
+        assert_eq!(BOOT_PROTOCOL_VERSION, 4);
     }
 
     /// InitImage segment_count field must fit within INIT_MAX_SEGMENTS.

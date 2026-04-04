@@ -229,6 +229,60 @@ pub fn current_id() -> u32
     ebx >> 24
 }
 
+// ── Per-CPU GS-base ───────────────────────────────────────────────────────────
+
+/// MSR address for `IA32_GS_BASE` — the canonical GS segment base.
+const IA32_GS_BASE: u32 = 0xC000_0101;
+
+/// Install `addr` as the per-CPU data pointer for the current CPU.
+///
+/// Writes `addr` to `IA32_GS_BASE` (MSR 0xC000_0101) so that
+/// GS-relative loads (`gs:[offset]`) reach the `PerCpuData` entry for
+/// this CPU. Must be called from Phase 5 (BSP) and `kernel_entry_ap`
+/// (each AP) before any GS-relative access occurs.
+///
+/// # Safety
+/// Must execute at ring 0. `addr` must be the virtual address of a valid
+/// `PerCpuData` that outlives the CPU's execution.
+#[cfg(not(test))]
+pub unsafe fn install_percpu(addr: u64)
+{
+    // SAFETY: IA32_GS_BASE is a valid MSR on all x86-64 CPUs; ring 0.
+    unsafe {
+        write_msr(IA32_GS_BASE, addr);
+    }
+}
+
+/// Return the logical CPU index of the executing CPU.
+///
+/// Reads `gs:[0]` which holds `PerCpuData::cpu_id` (u32, offset 0).
+/// Valid after [`install_percpu`] is called for this CPU.
+///
+/// # Safety (internal)
+/// `gs:[0]` is always a valid u32 read once GS-base is installed.
+/// The function is safe to call because the install guarantee is a
+/// precondition of the kernel running on this CPU.
+pub fn current_cpu() -> u32
+{
+    #[cfg(not(test))]
+    {
+        let id: u32;
+        // SAFETY: gs:[0] == PerCpuData::cpu_id; valid after install_percpu.
+        unsafe {
+            core::arch::asm!(
+                "mov {:e}, gs:[0]",
+                out(reg) id,
+                options(nostack, readonly, preserves_flags),
+            );
+        }
+        id
+    }
+    #[cfg(test)]
+    {
+        0
+    }
+}
+
 // ── Kernel trap stack ─────────────────────────────────────────────────────────
 
 /// Set the kernel stack pointer used when a trap fires from U-mode.

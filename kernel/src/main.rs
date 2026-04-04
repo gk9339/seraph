@@ -41,6 +41,7 @@ mod framebuffer;
 mod ipc;
 pub mod irq;
 mod mm;
+mod percpu;
 mod platform;
 mod sched;
 mod sync;
@@ -168,6 +169,13 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
         arch::current::syscall::init();
     }
     kprintln!("syscall ok");
+    // Install per-CPU GS-base (x86-64) / tp (RISC-V) for the BSP.
+    // Must be after arch init (GDT/TSS loaded) and before any current_cpu() call.
+    #[cfg(not(test))]
+    unsafe {
+        percpu::init_bsp();
+    }
+    kprintln!("percpu ok");
 
     // ── Phase 6: platform resource validation ─────────────────────────────────
     // Validate platform_resources from BootInfo before Phase 7 mints

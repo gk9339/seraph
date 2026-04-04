@@ -23,9 +23,10 @@
 //! shuttle user RSP to `SYSCALL_USER_RSP`, switch to `SYSCALL_KERNEL_RSP`,
 //! then rebuild R11 from the scratch before saving the full TrapFrame.
 //!
-//! ## Per-CPU note (WSMP)
-//! Both scratch statics must become per-CPU (GS-relative or TSS scratch)
-//! for SMP correctness.
+//! ## Per-CPU layout (PerCpuData GS-relative offsets)
+//! - `gs:[8]`  (`PERCPU_KERNEL_RSP_OFFSET`) — kernel RSP loaded at entry
+//! - `gs:[16]` (`PERCPU_USER_RSP_OFFSET`)   — saved user RSP
+//! - `gs:[24]` (`PERCPU_SCRATCH_OFFSET`)    — temp save of R11 (user RFLAGS)
 
 #[cfg(not(test))]
 use super::cpu;
@@ -45,36 +46,27 @@ const SFMASK_CLEAR_IF: u64 = 1 << 9;
 /// - bits [63:48] = 0x0010: SYSRET64 → CS=(0x10+16)|3=0x23, SS=(0x10+8)|3=0x1B.
 const STAR_VALUE: u64 = (0x0010u64 << 48) | (0x0008u64 << 32);
 
-// ── Per-CPU scratch statics ───────────────────────────────────────────────────
-// Single CPU until WSMP — these are plain statics.
-// WSMP: must become per-CPU (GS-relative or per-CPU struct).
-
-/// Kernel RSP loaded at SYSCALL entry. Set by `set_kernel_rsp` before
-/// every return to user mode.
-#[cfg(not(test))]
-static mut SYSCALL_KERNEL_RSP: u64 = 0;
-
-/// Saved user RSP at SYSCALL entry. Used to populate `TrapFrame.rsp`.
-#[cfg(not(test))]
-static mut SYSCALL_USER_RSP: u64 = 0;
-
-/// Temporary save of R11 (user RFLAGS) while R11 is repurposed for the
-/// kernel-stack switch. Restored before building the TrapFrame.
-#[cfg(not(test))]
-static mut SYSCALL_SCRATCH: u64 = 0;
-
-/// Set the kernel RSP used by SYSCALL entry.
+/// Set the kernel RSP for the current CPU's SYSCALL entry path.
 ///
-/// Must be called with the current thread's `kernel_stack_top` before any
+/// Writes `rsp` to `gs:[8]` (`PerCpuData::kernel_rsp`). The `syscall_entry`
+/// stub reads this value to switch from user to kernel stack.
+///
+/// Must be called with the current thread's `kernel_stack_top` before every
 /// return to user mode so the next SYSCALL lands on the correct kernel stack.
 ///
 /// # Safety
-/// Ring 0 only. Phase 9: single CPU; no concurrent access.
+/// Ring 0 only. GS-base must point to a valid `PerCpuData` (after Phase 5).
 #[cfg(not(test))]
 pub unsafe fn set_kernel_rsp(rsp: u64)
 {
-    // SAFETY: single-threaded Phase 9; caller is at boot or holds sched lock.
-    unsafe { SYSCALL_KERNEL_RSP = rsp; }
+    // SAFETY: gs:[8] == PerCpuData::kernel_rsp; valid after percpu::init_bsp/ap.
+    unsafe {
+        core::arch::asm!(
+            "mov gs:[8], {}",
+            in(reg) rsp,
+            options(nostack, nomem),
+        );
+    }
 }
 
 // ── syscall_entry ─────────────────────────────────────────────────────────────
@@ -83,13 +75,16 @@ pub unsafe fn set_kernel_rsp(rsp: u64)
 ///
 /// On SYSCALL hardware saves: RIP→RCX, RFLAGS→R11. Does NOT change RSP.
 /// This stub:
-/// 1. Saves R11 (user RFLAGS) to `SYSCALL_SCRATCH`.
-/// 2. Saves user RSP (via R11) to `SYSCALL_USER_RSP`.
-/// 3. Switches to `SYSCALL_KERNEL_RSP`.
+/// 1. Saves R11 (user RFLAGS) to `gs:[24]` (`PerCpuData::scratch`).
+/// 2. Saves user RSP (via R11) to `gs:[16]` (`PerCpuData::user_rsp`).
+/// 3. Switches to `gs:[8]` (`PerCpuData::kernel_rsp`).
 /// 4. Allocates a 168-byte [`TrapFrame`] on the kernel stack.
 /// 5. Saves all GPRs and CPU-state fields into the frame.
 /// 6. Calls `crate::syscall::dispatch`.
 /// 7. Restores registers and executes `sysretq`.
+///
+/// GS-base must point to a valid `PerCpuData` (installed by `percpu::init_bsp`
+/// in Phase 5) before any user thread executes a SYSCALL.
 #[cfg(not(test))]
 #[unsafe(naked)]
 unsafe extern "C" fn syscall_entry()
@@ -98,14 +93,16 @@ unsafe extern "C" fn syscall_entry()
     //   rax=0, rbx=8, rcx=16, rdx=24, rsi=32, rdi=40, rbp=48,
     //   r8=56, r9=64, r10=72, r11=80, r12=88, r13=96, r14=104, r15=112,
     //   rip=120, rflags=128, rsp=136, cs=144, ss=152, fs_base=160
+    //
+    // PerCpuData GS offsets: kernel_rsp=gs:[8], user_rsp=gs:[16], scratch=gs:[24]
     core::arch::naked_asm!(
         // ── Phase 1: stack switch (use R11 as scratch, restore later) ─────
-        // Save user RFLAGS (R11) before repurposing R11.
-        "mov [rip + {scratch}], r11",
-        // Use R11 to carry user RSP to the static, then switch stacks.
+        // Save user RFLAGS (R11) to PerCpuData::scratch before repurposing R11.
+        "mov gs:[24], r11",
+        // Use R11 to carry user RSP to PerCpuData::user_rsp, then switch stacks.
         "mov r11, rsp",
-        "mov [rip + {user_rsp}], r11",
-        "mov rsp, [rip + {kernel_rsp}]",
+        "mov gs:[16], r11",
+        "mov rsp, gs:[8]",
 
         // ── Phase 2: allocate TrapFrame and save all registers ────────────
         "sub rsp, 168",
@@ -119,8 +116,8 @@ unsafe extern "C" fn syscall_entry()
         "mov [rsp +  56], r8",
         "mov [rsp +  64], r9",
         "mov [rsp +  72], r10",     // user arg3 (r10 unmodified ✓)
-        // Restore R11 (user RFLAGS) from scratch and save it to the frame.
-        "mov r11, [rip + {scratch}]",
+        // Restore R11 (user RFLAGS) from PerCpuData::scratch and save to frame.
+        "mov r11, gs:[24]",
         "mov [rsp +  80], r11",     // user RFLAGS
         "mov [rsp +  88], r12",
         "mov [rsp +  96], r13",
@@ -128,10 +125,10 @@ unsafe extern "C" fn syscall_entry()
         "mov [rsp + 112], r15",
 
         // CPU-state fields:
-        "mov [rsp + 120], rcx",     // rip   = user RIP
+        "mov [rsp + 120], rcx",     // rip    = user RIP
         "mov [rsp + 128], r11",     // rflags = user RFLAGS
-        "mov r11, [rip + {user_rsp}]",
-        "mov [rsp + 136], r11",     // rsp   = user RSP
+        "mov r11, gs:[16]",         // load saved user RSP from PerCpuData::user_rsp
+        "mov [rsp + 136], r11",     // rsp    = user RSP
         "mov qword ptr [rsp + 144], 0x23", // cs = USER_CS
         "mov qword ptr [rsp + 152], 0x1b", // ss = USER_DS
         "mov qword ptr [rsp + 160], 0",    // fs_base (Phase 9: zero)
@@ -157,16 +154,12 @@ unsafe extern "C" fn syscall_entry()
         "mov r13, [rsp +  96]",
         "mov r14, [rsp + 104]",
         "mov r15, [rsp + 112]",
-        // Switch to user RSP last (TrapFrame still on kernel stack, accessible
-        // above via RSP until this point).
+        // Switch to user RSP last (TrapFrame still on kernel stack until here).
         "mov rsp, [rsp + 136]",     // rsp = user RSP
 
         "sysretq",
 
-        scratch     = sym SYSCALL_SCRATCH,
-        user_rsp    = sym SYSCALL_USER_RSP,
-        kernel_rsp  = sym SYSCALL_KERNEL_RSP,
-        dispatch    = sym crate::syscall::dispatch,
+        dispatch = sym crate::syscall::dispatch,
     );
 }
 

@@ -8,6 +8,7 @@
 pub mod console;
 pub mod context;
 pub mod cpu;
+pub mod gdt;
 pub mod interrupts;
 pub mod paging;
 pub mod syscall;

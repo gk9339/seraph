@@ -28,6 +28,9 @@
 //!   into `init`, and reference them in IDT gate descriptors.
 
 // Unit tests exercise descriptor encoding only; hardware ops are #[cfg(not(test))].
+// AP GDT/TSS init uses Box (heap allocation); alloc is available from Phase 4 onward.
+#[cfg(not(test))]
+extern crate alloc;
 
 // ── Selector constants ────────────────────────────────────────────────────────
 
@@ -303,20 +306,164 @@ pub unsafe fn init(kernel_stack_top: u64, ist1_top: u64, ist2_top: u64)
     }
 }
 
-/// Update the ring-0 RSP stored in the TSS.
+/// Return the virtual address of the BSP's static TSS.
 ///
-/// Call before returning to ring-3 to ensure the correct kernel stack is
-/// used on the next ring-3 → ring-0 transition.
+/// Used by `percpu::init_bsp()` to populate `PER_CPU[0].tss_ptr` so that
+/// `set_rsp0` can locate the TSS via the GS-relative pointer regardless of
+/// which CPU is executing.
+#[cfg(not(test))]
+pub fn bsp_tss_ptr() -> u64
+{
+    // SAFETY: address-of is always safe; only reads the address, no deref.
+    unsafe { core::ptr::addr_of!(TSS) as u64 }
+}
+
+/// Update the ring-0 RSP stored in the current CPU's TSS.
+///
+/// Reads `PER_CPU[current_cpu].tss_ptr` via `gs:[32]` (PERCPU_TSS_PTR_OFFSET)
+/// to locate the TSS without a global lookup. Safe to call after
+/// `percpu::init_bsp()` / `percpu::init_ap()` installs GS-base.
+///
+/// Call before returning to ring-3 to ensure the correct kernel stack is used.
 ///
 /// # Safety
-/// Must be called at ring 0. `init()` must have been called first.
+/// Must be called at ring 0. GS-base must point to a valid `PerCpuData` with
+/// `tss_ptr` set (i.e., after Phase 5 init for this CPU).
 #[cfg(not(test))]
 pub unsafe fn set_rsp0(stack_top: u64)
 {
-    // SAFETY: caller holds any necessary lock; boot is single-threaded.
+    let tss_ptr: u64;
+    // SAFETY: gs:[32] == PerCpuData::tss_ptr (PERCPU_TSS_PTR_OFFSET=32); valid
+    // after percpu::init_bsp() / init_ap() sets GS-base and tss_ptr.
     unsafe {
-        (*core::ptr::addr_of_mut!(TSS)).tss.rsp0 = stack_top;
+        core::arch::asm!(
+            "mov {}, gs:[32]",
+            out(reg) tss_ptr,
+            options(nostack, readonly, preserves_flags),
+        );
+        (*(tss_ptr as *mut Tss)).rsp0 = stack_top;
     }
+}
+
+/// Initialise and load a per-CPU GDT and TSS for an AP (Application Processor).
+///
+/// Heap-allocates a `TssWithIopb` and a 7-entry GDT, configures them with
+/// the same layout as the BSP's static GDT, loads them via `lgdt` + `ltr`,
+/// and stores the TSS pointer in `PER_CPU[cpu_id].tss_ptr`.
+///
+/// Called from `kernel_entry_ap` during Phase C AP startup, after GS-base is
+/// installed. The BSP calls `gdt::init()` (static GDT/TSS) — this function is
+/// only for APs.
+///
+/// # Safety
+/// Must execute at ring 0 on the AP being initialised. `cpu_id` must be < MAX_CPUS.
+/// `percpu::init_ap(cpu_id)` must have been called first so GS-base and
+/// `PER_CPU[cpu_id].tss_ptr` are writable.
+#[cfg(not(test))]
+pub unsafe fn init_ap(cpu_id: u32, rsp0: u64, ist1_top: u64, ist2_top: u64)
+{
+    use alloc::boxed::Box;
+
+    // Allocate and configure the TSS for this AP.
+    let mut tss_box = Box::new(TssWithIopb {
+        tss: Tss {
+            _reserved0: 0,
+            rsp0,
+            _rsp1: 0,
+            _rsp2: 0,
+            _reserved1: 0,
+            ist1: ist1_top,
+            ist2: ist2_top,
+            _ist3: 0,
+            _ist4: 0,
+            _ist5: 0,
+            _ist6: 0,
+            _ist7: 0,
+            _reserved2: 0,
+            _reserved3: 0,
+            iopb_offset: core::mem::size_of::<Tss>() as u16,
+        },
+        iopb: [0xFF; IOPB_SIZE],
+        terminator: 0xFF,
+    });
+    let tss_addr = core::ptr::addr_of!(*tss_box) as u64;
+
+    // Allocate and fill the GDT for this AP (identical layout to BSP).
+    let mut gdt_box = Box::new([0u64; 7]);
+    gdt_box[0] = 0;                      // null
+    gdt_box[1] = code_desc_64(0);        // 0x08 kernel CS
+    gdt_box[2] = data_desc_64(0);        // 0x10 kernel DS
+    gdt_box[3] = data_desc_64(3);        // 0x18 user DS
+    gdt_box[4] = code_desc_64(3);        // 0x20 user CS
+    let (tss_lo, tss_hi) = tss_desc(tss_addr);
+    gdt_box[5] = tss_lo;                 // 0x28 TSS low
+    gdt_box[6] = tss_hi;                 // 0x30 TSS high
+
+    // Leak both boxes — the AP runs on them for the lifetime of the kernel.
+    let gdt_ptr = Box::into_raw(gdt_box) as *const [u64; 7];
+    let _tss_ptr = Box::into_raw(tss_box) as *mut TssWithIopb;
+
+    // Load GDTR.
+    let gdtr = Gdtr {
+        limit: (7 * 8 - 1) as u16,
+        base: gdt_ptr as u64,
+    };
+    unsafe {
+        core::arch::asm!(
+            "lgdt [{0}]",
+            in(reg) &gdtr,
+            options(readonly, nostack, preserves_flags),
+        );
+    }
+
+    // Reload CS via a far return into the kernel code segment.
+    unsafe {
+        core::arch::asm!(
+            "push {cs}",
+            "lea {tmp}, [rip + 2f]",
+            "push {tmp}",
+            "retfq",
+            "2:",
+            cs  = in(reg) KERNEL_CS as u64,
+            tmp = lateout(reg) _,
+            options(nostack),
+        );
+    }
+
+    // Reload data/stack segment registers and zero FS/GS (GS-base is in MSR).
+    unsafe {
+        core::arch::asm!(
+            "mov ds, {ds:x}",
+            "mov es, {ds:x}",
+            "mov ss, {ds:x}",
+            "xor {z:e}, {z:e}",
+            "mov fs, {z:x}",
+            "mov gs, {z:x}",
+            ds = in(reg) KERNEL_DS,
+            z  = lateout(reg) _,
+            options(nostack, nomem),
+        );
+    }
+
+    // Load the TSS selector.
+    unsafe {
+        core::arch::asm!(
+            "ltr {0:x}",
+            in(reg) TSS_SEL,
+            options(nostack, nomem),
+        );
+    }
+
+    // Store TSS pointer in per-CPU data via GS-relative write.
+    // gs:[32] == PerCpuData::tss_ptr (PERCPU_TSS_PTR_OFFSET).
+    unsafe {
+        core::arch::asm!(
+            "mov gs:[32], {}",
+            in(reg) tss_addr,
+            options(nostack, nomem),
+        );
+    }
+    let _ = cpu_id; // cpu_id is implicit via GS-base already installed by init_ap()
 }
 
 /// Copy `iopb` into the TSS I/O Permission Bitmap for the current CPU.

@@ -35,6 +35,59 @@ pub fn current_id() -> u32
     0
 }
 
+// ── Per-CPU tp register ───────────────────────────────────────────────────────
+
+/// Install `addr` as the per-CPU data pointer for the current hart.
+///
+/// Writes `addr` into the `tp` (thread pointer) register so that
+/// `current_cpu()` can recover the hart's `PerCpuData` without a
+/// global lookup. Must be called from Phase 5 (BSP) and
+/// `kernel_entry_ap` (each AP) before any `current_cpu()` call.
+///
+/// # Safety
+/// Must execute in supervisor mode. `addr` must be the virtual address
+/// of a valid `PerCpuData` that outlives the hart's execution.
+#[cfg(not(test))]
+pub unsafe fn install_percpu(addr: u64)
+{
+    // SAFETY: writing tp is always safe in S-mode; addr is valid per caller.
+    unsafe {
+        core::arch::asm!(
+            "mv tp, {}",
+            in(reg) addr,
+            options(nostack, nomem),
+        );
+    }
+}
+
+/// Return the logical CPU index of the executing hart.
+///
+/// Reads `PerCpuData::cpu_id` (u32 at offset 0) via the `tp` register
+/// which was set by [`install_percpu`].
+///
+/// On non-test builds this dereferences `tp`; in test builds returns 0.
+pub fn current_cpu() -> u32
+{
+    #[cfg(not(test))]
+    {
+        let tp: u64;
+        // SAFETY: reading tp is always safe; install_percpu ensures it points
+        // to a valid PerCpuData with cpu_id at offset 0.
+        unsafe {
+            core::arch::asm!(
+                "mv {}, tp",
+                out(reg) tp,
+                options(nostack, nomem),
+            );
+            *(tp as *const u32)
+        }
+    }
+    #[cfg(test)]
+    {
+        0
+    }
+}
+
 // ── Kernel trap stack ─────────────────────────────────────────────────────────
 
 /// Set the kernel stack pointer used when a trap fires from U-mode.

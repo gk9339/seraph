@@ -78,10 +78,16 @@ impl EndpointState
 ///
 /// # Safety
 /// The TCB must not already be on any queue.
-unsafe fn enqueue(head: &mut *mut ThreadControlBlock, tail: &mut *mut ThreadControlBlock, tcb: *mut ThreadControlBlock)
+unsafe fn enqueue(
+    head: &mut *mut ThreadControlBlock,
+    tail: &mut *mut ThreadControlBlock,
+    tcb: *mut ThreadControlBlock,
+)
 {
     // SAFETY: tcb is a valid TCB.
-    unsafe { (*tcb).ipc_wait_next = None; }
+    unsafe {
+        (*tcb).ipc_wait_next = None;
+    }
     if tail.is_null()
     {
         *head = tcb;
@@ -90,7 +96,9 @@ unsafe fn enqueue(head: &mut *mut ThreadControlBlock, tail: &mut *mut ThreadCont
     else
     {
         // SAFETY: *tail is a valid TCB.
-        unsafe { (**tail).ipc_wait_next = Some(tcb); }
+        unsafe {
+            (**tail).ipc_wait_next = Some(tcb);
+        }
         *tail = tcb;
     }
 }
@@ -99,7 +107,10 @@ unsafe fn enqueue(head: &mut *mut ThreadControlBlock, tail: &mut *mut ThreadCont
 ///
 /// # Safety
 /// Head/tail pointers must be consistent.
-unsafe fn dequeue(head: &mut *mut ThreadControlBlock, tail: &mut *mut ThreadControlBlock) -> *mut ThreadControlBlock
+unsafe fn dequeue(
+    head: &mut *mut ThreadControlBlock,
+    tail: &mut *mut ThreadControlBlock,
+) -> *mut ThreadControlBlock
 {
     if head.is_null()
     {
@@ -114,7 +125,9 @@ unsafe fn dequeue(head: &mut *mut ThreadControlBlock, tail: &mut *mut ThreadCont
         *tail = core::ptr::null_mut();
     }
     // SAFETY: tcb is valid.
-    unsafe { (*tcb).ipc_wait_next = None; }
+    unsafe {
+        (*tcb).ipc_wait_next = None;
+    }
     tcb
 }
 
@@ -206,7 +219,9 @@ pub unsafe fn endpoint_recv(
         // Dequeue the pending call and deliver to server.
         let msg = unsafe { (*caller).ipc_msg };
         // Record who the server should reply to.
-        unsafe { (*server).reply_tcb = caller; }
+        unsafe {
+            (*server).reply_tcb = caller;
+        }
         // Update caller's blocking state: it is now waiting for this server's
         // reply, not in the send queue. SYS_THREAD_STOP will use blocked_on_object
         // (the server TCB) to cancel the reply if needed.
@@ -248,7 +263,9 @@ pub unsafe fn endpoint_reply(
         return None;
     }
     // Clear the reply target.
-    unsafe { (*server).reply_tcb = core::ptr::null_mut(); }
+    unsafe {
+        (*server).reply_tcb = core::ptr::null_mut();
+    }
 
     // Deliver reply to caller.
     unsafe {
@@ -294,7 +311,9 @@ pub unsafe fn unlink_from_wait_queue(
             else
             {
                 // SAFETY: prev is a valid TCB.
-                unsafe { (*prev).ipc_wait_next = if next.is_null() { None } else { Some(next) }; }
+                unsafe {
+                    (*prev).ipc_wait_next = if next.is_null() { None } else { Some(next) };
+                }
             }
 
             if core::ptr::eq(cur, *tail)
@@ -303,7 +322,9 @@ pub unsafe fn unlink_from_wait_queue(
             }
 
             // SAFETY: cur is a valid TCB.
-            unsafe { (*cur).ipc_wait_next = None; }
+            unsafe {
+                (*cur).ipc_wait_next = None;
+            }
             return true;
         }
 

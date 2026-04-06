@@ -82,8 +82,7 @@ pub fn create_thread(ctx: &TestContext) -> TestResult
 {
     // Thread needs both an address space and a cspace to be bound to.
     let cs = cap_create_cspace(16).map_err(|_| "cap_create_cspace for thread test failed")?;
-    let th = cap_create_thread(ctx.aspace_cap, cs)
-        .map_err(|_| "cap_create_thread failed")?;
+    let th = cap_create_thread(ctx.aspace_cap, cs).map_err(|_| "cap_create_thread failed")?;
     cap_delete(th).map_err(|_| "cap_delete thread failed")?;
     cap_delete(cs).map_err(|_| "cap_delete cspace failed")?;
     Ok(())
@@ -222,7 +221,8 @@ pub fn derive_attenuation(_ctx: &TestContext) -> TestResult
 pub fn revoke_invalidates(_ctx: &TestContext) -> TestResult
 {
     let sig = cap_create_signal().map_err(|_| "create_signal for revoke test failed")?;
-    let derived = cap_derive(sig, RIGHTS_SIGNAL).map_err(|_| "cap_derive for revoke test failed")?;
+    let derived =
+        cap_derive(sig, RIGHTS_SIGNAL).map_err(|_| "cap_derive for revoke test failed")?;
 
     // Revoke all descendants of sig (derived is now invalid).
     cap_revoke(sig).map_err(|_| "cap_revoke failed")?;
@@ -243,14 +243,12 @@ pub fn revoke_invalidates(_ctx: &TestContext) -> TestResult
 /// `cap_insert` to an already-occupied destination slot must return an error.
 pub fn insert_to_occupied_slot_err(_ctx: &TestContext) -> TestResult
 {
-    let sig = cap_create_signal()
-        .map_err(|_| "create_signal for occupied-slot test failed")?;
-    let dest_cs = cap_create_cspace(16)
-        .map_err(|_| "create_cspace for occupied-slot test failed")?;
+    let sig = cap_create_signal().map_err(|_| "create_signal for occupied-slot test failed")?;
+    let dest_cs =
+        cap_create_cspace(16).map_err(|_| "create_cspace for occupied-slot test failed")?;
 
     // First insert at slot 5 — must succeed.
-    cap_insert(sig, dest_cs, 5, !0u64)
-        .map_err(|_| "first cap_insert to slot 5 failed")?;
+    cap_insert(sig, dest_cs, 5, !0u64).map_err(|_| "first cap_insert to slot 5 failed")?;
 
     // Second insert at the same slot 5 — must fail (slot is occupied).
     let err = cap_insert(sig, dest_cs, 5, !0u64);
@@ -272,8 +270,7 @@ pub fn insert_to_occupied_slot_err(_ctx: &TestContext) -> TestResult
 /// before any modification occurs.
 pub fn copy_into_non_cspace_err(_ctx: &TestContext) -> TestResult
 {
-    let sig = cap_create_signal()
-        .map_err(|_| "create_signal for non-cspace test failed")?;
+    let sig = cap_create_signal().map_err(|_| "create_signal for non-cspace test failed")?;
 
     // sig is a Signal, not a CSpace — using it as dest_cs must fail.
     let err = cap_copy(sig, sig, !0u64);

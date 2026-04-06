@@ -24,6 +24,8 @@ use crate::arch::current::trap_frame::TrapFrame;
 use syscall::SyscallError;
 
 #[cfg(not(test))]
+use super::{current_tcb, lookup_cap};
+#[cfg(not(test))]
 use crate::cap::slot::{CapTag, Rights};
 #[cfg(not(test))]
 use crate::cap::CSpace;
@@ -31,8 +33,6 @@ use crate::cap::CSpace;
 use crate::ipc::message::Message;
 #[cfg(not(test))]
 use syscall::{MSG_CAP_SLOTS_MAX, MSG_DATA_WORDS_MAX};
-#[cfg(not(test))]
-use super::{current_tcb, lookup_cap};
 
 // ── IPC buffer helpers ────────────────────────────────────────────────────────
 
@@ -45,7 +45,11 @@ use super::{current_tcb, lookup_cap};
 /// with `user_access_begin`/`user_access_end` to satisfy SMAP (x86-64) /
 /// SUM (RISC-V).
 #[cfg(not(test))]
-unsafe fn read_ipc_buf(buf: u64, count: usize, dst: &mut [u64; MSG_DATA_WORDS_MAX]) -> Result<(), SyscallError>
+unsafe fn read_ipc_buf(
+    buf: u64,
+    count: usize,
+    dst: &mut [u64; MSG_DATA_WORDS_MAX],
+) -> Result<(), SyscallError>
 {
     if buf == 0
     {
@@ -173,7 +177,9 @@ unsafe fn transfer_caps(
     if cap_count == 0
     {
         // Write zero cap_count to the IPC buffer so receivers see no caps.
-        unsafe { write_cap_results(dst_ipc_buf, 0, &[0u32; MSG_CAP_SLOTS_MAX]); }
+        unsafe {
+            write_cap_results(dst_ipc_buf, 0, &[0u32; MSG_CAP_SLOTS_MAX]);
+        }
         return Ok(());
     }
 
@@ -191,8 +197,7 @@ unsafe fn transfer_caps(
     }
 
     // Pre-allocate destination slots to avoid OOM mid-transfer.
-    unsafe { (*dst_cspace).pre_allocate(cap_count) }
-        .map_err(|_| SyscallError::OutOfMemory)?;
+    unsafe { (*dst_cspace).pre_allocate(cap_count) }.map_err(|_| SyscallError::OutOfMemory)?;
 
     // Acquire derivation lock for the batch move.
     crate::cap::DERIVATION_LOCK.write_lock();
@@ -201,21 +206,25 @@ unsafe fn transfer_caps(
     for (i, &src_idx) in src_slots[..cap_count].iter().enumerate()
     {
         // SAFETY: DERIVATION_LOCK held; CSpace pointers valid.
-        dst_indices[i] = unsafe {
-            crate::cap::move_cap_between_cspaces(src_cspace, src_idx, dst_cspace)
-        }
-        .unwrap_or_else(|_| {
-            // Pre-validation passed and pre-allocation succeeded; this branch
-            // is unreachable in correct operation. Panic in debug builds only.
-            debug_assert!(false, "transfer_caps: unexpected move failure after pre-validation");
-            0
-        });
+        dst_indices[i] =
+            unsafe { crate::cap::move_cap_between_cspaces(src_cspace, src_idx, dst_cspace) }
+                .unwrap_or_else(|_| {
+                    // Pre-validation passed and pre-allocation succeeded; this branch
+                    // is unreachable in correct operation. Panic in debug builds only.
+                    debug_assert!(
+                        false,
+                        "transfer_caps: unexpected move failure after pre-validation"
+                    );
+                    0
+                });
     }
 
     crate::cap::DERIVATION_LOCK.write_unlock();
 
     // Write results to receiver's IPC buffer.
-    unsafe { write_cap_results(dst_ipc_buf, cap_count, &dst_indices); }
+    unsafe {
+        write_cap_results(dst_ipc_buf, cap_count, &dst_indices);
+    }
 
     Ok(())
 }
@@ -237,10 +246,10 @@ unsafe fn transfer_caps(
 #[cfg(not(test))]
 pub fn sys_ipc_call(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 {
-    let ep_idx     = tf.arg(0) as u32;
-    let label      = tf.arg(1);
+    let ep_idx = tf.arg(0) as u32;
+    let label = tf.arg(1);
     let data_count = (tf.arg(2) as usize).min(MSG_DATA_WORDS_MAX);
-    let cap_count  = (tf.arg(3) as usize).min(MSG_CAP_SLOTS_MAX);
+    let cap_count = (tf.arg(3) as usize).min(MSG_CAP_SLOTS_MAX);
     let cap_packed = tf.arg(4);
 
     // SAFETY: current_tcb() valid from syscall context.
@@ -325,19 +334,23 @@ pub fn sys_ipc_call(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 
     // Yield CPU — the current thread is now Blocked.
     // SAFETY: called from syscall handler.
-    unsafe { crate::sched::schedule(); }
+    unsafe {
+        crate::sched::schedule();
+    }
 
     // On resume (after reply): write reply data to caller's IPC buffer.
     // Reply-direction caps were already written to our IPC buffer by sys_ipc_reply.
     // SAFETY: tcb is still valid after resume.
     let reply_label = unsafe { (*tcb).ipc_msg.label };
     let reply_count = unsafe { (*tcb).ipc_msg.data_count };
-    let reply_buf   = unsafe { (*tcb).ipc_buffer };
+    let reply_buf = unsafe { (*tcb).ipc_buffer };
 
     if reply_count > 0
     {
         let data = unsafe { (*tcb).ipc_msg.data };
-        unsafe { write_ipc_buf(reply_buf, reply_count, &data); }
+        unsafe {
+            write_ipc_buf(reply_buf, reply_count, &data);
+        }
     }
 
     tf.set_ipc_return(0, reply_label);
@@ -389,13 +402,20 @@ pub fn sys_ipc_recv(tf: &mut TrapFrame) -> Result<u64, SyscallError>
                 let caller_cspace = unsafe { (*caller).cspace };
                 let server_cspace = unsafe { (*tcb).cspace };
                 unsafe {
-                    transfer_caps(caller_cspace, &msg.cap_slots[..msg.cap_count], server_cspace, server_buf)
+                    transfer_caps(
+                        caller_cspace,
+                        &msg.cap_slots[..msg.cap_count],
+                        server_cspace,
+                        server_buf,
+                    )
                 }?;
             }
 
             if msg.data_count > 0
             {
-                unsafe { write_ipc_buf(server_buf, msg.data_count, &msg.data); }
+                unsafe {
+                    write_ipc_buf(server_buf, msg.data_count, &msg.data);
+                }
             }
             tf.set_ipc_return(0, msg.label);
             return Ok(0);
@@ -407,7 +427,9 @@ pub fn sys_ipc_recv(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     }
 
     // SAFETY: called from syscall handler.
-    unsafe { crate::sched::schedule(); }
+    unsafe {
+        crate::sched::schedule();
+    }
 
     // On resume (caller arrived), deliver message from ipc_msg.
     // SAFETY: tcb valid; reply_tcb points to the caller that woke us.
@@ -416,18 +438,27 @@ pub fn sys_ipc_recv(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 
     if msg.cap_count > 0
     {
-        let caller        = unsafe { (*tcb).reply_tcb };
+        let caller = unsafe { (*tcb).reply_tcb };
         let caller_cspace = unsafe { (*caller).cspace };
         let server_cspace = unsafe { (*tcb).cspace };
         // On failure: deliver message data without caps (cap_count=0 in buf).
         // The caller stays blocked awaiting a reply; the server receives an
         // incomplete message but is not crashed.
-        let _ = unsafe { transfer_caps(caller_cspace, &msg.cap_slots[..msg.cap_count], server_cspace, server_buf) };
+        let _ = unsafe {
+            transfer_caps(
+                caller_cspace,
+                &msg.cap_slots[..msg.cap_count],
+                server_cspace,
+                server_buf,
+            )
+        };
     }
 
     if msg.data_count > 0
     {
-        unsafe { write_ipc_buf(server_buf, msg.data_count, &msg.data); }
+        unsafe {
+            write_ipc_buf(server_buf, msg.data_count, &msg.data);
+        }
     }
     tf.set_ipc_return(0, msg.label);
     Ok(0)
@@ -444,9 +475,9 @@ pub fn sys_ipc_recv(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 #[cfg(not(test))]
 pub fn sys_ipc_reply(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 {
-    let label      = tf.arg(0);
+    let label = tf.arg(0);
     let data_count = (tf.arg(1) as usize).min(MSG_DATA_WORDS_MAX);
-    let cap_count  = (tf.arg(2) as usize).min(MSG_CAP_SLOTS_MAX);
+    let cap_count = (tf.arg(2) as usize).min(MSG_CAP_SLOTS_MAX);
     let cap_packed = tf.arg(3);
 
     let tcb = unsafe { current_tcb() };
@@ -498,7 +529,12 @@ pub fn sys_ipc_reply(tf: &mut TrapFrame) -> Result<u64, SyscallError>
                 let server_cspace = unsafe { (*tcb).cspace };
                 let caller_cspace = unsafe { (*caller).cspace };
                 unsafe {
-                    transfer_caps(server_cspace, &msg.cap_slots[..cap_count], caller_cspace, caller_buf)
+                    transfer_caps(
+                        server_cspace,
+                        &msg.cap_slots[..cap_count],
+                        caller_cspace,
+                        caller_buf,
+                    )
                 }?;
                 // On failure: ? propagates the error to the server. The caller
                 // stays blocked. The server can retry.
@@ -506,13 +542,17 @@ pub fn sys_ipc_reply(tf: &mut TrapFrame) -> Result<u64, SyscallError>
             else
             {
                 // Write zero cap_count so caller can read consistently.
-                unsafe { write_cap_results(caller_buf, 0, &[0u32; MSG_CAP_SLOTS_MAX]); }
+                unsafe {
+                    write_cap_results(caller_buf, 0, &[0u32; MSG_CAP_SLOTS_MAX]);
+                }
             }
 
             // Write reply data to caller's IPC buffer.
             if data_count > 0
             {
-                unsafe { write_ipc_buf(caller_buf, data_count, &msg.data); }
+                unsafe {
+                    write_ipc_buf(caller_buf, data_count, &msg.data);
+                }
             }
 
             // Re-enqueue caller (it is now Ready).
@@ -534,7 +574,7 @@ pub fn sys_ipc_reply(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 pub fn sys_signal_send(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 {
     let sig_idx = tf.arg(0) as u32;
-    let bits    = tf.arg(1);
+    let bits = tf.arg(1);
 
     if bits == 0
     {
@@ -608,11 +648,15 @@ pub fn sys_signal_wait(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         {
             // No bits; thread is Blocked. Yield CPU.
             // SAFETY: called from syscall handler.
-            unsafe { crate::sched::schedule(); }
+            unsafe {
+                crate::sched::schedule();
+            }
 
             // On resume, `signal_send` stored the delivered bits in wakeup_value.
             let bits = unsafe { (*tcb).wakeup_value };
-            unsafe { (*tcb).wakeup_value = 0; }
+            unsafe {
+                (*tcb).wakeup_value = 0;
+            }
             Ok(bits)
         }
     }
@@ -631,7 +675,7 @@ pub fn sys_signal_wait(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 #[cfg(not(test))]
 pub fn sys_event_post(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 {
-    let eq_idx  = tf.arg(0) as u32;
+    let eq_idx = tf.arg(0) as u32;
     let payload = tf.arg(1);
 
     let tcb = unsafe { current_tcb() };
@@ -708,11 +752,15 @@ pub fn sys_event_recv(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         {
             // Queue empty; thread is Blocked. Yield CPU.
             // SAFETY: called from syscall handler.
-            unsafe { crate::sched::schedule(); }
+            unsafe {
+                crate::sched::schedule();
+            }
 
             // On resume, event_queue_post stored the payload in wakeup_value.
             let payload = unsafe { (*tcb).wakeup_value };
-            unsafe { (*tcb).wakeup_value = 0; }
+            unsafe {
+                (*tcb).wakeup_value = 0;
+            }
             tf.set_ipc_return(0, payload);
             Ok(0)
         }
@@ -736,9 +784,9 @@ pub fn sys_wait_set_add(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 {
     use crate::ipc::wait_set::WaitSetSourceTag;
 
-    let ws_idx     = tf.arg(0) as u32;
-    let src_idx    = tf.arg(1) as u32;
-    let token      = tf.arg(2);
+    let ws_idx = tf.arg(0) as u32;
+    let src_idx = tf.arg(1) as u32;
+    let token = tf.arg(2);
 
     let tcb = unsafe { current_tcb() };
     if tcb.is_null()
@@ -750,7 +798,10 @@ pub fn sys_wait_set_add(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     // Look up wait set cap.
     let ws_slot = unsafe { lookup_cap(cspace_ptr, ws_idx, CapTag::WaitSet, Rights::MODIFY) }?;
     let ws_state = unsafe {
-        let obj_ptr = ws_slot.object.ok_or(SyscallError::InvalidCapability)?.as_ptr();
+        let obj_ptr = ws_slot
+            .object
+            .ok_or(SyscallError::InvalidCapability)?
+            .as_ptr();
         let ws_obj = obj_ptr as *mut crate::cap::object::WaitSetObject;
         (*ws_obj).state
     };
@@ -769,7 +820,10 @@ pub fn sys_wait_set_add(tf: &mut TrapFrame) -> Result<u64, SyscallError>
                 {
                     return Err(SyscallError::InsufficientRights);
                 }
-                let obj_ptr = src_slot.object.ok_or(SyscallError::InvalidCapability)?.as_ptr();
+                let obj_ptr = src_slot
+                    .object
+                    .ok_or(SyscallError::InvalidCapability)?
+                    .as_ptr();
                 let ep_obj = obj_ptr as *mut crate::cap::object::EndpointObject;
                 let ep_state = (*ep_obj).state as *mut u8;
                 (ep_state, WaitSetSourceTag::Endpoint)
@@ -780,7 +834,10 @@ pub fn sys_wait_set_add(tf: &mut TrapFrame) -> Result<u64, SyscallError>
                 {
                     return Err(SyscallError::InsufficientRights);
                 }
-                let obj_ptr = src_slot.object.ok_or(SyscallError::InvalidCapability)?.as_ptr();
+                let obj_ptr = src_slot
+                    .object
+                    .ok_or(SyscallError::InvalidCapability)?
+                    .as_ptr();
                 let sig_obj = obj_ptr as *mut crate::cap::object::SignalObject;
                 let sig_state = (*sig_obj).state as *mut u8;
                 (sig_state, WaitSetSourceTag::Signal)
@@ -791,7 +848,10 @@ pub fn sys_wait_set_add(tf: &mut TrapFrame) -> Result<u64, SyscallError>
                 {
                     return Err(SyscallError::InsufficientRights);
                 }
-                let obj_ptr = src_slot.object.ok_or(SyscallError::InvalidCapability)?.as_ptr();
+                let obj_ptr = src_slot
+                    .object
+                    .ok_or(SyscallError::InvalidCapability)?
+                    .as_ptr();
                 let eq_obj = obj_ptr as *mut crate::cap::object::EventQueueObject;
                 let eq_state = (*eq_obj).state as *mut u8;
                 (eq_state, WaitSetSourceTag::EventQueue)
@@ -830,10 +890,9 @@ pub fn sys_wait_set_add(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 
     // Register in the wait set.
     // SAFETY: ws_state, source_ptr valid; scheduler lock not held.
-    let member_idx = unsafe {
-        crate::ipc::wait_set::waitset_add(ws_state, source_ptr, source_tag, token)
-    }
-    .map_err(|_| SyscallError::InvalidArgument)?;
+    let member_idx =
+        unsafe { crate::ipc::wait_set::waitset_add(ws_state, source_ptr, source_tag, token) }
+            .map_err(|_| SyscallError::InvalidArgument)?;
 
     // Write back-pointer on the source.
     unsafe {
@@ -875,7 +934,7 @@ pub fn sys_wait_set_remove(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 {
     use crate::ipc::wait_set::WaitSetSourceTag;
 
-    let ws_idx  = tf.arg(0) as u32;
+    let ws_idx = tf.arg(0) as u32;
     let src_idx = tf.arg(1) as u32;
 
     let tcb = unsafe { current_tcb() };
@@ -888,7 +947,10 @@ pub fn sys_wait_set_remove(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     // Look up wait set.
     let ws_slot = unsafe { lookup_cap(cspace_ptr, ws_idx, CapTag::WaitSet, Rights::MODIFY) }?;
     let ws_state = unsafe {
-        let obj_ptr = ws_slot.object.ok_or(SyscallError::InvalidCapability)?.as_ptr();
+        let obj_ptr = ws_slot
+            .object
+            .ok_or(SyscallError::InvalidCapability)?
+            .as_ptr();
         let ws_obj = obj_ptr as *mut crate::cap::object::WaitSetObject;
         (*ws_obj).state
     };
@@ -901,19 +963,28 @@ pub fn sys_wait_set_remove(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         {
             CapTag::Endpoint =>
             {
-                let obj_ptr = src_slot.object.ok_or(SyscallError::InvalidCapability)?.as_ptr();
+                let obj_ptr = src_slot
+                    .object
+                    .ok_or(SyscallError::InvalidCapability)?
+                    .as_ptr();
                 let ep_obj = obj_ptr as *mut crate::cap::object::EndpointObject;
                 ((*ep_obj).state as *mut u8, WaitSetSourceTag::Endpoint)
             }
             CapTag::Signal =>
             {
-                let obj_ptr = src_slot.object.ok_or(SyscallError::InvalidCapability)?.as_ptr();
+                let obj_ptr = src_slot
+                    .object
+                    .ok_or(SyscallError::InvalidCapability)?
+                    .as_ptr();
                 let sig_obj = obj_ptr as *mut crate::cap::object::SignalObject;
                 ((*sig_obj).state as *mut u8, WaitSetSourceTag::Signal)
             }
             CapTag::EventQueue =>
             {
-                let obj_ptr = src_slot.object.ok_or(SyscallError::InvalidCapability)?.as_ptr();
+                let obj_ptr = src_slot
+                    .object
+                    .ok_or(SyscallError::InvalidCapability)?
+                    .as_ptr();
                 let eq_obj = obj_ptr as *mut crate::cap::object::EventQueueObject;
                 ((*eq_obj).state as *mut u8, WaitSetSourceTag::EventQueue)
             }
@@ -977,7 +1048,10 @@ pub fn sys_wait_set_wait(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     let ws_slot = unsafe { lookup_cap(cspace_ptr, ws_idx, CapTag::WaitSet, Rights::WAIT) }?;
 
     let ws_state = unsafe {
-        let obj_ptr = ws_slot.object.ok_or(SyscallError::InvalidCapability)?.as_ptr();
+        let obj_ptr = ws_slot
+            .object
+            .ok_or(SyscallError::InvalidCapability)?
+            .as_ptr();
         let ws_obj = obj_ptr as *mut crate::cap::object::WaitSetObject;
         (*ws_obj).state
     };
@@ -997,11 +1071,15 @@ pub fn sys_wait_set_wait(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         {
             // No source ready; thread is Blocked. Yield CPU.
             // SAFETY: called from syscall handler.
-            unsafe { crate::sched::schedule(); }
+            unsafe {
+                crate::sched::schedule();
+            }
 
             // On resume, waitset_notify stored the token in wakeup_value.
             let token = unsafe { (*tcb).wakeup_value };
-            unsafe { (*tcb).wakeup_value = 0; }
+            unsafe {
+                (*tcb).wakeup_value = 0;
+            }
             tf.set_ipc_return(0, token);
             Ok(0)
         }

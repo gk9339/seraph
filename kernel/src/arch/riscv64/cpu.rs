@@ -92,24 +92,28 @@ pub fn current_cpu() -> u32
 
 /// Set the kernel stack pointer used when a trap fires from U-mode.
 ///
-/// On RISC-V this writes `stack_top` to `sscratch`.  The trap entry reads
-/// `sscratch` to detect U-mode traps and switch to the kernel stack before
-/// building the [`TrapFrame`].  Must be called before the first `sret` to
-/// U-mode and again whenever the current thread changes.
+/// On RISC-V, `sscratch` holds `&PER_CPU[cpu_id]` (not the stack pointer)
+/// so trap_entry can recover the per-CPU pointer on U-mode entry.  The
+/// actual kernel stack top is stored in `PerCpuData::kernel_rsp` (offset 8
+/// from `tp`), from which trap_entry loads it when switching stacks.
+///
+/// Must be called before the first `sret` to U-mode and again whenever the
+/// current thread changes.
 ///
 /// # Safety
-/// Must execute in supervisor mode.
+/// Must execute in supervisor mode.  `tp` must already point to a valid
+/// `PerCpuData` (guaranteed after [`install_percpu`] is called in Phase 5).
 #[cfg(not(test))]
 #[inline]
 pub unsafe fn set_kernel_trap_stack(stack_top: u64)
 {
-    // SAFETY: csrw sscratch is safe in S-mode and has no side effects beyond
-    // updating the register.
+    // SAFETY: tp = &PER_CPU[cpu_id] (installed in Phase 5). offset 8 =
+    // PerCpuData::kernel_rsp. Storing via tp is safe in S-mode.
     unsafe {
         core::arch::asm!(
-            "csrw sscratch, {}",
+            "sd {}, 8(tp)",
             in(reg) stack_top,
-            options(nomem, nostack),
+            options(nostack),
         );
     }
 }

@@ -104,7 +104,8 @@ impl RunQueue
                 {
                     None => self.head = next,
                     // SAFETY: prev is a valid TCB.
-                    Some(p) => unsafe { (*p).run_queue_next = next },
+                    Some(p) =>
+                    unsafe { (*p).run_queue_next = next },
                 }
                 if self.tail == Some(c)
                 {
@@ -240,7 +241,10 @@ impl PerCpuScheduler
     pub fn remove_from_queue(&mut self, tcb: *mut ThreadControlBlock, priority: u8)
     {
         let p = priority as usize;
-        if p >= NUM_PRIORITY_LEVELS { return; }
+        if p >= NUM_PRIORITY_LEVELS
+        {
+            return;
+        }
         if self.queues[p].remove(tcb) && self.queues[p].is_empty()
         {
             self.non_empty &= !(1 << p);
@@ -494,12 +498,14 @@ mod tests
         let ptrs: Vec<*mut ThreadControlBlock> =
             tcbs.iter_mut().map(|t| &mut **t as *mut _).collect();
 
-        for &p in &ptrs {
+        for &p in &ptrs
+        {
             sched.enqueue(p, 7);
         }
         sched.set_idle(ptrs[0]);
 
-        for &expected in &ptrs {
+        for &expected in &ptrs
+        {
             assert_eq!(sched.dequeue_highest(), expected, "FIFO order violated");
         }
         // Queue exhausted; returns idle.
@@ -556,7 +562,11 @@ mod tests
         // Raise middle thread.
         sched.change_priority(pb, 3, 7);
 
-        assert_eq!(sched.dequeue_highest(), pb, "raised thread must dequeue first");
+        assert_eq!(
+            sched.dequeue_highest(),
+            pb,
+            "raised thread must dequeue first"
+        );
         assert_eq!(sched.dequeue_highest(), pa, "then A in original order");
         assert_eq!(sched.dequeue_highest(), pc, "then C in original order");
     }

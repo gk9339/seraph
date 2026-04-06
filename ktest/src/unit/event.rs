@@ -101,17 +101,19 @@ pub fn recv_blocks_until_post(ctx: &TestContext) -> TestResult
 
     let cs = cap_create_cspace(16).map_err(|_| "cap_create_cspace failed")?;
     // Pass all rights for the queue; SIGNAL right for the sync signal.
-    let child_eq = cap_copy(eq, cs, !0u64)
-        .map_err(|_| "cap_copy eq failed")?;
-    let child_sync = cap_copy(sync, cs, 1 << 7)
-        .map_err(|_| "cap_copy sync failed")?;
+    let child_eq = cap_copy(eq, cs, !0u64).map_err(|_| "cap_copy eq failed")?;
+    let child_sync = cap_copy(sync, cs, 1 << 7).map_err(|_| "cap_copy sync failed")?;
     let child_arg = (child_eq as u64) | ((child_sync as u64) << 16);
 
-    let th = cap_create_thread(ctx.aspace_cap, cs)
-        .map_err(|_| "cap_create_thread failed")?;
+    let th = cap_create_thread(ctx.aspace_cap, cs).map_err(|_| "cap_create_thread failed")?;
     let stack_top = ChildStack::top(core::ptr::addr_of!(RECV_BLOCKS_STACK));
-    thread_configure(th, recv_and_report_entry as *const () as u64, stack_top, child_arg)
-        .map_err(|_| "thread_configure failed")?;
+    thread_configure(
+        th,
+        recv_and_report_entry as *const () as u64,
+        stack_top,
+        child_arg,
+    )
+    .map_err(|_| "thread_configure failed")?;
     thread_start(th).map_err(|_| "thread_start failed")?;
 
     // Yield to let the child run and block on event_recv (queue is empty).
@@ -141,13 +143,19 @@ pub fn recv_blocks_until_post(ctx: &TestContext) -> TestResult
 /// `arg`: bits[15:0] = eq_slot, bits[31:16] = sync_slot (in child's CSpace).
 fn recv_and_report_entry(arg: u64) -> !
 {
-    let eq_slot   = (arg         & 0xFFFF) as u32;
+    let eq_slot = (arg & 0xFFFF) as u32;
     let sync_slot = ((arg >> 16) & 0xFFFF) as u32;
 
     match event_recv(eq_slot)
     {
-        Ok(val) => { signal_send(sync_slot, val).ok(); }
-        Err(_)  => { signal_send(sync_slot, 0xBAD).ok(); }
+        Ok(val) =>
+        {
+            signal_send(sync_slot, val).ok();
+        }
+        Err(_) =>
+        {
+            signal_send(sync_slot, 0xBAD).ok();
+        }
     }
     thread_exit()
 }

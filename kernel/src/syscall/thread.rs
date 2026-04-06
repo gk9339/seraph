@@ -48,9 +48,8 @@ pub fn sys_thread_configure(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     }
     let caller_cspace = unsafe { (*caller_tcb).cspace };
 
-    let thread_slot = unsafe {
-        super::lookup_cap(caller_cspace, thread_idx, CapTag::Thread, Rights::CONTROL)
-    }?;
+    let thread_slot =
+        unsafe { super::lookup_cap(caller_cspace, thread_idx, CapTag::Thread, Rights::CONTROL) }?;
 
     let target_tcb = {
         let obj = thread_slot.object.ok_or(SyscallError::InvalidCapability)?;
@@ -89,7 +88,9 @@ pub fn sys_thread_configure(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 
     // Store the trap frame pointer so sched::schedule() can find it.
     // SAFETY: target_tcb is valid.
-    unsafe { (*target_tcb).trap_frame = tf_ptr; }
+    unsafe {
+        (*target_tcb).trap_frame = tf_ptr;
+    }
 
     Ok(0)
 }
@@ -119,9 +120,8 @@ pub fn sys_thread_start(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     }
     let caller_cspace = unsafe { (*caller_tcb).cspace };
 
-    let thread_slot = unsafe {
-        super::lookup_cap(caller_cspace, thread_idx, CapTag::Thread, Rights::CONTROL)
-    }?;
+    let thread_slot =
+        unsafe { super::lookup_cap(caller_cspace, thread_idx, CapTag::Thread, Rights::CONTROL) }?;
 
     let target_tcb = {
         let obj = thread_slot.object.ok_or(SyscallError::InvalidCapability)?;
@@ -150,8 +150,18 @@ pub fn sys_thread_start(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 
         (*target_tcb).state = ThreadState::Ready;
         let prio = (*target_tcb).priority;
-        // Enqueue on the BSP scheduler. WSMP (SMP) will use cpu_affinity.
-        crate::sched::scheduler_for(0).enqueue(target_tcb, prio);
+        // Enqueue on the affinity CPU if set; otherwise CPU 0 (BSP).
+        // Full preferred_cpu migration is Phase D.
+        let affinity = (*target_tcb).cpu_affinity;
+        let target_cpu = if affinity != crate::sched::AFFINITY_ANY
+        {
+            affinity as usize
+        }
+        else
+        {
+            0
+        };
+        crate::sched::scheduler_for(target_cpu).enqueue(target_tcb, prio);
     }
 
     Ok(0)
@@ -183,9 +193,8 @@ pub fn sys_thread_stop(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     }
     let caller_cspace = unsafe { (*caller_tcb).cspace };
 
-    let thread_slot = unsafe {
-        super::lookup_cap(caller_cspace, thread_idx, CapTag::Thread, Rights::CONTROL)
-    }?;
+    let thread_slot =
+        unsafe { super::lookup_cap(caller_cspace, thread_idx, CapTag::Thread, Rights::CONTROL) }?;
 
     let target_tcb = {
         let obj = thread_slot.object.ok_or(SyscallError::InvalidCapability)?;
@@ -253,7 +262,7 @@ pub fn sys_thread_stop(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 #[cfg(not(test))]
 unsafe fn cancel_ipc_block(tcb: *mut crate::sched::thread::ThreadControlBlock)
 {
-    use crate::ipc::endpoint::{EndpointState, unlink_from_wait_queue};
+    use crate::ipc::endpoint::{unlink_from_wait_queue, EndpointState};
     use crate::ipc::event_queue::EventQueueState;
     use crate::ipc::signal::SignalState;
     use crate::ipc::wait_set::WaitSetState;
@@ -298,7 +307,9 @@ unsafe fn cancel_ipc_block(tcb: *mut crate::sched::thread::ThreadControlBlock)
             {
                 let server = blocked_on as *mut crate::sched::thread::ThreadControlBlock;
                 // SAFETY: server is a valid TCB pointer.
-                unsafe { (*server).reply_tcb = core::ptr::null_mut(); }
+                unsafe {
+                    (*server).reply_tcb = core::ptr::null_mut();
+                }
             }
         }
 
@@ -347,7 +358,8 @@ unsafe fn cancel_ipc_block(tcb: *mut crate::sched::thread::ThreadControlBlock)
             }
         }
 
-        IpcThreadState::None => {}
+        IpcThreadState::None =>
+        {}
     }
 
     // Reset IPC state and blocked_on_object.
@@ -390,8 +402,8 @@ pub fn sys_thread_set_priority(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     use syscall::{PRIORITY_MAX, SCHED_ELEVATED_MIN};
 
     let thread_idx = tf.arg(0) as u32;
-    let priority   = tf.arg(1) as u8;
-    let sched_idx  = tf.arg(2) as u32;
+    let priority = tf.arg(1) as u8;
+    let sched_idx = tf.arg(2) as u32;
 
     // Validate priority range: 0 (idle) and 31 (reserved) are rejected.
     if priority == 0 || priority > PRIORITY_MAX
@@ -410,13 +422,17 @@ pub fn sys_thread_set_priority(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     if priority >= SCHED_ELEVATED_MIN
     {
         unsafe {
-            super::lookup_cap(caller_cspace, sched_idx, CapTag::SchedControl, Rights::ELEVATE)
+            super::lookup_cap(
+                caller_cspace,
+                sched_idx,
+                CapTag::SchedControl,
+                Rights::ELEVATE,
+            )
         }?;
     }
 
-    let thread_slot = unsafe {
-        super::lookup_cap(caller_cspace, thread_idx, CapTag::Thread, Rights::CONTROL)
-    }?;
+    let thread_slot =
+        unsafe { super::lookup_cap(caller_cspace, thread_idx, CapTag::Thread, Rights::CONTROL) }?;
 
     let target_tcb = {
         let obj = thread_slot.object.ok_or(SyscallError::InvalidCapability)?;
@@ -464,7 +480,7 @@ pub fn sys_thread_set_affinity(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     use core::sync::atomic::Ordering;
 
     let thread_idx = tf.arg(0) as u32;
-    let cpu_id     = tf.arg(1) as u32;
+    let cpu_id = tf.arg(1) as u32;
 
     let caller_tcb = unsafe { current_tcb() };
     if caller_tcb.is_null()
@@ -473,9 +489,8 @@ pub fn sys_thread_set_affinity(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     }
     let caller_cspace = unsafe { (*caller_tcb).cspace };
 
-    let thread_slot = unsafe {
-        super::lookup_cap(caller_cspace, thread_idx, CapTag::Thread, Rights::CONTROL)
-    }?;
+    let thread_slot =
+        unsafe { super::lookup_cap(caller_cspace, thread_idx, CapTag::Thread, Rights::CONTROL) }?;
 
     let target_tcb = {
         let obj = thread_slot.object.ok_or(SyscallError::InvalidCapability)?;
@@ -499,7 +514,9 @@ pub fn sys_thread_set_affinity(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     }
 
     // SAFETY: target_tcb is valid.
-    unsafe { (*target_tcb).cpu_affinity = cpu_id; }
+    unsafe {
+        (*target_tcb).cpu_affinity = cpu_id;
+    }
 
     Ok(0)
 }
@@ -523,8 +540,8 @@ pub fn sys_thread_read_regs(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     use core::mem::size_of;
 
     let thread_idx = tf.arg(0) as u32;
-    let buf_ptr    = tf.arg(1);
-    let buf_size   = tf.arg(2) as usize;
+    let buf_ptr = tf.arg(1);
+    let buf_size = tf.arg(2) as usize;
 
     let caller_tcb = unsafe { current_tcb() };
     if caller_tcb.is_null()
@@ -534,9 +551,8 @@ pub fn sys_thread_read_regs(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     let caller_cspace = unsafe { (*caller_tcb).cspace };
 
     // OBSERVE right is sufficient for reading registers.
-    let thread_slot = unsafe {
-        super::lookup_cap(caller_cspace, thread_idx, CapTag::Thread, Rights::OBSERVE)
-    }?;
+    let thread_slot =
+        unsafe { super::lookup_cap(caller_cspace, thread_idx, CapTag::Thread, Rights::OBSERVE) }?;
 
     let target_tcb = {
         let obj = thread_slot.object.ok_or(SyscallError::InvalidCapability)?;
@@ -599,8 +615,8 @@ pub fn sys_thread_write_regs(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     use core::mem::{size_of, MaybeUninit};
 
     let thread_idx = tf.arg(0) as u32;
-    let buf_ptr    = tf.arg(1);
-    let buf_size   = tf.arg(2) as usize;
+    let buf_ptr = tf.arg(1);
+    let buf_size = tf.arg(2) as usize;
 
     let caller_tcb = unsafe { current_tcb() };
     if caller_tcb.is_null()
@@ -609,9 +625,8 @@ pub fn sys_thread_write_regs(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     }
     let caller_cspace = unsafe { (*caller_tcb).cspace };
 
-    let thread_slot = unsafe {
-        super::lookup_cap(caller_cspace, thread_idx, CapTag::Thread, Rights::CONTROL)
-    }?;
+    let thread_slot =
+        unsafe { super::lookup_cap(caller_cspace, thread_idx, CapTag::Thread, Rights::CONTROL) }?;
 
     let target_tcb = {
         let obj = thread_slot.object.ok_or(SyscallError::InvalidCapability)?;
@@ -685,7 +700,9 @@ pub fn sys_thread_write_regs(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 /// Add per-field validation below the existing blocks. Use `InvalidArgument`
 /// for bad user data (not a kernel invariant violation).
 #[cfg(not(test))]
-fn validate_write_regs(regs: &mut crate::arch::current::trap_frame::TrapFrame) -> Result<(), SyscallError>
+fn validate_write_regs(
+    regs: &mut crate::arch::current::trap_frame::TrapFrame,
+) -> Result<(), SyscallError>
 {
     #[cfg(target_arch = "x86_64")]
     {
@@ -725,7 +742,7 @@ fn validate_write_regs(regs: &mut crate::arch::current::trap_frame::TrapFrame) -
         // scause and stval are kernel-internal; zero them out to prevent
         // spurious fault handling on resume.
         regs.scause = 0;
-        regs.stval  = 0;
+        regs.stval = 0;
     }
 
     Ok(())

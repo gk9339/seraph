@@ -26,11 +26,23 @@
 
 #[cfg(not(test))]
 use core::panic::PanicInfo;
+#[cfg(not(test))]
+use core::sync::atomic::{AtomicU32, Ordering};
 
 // Pull in the `alloc` crate (Box, Vec, …) for no_std kernel builds.
 // In test mode the standard library provides alloc implicitly.
 #[cfg(not(test))]
 extern crate alloc;
+
+// ── AP ready counter ──────────────────────────────────────────────────────────
+
+/// Number of APs that have completed SMP startup and are online.
+///
+/// Incremented by each AP in `kernel_entry_ap` just before entering the idle
+/// loop. The BSP spins on this counter after sending SIPIs to wait for all APs
+/// to come online before entering the scheduler.
+#[cfg(not(test))]
+static APS_READY: AtomicU32 = AtomicU32::new(0);
 
 use boot_protocol::BootInfo;
 
@@ -71,11 +83,13 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
     // SAFETY: validate_boot_info confirmed non-null, aligned, and readable.
     let info = unsafe { &*boot_info };
 
-    // Capture SMP fields from BootInfo while it is still identity-mapped
-    // (before Phase 3 replaces the bootloader's page tables). After Phase 3,
-    // `info` is no longer accessible via the physical address; use the direct
-    // map (info9 in Phase 9) instead.
-    let boot_cpu_count = info.cpu_count.max(1);
+    // Copy all fields needed beyond Phase 3 out of BootInfo now, while the
+    // identity mapping is still live. After Phase 3 activates the kernel page
+    // tables, the physical address in `info` is no longer mapped.
+    let boot_cpu_count    = info.cpu_count.max(1);
+    let boot_cpu_ids      = info.cpu_ids;
+    let trampoline_pa     = info.ap_trampoline_page;
+    let init_image        = info.init_image; // InitImage is Copy
 
     // ── Phase 1: early console ──────────────────────────────────────────────
     // SAFETY: called exactly once, from the single kernel boot thread, after
@@ -88,7 +102,13 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
     // so the banner and the queryable version are guaranteed to stay in sync.
     let kver = ::syscall::KERNEL_VERSION;
     let (kmaj, kmin, kpat) = (kver >> 32, (kver >> 16) & 0xFFFF, kver & 0xFFFF);
-    kprintln!("Seraph kernel v{}.{}.{} ({})", kmaj, kmin, kpat, arch::current::ARCH_NAME);
+    kprintln!(
+        "Seraph kernel v{}.{}.{} ({})",
+        kmaj,
+        kmin,
+        kpat,
+        arch::current::ARCH_NAME
+    );
     kprintln!("Phase 1: Early Console");
     kprintln!("boot protocol v{}", info.version);
 
@@ -188,18 +208,25 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
     // boot-provided hardware resources.
     kprintln!("Phase 7: Capability System");
     let cap_count = cap::init_capability_system(platform_resources, boot_info as u64);
-    kprintln!("capability system initialised, {} slots populated", cap_count);
+    kprintln!(
+        "capability system initialised, {} slots populated",
+        cap_count
+    );
 
     // ── Phase 8: scheduler ────────────────────────────────────────────────────
     // Initialise per-CPU scheduler state and create idle threads.
     // cpu_count from BootInfo (populated by bootloader from ACPI MADT / DTB).
     // APs are not yet started; sched::init allocates idle threads for all CPUs
-    // so Phase C (AP startup) can call sched::ap_enter without re-allocating.
+    // so AP startup can call sched::ap_enter without re-allocating.
     //
     // SAFETY: single-threaded boot; heap and page tables are active.
     kprintln!("Phase 8: Scheduler");
     let cpu_count = sched::init(boot_cpu_count, allocator);
-    kprintln!("scheduler initialised, {} CPU{}", cpu_count, if cpu_count == 1 { "" } else { "s" });
+    kprintln!(
+        "scheduler initialised, {} CPU{}",
+        cpu_count,
+        if cpu_count == 1 { "" } else { "s" }
+    );
 
     // ── Phase 9: create and launch init ───────────────────────────────────────
     // Gated #[cfg(not(test))]: Phase 9 uses heap allocation and arch-specific
@@ -207,24 +234,17 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
     // 0-8 via their individual stub functions; kernel_entry is never invoked.
     #[cfg(not(test))]
     {
-        // Re-access BootInfo via the direct physical map (identity mapping no longer active).
-        // SAFETY: boot_info holds the physical address of the BootInfo struct; after Phase 3
-        // all physical memory is accessible via DIRECT_MAP_BASE.
-        let info9 = unsafe {
-            &*(mm::paging::phys_to_virt(boot_info as u64) as *const boot_protocol::BootInfo)
-        };
-
         kprintln!("Phase 9: Init Creation and Scheduler Entry");
 
-        if info9.init_image.segment_count == 0 || info9.init_image.entry_point == 0
+        if init_image.segment_count == 0 || init_image.entry_point == 0
         {
             fatal("Phase 9: init image missing or has no entry point");
         }
 
         kprintln!(
             "init: {} segments entry={:#x}",
-            info9.init_image.segment_count,
-            info9.init_image.entry_point
+            init_image.segment_count,
+            init_image.entry_point
         );
 
         // Create init's user address space (PML4 / Sv48 root + kernel entries).
@@ -233,14 +253,12 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
         let init_as_ptr = alloc::boxed::Box::into_raw(alloc::boxed::Box::new(init_as));
 
         // Map each ELF LOAD segment into the init address space.
-        for i in 0..info9.init_image.segment_count as usize
+        for i in 0..init_image.segment_count as usize
         {
-            let seg = &info9.init_image.segments[i];
+            let seg = &init_image.segments[i];
             // SAFETY: segment data is in Loaded memory reachable via the direct map.
-            unsafe {
-                (*init_as_ptr).map_segment(seg, allocator)
-            }
-            .unwrap_or_else(|_| fatal("Phase 9: failed to map init segment"));
+            unsafe { (*init_as_ptr).map_segment(seg, allocator) }
+                .unwrap_or_else(|_| fatal("Phase 9: failed to map init segment"));
         }
 
         // Insert an AddressSpace cap for init's own address space into the root
@@ -253,9 +271,9 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
         // (init_aspace_slot + 1) through (init_aspace_slot + segment_count).
         let init_aspace_cap_slot = {
             use alloc::boxed::Box;
+            use boot_protocol::SegmentFlags;
             use cap::object::{AddressSpaceObject, FrameObject, KernelObjectHeader, ObjectType};
             use cap::slot::{CapTag, Rights};
-            use boot_protocol::SegmentFlags;
             use core::ptr::NonNull;
 
             // SAFETY: ROOT_CSPACE is still owned by the kernel (not yet taken
@@ -268,41 +286,35 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
                 header: KernelObjectHeader::new(ObjectType::AddressSpace),
                 address_space: init_as_ptr,
             });
-            let as_nn = unsafe {
-                NonNull::new_unchecked(Box::into_raw(as_obj) as *mut KernelObjectHeader)
-            };
+            let as_nn =
+                unsafe { NonNull::new_unchecked(Box::into_raw(as_obj) as *mut KernelObjectHeader) };
             let slot = cs
                 .insert_cap(CapTag::AddressSpace, Rights::MAP | Rights::READ, as_nn)
                 .unwrap_or_else(|_| fatal("Phase 9: cannot insert init AddressSpace cap"));
 
             // Frame caps for each init segment (phys base + size + permissions).
             // Stored in order: slot+1 = segment[0], slot+2 = segment[1], etc.
-            let seg_count = info9.init_image.segment_count as usize;
+            let seg_count = init_image.segment_count as usize;
             for i in 0..seg_count
             {
-                let seg = &info9.init_image.segments[i];
+                let seg = &init_image.segments[i];
                 let rights = match seg.flags
                 {
-                    SegmentFlags::Read        => Rights::MAP,
-                    SegmentFlags::ReadWrite   => Rights::MAP | Rights::WRITE,
+                    SegmentFlags::Read => Rights::MAP,
+                    SegmentFlags::ReadWrite => Rights::MAP | Rights::WRITE,
                     SegmentFlags::ReadExecute => Rights::MAP | Rights::EXECUTE,
                 };
                 let fo = Box::new(FrameObject {
                     header: KernelObjectHeader::new(ObjectType::Frame),
-                    base:   seg.phys_addr,
-                    size:   seg.size,
+                    base: seg.phys_addr,
+                    size: seg.size,
                 });
-                let fo_nn = unsafe {
-                    NonNull::new_unchecked(Box::into_raw(fo) as *mut KernelObjectHeader)
-                };
+                let fo_nn =
+                    unsafe { NonNull::new_unchecked(Box::into_raw(fo) as *mut KernelObjectHeader) };
                 cs.insert_cap(CapTag::Frame, rights, fo_nn)
                     .unwrap_or_else(|_| fatal("Phase 9: cannot insert init segment Frame cap"));
             }
-            kprintln!(
-                "init: aspace cap={} + {} frame caps",
-                slot,
-                seg_count,
-            );
+            kprintln!("init: aspace cap={} + {} frame caps", slot, seg_count,);
             slot
         };
 
@@ -322,13 +334,12 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
             .alloc(2) // 2^2 = 4 pages
             .unwrap_or_else(|| fatal("Phase 9: out of memory for init kernel stack"));
         let init_kstack_virt = mm::paging::phys_to_virt(init_kstack_phys);
-        let init_kstack_top =
-            init_kstack_virt + (sched::KERNEL_STACK_PAGES * mm::PAGE_SIZE) as u64;
+        let init_kstack_top = init_kstack_virt + (sched::KERNEL_STACK_PAGES * mm::PAGE_SIZE) as u64;
 
         // Build the init TCB.  saved_state.rip / .ra stores the user entry point
         // so sched::enter() can retrieve it without depending on BootInfo.
         let init_saved = arch::current::context::new_state(
-            info9.init_image.entry_point,
+            init_image.entry_point,
             init_kstack_top,
             init_aspace_cap_slot as u64, // forwarded to init's a0/rdi on first entry
             true,
@@ -336,26 +347,26 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
 
         let init_tcb = alloc::boxed::Box::into_raw(alloc::boxed::Box::new(
             sched::thread::ThreadControlBlock {
-                state:           sched::thread::ThreadState::Ready,
-                priority:        sched::INIT_PRIORITY,
+                state: sched::thread::ThreadState::Ready,
+                priority: sched::INIT_PRIORITY,
                 slice_remaining: sched::TIME_SLICE_TICKS,
-                cpu_affinity:    sched::AFFINITY_ANY,
-                preferred_cpu:   0,
-                run_queue_next:  None,
-                ipc_state:       sched::thread::IpcThreadState::None,
-                ipc_msg:         ipc::message::Message::default(),
-                reply_tcb:       core::ptr::null_mut(),
-                ipc_wait_next:   None,
-                is_user:         true,
-                saved_state:     init_saved,
+                cpu_affinity: sched::AFFINITY_ANY,
+                preferred_cpu: 0,
+                run_queue_next: None,
+                ipc_state: sched::thread::IpcThreadState::None,
+                ipc_msg: ipc::message::Message::default(),
+                reply_tcb: core::ptr::null_mut(),
+                ipc_wait_next: None,
+                is_user: true,
+                saved_state: init_saved,
                 kernel_stack_top: init_kstack_top,
-                trap_frame:      core::ptr::null_mut(), // set in sched::enter()
-                address_space:   init_as_ptr,
-                ipc_buffer:      0,
-                wakeup_value:    0,
-                iopb:            core::ptr::null_mut(),
+                trap_frame: core::ptr::null_mut(), // set in sched::enter()
+                address_space: init_as_ptr,
+                ipc_buffer: 0,
+                wakeup_value: 0,
+                iopb: core::ptr::null_mut(),
                 blocked_on_object: core::ptr::null_mut(),
-                cspace:          {
+                cspace: {
                     // Transfer root CSpace ownership to init. ROOT_CSPACE is
                     // an Option<Box<CSpace>> set in Phase 7; take it here so
                     // the raw pointer is valid for the lifetime of the process.
@@ -364,7 +375,7 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
                         .unwrap_or_else(|| fatal("Phase 9: ROOT_CSPACE missing"));
                     alloc::boxed::Box::into_raw(cs)
                 },
-                thread_id:       1, // 0 = idle BSP, 1 = init
+                thread_id: 1, // 0 = idle BSP, 1 = init
             },
         ));
 
@@ -381,6 +392,64 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
             init_kstack_top
         );
 
+        // ── SMP: start Application Processors ────────────────────────────────
+        // Arch-neutral: each architecture implements `ap_trampoline::setup_trampoline`
+        // and `ap_trampoline::start_ap` behind the `arch::current` facade.
+        // APs enter their idle loops and increment APS_READY. The BSP waits
+        // for all APs before entering the scheduler.
+        {
+            let ap_count = (boot_cpu_count - 1) as usize;
+            if ap_count > 0
+            {
+                if trampoline_pa == 0
+                {
+                    kprintln!("smp: no AP trampoline page — SMP disabled");
+                }
+                else
+                {
+                    kprintln!("smp: starting {} AP(s)", ap_count);
+
+                    // Copy/patch the trampoline code into the physical page.
+                    // SAFETY: direct map active; trampoline_pa is identity-mapped RWX.
+                    unsafe {
+                        arch::current::ap_trampoline::setup_trampoline(trampoline_pa);
+                    }
+
+                    let entry_fn = kernel_entry_ap as *const () as u64;
+
+                    for cpu_idx in 1..=ap_count
+                    {
+                        let hw_id = boot_cpu_ids[cpu_idx];
+                        let stack_top = unsafe { sched::idle_stack_top_for(cpu_idx) };
+
+                        // Arch-specific: write params + send SIPI / SBI hart_start.
+                        // SAFETY: trampoline ready; Phase 3–8 active.
+                        let ok = unsafe {
+                            arch::current::ap_trampoline::start_ap(
+                                trampoline_pa,
+                                cpu_idx as u32,
+                                hw_id,
+                                entry_fn,
+                                stack_top,
+                            )
+                        };
+                        if !ok
+                        {
+                            kprintln!("smp: start_ap(cpu={}) failed", cpu_idx);
+                            continue;
+                        }
+
+                        while APS_READY.load(Ordering::Acquire) < cpu_idx as u32
+                        {
+                            core::hint::spin_loop();
+                        }
+                    }
+
+                    kprintln!("smp: all {} AP(s) online", ap_count);
+                }
+            }
+        }
+
         // Hand off to the scheduler. Never returns.
         sched::enter();
     }
@@ -389,6 +458,79 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
     // the function must type-check as returning `!`.
     #[cfg(test)]
     arch::current::cpu::halt_loop()
+}
+
+// ── AP entry point ────────────────────────────────────────────────────────────
+
+/// Entry point for Application Processor startup.
+///
+/// Called from the AP trampoline after the PM32 → LM64 transition. The AP
+/// arrives here with:
+/// - RSP set to its idle thread kernel stack top (loaded by the relay stub).
+/// - RDI = `cpu_id`, RSI = `ist1_top`, RDX = `ist2_top` (trampoline params).
+///
+/// Initialises per-CPU hardware state, announces the AP as ready, then enters
+/// the idle loop via [`sched::ap_enter`].
+///
+/// # Safety
+/// Runs on a fresh kernel stack. All Phase 3–8 globals (direct map, heap,
+/// scheduler, IDT) must have been set up by the BSP before this is called.
+#[cfg(not(test))]
+#[no_mangle]
+pub extern "C" fn kernel_entry_ap(cpu_id: u32, ist1_top: u64, ist2_top: u64) -> !
+{
+    // 1. Load per-CPU GDT + TSS with the idle thread's kernel stack as RSP0.
+    //    Must come before percpu::init_ap because lgdt reloads all segment
+    //    registers (including GS ← null selector), which resets the GS
+    //    shadow-register base to 0. percpu::init_ap reinstalls it afterward.
+    //    SAFETY: heap is active (Phase 4); init_ap box-allocates GDT+TSS.
+    let idle_stack_top = unsafe { sched::idle_stack_top_for(cpu_id as usize) };
+    unsafe {
+        arch::current::gdt::init_ap(cpu_id, idle_stack_top, ist1_top, ist2_top);
+    }
+
+    // 2. Install per-CPU GS-base (IA32_GS_BASE → &PER_CPU[cpu_id]).
+    //    After gdt::init_ap reloaded GS with selector 0, the GS shadow-register
+    //    base is 0. Write the MSR here to restore GS-relative addressing.
+    //    SAFETY: PER_CPU[cpu_id] is not yet accessed by any other CPU.
+    unsafe {
+        percpu::init_ap(cpu_id);
+    }
+
+    // 3. Load the BSP's shared IDT on this AP.
+    //    SAFETY: IDT was populated by idt::init() on the BSP.
+    unsafe {
+        arch::current::idt::load();
+    }
+
+    // 4. Software-enable local APIC and mask all LVT entries.
+    //    SAFETY: direct map active; APIC MMIO is accessible.
+    unsafe {
+        arch::current::interrupts::init_ap();
+    }
+
+    // 5. Configure SYSCALL/SYSRET MSRs (IA32_EFER.SCE, STAR, LSTAR, SFMASK).
+    //    MSR writes are per-CPU; each AP must execute this.
+    //    SAFETY: ring 0; GDT is loaded.
+    unsafe {
+        arch::current::syscall::init();
+    }
+
+    // 6. Start the per-CPU preemption timer.
+    //    x86-64: programs the local APIC timer using the BSP's calibrated rate.
+    //    RISC-V: arms the SBI timer using the BSP's stored tick period.
+    //    SAFETY: interrupts::init_ap() has prepared the interrupt delivery path.
+    unsafe {
+        arch::current::timer::init_ap(10_000);
+    }
+
+    kprintln!("smp: AP {} online", cpu_id);
+
+    // 6. Signal BSP that this AP is ready.
+    APS_READY.fetch_add(1, Ordering::Release);
+
+    // 7. Enter idle loop (never returns).
+    sched::ap_enter(cpu_id)
 }
 
 /// Emit a fatal error message and halt.
@@ -403,7 +545,29 @@ pub(crate) fn fatal(msg: &str) -> !
 
 #[cfg(not(test))]
 #[panic_handler]
-fn panic(_info: &PanicInfo) -> !
+fn panic(info: &PanicInfo) -> !
 {
+    // Use panic_write_fmt (serial-only, lock-bypassing) instead of kprintln!.
+    // kprintln! goes through CONSOLE_LOCK; if the panic occurred inside
+    // console_write_fmt (or anywhere else that holds the lock), using kprintln!
+    // here would deadlock. panic_write_fmt force-stores the lock and writes
+    // directly to serial, which is always safe.
+    if let Some(loc) = info.location()
+    {
+        unsafe {
+            console::panic_write_fmt(format_args!(
+                "\nPANIC at {}:{}: {}\n",
+                loc.file(),
+                loc.line(),
+                info.message()
+            ));
+        }
+    }
+    else
+    {
+        unsafe {
+            console::panic_write_fmt(format_args!("\nPANIC: {}\n", info.message()));
+        }
+    }
     arch::current::cpu::halt_loop();
 }

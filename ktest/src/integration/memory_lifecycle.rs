@@ -21,7 +21,7 @@ use syscall::{aspace_query, frame_split, mem_map, mem_protect, mem_unmap};
 use crate::{TestContext, TestResult};
 
 const TEST_VA: u64 = 0x4800_0000; // 1.125 GiB — distinct from unit/mm.rs TEST_VA.
-const PAGE: u64    = 0x1000;
+const PAGE: u64 = 0x1000;
 
 pub fn run(ctx: &TestContext) -> TestResult
 {

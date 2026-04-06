@@ -123,6 +123,41 @@ pub unsafe fn init(period_us: u64)
     }
 }
 
+/// Initialise the supervisor timer on an AP hart using the BSP's stored tick rate.
+///
+/// The BSP must have called [`init`] first to populate [`TIMER_PERIOD_TICKS`].
+/// Sets the first SBI timer deadline and enables supervisor interrupts.
+///
+/// # Safety
+/// Must execute in supervisor mode on the AP being initialised.
+/// [`interrupts::init_ap`] must have been called first to configure `stvec`
+/// and `sie` before enabling interrupts here.
+#[cfg(not(test))]
+pub unsafe fn init_ap(period_us: u64)
+{
+    let period_ticks = TIMER_PERIOD_TICKS.load(Ordering::Relaxed);
+    if period_ticks == 0
+    {
+        // BSP calibration not yet done — fall back to computing from period_us.
+        // This path should not occur in practice since APs start after Phase 5.
+        let fallback = TIMEBASE_FREQ * period_us / 1_000_000;
+        sbi_set_timer(read_time() + fallback);
+    }
+    else
+    {
+        sbi_set_timer(read_time() + period_ticks);
+    }
+    // Enable supervisor interrupts — the timer will now fire.
+    // SAFETY: stvec is installed (interrupts::init_ap called first).
+    unsafe {
+        interrupts::enable();
+    }
+}
+
+/// No-op test stub.
+#[cfg(test)]
+pub unsafe fn init_ap(_period_us: u64) {}
+
 /// Handle a supervisor timer interrupt.
 ///
 /// Called from `trap_dispatch` on scause = 5 (supervisor timer interrupt).
@@ -137,7 +172,9 @@ pub fn handle_tick()
     sbi_set_timer(read_time() + period);
     // SAFETY: called from interrupt handler on a valid kernel stack.
     #[cfg(not(test))]
-    unsafe { crate::sched::timer_tick(); }
+    unsafe {
+        crate::sched::timer_tick();
+    }
 }
 
 /// Return the current monotonic tick count.
@@ -163,7 +200,10 @@ pub fn ticks_per_second() -> u64
 pub fn elapsed_us() -> Option<u64>
 {
     let boot = BOOT_TIME_TICKS.load(Ordering::Relaxed);
-    if boot == 0 { return None; }
+    if boot == 0
+    {
+        return None;
+    }
     Some((read_time().saturating_sub(boot)) / TIME_TICKS_PER_US)
 }
 

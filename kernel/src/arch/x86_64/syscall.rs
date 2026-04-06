@@ -33,12 +33,12 @@ use super::cpu;
 
 // ── MSR addresses ─────────────────────────────────────────────────────────────
 
-const IA32_EFER:   u32 = 0xC000_0080;
-const IA32_STAR:   u32 = 0xC000_0081;
-const IA32_LSTAR:  u32 = 0xC000_0082;
+const IA32_EFER: u32 = 0xC000_0080;
+const IA32_STAR: u32 = 0xC000_0081;
+const IA32_LSTAR: u32 = 0xC000_0082;
 const IA32_SFMASK: u32 = 0xC000_0084;
 
-const EFER_SCE:        u64 = 1 << 0;
+const EFER_SCE: u64 = 1 << 0;
 const SFMASK_CLEAR_IF: u64 = 1 << 9;
 
 /// STAR value:

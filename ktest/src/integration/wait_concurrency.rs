@@ -32,11 +32,11 @@ static mut CHILD_STACK: ChildStack = ChildStack::ZERO;
 
 pub fn run(ctx: &TestContext) -> TestResult
 {
-    let ws  = wait_set_create()
-        .map_err(|_| "integration::wait_concurrency: wait_set_create failed")?;
+    let ws =
+        wait_set_create().map_err(|_| "integration::wait_concurrency: wait_set_create failed")?;
     let sig = cap_create_signal()
         .map_err(|_| "integration::wait_concurrency: cap_create_signal failed")?;
-    let eq  = event_queue_create(4)
+    let eq = event_queue_create(4)
         .map_err(|_| "integration::wait_concurrency: event_queue_create failed")?;
 
     wait_set_add(ws, sig, 1)
@@ -68,10 +68,14 @@ pub fn run(ctx: &TestContext) -> TestResult
         .map_err(|_| "integration::wait_concurrency: cap_create_thread failed")?;
 
     let stack_top = ChildStack::top(core::ptr::addr_of!(CHILD_STACK));
-    thread_configure(th, sender_entry as *const () as u64, stack_top, child_sig as u64)
-        .map_err(|_| "integration::wait_concurrency: thread_configure failed")?;
-    thread_start(th)
-        .map_err(|_| "integration::wait_concurrency: thread_start failed")?;
+    thread_configure(
+        th,
+        sender_entry as *const () as u64,
+        stack_top,
+        child_sig as u64,
+    )
+    .map_err(|_| "integration::wait_concurrency: thread_configure failed")?;
+    thread_start(th).map_err(|_| "integration::wait_concurrency: thread_start failed")?;
 
     // Block until the child fires the signal.
     let tok_b = wait_set_wait(ws)

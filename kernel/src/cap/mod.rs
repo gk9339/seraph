@@ -163,7 +163,14 @@ pub fn lookup_cspace(id: CSpaceId) -> Option<*mut CSpace>
         return None;
     }
     let ptr = CSPACE_REGISTRY[id as usize].load(Ordering::Acquire);
-    if ptr.is_null() { None } else { Some(ptr) }
+    if ptr.is_null()
+    {
+        None
+    }
+    else
+    {
+        Some(ptr)
+    }
 }
 
 /// Allocate a unique CSpace ID.
@@ -423,7 +430,11 @@ pub unsafe fn move_cap_between_cspaces(
         {
             return Err(SyscallError::InvalidCapability);
         }
-        (slot.tag, slot.rights, slot.object.ok_or(SyscallError::InvalidCapability)?)
+        (
+            slot.tag,
+            slot.rights,
+            slot.object.ok_or(SyscallError::InvalidCapability)?,
+        )
     };
 
     let src_cspace_id = unsafe { (*src_cspace).id() };
@@ -440,14 +451,19 @@ pub unsafe fn move_cap_between_cspaces(
     let (src_parent, src_first_child, src_prev, src_next) = {
         let cs = unsafe { &*src_cspace };
         let slot = cs.slot(src_idx).unwrap();
-        (slot.deriv_parent, slot.deriv_first_child, slot.deriv_prev_sibling, slot.deriv_next_sibling)
+        (
+            slot.deriv_parent,
+            slot.deriv_first_child,
+            slot.deriv_prev_sibling,
+            slot.deriv_next_sibling,
+        )
     };
 
     // Copy derivation links to the destination slot.
     if let Some(dst_slot) = unsafe { (*dst_cspace).slot_mut(new_idx) }
     {
-        dst_slot.deriv_parent       = src_parent;
-        dst_slot.deriv_first_child  = src_first_child;
+        dst_slot.deriv_parent = src_parent;
+        dst_slot.deriv_first_child = src_first_child;
         dst_slot.deriv_prev_sibling = src_prev;
         dst_slot.deriv_next_sibling = src_next;
     }
@@ -521,7 +537,9 @@ pub unsafe fn move_cap_between_cspaces(
     }
 
     // Clear the source slot. No inc_ref/dec_ref — it's a move.
-    unsafe { (*src_cspace).free_slot(src_idx); }
+    unsafe {
+        (*src_cspace).free_slot(src_idx);
+    }
 
     Ok(new_idx)
 }

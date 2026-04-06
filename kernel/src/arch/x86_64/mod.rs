@@ -5,13 +5,14 @@
 
 //! x86-64 architecture module for the kernel.
 
+pub mod ap_trampoline;
 pub mod console;
 pub mod context;
 pub mod cpu;
 pub mod gdt;
 pub mod idt;
-pub mod ioapic;
 pub mod interrupts;
+pub mod ioapic;
 pub mod paging;
 pub mod syscall;
 pub mod timer;
@@ -44,5 +45,4 @@ pub use gdt::IOPB_SIZE;
 ///
 // TODO: Discover IOAPIC base from ACPI MADT rather than
 // hardcoding. Pick up when ACPI table parsing is added.
-pub const MMIO_DIRECT_MAP_REGIONS: &[(u64, u64)] =
-    &[(0xFEE0_0000, 0x1000), (0xFEC0_0000, 0x1000)];
+pub const MMIO_DIRECT_MAP_REGIONS: &[(u64, u64)] = &[(0xFEE0_0000, 0x1000), (0xFEC0_0000, 0x1000)];

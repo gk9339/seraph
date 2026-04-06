@@ -43,15 +43,20 @@ pub fn send_wait_blocking(ctx: &TestContext) -> TestResult
 
     // Create a child CSpace and copy the signal cap (SIGNAL right only).
     let cs = cap_create_cspace(16).map_err(|_| "create_cspace for blocking-wait test failed")?;
-    let child_sig = cap_copy(sig, cs, RIGHTS_SIGNAL)
-        .map_err(|_| "cap_copy signal into child CSpace failed")?;
+    let child_sig =
+        cap_copy(sig, cs, RIGHTS_SIGNAL).map_err(|_| "cap_copy signal into child CSpace failed")?;
 
     let child_th = cap_create_thread(ctx.aspace_cap, cs)
         .map_err(|_| "cap_create_thread for blocking-wait test failed")?;
 
     let stack_top = ChildStack::top(core::ptr::addr_of!(CHILD_STACK));
-    thread_configure(child_th, sender_entry as *const () as u64, stack_top, child_sig as u64)
-        .map_err(|_| "thread_configure for blocking-wait test failed")?;
+    thread_configure(
+        child_th,
+        sender_entry as *const () as u64,
+        stack_top,
+        child_sig as u64,
+    )
+    .map_err(|_| "thread_configure for blocking-wait test failed")?;
     thread_start(child_th).map_err(|_| "thread_start for blocking-wait test failed")?;
 
     // Block until the child sends.
@@ -89,8 +94,8 @@ pub fn wait_insufficient_rights(_ctx: &TestContext) -> TestResult
 {
     let sig = cap_create_signal().map_err(|_| "create_signal for rights test failed")?;
     // Derive a cap with SIGNAL (send) right only — no WAIT (receive) right.
-    let send_only = cap_derive(sig, RIGHTS_SIGNAL)
-        .map_err(|_| "cap_derive for rights test failed")?;
+    let send_only =
+        cap_derive(sig, RIGHTS_SIGNAL).map_err(|_| "cap_derive for rights test failed")?;
 
     // Pre-set bits so the kernel would not block — we want to test the rights
     // check, not the blocking path.
@@ -117,8 +122,7 @@ pub fn wait_insufficient_rights(_ctx: &TestContext) -> TestResult
 /// return the OR of all three (0x7), not just the last value.
 pub fn multiple_sends_before_wait_accumulate_bits(_ctx: &TestContext) -> TestResult
 {
-    let sig = cap_create_signal()
-        .map_err(|_| "create_signal for multi-send test failed")?;
+    let sig = cap_create_signal().map_err(|_| "create_signal for multi-send test failed")?;
 
     signal_send(sig, 0x1).map_err(|_| "signal_send(0x1) failed")?;
     signal_send(sig, 0x2).map_err(|_| "signal_send(0x2) failed")?;
@@ -143,8 +147,7 @@ pub fn multiple_sends_before_wait_accumulate_bits(_ctx: &TestContext) -> TestRes
 /// 2. A subsequent non-zero send arrives intact (error did not corrupt state).
 pub fn send_zero_bits_is_noop(_ctx: &TestContext) -> TestResult
 {
-    let sig = cap_create_signal()
-        .map_err(|_| "create_signal for zero-send test failed")?;
+    let sig = cap_create_signal().map_err(|_| "create_signal for zero-send test failed")?;
 
     // Kernel rejects zero-bit send.
     let zero_err = signal_send(sig, 0);

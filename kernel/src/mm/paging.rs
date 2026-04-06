@@ -39,6 +39,31 @@ use super::PAGE_SIZE;
 #[cfg(not(test))]
 use crate::arch::current::paging as arch_paging;
 
+// ── Kernel PML4 physical address ──────────────────────────────────────────────
+
+/// Physical address of the kernel's root page table (PML4 on x86-64, Sv48 root on RISC-V).
+///
+/// Set once during Phase 3 by `init_kernel_page_tables`. APs load this into CR3
+/// (x86-64) or `satp` (RISC-V) during the SMP startup sequence.
+#[cfg(not(test))]
+static KERNEL_PML4_PA: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+
+/// Return the physical address of the kernel root page table.
+///
+/// Returns 0 until `init_kernel_page_tables` completes (Phase 3).
+#[cfg(not(test))]
+pub fn kernel_pml4_pa() -> u64
+{
+    KERNEL_PML4_PA.load(core::sync::atomic::Ordering::Relaxed)
+}
+
+/// Test stub.
+#[cfg(test)]
+pub fn kernel_pml4_pa() -> u64
+{
+    0
+}
+
 // ── Public constants ──────────────────────────────────────────────────────────
 
 /// Base virtual address of the direct physical map.
@@ -329,6 +354,9 @@ pub fn init_kernel_page_tables(
         core::ptr::write_bytes(root_va as *mut u8, 0, 4096);
     }
 
+    // Save the root page table physical address so APs can load it during startup.
+    KERNEL_PML4_PA.store(root_pa, core::sync::atomic::Ordering::Relaxed);
+
     // Compute the highest physical address to determine direct map extent.
     let max_phys = compute_max_physical_address(info);
     let max_phys_rounded = (max_phys + LARGE_PAGE_SIZE - 1) & !(LARGE_PAGE_SIZE - 1);
@@ -382,6 +410,31 @@ pub fn init_kernel_page_tables(
             arch_paging::map_page(root_va, DIRECT_MAP_BASE + phys, phys, rw, &mut pool)?;
             phys += PAGE_SIZE as u64;
         }
+    }
+
+    // ── AP trampoline identity mapping (x86-64 SMP) ──────────────────────────
+    // Map the AP trampoline page at its physical address as a 4 KiB identity
+    // page (VA = PA). This allows APs to execute trampoline code immediately
+    // after enabling paging (CR3 = kernel PML4) in the PM32 → LM64 transition,
+    // before the first far jmp to the direct-map address.
+    //
+    // The trampoline page is physically < 1 MiB. The kernel's other mappings
+    // are at high virtual addresses (DIRECT_MAP_BASE, kernel image), so the
+    // low-VA identity mapping does not conflict.
+    //
+    // To add new low-VA trampoline pages: call map_page here with additional
+    // addresses. One 4 KiB page is sufficient for the SIPI startup sequence.
+    if info.ap_trampoline_page != 0
+    {
+        let tramp = info.ap_trampoline_page;
+        // R/W/X: the trampoline page contains startup code AND writable patch areas.
+        let rwx = PageFlags {
+            readable: true,
+            writable: true,
+            executable: true,
+            uncacheable: false,
+        };
+        arch_paging::map_page(root_va, tramp, tramp, rwx, &mut pool)?;
     }
 
     // Activate the new page tables. After this point the direct map is live.

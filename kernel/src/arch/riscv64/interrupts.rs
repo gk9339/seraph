@@ -96,10 +96,21 @@ unsafe extern "C" fn trap_entry()
     // Frame layout: 34 × 8 = 272 bytes (verified by test below).
     // Offsets: x1=0, x2=8, x3=16, x4=24, x5=32, …, x31=240,
     //          sepc=248, scause=256, stval=264.
+    //
+    // sscratch convention (new):
+    //   S-mode: sscratch = 0   (trap from S-mode, stack is already the kernel stack)
+    //   U-mode: sscratch = &PER_CPU[cpu_id]   (tp value, always non-zero)
+    //
+    // tp (x4) convention: always = &PER_CPU[cpu_id] in S-mode.
+    //   On U-mode entry the trap handler restores tp from sscratch and saves
+    //   the user's tp to TrapFrame[tp] via PerCpuData::scratch.
+    //   On U-mode return tp is overwritten with the user TLS value from the
+    //   TrapFrame; sscratch is set to &PER_CPU before that restore so the
+    //   next trap can recover tp.
     core::arch::naked_asm!(
         // ── Determine source privilege ──────────────────────────────────────────
         // Atomically swap t0 (x5) with sscratch:
-        //   t0    = old sscratch (kernel_sp_top if from U-mode, 0 if from S-mode)
+        //   t0       = old sscratch (&PER_CPU if from U-mode, 0 if from S-mode)
         //   sscratch = old t0 (saved here temporarily)
         "csrrw t0, sscratch, t0",
         "bnez t0, 1f",              // t0 != 0 → came from U-mode
@@ -115,29 +126,43 @@ unsafe extern "C" fn trap_entry()
         // Record original sp (= current sp + 272, the pre-allocation value).
         "addi x5, sp, 272",
         "sd x5, 8(sp)",
+        // tp (x4) = &PER_CPU in S-mode; save it to the frame before common path.
+        "sd x4, 24(sp)",
         "j 2f",
 
         // ── U-mode path ─────────────────────────────────────────────────────────
-        // t0 = kernel_sp_top; sscratch = old_t0; sp = user_sp
+        // t0 (x5) = &PER_CPU; sscratch = old t0 (user's t0); sp = user_sp
+        // x4 (tp) = user's tp (we must save it and replace with &PER_CPU)
         "1:",
-        // Allocate TrapFrame at the top of the kernel stack (in t0).
-        "addi t0, t0, -272",
+        // Temporarily park user's tp in PerCpuData::scratch (offset 24 from t0).
+        // t0 = &PER_CPU, x4 = user_tp at this point.
+        "sd x4, 24(t0)",            // PerCpuData.scratch = user_tp (temporary)
+        // Install kernel per-CPU pointer into tp.
+        "mv x4, t0",                // tp = &PER_CPU (t0 is x5, x4 is tp)
+        // Load kernel stack top from PerCpuData::kernel_rsp (offset 8 from tp).
+        "ld t0, 8(x4)",             // t0 = kernel_stack_top
+        // Allocate TrapFrame at the top of the kernel stack.
+        "addi t0, t0, -272",        // t0 = TrapFrame base
         // Save user sp (x2) into the frame before overwriting sp.
         "sd x2, 8(t0)",
         // Switch to kernel stack.
-        "mv sp, t0",
-        // Retrieve original t0 from sscratch; clear sscratch (now in S-mode).
-        "csrr x5, sscratch",
-        "csrw sscratch, zero",
-        "sd x5, 32(sp)",            // frame.t0 = user t0
+        "mv sp, t0",                // sp = TrapFrame base
+        // Retrieve user's t0 from sscratch; clear sscratch (now in S-mode).
+        "csrrw t0, sscratch, x0",   // t0 = user_t0, sscratch = 0
+        "sd t0, 32(sp)",            // frame.t0 = user t0
+        // Retrieve user's tp from PerCpuData::scratch and save to the frame.
+        // x4 (tp) = &PER_CPU at this point; user_tp was parked at offset 24.
+        "ld t0, 24(x4)",            // t0 = user_tp (from PerCpuData.scratch)
+        "sd t0, 24(sp)",            // frame.tp = user_tp
+        // tp (x4) = &PER_CPU remains — common path must NOT save x4 again.
 
-        // ── Save remaining registers (x2 and x5 already saved above) ───────────
+        // ── Save remaining registers (x2, x4, x5 already saved above) ──────────
         "2:",
         "sd x1,   0(sp)",           // ra
         // x2 (sp) saved above in both paths
         "sd x3,  16(sp)",           // gp
-        "sd x4,  24(sp)",           // tp
-        // x5 (t0) saved above in both paths
+        // x4 (tp) saved by both paths above (kernel tp or user tp)
+        // x5 (t0) saved by both paths above
         "sd x6,  40(sp)",
         "sd x7,  48(sp)",
         "sd x8,  56(sp)",
@@ -173,6 +198,7 @@ unsafe extern "C" fn trap_entry()
         "sd   t0, 264(sp)",
 
         // ── Dispatch ────────────────────────────────────────────────────────────
+        // tp (x4) = &PER_CPU throughout dispatch (compiler treats tp as reserved).
         "mv a0, sp",
         "call {dispatch}",
 
@@ -186,12 +212,15 @@ unsafe extern "C" fn trap_entry()
         "srli t0, t0, 8",
         "andi t0, t0, 1",
         "bnez t0, 3f",
-        // Returning to U-mode: sscratch = frame base + 272 = kernel stack top.
-        "addi t0, sp, 272",
-        "csrw sscratch, t0",
+        // Returning to U-mode: set sscratch = &PER_CPU so the next trap can
+        // detect U-mode (sscratch != 0) and recover the per-CPU pointer.
+        // tp (x4) is still &PER_CPU here; it will be overwritten below.
+        "csrw sscratch, x4",
 
         // ── Restore all registers ────────────────────────────────────────────────
         // x2 (sp) is restored last since it changes the addressing base.
+        // x4 (tp) is restored: for U-mode return this is the user TLS pointer;
+        //         for S-mode return it is &PER_CPU (saved in S-mode path above).
         "3:",
         "ld x1,   0(sp)",
         // x2 restored last
@@ -279,7 +308,9 @@ extern "C" fn trap_dispatch(frame: &mut TrapFrame)
                 // U-mode ecall: dispatch via the kernel syscall table.
                 // SAFETY: frame is a valid TrapFrame on the kernel stack.
                 let sepc_before = frame.sepc;
-                unsafe { crate::syscall::dispatch(frame as *mut _); }
+                unsafe {
+                    crate::syscall::dispatch(frame as *mut _);
+                }
                 // Advance sepc past the ecall instruction ONLY if dispatch did
                 // not modify sepc. SYS_THREAD_WRITE_REGS may redirect a blocked
                 // thread to a new instruction pointer; in that case sepc is
@@ -387,9 +418,10 @@ fn dispatch_external(irq: u32)
 /// # Safety
 /// Must execute in supervisor mode with the direct physical map active.
 #[cfg(not(test))]
-pub unsafe fn init()
+pub unsafe fn install_trap_vector()
 {
     // Install trap vector (direct mode: bit [1:0] = 00).
+    // stvec is a per-hart CSR; called from both init() (BSP) and init_ap() (each AP).
     // SAFETY: trap_entry is a valid naked function at a known address.
     unsafe {
         core::arch::asm!(
@@ -397,6 +429,23 @@ pub unsafe fn init()
             in(reg) trap_entry as *const () as u64,
             options(nostack, nomem),
         );
+    }
+}
+
+/// No-op stub for host tests.
+#[cfg(test)]
+pub unsafe fn install_trap_vector() {}
+
+/// Initialise supervisor trap infrastructure for the BSP.
+///
+/// Must execute in supervisor mode with the direct physical map active.
+#[cfg(not(test))]
+pub unsafe fn init()
+{
+    // Install trap vector (stvec is a per-hart CSR; also called from init_ap).
+    // SAFETY: in S-mode; trap_entry is valid.
+    unsafe {
+        install_trap_vector();
     }
 
     // Clear sscratch so trap_entry correctly identifies S-mode traps.
@@ -455,6 +504,48 @@ pub unsafe fn init()
         plic_write(PLIC_THRESHOLD, 0);
     }
 }
+
+/// Initialise supervisor trap infrastructure for an AP hart.
+///
+/// Called from `kernel_entry_ap` on each secondary hart. Mirrors the
+/// per-hart subset of `init()` (no PLIC global setup — that is BSP-only).
+///
+/// # Safety
+/// Must execute in supervisor mode on the AP being initialised.
+#[cfg(not(test))]
+pub unsafe fn init_ap()
+{
+    unsafe {
+        // Install stvec — per-hart CSR, must be written on every hart.
+        install_trap_vector();
+
+        // Clear sscratch so trap_entry identifies S-mode traps correctly.
+        core::arch::asm!("csrw sscratch, zero", options(nostack, nomem));
+
+        // Clear sstatus.SIE, SPP, SUM; then enable SEIP and STIP in sie.
+        core::arch::asm!(
+            "csrc sstatus, {mask}",
+            mask = in(reg) (1u64 << 1) | (1u64 << 8) | (1u64 << 18),
+            options(nostack, nomem),
+        );
+        core::arch::asm!(
+            "csrs sie, {mask}",
+            mask = in(reg) (1u64 << 9) | (1u64 << 5),
+            options(nostack, nomem),
+        );
+
+        // Allow U-mode performance-counter reads (per-hart; same as BSP init).
+        core::arch::asm!(
+            "csrs scounteren, {cy}",
+            cy = in(reg) 1u64,
+            options(nostack, nomem),
+        );
+    }
+}
+
+/// No-op stub for host tests.
+#[cfg(test)]
+pub unsafe fn init_ap() {}
 
 /// Disable supervisor interrupts. Returns previous SIE state.
 #[allow(dead_code)] // Required by arch interface: kernel/docs/arch-interface.md

@@ -126,20 +126,26 @@ fn idle_thread_entry(_cpu_id: u64) -> !
     // sscratch=0 at this point (idle is !is_user) so any S-mode interrupt
     // correctly takes the S-mode trap path.
     #[cfg(not(test))]
-    unsafe { crate::arch::current::interrupts::enable(); }
+    unsafe {
+        crate::arch::current::interrupts::enable();
+    }
 
     loop
     {
-        // Check non_empty before halting; if any threads are ready, schedule
-        // them rather than spinning idle. SAFETY: SCHEDULERS[0] is owned by
-        // the BSP; single-CPU until WSMP.
+        // Check this CPU's run queue before halting. Use current_cpu() so APs
+        // consult their own scheduler rather than the BSP's (SCHEDULERS[0]).
+        // schedule() still uses SCHEDULERS[0] (Phase D fix); this check is
+        // safe as long as APs have empty run queues (true until Phase D).
         #[cfg(not(test))]
         {
-            let has_work = unsafe { SCHEDULERS[0].has_runnable() };
+            let cpu = crate::arch::current::cpu::current_cpu() as usize;
+            let has_work = unsafe { SCHEDULERS[cpu].has_runnable() };
             if has_work
             {
-                // SAFETY: single-CPU until WSMP; called from scheduler context.
-                unsafe { schedule(); }
+                // SAFETY: called from scheduler context on a valid kernel stack.
+                unsafe {
+                    schedule();
+                }
             }
         }
         halt_until_interrupt();
@@ -252,6 +258,44 @@ pub fn init(_cpu_count: u32, _allocator: &mut crate::mm::BuddyAllocator) -> u32
     0
 }
 
+// ── AP entry and helpers ──────────────────────────────────────────────────────
+
+/// Enter the idle loop for an AP (Application Processor).
+///
+/// Called from `kernel_entry_ap` after per-CPU hardware initialisation is
+/// complete. The AP has an empty run queue at this point; it idles until
+/// the scheduler enqueues work (Phase D / F will add cross-CPU wakeup).
+///
+/// This function never returns.
+///
+/// # Safety
+/// Must be called exactly once per AP, from the AP being initialised, after
+/// per-CPU GDT, IDT, LAPIC, and SYSCALL have been set up.
+#[cfg(not(test))]
+pub fn ap_enter(cpu_id: u32) -> !
+{
+    // Idle loop: wait for interrupt. The idle TCB was created by sched::init();
+    // SCHEDULERS[cpu_id].current already points to it. Interrupts are enabled
+    // by idle_thread_entry which is the natural entry point of the idle thread.
+    // We call it directly since we are "on" the idle thread's kernel stack.
+    idle_thread_entry(cpu_id as u64)
+}
+
+/// Return the kernel stack top for the idle thread on CPU `cpu_id`.
+///
+/// Used by the BSP AP startup sequence to retrieve the idle stack address
+/// for loading into the trampoline parameters and TSS RSP0.
+///
+/// # Safety
+/// `cpu_id` must be < [`MAX_CPUS`] and `sched::init` must have been called
+/// for this CPU.
+#[cfg(not(test))]
+pub unsafe fn idle_stack_top_for(cpu_id: usize) -> u64
+{
+    // SAFETY: caller guarantees cpu_id is valid and sched::init was called.
+    unsafe { (*SCHEDULERS[cpu_id].idle).kernel_stack_top }
+}
+
 // ── Public accessor ───────────────────────────────────────────────────────────
 
 /// Return a reference to the scheduler for CPU `id`.
@@ -294,7 +338,8 @@ pub unsafe fn schedule()
     use crate::arch::current::context::switch;
     use thread::ThreadState;
 
-    let sched = unsafe { &mut SCHEDULERS[0] };
+    let sched =
+        unsafe { &mut SCHEDULERS[crate::arch::current::cpu::current_cpu() as usize] };
 
     // Acquire the scheduler lock via lock_raw so we hold no borrow reference
     // to `sched` during the critical section — allowing us to call mutable
@@ -341,9 +386,13 @@ pub unsafe fn schedule()
         // Re-mark as running, release lock, and return.
         if !current.is_null()
         {
-            unsafe { (*current).state = ThreadState::Running; }
+            unsafe {
+                (*current).state = ThreadState::Running;
+            }
         }
-        unsafe { sched.lock.unlock_raw(saved_flags); }
+        unsafe {
+            sched.lock.unlock_raw(saved_flags);
+        }
         return;
     }
 
@@ -358,21 +407,39 @@ pub unsafe fn schedule()
     // transition (interrupt, exception, or syscall) lands on the correct
     // kernel stack for the incoming thread.
     //
-    // For kernel threads (idle, is_user=false): set sscratch=0 so S-mode
-    // timer and external traps take the S-mode path (sp -= frame_size).
-    // A non-zero sscratch while running in S-mode causes trap_entry to
-    // incorrectly take the U-mode path, corrupt sscratch, and build a
-    // TrapFrame at an unexpected stack location.
+    // On x86-64: writes TSS RSP0 + SYSCALL_KERNEL_RSP.
+    // On RISC-V: writes PerCpuData::kernel_rsp (offset 8 from tp); sscratch
+    //   is set to &PER_CPU by return_to_user just before sret, so trap_entry
+    //   can detect U-mode (sscratch != 0) and recover tp.
+    //   For kernel threads (idle): pass 0 to keep PerCpuData::kernel_rsp=0;
+    //   sscratch is already 0 (S-mode invariant) so trap_entry takes the
+    //   S-mode path correctly.
     //
     // SAFETY: next is a valid TCB; called with interrupts disabled.
-    let trap_stack = if unsafe { (*next).is_user } { unsafe { (*next).kernel_stack_top } } else { 0 };
-    unsafe { crate::arch::current::cpu::set_kernel_trap_stack(trap_stack); }
+    let trap_stack = if unsafe { (*next).is_user }
+    {
+        unsafe { (*next).kernel_stack_top }
+    }
+    else
+    {
+        0
+    };
+    unsafe {
+        crate::arch::current::cpu::set_kernel_trap_stack(trap_stack);
+    }
 
     // Switch address space if different (both non-null).
     // SAFETY: address_space pointers were set up by Phase 9 init or future
     // thread creation; null means kernel thread (shares kernel mappings).
     unsafe {
-        let cur_as = if current.is_null() { core::ptr::null_mut() } else { (*current).address_space };
+        let cur_as = if current.is_null()
+        {
+            core::ptr::null_mut()
+        }
+        else
+        {
+            (*current).address_space
+        };
         let nxt_as = (*next).address_space;
         if !nxt_as.is_null() && nxt_as != cur_as
         {
@@ -386,9 +453,12 @@ pub unsafe fn schedule()
     #[cfg(all(not(test), target_arch = "x86_64"))]
     unsafe {
         let iopb_ptr = (*next).iopb;
-        if iopb_ptr.is_null() {
+        if iopb_ptr.is_null()
+        {
             crate::arch::current::gdt::load_iopb(None);
-        } else {
+        }
+        else
+        {
             crate::arch::current::gdt::load_iopb(Some(&*iopb_ptr));
         }
     }
@@ -410,13 +480,17 @@ pub unsafe fn schedule()
     // to the next thread's kernel stack; the unlock_raw call must complete on
     // the current stack before that happens.
     // SAFETY: saved_flags was returned by the matching lock_raw above.
-    unsafe { sched.lock.unlock_raw(saved_flags); }
+    unsafe {
+        sched.lock.unlock_raw(saved_flags);
+    }
 
     if !current_state.is_null()
     {
         // SAFETY: both pointers are valid SavedState values on heap-allocated
         // TCBs; interrupts are now re-enabled.
-        unsafe { switch(current_state, next_state); }
+        unsafe {
+            switch(current_state, next_state);
+        }
     }
     // If current_state is null (unreachable post-init), the idle TCB is
     // always current, so this path cannot be reached normally.
@@ -431,7 +505,8 @@ pub unsafe fn schedule()
 #[cfg(not(test))]
 pub unsafe fn timer_tick()
 {
-    let sched = unsafe { &mut SCHEDULERS[0] };
+    let sched =
+        unsafe { &mut SCHEDULERS[crate::arch::current::cpu::current_cpu() as usize] };
     let current = sched.current;
     if current.is_null()
     {
@@ -445,13 +520,19 @@ pub unsafe fn timer_tick()
         return;
     }
     let new_remaining = remaining - 1;
-    unsafe { (*current).slice_remaining = new_remaining; }
+    unsafe {
+        (*current).slice_remaining = new_remaining;
+    }
     if new_remaining == 0
     {
         // Reset slice for next run.
-        unsafe { (*current).slice_remaining = TIME_SLICE_TICKS; }
+        unsafe {
+            (*current).slice_remaining = TIME_SLICE_TICKS;
+        }
         // SAFETY: called from interrupt handler.
-        unsafe { schedule(); }
+        unsafe {
+            schedule();
+        }
     }
 }
 
@@ -531,22 +612,26 @@ pub fn enter() -> !
     // Retrieve the user entry point stored in saved_state at TCB creation.
     let entry_point = init_tcb.saved_state.entry_point();
 
-    // On RISC-V, there is a race between set_kernel_trap_stack (sscratch ≠ 0
-    // → U-mode trap path assumed) and the `csrw sstatus, 0x20` inside
-    // return_to_user (which clears SIE). An S-mode interrupt arriving in that
-    // window sees sscratch ≠ 0 and incorrectly takes the U-mode path,
-    // corrupting sscratch and the init kernel stack. Disable interrupts first;
-    // return_to_user leaves SIE=0, and sret re-enables them (SIE←SPIE=1) only
-    // after transitioning to U-mode where sscratch is valid.
-    // SAFETY: single-boot-thread; disable before arming sscratch.
-    unsafe { crate::arch::current::cpu::disable_interrupts(); }
+    // Disable interrupts before entering user mode.
+    // On x86-64: no-op (interrupts are re-enabled by iretq/sysret flags).
+    // On RISC-V: return_to_user sets sstatus to SPP=0/SPIE=1/SIE=0 before
+    // sret; SIE is re-enabled atomically by sret. Disabling here prevents any
+    // stray interrupt from arriving before return_to_user arms sscratch.
+    // SAFETY: single-boot-thread; disable before entering user context.
+    unsafe {
+        crate::arch::current::cpu::disable_interrupts();
+    }
 
     // Set the kernel trap stack pointer before entering user mode so the first
     // ring-3 → ring-0 transition lands on the correct kernel stack.
     // On x86-64: writes TSS RSP0 + SYSCALL_KERNEL_RSP.
-    // On RISC-V: writes sscratch (read by trap_entry to switch stacks).
+    // On RISC-V: writes PerCpuData::kernel_rsp (offset 8 from tp); trap_entry
+    //   loads this to locate the kernel stack on U-mode entry.  sscratch is set
+    //   to &PER_CPU by return_to_user just before sret.
     // SAFETY: single-boot-thread; kernel_stack_top is valid.
-    unsafe { crate::arch::current::cpu::set_kernel_trap_stack(kernel_stack_top); }
+    unsafe {
+        crate::arch::current::cpu::set_kernel_trap_stack(kernel_stack_top);
+    }
 
     // Build the initial user-mode TrapFrame on the init thread's kernel stack.
     // The frame sits just below kernel_stack_top.
@@ -562,7 +647,8 @@ pub fn enter() -> !
         // Forward the initial user argument (cap slot, etc.) stored in
         // saved_state at TCB creation via new_state(…, arg, …).
         let user_arg = init_tcb.saved_state.user_arg();
-        if user_arg != 0 {
+        if user_arg != 0
+        {
             (*tf_ptr).set_arg0(user_arg);
         }
     }
@@ -582,5 +668,7 @@ pub fn enter() -> !
     //   x86-64: atomically switches CR3 and executes iretq from init's kernel stack.
     //   RISC-V: writes satp (sfence serializes), then executes sret.
     // SAFETY: root_phys is init's valid page-table root; tf_ptr is on init's kernel stack.
-    unsafe { crate::arch::current::context::first_entry_to_user(root_phys, tf_ptr); }
+    unsafe {
+        crate::arch::current::context::first_entry_to_user(root_phys, tf_ptr);
+    }
 }

@@ -130,10 +130,8 @@ pub unsafe fn signal_send(sig: *mut SignalState, bits: u64) -> Option<*mut Threa
 /// # Safety
 /// Must be called with the relevant scheduler lock held.
 #[cfg(not(test))]
-pub unsafe fn signal_wait(
-    sig: *mut SignalState,
-    caller: *mut ThreadControlBlock,
-) -> Result<u64, ()>
+pub unsafe fn signal_wait(sig: *mut SignalState, caller: *mut ThreadControlBlock)
+    -> Result<u64, ()>
 {
     // SAFETY: caller guarantees sig is valid and lock is held.
     let sig = unsafe { &mut *sig };
@@ -226,8 +224,16 @@ mod tests
         s.bits.fetch_or(0xDEAD, Ordering::Relaxed);
         s.bits.fetch_or(0xBEEF, Ordering::Relaxed);
         let before = s.bits.swap(0, Ordering::Relaxed);
-        assert_eq!(before, 0xDEAD | 0xBEEF, "swap must return OR of all previous fetches");
-        assert_eq!(s.bits.load(Ordering::Relaxed), 0, "state must be zero after swap");
+        assert_eq!(
+            before,
+            0xDEAD | 0xBEEF,
+            "swap must return OR of all previous fetches"
+        );
+        assert_eq!(
+            s.bits.load(Ordering::Relaxed),
+            0,
+            "state must be zero after swap"
+        );
         // New OR starts from zero.
         s.bits.fetch_or(0x1234, Ordering::Relaxed);
         assert_eq!(s.bits.load(Ordering::Relaxed), 0x1234);

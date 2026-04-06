@@ -30,8 +30,8 @@
 
 use boot_protocol::{InitSegment, SegmentFlags};
 
-use crate::mm::{BuddyAllocator, PAGE_SIZE};
 use crate::mm::paging::phys_to_virt;
+use crate::mm::{BuddyAllocator, PAGE_SIZE};
 
 /// Virtual address of the top of init's user stack.
 ///
@@ -176,33 +176,24 @@ impl AddressSpace
     {
         let flags = match segment.flags
         {
-            SegmentFlags::Read =>
-            {
-                crate::mm::paging::PageFlags {
-                    readable: true,
-                    writable: false,
-                    executable: false,
-                    uncacheable: false,
-                }
-            }
-            SegmentFlags::ReadWrite =>
-            {
-                crate::mm::paging::PageFlags {
-                    readable: true,
-                    writable: true,
-                    executable: false,
-                    uncacheable: false,
-                }
-            }
-            SegmentFlags::ReadExecute =>
-            {
-                crate::mm::paging::PageFlags {
-                    readable: true,
-                    writable: false,
-                    executable: true,
-                    uncacheable: false,
-                }
-            }
+            SegmentFlags::Read => crate::mm::paging::PageFlags {
+                readable: true,
+                writable: false,
+                executable: false,
+                uncacheable: false,
+            },
+            SegmentFlags::ReadWrite => crate::mm::paging::PageFlags {
+                readable: true,
+                writable: true,
+                executable: false,
+                uncacheable: false,
+            },
+            SegmentFlags::ReadExecute => crate::mm::paging::PageFlags {
+                readable: true,
+                writable: false,
+                executable: true,
+                uncacheable: false,
+            },
         };
 
         // Align virt and phys down to 4 KiB page boundaries for page table
@@ -217,8 +208,8 @@ impl AddressSpace
         // page boundary gets enough pages mapped.
         let in_page_off = (segment.virt_addr & 0xFFF) as usize;
         let page_count = ((in_page_off + segment.size as usize + PAGE_SIZE - 1) / PAGE_SIZE).max(1);
-        let virt_base = segment.virt_addr & !0xFFF_u64;  // page-aligned virtual
-        let phys_base = segment.phys_addr & !0xFFF_u64;  // page-aligned physical frame
+        let virt_base = segment.virt_addr & !0xFFF_u64; // page-aligned virtual
+        let phys_base = segment.phys_addr & !0xFFF_u64; // page-aligned physical frame
         for i in 0..page_count
         {
             let virt = virt_base + (i * PAGE_SIZE) as u64;
@@ -256,9 +247,7 @@ impl AddressSpace
         for i in 0..pages
         {
             // Allocate one physical frame per page.
-            let phys = allocator
-                .alloc(0)
-                .ok_or(())?;
+            let phys = allocator.alloc(0).ok_or(())?;
 
             // Zero the frame (stack pages should start clean).
             // SAFETY: phys_to_virt gives a valid kernel virtual address.
@@ -345,6 +334,8 @@ impl AddressSpace
     {
         use crate::arch::current::paging::activate;
         // SAFETY: caller's contract; root_phys is a valid page table root.
-        unsafe { activate(self.root_phys); }
+        unsafe {
+            activate(self.root_phys);
+        }
     }
 }

@@ -474,19 +474,23 @@ mod tests
         let capacity = PAGE_SIZE / 64; // 64 slots per order-0 slab
 
         // Fill first slab to capacity.
-        let mut ptrs: Vec<*mut u8> =
-            (0..capacity).map(|_| cache.alloc(&mut buddy).unwrap()).collect();
+        let mut ptrs: Vec<*mut u8> = (0..capacity)
+            .map(|_| cache.alloc(&mut buddy).unwrap())
+            .collect();
         assert_eq!(cache.slab_count, 1);
 
         // Free all slots; slab may collapse back to buddy (keep-one rule: stays at 1).
-        for p in ptrs.drain(..) {
+        for p in ptrs.drain(..)
+        {
             cache.free(p, &mut buddy);
         }
 
         // Re-allocate capacity slots; must all succeed and be non-null.
-        let ptrs2: Vec<*mut u8> =
-            (0..capacity).map(|_| cache.alloc(&mut buddy).unwrap()).collect();
-        for &p in &ptrs2 {
+        let ptrs2: Vec<*mut u8> = (0..capacity)
+            .map(|_| cache.alloc(&mut buddy).unwrap())
+            .collect();
+        for &p in &ptrs2
+        {
             assert!(!p.is_null(), "re-allocated pointer must be non-null");
         }
     }

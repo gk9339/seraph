@@ -369,7 +369,6 @@ pub struct BootInfo
     pub command_line_len: u64,
 
     // ── SMP fields (added in protocol version 4) ──────────────────────────────
-
     /// Number of logical CPUs present and usable.
     ///
     /// On x86-64: count of enabled LAPIC entries from the ACPI MADT.

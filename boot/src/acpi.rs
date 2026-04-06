@@ -44,7 +44,7 @@ const MADT_OFF_LAPIC_BASE: usize = SDT_HDR_LEN; // u32
 const MADT_ENTRIES_OFF: usize = 44;
 
 // MADT entry types:
-const MADT_TYPE_LAPIC: u8 = 0;   // x86-64: Processor Local APIC, length 8
+const MADT_TYPE_LAPIC: u8 = 0; // x86-64: Processor Local APIC, length 8
 const MADT_TYPE_IOAPIC: u8 = 1;
 const MADT_TYPE_ISO: u8 = 2;
 const MADT_TYPE_RINTC: u8 = 0x18; // RISC-V INTC (MADT type 24), length 36
@@ -399,7 +399,8 @@ fn parse_madt_topology(table: &[u8], bsp_id: u32, mut cpu_ids: [u32; 64]) -> (u3
                     }
                 }
             }
-            _ => {}
+            _ =>
+            {}
         }
 
         off += entry_len;

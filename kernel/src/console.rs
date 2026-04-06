@@ -14,12 +14,21 @@
 //! trait objects and vtable dispatch work on all architectures. The macros
 //! accept full format arguments.
 
+use core::sync::atomic::{AtomicBool, Ordering};
+
 use crate::arch::current::console::{serial_init, serial_write_byte};
 use crate::framebuffer::FramebufferWriter;
 use crate::mm::paging::phys_to_virt;
 use boot_protocol::BootInfo;
 
-/// Static console state. Single-threaded early boot: no locking required.
+/// Spinlock protecting `CONSOLE`. Acquired by every `console_write_fmt` call
+/// so concurrent writes from multiple CPUs (SMP) do not race on the
+/// framebuffer cursor position. Uses a plain `AtomicBool` (test-and-set) rather
+/// than the ticket `Spinlock` to avoid disabling interrupts — callers may already
+/// be in an interrupt handler, and timer ISRs do not call `kprintln!`.
+static CONSOLE_LOCK: AtomicBool = AtomicBool::new(false);
+
+/// Static console state.
 static mut CONSOLE: Console = Console {
     serial_ready: false,
     fb: None,
@@ -128,20 +137,80 @@ pub unsafe fn rebase_framebuffer(fb_phys: u64)
 
 /// Write a formatted string to the kernel console.
 ///
-/// Forwards to `core::fmt::Write` on the static `CONSOLE`. Must be called
-/// only after `console::init()`.
+/// Serialised via `CONSOLE_LOCK` so concurrent calls from multiple CPUs
+/// (after SMP bringup) do not race on the framebuffer cursor state.
+/// Each call acquires the lock, writes, then releases.
 ///
 /// # Safety
 /// `console::init` must have been called before this function.
 pub unsafe fn console_write_fmt(args: core::fmt::Arguments)
 {
     use core::fmt::Write;
-    // SAFETY: CONSOLE is only accessed from the single boot thread.
-    // SAFETY: raw pointer avoids the static_mut_refs lint; single-threaded boot.
+
+    // Acquire spin-lock (test-and-set, non-disabling).
+    while CONSOLE_LOCK
+        .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+        .is_err()
+    {
+        core::hint::spin_loop();
+    }
+
+    // SAFETY: we hold CONSOLE_LOCK; no other CPU is in this block.
     let console = unsafe { &mut *core::ptr::addr_of_mut!(CONSOLE) };
-    // Ignore fmt errors: we have no fallback output channel.
     let _ = console.write_fmt(args);
+
+    CONSOLE_LOCK.store(false, Ordering::Release);
 }
+
+/// Write a formatted string to the serial port only, for use inside panic handlers.
+///
+/// Unlike `console_write_fmt`, this function:
+/// - Force-claims `CONSOLE_LOCK` with a store (no spin-wait, avoids deadlock if
+///   this CPU already holds the lock or if the lock is stuck on a halted CPU).
+/// - Writes only to the serial port; skips the framebuffer to avoid touching
+///   any mutable cursor state that might be in an inconsistent state mid-panic.
+/// - Does not release the lock (the caller is about to halt anyway).
+///
+/// # Safety
+/// `console::init` must have been called before this function. May be called
+/// even while `CONSOLE_LOCK` is held by the same CPU (re-entrant panic).
+#[cfg(not(test))]
+pub unsafe fn panic_write_fmt(args: core::fmt::Arguments)
+{
+    use core::fmt::Write;
+
+    // Force-claim: store true unconditionally. Stops other CPUs from writing
+    // (best-effort) without risking a spin-wait deadlock on re-entrant panics.
+    CONSOLE_LOCK.store(true, Ordering::Relaxed);
+
+    /// A `fmt::Write` sink that writes bytes only to the serial port.
+    struct SerialWriter;
+    impl core::fmt::Write for SerialWriter
+    {
+        fn write_str(&mut self, s: &str) -> core::fmt::Result
+        {
+            // SAFETY: serial was initialised by console::init before any kprint! use.
+            unsafe {
+                for byte in s.bytes()
+                {
+                    if byte == b'\n'
+                    {
+                        serial_write_byte(b'\r');
+                    }
+                    serial_write_byte(byte);
+                }
+            }
+            Ok(())
+        }
+    }
+
+    let _ = SerialWriter.write_fmt(args);
+    // Lock intentionally not released — caller halts immediately after.
+}
+
+/// No-op stub for test builds.
+#[cfg(test)]
+pub unsafe fn panic_write_fmt(_args: core::fmt::Arguments) {}
 
 /// Write a `[S.NNNNNN] ` timestamp prefix to the kernel console before each line.
 ///
@@ -168,16 +237,20 @@ pub fn print_timestamp()
 {
     use crate::arch::current::timer;
 
-    let Some(us) = timer::elapsed_us() else {
+    let Some(us) = timer::elapsed_us()
+    else
+    {
         // Timer not yet calibrated (pre-Phase 5). Fixed-width placeholder so
         // pre-boot lines are visually distinct from timed lines.
         // Width matches "[0.000000]": 8 inner chars → 8 dashes.
         // SAFETY: console is initialised before kprintln! is used.
-        unsafe { console_write_fmt(format_args!("[--------] ")); }
+        unsafe {
+            console_write_fmt(format_args!("[--------] "));
+        }
         return;
     };
 
-    let sec    = us / 1_000_000;
+    let sec = us / 1_000_000;
     let us_frac = us % 1_000_000;
 
     // Format seconds into a small stack buffer (no heap, no float).
@@ -186,11 +259,15 @@ pub fn print_timestamp()
     let sec_str = {
         let mut n = sec;
         let mut len = 0usize;
-        if n == 0 {
+        if n == 0
+        {
             sec_buf[0] = b'0';
             len = 1;
-        } else {
-            while n > 0 {
+        }
+        else
+        {
+            while n > 0
+            {
                 sec_buf[len] = b'0' + (n % 10) as u8;
                 n /= 10;
                 len += 1;

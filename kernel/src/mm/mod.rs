@@ -77,9 +77,13 @@ where
         .is_err()
     {
         spins += 1;
-        if spins > 500_000 {
+        if spins > 500_000
+        {
             crate::kprintln!("[frame_alloc] DEADLOCK after {}k spins", spins / 1000);
-            loop { core::hint::spin_loop(); }
+            loop
+            {
+                core::hint::spin_loop();
+            }
         }
         core::hint::spin_loop();
     }

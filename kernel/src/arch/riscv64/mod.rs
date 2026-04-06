@@ -5,10 +5,12 @@
 
 //! RISC-V 64-bit architecture module for the kernel.
 
+pub mod ap_trampoline;
 pub mod console;
 pub mod context;
 pub mod cpu;
 pub mod gdt;
+pub mod idt;
 pub mod interrupts;
 pub mod paging;
 pub mod syscall;

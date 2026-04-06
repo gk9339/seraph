@@ -57,8 +57,8 @@ pub fn run(ctx: &TestContext) -> TestResult
     //   child_ep       — SEND | GRANT copy of ep (needed to call and transfer caps)
     //   child_test_sig — SIGNAL-only copy of test_sig (the cap to transfer)
     //   child_sync_sig — SIGNAL-only copy of sync_sig (for reporting back)
-    let cs = cap_create_cspace(32)
-        .map_err(|_| "integration::cap_transfer: cap_create_cspace failed")?;
+    let cs =
+        cap_create_cspace(32).map_err(|_| "integration::cap_transfer: cap_create_cspace failed")?;
     crate::klog("cap_transfer: cspace created");
 
     let child_ep = cap_copy(ep, cs, RIGHTS_SEND_GRANT)
@@ -72,9 +72,8 @@ pub fn run(ctx: &TestContext) -> TestResult
     crate::klog("cap_transfer: child_sync_sig copied");
 
     // Pack three 16-bit slot indices into a single u64 argument.
-    let child_arg = (child_ep as u64)
-        | ((child_test_sig as u64) << 16)
-        | ((child_sync_sig as u64) << 32);
+    let child_arg =
+        (child_ep as u64) | ((child_test_sig as u64) << 16) | ((child_sync_sig as u64) << 32);
 
     let th = cap_create_thread(ctx.aspace_cap, cs)
         .map_err(|_| "integration::cap_transfer: cap_create_thread failed")?;
@@ -140,7 +139,7 @@ pub fn run(ctx: &TestContext) -> TestResult
 /// bits[47:32] = sync_sig_slot (all in the child's own CSpace).
 fn child_entry(arg: u64) -> !
 {
-    let ep_slot       = (arg         & 0xFFFF) as u32;
+    let ep_slot = (arg & 0xFFFF) as u32;
     let test_sig_slot = ((arg >> 16) & 0xFFFF) as u32;
     let sync_sig_slot = ((arg >> 32) & 0xFFFF) as u32;
 

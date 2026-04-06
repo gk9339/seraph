@@ -71,7 +71,7 @@ pub fn run(ctx: &BuildContext, args: &RunArgs) -> Result<()>
     {
         step(
             "GDB server will listen on localhost:1234 \
-             (QEMU paused at startup; KVM disabled for correct register visibility)",
+             (QEMU paused at startup)",
         );
     }
 
@@ -148,24 +148,7 @@ fn arch_setup_x86(args: &mut Vec<String>, run_args: &RunArgs) -> Result<ArchSetu
             )
         })?;
 
-    args.extend(["-machine".into(), "q35".into()]);
-
-    if run_args.gdb
-    {
-        // KVM prevents QEMU's gdbserver from reading live CPU register state —
-        // all vCPUs appear frozen at the reset vector regardless of actual
-        // execution. Disable KVM and fall back to TCG for GDB sessions.
-        args.extend([
-            "-accel".into(),
-            "tcg".into(),
-            "-cpu".into(),
-            "qemu64".into(),
-        ]);
-    }
-    else
-    {
-        args.extend(["-enable-kvm".into(), "-cpu".into(), "host".into()]);
-    }
+    args.extend(["-machine".into(), "q35".into(), "-enable-kvm".into(), "-cpu".into(), "host".into()]);
 
     args.extend([
         "-drive".into(),

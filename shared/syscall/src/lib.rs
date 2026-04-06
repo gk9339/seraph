@@ -21,16 +21,16 @@
 #![no_std]
 
 use syscall_abi::{
-    SYS_ASPACE_QUERY, SYS_CAP_COPY, SYS_CAP_CREATE_ASPACE, SYS_CAP_CREATE_CSPACE,
-    SYS_CAP_CREATE_ENDPOINT, SYS_CAP_CREATE_EVENT_Q, SYS_CAP_CREATE_SIGNAL, SYS_CAP_CREATE_THREAD,
-    SYS_CAP_CREATE_WAIT_SET, SYS_CAP_DELETE, SYS_CAP_DERIVE, SYS_CAP_INSERT, SYS_CAP_MOVE,
-    SYS_CAP_REVOKE, SYS_DEBUG_LOG, SYS_DMA_GRANT, SYS_EVENT_POST, SYS_EVENT_RECV, SYS_FRAME_SPLIT,
-    SYS_IPC_BUFFER_SET, SYS_IPC_CALL, SYS_IPC_RECV, SYS_IPC_REPLY, SYS_IOPORT_BIND, SYS_IRQ_ACK,
-    SYS_IRQ_REGISTER, SYS_MEM_MAP, SYS_MEM_PROTECT, SYS_MEM_UNMAP, SYS_MMIO_MAP, SYS_SIGNAL_SEND,
-    SYS_SIGNAL_WAIT, SYS_SYSTEM_INFO, SYS_THREAD_CONFIGURE, SYS_THREAD_EXIT,
-    SYS_THREAD_READ_REGS, SYS_THREAD_SET_AFFINITY, SYS_THREAD_SET_PRIORITY, SYS_THREAD_START,
-    SYS_THREAD_STOP, SYS_THREAD_WRITE_REGS, SYS_THREAD_YIELD, SYS_WAIT_SET_ADD,
-    SYS_WAIT_SET_REMOVE, SYS_WAIT_SET_WAIT, MSG_CAP_SLOTS_MAX, MSG_DATA_WORDS_MAX,
+    MSG_CAP_SLOTS_MAX, MSG_DATA_WORDS_MAX, SYS_ASPACE_QUERY, SYS_CAP_COPY, SYS_CAP_CREATE_ASPACE,
+    SYS_CAP_CREATE_CSPACE, SYS_CAP_CREATE_ENDPOINT, SYS_CAP_CREATE_EVENT_Q, SYS_CAP_CREATE_SIGNAL,
+    SYS_CAP_CREATE_THREAD, SYS_CAP_CREATE_WAIT_SET, SYS_CAP_DELETE, SYS_CAP_DERIVE, SYS_CAP_INSERT,
+    SYS_CAP_MOVE, SYS_CAP_REVOKE, SYS_DEBUG_LOG, SYS_DMA_GRANT, SYS_EVENT_POST, SYS_EVENT_RECV,
+    SYS_FRAME_SPLIT, SYS_IOPORT_BIND, SYS_IPC_BUFFER_SET, SYS_IPC_CALL, SYS_IPC_RECV,
+    SYS_IPC_REPLY, SYS_IRQ_ACK, SYS_IRQ_REGISTER, SYS_MEM_MAP, SYS_MEM_PROTECT, SYS_MEM_UNMAP,
+    SYS_MMIO_MAP, SYS_SIGNAL_SEND, SYS_SIGNAL_WAIT, SYS_SYSTEM_INFO, SYS_THREAD_CONFIGURE,
+    SYS_THREAD_EXIT, SYS_THREAD_READ_REGS, SYS_THREAD_SET_AFFINITY, SYS_THREAD_SET_PRIORITY,
+    SYS_THREAD_START, SYS_THREAD_STOP, SYS_THREAD_WRITE_REGS, SYS_THREAD_YIELD, SYS_WAIT_SET_ADD,
+    SYS_WAIT_SET_REMOVE, SYS_WAIT_SET_WAIT,
 };
 
 // ── Raw syscall entry ─────────────────────────────────────────────────────────
@@ -292,7 +292,8 @@ pub unsafe fn read_recv_caps(ipc_buf: *const u64) -> (usize, [u32; MSG_CAP_SLOTS
     let mut indices = [0u32; MSG_CAP_SLOTS_MAX];
     for i in 0..cap_count
     {
-        indices[i] = unsafe { core::ptr::read_volatile(ipc_buf.add(MSG_DATA_WORDS_MAX + 1 + i)) } as u32;
+        indices[i] =
+            unsafe { core::ptr::read_volatile(ipc_buf.add(MSG_DATA_WORDS_MAX + 1 + i)) } as u32;
     }
     (cap_count, indices)
 }
@@ -311,7 +312,14 @@ pub unsafe fn read_recv_caps(ipc_buf: *const u64) -> (usize, [u32; MSG_CAP_SLOTS
 pub fn debug_log(msg: &str) -> Result<(), i64>
 {
     let ret = unsafe { syscall2(SYS_DEBUG_LOG, msg.as_ptr() as u64, msg.len() as u64) };
-    if ret < 0 { Err(ret) } else { Ok(()) }
+    if ret < 0
+    {
+        Err(ret)
+    }
+    else
+    {
+        Ok(())
+    }
 }
 
 /// Voluntarily yield the CPU to the next runnable thread.
@@ -319,7 +327,14 @@ pub fn debug_log(msg: &str) -> Result<(), i64>
 pub fn thread_yield() -> Result<(), i64>
 {
     let ret = unsafe { syscall2(SYS_THREAD_YIELD, 0, 0) };
-    if ret < 0 { Err(ret) } else { Ok(()) }
+    if ret < 0
+    {
+        Err(ret)
+    }
+    else
+    {
+        Ok(())
+    }
 }
 
 /// Exit the current thread. Never returns.
@@ -328,7 +343,10 @@ pub fn thread_exit() -> !
 {
     unsafe { syscall2(SYS_THREAD_EXIT, 0, 0) };
     // The syscall never returns; loop to satisfy the diverging type.
-    loop { core::hint::spin_loop(); }
+    loop
+    {
+        core::hint::spin_loop();
+    }
 }
 
 /// Register (or clear) the per-thread IPC buffer page.
@@ -338,7 +356,14 @@ pub fn thread_exit() -> !
 pub fn ipc_buffer_set(virt: u64) -> Result<(), i64>
 {
     let ret = unsafe { syscall2(SYS_IPC_BUFFER_SET, virt, 0) };
-    if ret < 0 { Err(ret) } else { Ok(()) }
+    if ret < 0
+    {
+        Err(ret)
+    }
+    else
+    {
+        Ok(())
+    }
 }
 
 /// Synchronous IPC call on an endpoint cap.
@@ -356,7 +381,12 @@ pub fn ipc_buffer_set(virt: u64) -> Result<(), i64>
 /// # Note
 /// The caller must have registered an IPC buffer via [`ipc_buffer_set`].
 #[inline]
-pub fn ipc_call(ep: u32, label: u64, data_count: usize, cap_slots: &[u32]) -> Result<(u64, usize), i64>
+pub fn ipc_call(
+    ep: u32,
+    label: u64,
+    data_count: usize,
+    cap_slots: &[u32],
+) -> Result<(u64, usize), i64>
 {
     let cap_count = cap_slots.len().min(MSG_CAP_SLOTS_MAX);
     let cap_packed = pack_cap_slots(cap_slots);
@@ -370,7 +400,14 @@ pub fn ipc_call(ep: u32, label: u64, data_count: usize, cap_slots: &[u32]) -> Re
             cap_packed,
         )
     };
-    if ret < 0 { Err(ret) } else { Ok((secondary, 0)) }
+    if ret < 0
+    {
+        Err(ret)
+    }
+    else
+    {
+        Ok((secondary, 0))
+    }
 }
 
 /// Receive a call on an endpoint cap.
@@ -381,7 +418,14 @@ pub fn ipc_call(ep: u32, label: u64, data_count: usize, cap_slots: &[u32]) -> Re
 pub fn ipc_recv(ep: u32) -> Result<(u64, usize), i64>
 {
     let (ret, secondary) = unsafe { syscall5_ret2(SYS_IPC_RECV, ep as u64, 0, 0, 0, 0) };
-    if ret < 0 { Err(ret) } else { Ok((secondary, 0)) }
+    if ret < 0
+    {
+        Err(ret)
+    }
+    else
+    {
+        Ok((secondary, 0))
+    }
 }
 
 /// Reply to the thread that called us.
@@ -396,8 +440,23 @@ pub fn ipc_reply(label: u64, data_count: usize, cap_slots: &[u32]) -> Result<(),
 {
     let cap_count = cap_slots.len().min(MSG_CAP_SLOTS_MAX);
     let cap_packed = pack_cap_slots(cap_slots);
-    let ret = unsafe { syscall4(SYS_IPC_REPLY, label, data_count as u64, cap_count as u64, cap_packed) };
-    if ret < 0 { Err(ret) } else { Ok(()) }
+    let ret = unsafe {
+        syscall4(
+            SYS_IPC_REPLY,
+            label,
+            data_count as u64,
+            cap_count as u64,
+            cap_packed,
+        )
+    };
+    if ret < 0
+    {
+        Err(ret)
+    }
+    else
+    {
+        Ok(())
+    }
 }
 
 /// Send `bits` to a signal cap. `bits` must be non-zero.
@@ -405,7 +464,14 @@ pub fn ipc_reply(label: u64, data_count: usize, cap_slots: &[u32]) -> Result<(),
 pub fn signal_send(sig: u32, bits: u64) -> Result<(), i64>
 {
     let ret = unsafe { syscall2(SYS_SIGNAL_SEND, sig as u64, bits) };
-    if ret < 0 { Err(ret) } else { Ok(()) }
+    if ret < 0
+    {
+        Err(ret)
+    }
+    else
+    {
+        Ok(())
+    }
 }
 
 /// Block until any bits are set on a signal cap. Returns the acquired bitmask.
@@ -413,7 +479,14 @@ pub fn signal_send(sig: u32, bits: u64) -> Result<(), i64>
 pub fn signal_wait(sig: u32) -> Result<u64, i64>
 {
     let ret = unsafe { syscall2(SYS_SIGNAL_WAIT, sig as u64, 0) };
-    if ret < 0 { Err(ret) } else { Ok(ret as u64) }
+    if ret < 0
+    {
+        Err(ret)
+    }
+    else
+    {
+        Ok(ret as u64)
+    }
 }
 
 /// Create a new Endpoint object. Returns the CSpace slot index.
@@ -421,7 +494,14 @@ pub fn signal_wait(sig: u32) -> Result<u64, i64>
 pub fn cap_create_endpoint() -> Result<u32, i64>
 {
     let ret = unsafe { syscall2(SYS_CAP_CREATE_ENDPOINT, 0, 0) };
-    if ret < 0 { Err(ret) } else { Ok(ret as u32) }
+    if ret < 0
+    {
+        Err(ret)
+    }
+    else
+    {
+        Ok(ret as u32)
+    }
 }
 
 /// Create a new Signal object. Returns the CSpace slot index.
@@ -429,7 +509,14 @@ pub fn cap_create_endpoint() -> Result<u32, i64>
 pub fn cap_create_signal() -> Result<u32, i64>
 {
     let ret = unsafe { syscall2(SYS_CAP_CREATE_SIGNAL, 0, 0) };
-    if ret < 0 { Err(ret) } else { Ok(ret as u32) }
+    if ret < 0
+    {
+        Err(ret)
+    }
+    else
+    {
+        Ok(ret as u32)
+    }
 }
 
 /// Create a new AddressSpace object. Returns the CSpace slot index.
@@ -437,7 +524,14 @@ pub fn cap_create_signal() -> Result<u32, i64>
 pub fn cap_create_aspace() -> Result<u32, i64>
 {
     let ret = unsafe { syscall2(SYS_CAP_CREATE_ASPACE, 0, 0) };
-    if ret < 0 { Err(ret) } else { Ok(ret as u32) }
+    if ret < 0
+    {
+        Err(ret)
+    }
+    else
+    {
+        Ok(ret as u32)
+    }
 }
 
 /// Create a new CSpace object. `max_slots` is clamped to [16, 16384] by the kernel.
@@ -446,7 +540,14 @@ pub fn cap_create_aspace() -> Result<u32, i64>
 pub fn cap_create_cspace(max_slots: u64) -> Result<u32, i64>
 {
     let ret = unsafe { syscall2(SYS_CAP_CREATE_CSPACE, max_slots, 0) };
-    if ret < 0 { Err(ret) } else { Ok(ret as u32) }
+    if ret < 0
+    {
+        Err(ret)
+    }
+    else
+    {
+        Ok(ret as u32)
+    }
 }
 
 /// Create a new Thread object bound to `aspace_cap` and `cspace_cap`.
@@ -455,7 +556,14 @@ pub fn cap_create_cspace(max_slots: u64) -> Result<u32, i64>
 pub fn cap_create_thread(aspace_cap: u32, cspace_cap: u32) -> Result<u32, i64>
 {
     let ret = unsafe { syscall2(SYS_CAP_CREATE_THREAD, aspace_cap as u64, cspace_cap as u64) };
-    if ret < 0 { Err(ret) } else { Ok(ret as u32) }
+    if ret < 0
+    {
+        Err(ret)
+    }
+    else
+    {
+        Ok(ret as u32)
+    }
 }
 
 /// Map `page_count` pages of a Frame cap into an address space.
@@ -484,7 +592,14 @@ pub fn mem_map(
             page_count,
         )
     };
-    if ret < 0 { Err(ret) } else { Ok(()) }
+    if ret < 0
+    {
+        Err(ret)
+    }
+    else
+    {
+        Ok(())
+    }
 }
 
 /// Remove `page_count` mappings starting at `virt` from `aspace_cap`.
@@ -494,10 +609,15 @@ pub fn mem_map(
 #[inline]
 pub fn mem_unmap(aspace_cap: u32, virt: u64, page_count: u64) -> Result<(), i64>
 {
-    let ret = unsafe {
-        syscall3(SYS_MEM_UNMAP, aspace_cap as u64, virt, page_count)
-    };
-    if ret < 0 { Err(ret) } else { Ok(()) }
+    let ret = unsafe { syscall3(SYS_MEM_UNMAP, aspace_cap as u64, virt, page_count) };
+    if ret < 0
+    {
+        Err(ret)
+    }
+    else
+    {
+        Ok(())
+    }
 }
 
 /// Change permission flags on `page_count` existing mappings in `aspace_cap`.
@@ -524,7 +644,14 @@ pub fn mem_protect(
             prot,
         )
     };
-    if ret < 0 { Err(ret) } else { Ok(()) }
+    if ret < 0
+    {
+        Err(ret)
+    }
+    else
+    {
+        Ok(())
+    }
 }
 
 /// Split `frame_cap` into two non-overlapping child Frame caps.
@@ -535,9 +662,7 @@ pub fn mem_protect(
 #[inline]
 pub fn frame_split(frame_cap: u32, split_offset: u64) -> Result<(u32, u32), i64>
 {
-    let ret = unsafe {
-        syscall3(SYS_FRAME_SPLIT, frame_cap as u64, split_offset, 0)
-    };
+    let ret = unsafe { syscall3(SYS_FRAME_SPLIT, frame_cap as u64, split_offset, 0) };
     if ret < 0
     {
         Err(ret)
@@ -557,9 +682,22 @@ pub fn frame_split(frame_cap: u32, split_offset: u64) -> Result<(u32, u32), i64>
 pub fn thread_configure(thread_cap: u32, entry: u64, stack_ptr: u64, arg: u64) -> Result<(), i64>
 {
     let ret = unsafe {
-        syscall4(SYS_THREAD_CONFIGURE, thread_cap as u64, entry, stack_ptr, arg)
+        syscall4(
+            SYS_THREAD_CONFIGURE,
+            thread_cap as u64,
+            entry,
+            stack_ptr,
+            arg,
+        )
     };
-    if ret < 0 { Err(ret) } else { Ok(()) }
+    if ret < 0
+    {
+        Err(ret)
+    }
+    else
+    {
+        Ok(())
+    }
 }
 
 /// Move a configured thread from `Created` to `Ready` (enqueue it).
@@ -569,7 +707,14 @@ pub fn thread_configure(thread_cap: u32, entry: u64, stack_ptr: u64, arg: u64) -
 pub fn thread_start(thread_cap: u32) -> Result<(), i64>
 {
     let ret = unsafe { syscall2(SYS_THREAD_START, thread_cap as u64, 0) };
-    if ret < 0 { Err(ret) } else { Ok(()) }
+    if ret < 0
+    {
+        Err(ret)
+    }
+    else
+    {
+        Ok(())
+    }
 }
 
 /// Copy a capability slot from the calling thread's CSpace into another CSpace.
@@ -585,9 +730,21 @@ pub fn thread_start(thread_cap: u32) -> Result<(), i64>
 pub fn cap_copy(src_slot: u32, dest_cspace_cap: u32, rights_mask: u64) -> Result<u32, i64>
 {
     let ret = unsafe {
-        syscall3(SYS_CAP_COPY, src_slot as u64, dest_cspace_cap as u64, rights_mask)
+        syscall3(
+            SYS_CAP_COPY,
+            src_slot as u64,
+            dest_cspace_cap as u64,
+            rights_mask,
+        )
     };
-    if ret < 0 { Err(ret) } else { Ok(ret as u32) }
+    if ret < 0
+    {
+        Err(ret)
+    }
+    else
+    {
+        Ok(ret as u32)
+    }
 }
 
 /// Attenuate a capability within the caller's own CSpace (SYS_CAP_DERIVE).
@@ -599,7 +756,14 @@ pub fn cap_copy(src_slot: u32, dest_cspace_cap: u32, rights_mask: u64) -> Result
 pub fn cap_derive(src_slot: u32, rights_mask: u64) -> Result<u32, i64>
 {
     let ret = unsafe { syscall2(SYS_CAP_DERIVE, src_slot as u64, rights_mask) };
-    if ret < 0 { Err(ret) } else { Ok(ret as u32) }
+    if ret < 0
+    {
+        Err(ret)
+    }
+    else
+    {
+        Ok(ret as u32)
+    }
 }
 
 /// Delete a capability slot in the caller's CSpace (SYS_CAP_DELETE).
@@ -609,7 +773,14 @@ pub fn cap_derive(src_slot: u32, rights_mask: u64) -> Result<u32, i64>
 pub fn cap_delete(slot: u32) -> Result<(), i64>
 {
     let ret = unsafe { syscall2(SYS_CAP_DELETE, slot as u64, 0) };
-    if ret < 0 { Err(ret) } else { Ok(()) }
+    if ret < 0
+    {
+        Err(ret)
+    }
+    else
+    {
+        Ok(())
+    }
 }
 
 /// Revoke all capabilities derived from a slot (SYS_CAP_REVOKE).
@@ -618,7 +789,14 @@ pub fn cap_delete(slot: u32) -> Result<(), i64>
 pub fn cap_revoke(slot: u32) -> Result<(), i64>
 {
     let ret = unsafe { syscall2(SYS_CAP_REVOKE, slot as u64, 0) };
-    if ret < 0 { Err(ret) } else { Ok(()) }
+    if ret < 0
+    {
+        Err(ret)
+    }
+    else
+    {
+        Ok(())
+    }
 }
 
 /// Move a capability to another CSpace (SYS_CAP_MOVE).
@@ -630,20 +808,50 @@ pub fn cap_revoke(slot: u32) -> Result<(), i64>
 pub fn cap_move(src_slot: u32, dest_cspace_cap: u32, dest_index: u32) -> Result<u32, i64>
 {
     let ret = unsafe {
-        syscall3(SYS_CAP_MOVE, src_slot as u64, dest_cspace_cap as u64, dest_index as u64)
+        syscall3(
+            SYS_CAP_MOVE,
+            src_slot as u64,
+            dest_cspace_cap as u64,
+            dest_index as u64,
+        )
     };
-    if ret < 0 { Err(ret) } else { Ok(ret as u32) }
+    if ret < 0
+    {
+        Err(ret)
+    }
+    else
+    {
+        Ok(ret as u32)
+    }
 }
 
 /// Insert a capability at a specific slot index in another CSpace (SYS_CAP_INSERT).
 ///
 /// Like `cap_copy` but the destination slot index is caller-chosen.
-pub fn cap_insert(src_slot: u32, dest_cspace_cap: u32, dest_index: u32, rights_mask: u64) -> Result<(), i64>
+pub fn cap_insert(
+    src_slot: u32,
+    dest_cspace_cap: u32,
+    dest_index: u32,
+    rights_mask: u64,
+) -> Result<(), i64>
 {
     let ret = unsafe {
-        syscall4(SYS_CAP_INSERT, src_slot as u64, dest_cspace_cap as u64, dest_index as u64, rights_mask)
+        syscall4(
+            SYS_CAP_INSERT,
+            src_slot as u64,
+            dest_cspace_cap as u64,
+            dest_index as u64,
+            rights_mask,
+        )
     };
-    if ret < 0 { Err(ret) } else { Ok(()) }
+    if ret < 0
+    {
+        Err(ret)
+    }
+    else
+    {
+        Ok(())
+    }
 }
 
 /// Query system information by `SystemInfoType` discriminant.
@@ -665,7 +873,14 @@ pub fn system_info(kind: u64) -> Result<u64, i64>
 {
     // Unused second arg is required because no syscall1 raw variant exists.
     let ret = unsafe { syscall2(SYS_SYSTEM_INFO, kind, 0) };
-    if ret < 0 { Err(ret) } else { Ok(ret as u64) }
+    if ret < 0
+    {
+        Err(ret)
+    }
+    else
+    {
+        Ok(ret as u64)
+    }
 }
 
 /// Translate a virtual address in an address space to its mapped physical address.
@@ -679,7 +894,14 @@ pub fn system_info(kind: u64) -> Result<u64, i64>
 pub fn aspace_query(aspace_cap: u32, virt: u64) -> Result<u64, i64>
 {
     let ret = unsafe { syscall2(SYS_ASPACE_QUERY, aspace_cap as u64, virt) };
-    if ret < 0 { Err(ret) } else { Ok(ret as u64) }
+    if ret < 0
+    {
+        Err(ret)
+    }
+    else
+    {
+        Ok(ret as u64)
+    }
 }
 
 // ── Event Queue wrappers ──────────────────────────────────────────────────────
@@ -692,7 +914,14 @@ pub fn aspace_query(aspace_cap: u32, virt: u64) -> Result<u64, i64>
 pub fn event_queue_create(capacity: u32) -> Result<u32, i64>
 {
     let ret = unsafe { syscall2(SYS_CAP_CREATE_EVENT_Q, capacity as u64, 0) };
-    if ret < 0 { Err(ret) } else { Ok(ret as u32) }
+    if ret < 0
+    {
+        Err(ret)
+    }
+    else
+    {
+        Ok(ret as u32)
+    }
 }
 
 /// Append `payload` to an event queue (non-blocking).
@@ -702,7 +931,14 @@ pub fn event_queue_create(capacity: u32) -> Result<u32, i64>
 pub fn event_post(queue_cap: u32, payload: u64) -> Result<(), i64>
 {
     let ret = unsafe { syscall2(SYS_EVENT_POST, queue_cap as u64, payload) };
-    if ret < 0 { Err(ret) } else { Ok(()) }
+    if ret < 0
+    {
+        Err(ret)
+    }
+    else
+    {
+        Ok(())
+    }
 }
 
 /// Dequeue the next entry from an event queue, blocking if empty.
@@ -714,7 +950,14 @@ pub fn event_recv(queue_cap: u32) -> Result<u64, i64>
 {
     // Payload is delivered in the secondary return register.
     let (ret, payload) = unsafe { syscall5_ret2(SYS_EVENT_RECV, queue_cap as u64, 0, 0, 0, 0) };
-    if ret < 0 { Err(ret) } else { Ok(payload) }
+    if ret < 0
+    {
+        Err(ret)
+    }
+    else
+    {
+        Ok(payload)
+    }
 }
 
 // ── Wait Set wrappers ─────────────────────────────────────────────────────────
@@ -724,7 +967,14 @@ pub fn event_recv(queue_cap: u32) -> Result<u64, i64>
 pub fn wait_set_create() -> Result<u32, i64>
 {
     let ret = unsafe { syscall2(SYS_CAP_CREATE_WAIT_SET, 0, 0) };
-    if ret < 0 { Err(ret) } else { Ok(ret as u32) }
+    if ret < 0
+    {
+        Err(ret)
+    }
+    else
+    {
+        Ok(ret as u32)
+    }
 }
 
 /// Register `source_cap` (Endpoint/Signal/EventQueue) in `ws_cap` with a
@@ -737,7 +987,14 @@ pub fn wait_set_create() -> Result<u32, i64>
 pub fn wait_set_add(ws_cap: u32, source_cap: u32, token: u64) -> Result<(), i64>
 {
     let ret = unsafe { syscall3(SYS_WAIT_SET_ADD, ws_cap as u64, source_cap as u64, token) };
-    if ret < 0 { Err(ret) } else { Ok(()) }
+    if ret < 0
+    {
+        Err(ret)
+    }
+    else
+    {
+        Ok(())
+    }
 }
 
 /// Remove `source_cap` from `ws_cap`.
@@ -745,7 +1002,14 @@ pub fn wait_set_add(ws_cap: u32, source_cap: u32, token: u64) -> Result<(), i64>
 pub fn wait_set_remove(ws_cap: u32, source_cap: u32) -> Result<(), i64>
 {
     let ret = unsafe { syscall2(SYS_WAIT_SET_REMOVE, ws_cap as u64, source_cap as u64) };
-    if ret < 0 { Err(ret) } else { Ok(()) }
+    if ret < 0
+    {
+        Err(ret)
+    }
+    else
+    {
+        Ok(())
+    }
 }
 
 /// Block until any registered source in `ws_cap` becomes ready.
@@ -757,7 +1021,14 @@ pub fn wait_set_remove(ws_cap: u32, source_cap: u32) -> Result<(), i64>
 pub fn wait_set_wait(ws_cap: u32) -> Result<u64, i64>
 {
     let (ret, token) = unsafe { syscall5_ret2(SYS_WAIT_SET_WAIT, ws_cap as u64, 0, 0, 0, 0) };
-    if ret < 0 { Err(ret) } else { Ok(token) }
+    if ret < 0
+    {
+        Err(ret)
+    }
+    else
+    {
+        Ok(token)
+    }
 }
 
 // ── Hardware access wrappers (W6) ─────────────────────────────────────────────
@@ -770,7 +1041,14 @@ pub fn wait_set_wait(ws_cap: u32) -> Result<u64, i64>
 pub fn irq_register(irq_cap: u32, signal_cap: u32) -> Result<(), i64>
 {
     let ret = unsafe { syscall2(SYS_IRQ_REGISTER, irq_cap as u64, signal_cap as u64) };
-    if ret < 0 { Err(ret) } else { Ok(()) }
+    if ret < 0
+    {
+        Err(ret)
+    }
+    else
+    {
+        Ok(())
+    }
 }
 
 /// Re-enable interrupt delivery for `irq_cap` after handling the interrupt.
@@ -781,7 +1059,14 @@ pub fn irq_register(irq_cap: u32, signal_cap: u32) -> Result<(), i64>
 pub fn irq_ack(irq_cap: u32) -> Result<(), i64>
 {
     let ret = unsafe { syscall2(SYS_IRQ_ACK, irq_cap as u64, 0) };
-    if ret < 0 { Err(ret) } else { Ok(()) }
+    if ret < 0
+    {
+        Err(ret)
+    }
+    else
+    {
+        Ok(())
+    }
 }
 
 /// Map `mmio_cap` into `aspace_cap` at virtual address `virt`.
@@ -793,9 +1078,22 @@ pub fn irq_ack(irq_cap: u32) -> Result<(), i64>
 pub fn mmio_map(aspace_cap: u32, mmio_cap: u32, virt: u64, flags: u64) -> Result<(), i64>
 {
     let ret = unsafe {
-        syscall4(SYS_MMIO_MAP, aspace_cap as u64, mmio_cap as u64, virt, flags)
+        syscall4(
+            SYS_MMIO_MAP,
+            aspace_cap as u64,
+            mmio_cap as u64,
+            virt,
+            flags,
+        )
     };
-    if ret < 0 { Err(ret) } else { Ok(()) }
+    if ret < 0
+    {
+        Err(ret)
+    }
+    else
+    {
+        Ok(())
+    }
 }
 
 /// Bind `ioport_cap` to `thread_cap`, granting it in/out access to the port range.
@@ -805,7 +1103,14 @@ pub fn mmio_map(aspace_cap: u32, mmio_cap: u32, virt: u64, flags: u64) -> Result
 pub fn ioport_bind(thread_cap: u32, ioport_cap: u32) -> Result<(), i64>
 {
     let ret = unsafe { syscall2(SYS_IOPORT_BIND, thread_cap as u64, ioport_cap as u64) };
-    if ret < 0 { Err(ret) } else { Ok(()) }
+    if ret < 0
+    {
+        Err(ret)
+    }
+    else
+    {
+        Ok(())
+    }
 }
 
 /// Return the physical address of `frame_cap` for use as a DMA buffer.
@@ -819,7 +1124,14 @@ pub fn ioport_bind(thread_cap: u32, ioport_cap: u32) -> Result<(), i64>
 pub fn dma_grant(frame_cap: u32, device_id: u64, flags: u64) -> Result<u64, i64>
 {
     let ret = unsafe { syscall3(SYS_DMA_GRANT, frame_cap as u64, device_id, flags) };
-    if ret < 0 { Err(ret) } else { Ok(ret as u64) }
+    if ret < 0
+    {
+        Err(ret)
+    }
+    else
+    {
+        Ok(ret as u64)
+    }
 }
 
 /// Stop a running, ready, or blocked thread. The thread transitions to `Stopped`.
@@ -830,7 +1142,14 @@ pub fn dma_grant(frame_cap: u32, device_id: u64, flags: u64) -> Result<u64, i64>
 pub fn thread_stop(thread_cap: u32) -> Result<(), i64>
 {
     let ret = unsafe { syscall2(SYS_THREAD_STOP, thread_cap as u64, 0) };
-    if ret < 0 { Err(ret) } else { Ok(()) }
+    if ret < 0
+    {
+        Err(ret)
+    }
+    else
+    {
+        Ok(())
+    }
 }
 
 /// Change a thread's scheduling priority.
@@ -842,9 +1161,21 @@ pub fn thread_stop(thread_cap: u32) -> Result<(), i64>
 pub fn thread_set_priority(thread_cap: u32, priority: u8, sched_cap: u32) -> Result<(), i64>
 {
     let ret = unsafe {
-        syscall3(SYS_THREAD_SET_PRIORITY, thread_cap as u64, priority as u64, sched_cap as u64)
+        syscall3(
+            SYS_THREAD_SET_PRIORITY,
+            thread_cap as u64,
+            priority as u64,
+            sched_cap as u64,
+        )
     };
-    if ret < 0 { Err(ret) } else { Ok(()) }
+    if ret < 0
+    {
+        Err(ret)
+    }
+    else
+    {
+        Ok(())
+    }
 }
 
 /// Set a thread's CPU affinity.
@@ -855,7 +1186,14 @@ pub fn thread_set_priority(thread_cap: u32, priority: u8, sched_cap: u32) -> Res
 pub fn thread_set_affinity(thread_cap: u32, cpu_id: u32) -> Result<(), i64>
 {
     let ret = unsafe { syscall2(SYS_THREAD_SET_AFFINITY, thread_cap as u64, cpu_id as u64) };
-    if ret < 0 { Err(ret) } else { Ok(()) }
+    if ret < 0
+    {
+        Err(ret)
+    }
+    else
+    {
+        Ok(())
+    }
 }
 
 /// Copy the register state of a stopped thread into `buf`.
@@ -867,9 +1205,21 @@ pub fn thread_set_affinity(thread_cap: u32, cpu_id: u32) -> Result<(), i64>
 pub fn thread_read_regs(thread_cap: u32, buf: *mut u8, buf_size: usize) -> Result<u64, i64>
 {
     let ret = unsafe {
-        syscall3(SYS_THREAD_READ_REGS, thread_cap as u64, buf as u64, buf_size as u64)
+        syscall3(
+            SYS_THREAD_READ_REGS,
+            thread_cap as u64,
+            buf as u64,
+            buf_size as u64,
+        )
     };
-    if ret < 0 { Err(ret) } else { Ok(ret as u64) }
+    if ret < 0
+    {
+        Err(ret)
+    }
+    else
+    {
+        Ok(ret as u64)
+    }
 }
 
 /// Write register state from `buf` into a stopped thread.
@@ -881,9 +1231,21 @@ pub fn thread_read_regs(thread_cap: u32, buf: *mut u8, buf_size: usize) -> Resul
 pub fn thread_write_regs(thread_cap: u32, buf: *const u8, buf_size: usize) -> Result<(), i64>
 {
     let ret = unsafe {
-        syscall3(SYS_THREAD_WRITE_REGS, thread_cap as u64, buf as u64, buf_size as u64)
+        syscall3(
+            SYS_THREAD_WRITE_REGS,
+            thread_cap as u64,
+            buf as u64,
+            buf_size as u64,
+        )
     };
-    if ret < 0 { Err(ret) } else { Ok(()) }
+    if ret < 0
+    {
+        Err(ret)
+    }
+    else
+    {
+        Ok(())
+    }
 }
 
 // Silence "unused import" if user only uses some functions.

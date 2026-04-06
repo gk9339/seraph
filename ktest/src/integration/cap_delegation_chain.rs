@@ -23,9 +23,7 @@
 //! level1 and level2 each have SIGNAL only. Any `signal_wait` on level1 or
 //! level2 must fail with `InsufficientRights`.
 
-use syscall::{
-    cap_create_signal, cap_delete, cap_derive, cap_revoke, signal_send, signal_wait,
-};
+use syscall::{cap_create_signal, cap_delete, cap_derive, cap_revoke, signal_send, signal_wait};
 use syscall_abi::SyscallError;
 
 use crate::{TestContext, TestResult};
@@ -40,8 +38,7 @@ pub fn run(_ctx: &TestContext) -> TestResult
     crate::klog("cap_delegation_chain: starting");
 
     // Root cap: full SIGNAL+WAIT rights.
-    let root = cap_create_signal()
-        .map_err(|_| "cap_delegation_chain: cap_create_signal failed")?;
+    let root = cap_create_signal().map_err(|_| "cap_delegation_chain: cap_create_signal failed")?;
 
     // ── Level 1: derive from root with SIGNAL only ────────────────────────────
     let level1 = cap_derive(root, RIGHTS_SIGNAL)
@@ -63,9 +60,7 @@ pub fn run(_ctx: &TestContext) -> TestResult
     let err1 = signal_wait(level1);
     if err1 != Err(SyscallError::InsufficientRights as i64)
     {
-        return Err(
-            "cap_delegation_chain: level1 signal_wait should fail with InsufficientRights",
-        );
+        return Err("cap_delegation_chain: level1 signal_wait should fail with InsufficientRights");
     }
 
     // ── Verify attenuation: level2 can send, cannot wait ─────────────────────
@@ -77,9 +72,7 @@ pub fn run(_ctx: &TestContext) -> TestResult
     let err2 = signal_wait(level2);
     if err2 != Err(SyscallError::InsufficientRights as i64)
     {
-        return Err(
-            "cap_delegation_chain: level2 signal_wait should fail with InsufficientRights",
-        );
+        return Err("cap_delegation_chain: level2 signal_wait should fail with InsufficientRights");
     }
 
     // ── Cascaded revocation: revoke root → level1 and level2 both invalid ────

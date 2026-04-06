@@ -267,9 +267,16 @@ impl BuddyAllocator
             // Pool exhausted. This physical region is lost from the allocator.
             // Increase POOL_SIZE if this occurs.
             #[cfg(not(test))]
-            crate::kprintln!("[buddy] POOL EXHAUSTED: free_pages={} order={}", self.free_pages, order);
+            crate::kprintln!(
+                "[buddy] POOL EXHAUSTED: free_pages={} order={}",
+                self.free_pages,
+                order
+            );
             #[cfg(not(test))]
-            loop { core::hint::spin_loop(); }
+            loop
+            {
+                core::hint::spin_loop();
+            }
             #[cfg(test)]
             return;
         };
@@ -480,7 +487,10 @@ mod tests
         assert_eq!(alloc.free_page_count(), 4);
 
         // Fully coalesced block must be allocatable as a single order-2 request.
-        assert!(alloc.alloc(2).is_some(), "coalesced order-2 block should be allocatable");
+        assert!(
+            alloc.alloc(2).is_some(),
+            "coalesced order-2 block should be allocatable"
+        );
     }
 
     #[test]

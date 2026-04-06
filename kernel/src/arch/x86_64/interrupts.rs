@@ -167,6 +167,136 @@ pub unsafe fn init()
 #[cfg(test)]
 pub unsafe fn init() {}
 
+// ── APIC ID and ICR ───────────────────────────────────────────────────────────
+
+/// Local APIC ID register offset.
+const APIC_ID: usize = 0x20;
+/// Interrupt Command Register low word (bits 31:0).
+const APIC_ICR_LOW: usize = 0x300;
+/// Interrupt Command Register high word (bits 63:32).
+const APIC_ICR_HIGH: usize = 0x310;
+
+/// ICR delivery pending bit (bit 12 of ICR_LOW).
+const ICR_PENDING: u32 = 1 << 12;
+/// ICR value for INIT IPI: level-assert, trigger=level, delivery=INIT.
+const ICR_INIT_ASSERT: u32 = 0x0000_C500;
+/// ICR value for INIT de-assert (clears INIT signal).
+const ICR_INIT_DEASSERT: u32 = 0x0000_8500;
+/// ICR base value for STARTUP IPI: delivery=STARTUP, vector in bits[7:0].
+const ICR_SIPI_BASE: u32 = 0x0000_4600;
+
+/// Read this CPU's local APIC ID (bits [31:24] of the APIC ID register).
+#[cfg(not(test))]
+pub fn lapic_id() -> u32
+{
+    apic_read(APIC_ID) >> 24
+}
+
+/// No-op test stub.
+#[cfg(test)]
+pub fn lapic_id() -> u32
+{
+    0
+}
+
+/// Spin until the ICR delivery status bit clears (IPI accepted by hardware).
+/// Returns false if it times out (bit still set after ~1M iterations).
+#[cfg(not(test))]
+unsafe fn wait_icr_idle() -> bool
+{
+    let mut n = 0u64;
+    while apic_read(APIC_ICR_LOW) & ICR_PENDING != 0
+    {
+        core::hint::spin_loop();
+        n += 1;
+        if n >= 1_000_000
+        {
+            return false;
+        }
+    }
+    true
+}
+
+/// Send an INIT IPI to the AP identified by `target_apic_id`.
+///
+/// Follows the Intel SDM sequence: assert INIT, wait for delivery, then
+/// de-assert INIT.
+#[cfg(not(test))]
+unsafe fn send_init_ipi(target_apic_id: u32)
+{
+    unsafe {
+        apic_write(APIC_ICR_HIGH, target_apic_id << 24);
+        apic_write(APIC_ICR_LOW, ICR_INIT_ASSERT);
+        wait_icr_idle();
+        apic_write(APIC_ICR_HIGH, target_apic_id << 24);
+        apic_write(APIC_ICR_LOW, ICR_INIT_DEASSERT);
+        wait_icr_idle();
+    }
+}
+
+/// Send a STARTUP IPI (SIPI) to the AP identified by `target_apic_id`.
+///
+/// `vector` is the SIPI vector byte: the AP starts executing at physical
+/// address `vector << 12`. Must be < 256 (< 1 MiB physical address).
+#[cfg(not(test))]
+unsafe fn send_sipi(target_apic_id: u32, vector: u8)
+{
+    unsafe {
+        apic_write(APIC_ICR_HIGH, target_apic_id << 24);
+        apic_write(APIC_ICR_LOW, ICR_SIPI_BASE | vector as u32);
+        wait_icr_idle();
+    }
+}
+
+/// Start an AP using the INIT + 2×SIPI sequence (Intel SDM Vol. 3A §8.4.4.1).
+///
+/// Waits ~10 ms after INIT and ~200 µs after each SIPI.
+/// `target_apic_id`: hardware LAPIC ID of the target AP.
+/// `trampoline_phys`: 4 KiB-aligned physical address < 1 MiB of the AP trampoline.
+///
+/// # Safety
+/// Must be called from the BSP with the IDT loaded and the APIC timer calibrated
+/// (so `timer::delay_us` works). The trampoline page must have been set up via
+/// `ap_trampoline::setup_trampoline` and `setup_ap_params`.
+#[cfg(not(test))]
+pub unsafe fn start_ap(target_apic_id: u32, trampoline_phys: u64)
+{
+    let vector = (trampoline_phys >> 12) as u8;
+    unsafe {
+        send_init_ipi(target_apic_id);
+        super::timer::delay_us(10_000); // 10 ms after INIT (Intel SDM §8.4.4.1)
+        send_sipi(target_apic_id, vector);
+        super::timer::delay_us(200); // 200 µs after first SIPI
+        send_sipi(target_apic_id, vector); // second SIPI per Intel spec
+        super::timer::delay_us(200);
+    }
+}
+
+/// Initialise the local APIC for an AP.
+///
+/// Software-enables the LAPIC and masks all LVT entries.
+/// Call before `timer::init_ap` so the APIC is active before the timer starts.
+///
+/// # Safety
+/// Ring 0. AP must have loaded its GDT and IDT before calling.
+#[cfg(not(test))]
+pub unsafe fn init_ap()
+{
+    unsafe {
+        apic_write(APIC_SVR, apic_read(APIC_SVR) | 0x100 | 0xFF);
+        apic_write(APIC_LVT_TIMER, LVT_MASK);
+        apic_write(APIC_LVT_LINT0, LVT_MASK);
+        apic_write(APIC_LVT_LINT1, LVT_MASK);
+        apic_write(APIC_LVT_ERROR, LVT_MASK);
+        apic_write(APIC_LVT_THERMAL, LVT_MASK);
+        apic_write(APIC_LVT_PERF, LVT_MASK);
+    }
+}
+
+/// No-op test stub.
+#[cfg(test)]
+pub unsafe fn init_ap() {}
+
 /// Disable interrupts and return the previous IF state.
 ///
 /// Returns `true` if interrupts were enabled before the call.

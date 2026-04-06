@@ -81,10 +81,16 @@ pub struct TrapFrame
 impl TrapFrame
 {
     /// Syscall number (a7 on RISC-V).
-    pub fn syscall_nr(&self) -> u64 { self.a7 }
+    pub fn syscall_nr(&self) -> u64
+    {
+        self.a7
+    }
 
     /// Write the primary syscall return value (a0).
-    pub fn set_return(&mut self, val: i64) { self.a0 = val as u64; }
+    pub fn set_return(&mut self, val: i64)
+    {
+        self.a0 = val as u64;
+    }
 
     /// Read syscall argument `n` (0-indexed).
     /// Mapping: 0=a0, 1=a1, 2=a2, 3=a3, 4=a4, 5=a5.
@@ -118,14 +124,17 @@ impl TrapFrame
     pub fn init_user(&mut self, entry: u64, stack: u64)
     {
         self.sepc = entry;
-        self.sp   = stack; // x2 = user stack pointer
+        self.sp = stack; // x2 = user stack pointer
     }
 
     /// Set the first argument register (a0 = x10) in the frame.
     ///
     /// Used by `SYS_THREAD_CONFIGURE` to pass the initial argument value to
     /// the new thread when it first enters user mode.
-    pub fn set_arg0(&mut self, val: u64) { self.a0 = val; }
+    pub fn set_arg0(&mut self, val: u64)
+    {
+        self.a0 = val;
+    }
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────

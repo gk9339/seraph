@@ -41,8 +41,8 @@ pub fn frame_split(ctx: &TestContext) -> TestResult
 {
     // BSS frame is large enough (36 KiB+) to split at one page boundary.
     let bss_cap = ctx.aspace_cap + 3;
-    let (a, b) = syscall::frame_split(bss_cap, PAGE)
-        .map_err(|_| "frame_split failed on BSS frame")?;
+    let (a, b) =
+        syscall::frame_split(bss_cap, PAGE).map_err(|_| "frame_split failed on BSS frame")?;
 
     // Both returned slots must be distinct and non-zero.
     if a == b
@@ -67,12 +67,11 @@ pub fn mem_map_unmap(ctx: &TestContext) -> TestResult
     let text_frame = ctx.aspace_cap + 1;
 
     // Map one page at TEST_VA, offset 0 within the frame.
-    mem_map(text_frame, ctx.aspace_cap, TEST_VA, 0, 1)
-        .map_err(|_| "mem_map failed")?;
+    mem_map(text_frame, ctx.aspace_cap, TEST_VA, 0, 1).map_err(|_| "mem_map failed")?;
 
     // Verify the mapping appears in the address space.
-    let phys = aspace_query(ctx.aspace_cap, TEST_VA)
-        .map_err(|_| "aspace_query after mem_map failed")?;
+    let phys =
+        aspace_query(ctx.aspace_cap, TEST_VA).map_err(|_| "aspace_query after mem_map failed")?;
     if phys == 0 || phys & 0xFFF != 0
     {
         return Err("aspace_query returned invalid physical address after mem_map");
@@ -100,8 +99,7 @@ pub fn mem_protect(ctx: &TestContext) -> TestResult
     syscall::mem_protect(text_frame, ctx.aspace_cap, TEST_VA, 1, 0)
         .map_err(|_| "mem_protect (read-only) failed")?;
 
-    mem_unmap(ctx.aspace_cap, TEST_VA, 1)
-        .map_err(|_| "mem_unmap after protect test failed")?;
+    mem_unmap(ctx.aspace_cap, TEST_VA, 1).map_err(|_| "mem_unmap after protect test failed")?;
     Ok(())
 }
 
@@ -130,11 +128,9 @@ pub fn mem_unmap_idempotent(ctx: &TestContext) -> TestResult
 
     mem_map(text_frame, ctx.aspace_cap, TEST_VA, 0, 1)
         .map_err(|_| "mem_map for idempotent-unmap test failed")?;
-    mem_unmap(ctx.aspace_cap, TEST_VA, 1)
-        .map_err(|_| "first mem_unmap failed")?;
+    mem_unmap(ctx.aspace_cap, TEST_VA, 1).map_err(|_| "first mem_unmap failed")?;
     // Second unmap of the same range must succeed (no-op).
-    mem_unmap(ctx.aspace_cap, TEST_VA, 1)
-        .map_err(|_| "second mem_unmap (idempotent) failed")?;
+    mem_unmap(ctx.aspace_cap, TEST_VA, 1).map_err(|_| "second mem_unmap (idempotent) failed")?;
     Ok(())
 }
 
@@ -149,8 +145,8 @@ pub fn aspace_query_mapped(ctx: &TestContext) -> TestResult
         fn _start();
     }
     let code_va = (_start as *const () as u64) & !0xFFF;
-    let phys = aspace_query(ctx.aspace_cap, code_va)
-        .map_err(|_| "aspace_query on _start page failed")?;
+    let phys =
+        aspace_query(ctx.aspace_cap, code_va).map_err(|_| "aspace_query on _start page failed")?;
     if phys == 0 || phys & 0xFFF != 0
     {
         return Err("aspace_query returned non-page-aligned or zero physical address");

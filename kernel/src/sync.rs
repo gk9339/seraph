@@ -104,7 +104,9 @@ fn save_and_disable_interrupts() -> u64
 fn restore_interrupts(saved: u64)
 {
     // SAFETY: `saved` came from a matching `save_and_disable_interrupts` call.
-    unsafe { crate::arch::current::cpu::restore_interrupts(saved); }
+    unsafe {
+        crate::arch::current::cpu::restore_interrupts(saved);
+    }
 }
 
 // In test builds, interrupts are not a concern; no-op stubs allow the rest of

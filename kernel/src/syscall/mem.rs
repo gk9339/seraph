@@ -68,7 +68,9 @@ pub fn sys_mem_map(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     let mapping_size = page_count
         .checked_mul(PAGE_SIZE)
         .ok_or(SyscallError::InvalidArgument)?;
-    let virt_end = virt_base.checked_add(mapping_size as u64).ok_or(SyscallError::InvalidArgument)?;
+    let virt_end = virt_base
+        .checked_add(mapping_size as u64)
+        .ok_or(SyscallError::InvalidArgument)?;
     if virt_end > USER_HALF_TOP
     {
         return Err(SyscallError::InvalidAddress);
@@ -88,7 +90,8 @@ pub fn sys_mem_map(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     }
 
     // Resolve Frame cap.
-    let frame_slot = unsafe { super::lookup_cap(caller_cspace, frame_idx, CapTag::Frame, Rights::MAP) }?;
+    let frame_slot =
+        unsafe { super::lookup_cap(caller_cspace, frame_idx, CapTag::Frame, Rights::MAP) }?;
     let (frame_phys, frame_size) = {
         let obj = frame_slot.object.ok_or(SyscallError::InvalidCapability)?;
         // SAFETY: tag confirmed Frame; pointer is valid.
@@ -118,16 +121,15 @@ pub fn sys_mem_map(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         return Err(SyscallError::WxViolation);
     }
     let page_flags = PageFlags {
-        readable:   true,
+        readable: true,
         writable,
         executable,
         uncacheable: false,
     };
 
     // Resolve AddressSpace cap.
-    let aspace_slot = unsafe {
-        super::lookup_cap(caller_cspace, aspace_idx, CapTag::AddressSpace, Rights::MAP)
-    }?;
+    let aspace_slot =
+        unsafe { super::lookup_cap(caller_cspace, aspace_idx, CapTag::AddressSpace, Rights::MAP) }?;
     let as_ptr = {
         let obj = aspace_slot.object.ok_or(SyscallError::InvalidCapability)?;
         // SAFETY: tag confirmed AddressSpace; pointer is valid.
@@ -183,7 +185,7 @@ pub fn sys_mem_unmap(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     use crate::syscall::current_tcb;
 
     let aspace_idx = tf.arg(0) as u32;
-    let virt_base  = tf.arg(1);
+    let virt_base = tf.arg(1);
     let page_count = tf.arg(2) as usize;
 
     // ── Validation ────────────────────────────────────────────────────────────
@@ -201,8 +203,12 @@ pub fn sys_mem_unmap(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     {
         return Err(SyscallError::InvalidArgument);
     }
-    let mapping_size = page_count.checked_mul(PAGE_SIZE).ok_or(SyscallError::InvalidArgument)?;
-    let virt_end = virt_base.checked_add(mapping_size as u64).ok_or(SyscallError::InvalidArgument)?;
+    let mapping_size = page_count
+        .checked_mul(PAGE_SIZE)
+        .ok_or(SyscallError::InvalidArgument)?;
+    let virt_end = virt_base
+        .checked_add(mapping_size as u64)
+        .ok_or(SyscallError::InvalidArgument)?;
     if virt_end > USER_HALF_TOP
     {
         return Err(SyscallError::InvalidAddress);
@@ -211,13 +217,18 @@ pub fn sys_mem_unmap(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     // ── Capability lookup ─────────────────────────────────────────────────────
 
     let tcb = unsafe { current_tcb() };
-    if tcb.is_null() { return Err(SyscallError::InvalidCapability); }
+    if tcb.is_null()
+    {
+        return Err(SyscallError::InvalidCapability);
+    }
     let caller_cspace = unsafe { (*tcb).cspace };
-    if caller_cspace.is_null() { return Err(SyscallError::InvalidCapability); }
+    if caller_cspace.is_null()
+    {
+        return Err(SyscallError::InvalidCapability);
+    }
 
-    let aspace_slot = unsafe {
-        super::lookup_cap(caller_cspace, aspace_idx, CapTag::AddressSpace, Rights::MAP)
-    }?;
+    let aspace_slot =
+        unsafe { super::lookup_cap(caller_cspace, aspace_idx, CapTag::AddressSpace, Rights::MAP) }?;
     let as_ptr = {
         let obj = aspace_slot.object.ok_or(SyscallError::InvalidCapability)?;
         // SAFETY: tag confirmed AddressSpace.
@@ -268,11 +279,11 @@ pub fn sys_mem_protect(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     use crate::mm::PAGE_SIZE;
     use crate::syscall::current_tcb;
 
-    let frame_idx  = tf.arg(0) as u32;
+    let frame_idx = tf.arg(0) as u32;
     let aspace_idx = tf.arg(1) as u32;
-    let virt_base  = tf.arg(2);
+    let virt_base = tf.arg(2);
     let page_count = tf.arg(3) as usize;
-    let prot_bits  = tf.arg(4);
+    let prot_bits = tf.arg(4);
 
     // ── Validation ────────────────────────────────────────────────────────────
 
@@ -289,15 +300,19 @@ pub fn sys_mem_protect(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     {
         return Err(SyscallError::InvalidArgument);
     }
-    let mapping_size = page_count.checked_mul(PAGE_SIZE).ok_or(SyscallError::InvalidArgument)?;
-    let virt_end = virt_base.checked_add(mapping_size as u64).ok_or(SyscallError::InvalidArgument)?;
+    let mapping_size = page_count
+        .checked_mul(PAGE_SIZE)
+        .ok_or(SyscallError::InvalidArgument)?;
+    let virt_end = virt_base
+        .checked_add(mapping_size as u64)
+        .ok_or(SyscallError::InvalidArgument)?;
     if virt_end > USER_HALF_TOP
     {
         return Err(SyscallError::InvalidAddress);
     }
 
     // Parse new protection bits (bit 1 = WRITE, bit 2 = EXECUTE per Rights layout).
-    let writable   = (prot_bits & 0x2) != 0;
+    let writable = (prot_bits & 0x2) != 0;
     let executable = (prot_bits & 0x4) != 0;
 
     // W^X check.
@@ -309,14 +324,19 @@ pub fn sys_mem_protect(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     // ── Capability lookup ─────────────────────────────────────────────────────
 
     let tcb = unsafe { current_tcb() };
-    if tcb.is_null() { return Err(SyscallError::InvalidCapability); }
+    if tcb.is_null()
+    {
+        return Err(SyscallError::InvalidCapability);
+    }
     let caller_cspace = unsafe { (*tcb).cspace };
-    if caller_cspace.is_null() { return Err(SyscallError::InvalidCapability); }
+    if caller_cspace.is_null()
+    {
+        return Err(SyscallError::InvalidCapability);
+    }
 
     // Frame cap authorises the permission level.
-    let frame_slot = unsafe {
-        super::lookup_cap(caller_cspace, frame_idx, CapTag::Frame, Rights::MAP)
-    }?;
+    let frame_slot =
+        unsafe { super::lookup_cap(caller_cspace, frame_idx, CapTag::Frame, Rights::MAP) }?;
     // Verify object pointer is valid; rights are read from the slot directly.
     let _ = frame_slot.object.ok_or(SyscallError::InvalidCapability)?;
     let frame_rights = frame_slot.rights;
@@ -338,9 +358,8 @@ pub fn sys_mem_protect(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         uncacheable: false,
     };
 
-    let aspace_slot = unsafe {
-        super::lookup_cap(caller_cspace, aspace_idx, CapTag::AddressSpace, Rights::MAP)
-    }?;
+    let aspace_slot =
+        unsafe { super::lookup_cap(caller_cspace, aspace_idx, CapTag::AddressSpace, Rights::MAP) }?;
     let as_ptr = {
         let obj = aspace_slot.object.ok_or(SyscallError::InvalidCapability)?;
         // SAFETY: tag confirmed AddressSpace.
@@ -354,12 +373,11 @@ pub fn sys_mem_protect(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     {
         let virt = virt_base + (i * PAGE_SIZE) as u64;
         // SAFETY: virt is in user range (validated above); as_ptr is valid.
-        unsafe { (*as_ptr).protect_page(virt, page_flags) }
-            .map_err(|e| match e
-            {
-                PagingError::NotMapped => SyscallError::InvalidAddress,
-                _ => SyscallError::InvalidArgument,
-            })?;
+        unsafe { (*as_ptr).protect_page(virt, page_flags) }.map_err(|e| match e
+        {
+            PagingError::NotMapped => SyscallError::InvalidAddress,
+            _ => SyscallError::InvalidArgument,
+        })?;
     }
 
     Ok(0)
@@ -399,7 +417,7 @@ pub fn sys_frame_split(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     use crate::mm::PAGE_SIZE;
     use crate::syscall::current_tcb;
 
-    let frame_idx    = tf.arg(0) as u32;
+    let frame_idx = tf.arg(0) as u32;
     let split_offset = tf.arg(1);
     // arg2 is reserved; ignore.
 
@@ -417,14 +435,19 @@ pub fn sys_frame_split(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     // ── Capability lookup ─────────────────────────────────────────────────────
 
     let tcb = unsafe { current_tcb() };
-    if tcb.is_null() { return Err(SyscallError::InvalidCapability); }
+    if tcb.is_null()
+    {
+        return Err(SyscallError::InvalidCapability);
+    }
     let caller_cspace = unsafe { (*tcb).cspace };
-    if caller_cspace.is_null() { return Err(SyscallError::InvalidCapability); }
+    if caller_cspace.is_null()
+    {
+        return Err(SyscallError::InvalidCapability);
+    }
 
     let (frame_phys, frame_size, frame_rights, cspace_id, orig_obj_ptr) = {
-        let slot = unsafe {
-            super::lookup_cap(caller_cspace, frame_idx, CapTag::Frame, Rights::MAP)
-        }?;
+        let slot =
+            unsafe { super::lookup_cap(caller_cspace, frame_idx, CapTag::Frame, Rights::MAP) }?;
         let obj_ptr = slot.object.ok_or(SyscallError::InvalidCapability)?;
         let fo = unsafe { &*(obj_ptr.as_ptr() as *const FrameObject) };
         let cspace_id = unsafe { (*caller_cspace).id() };
@@ -447,8 +470,8 @@ pub fn sys_frame_split(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     // Allocate child1: [base, base + split_offset).
     let child1_obj = Box::new(FrameObject {
         header: crate::cap::object::KernelObjectHeader::new(ObjectType::Frame),
-        base:   frame_phys,
-        size:   split_offset,
+        base: frame_phys,
+        size: split_offset,
     });
     let child1_ptr: NonNull<KernelObjectHeader> = {
         let raw = Box::into_raw(child1_obj) as *mut KernelObjectHeader;
@@ -459,8 +482,8 @@ pub fn sys_frame_split(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     // Allocate child2: [base + split_offset, end).
     let child2_obj = Box::new(FrameObject {
         header: crate::cap::object::KernelObjectHeader::new(ObjectType::Frame),
-        base:   frame_phys + split_offset,
-        size:   frame_size - split_offset,
+        base: frame_phys + split_offset,
+        size: frame_size - split_offset,
     });
     let child2_ptr: NonNull<KernelObjectHeader> = {
         let raw = Box::into_raw(child2_obj) as *mut KernelObjectHeader;
@@ -469,9 +492,11 @@ pub fn sys_frame_split(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 
     // Insert both children into the caller's CSpace (auto-allocate slots).
     let cs = unsafe { &mut *caller_cspace };
-    let slot1 = cs.insert_cap(CapTag::Frame, frame_rights, child1_ptr)
+    let slot1 = cs
+        .insert_cap(CapTag::Frame, frame_rights, child1_ptr)
         .map_err(|_| SyscallError::OutOfMemory)?;
-    let slot2 = cs.insert_cap(CapTag::Frame, frame_rights, child2_ptr)
+    let slot2 = cs
+        .insert_cap(CapTag::Frame, frame_rights, child2_ptr)
         .map_err(|_| {
             // Undo slot1 insertion on failure.
             cs.free_slot(slot1);
@@ -486,13 +511,15 @@ pub fn sys_frame_split(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 
     DERIVATION_LOCK.write_lock();
 
-    let orig_node  = SlotId::new(cspace_id, frame_idx);
-    let child1_id  = SlotId::new(cspace_id, slot1);
-    let child2_id  = SlotId::new(cspace_id, slot2);
+    let orig_node = SlotId::new(cspace_id, frame_idx);
+    let child1_id = SlotId::new(cspace_id, slot1);
+    let child2_id = SlotId::new(cspace_id, slot2);
 
     // Read the original's parent before we modify anything.
     let orig_parent = unsafe {
-        (*caller_cspace).slot(frame_idx).and_then(|s| s.deriv_parent)
+        (*caller_cspace)
+            .slot(frame_idx)
+            .and_then(|s| s.deriv_parent)
     };
 
     // Reparent original's existing children (if any) to its parent.

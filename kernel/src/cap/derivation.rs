@@ -205,22 +205,21 @@ pub unsafe fn link_child(parent: SlotId, child: SlotId)
 pub unsafe fn unlink_node(node: SlotId)
 {
     // Read node's current pointers.
-    let (parent, prev, next) =
-        if let Some(slot) = unsafe { resolve_slot_mut(node) }
-        {
-            let p = slot.deriv_parent;
-            let pr = slot.deriv_prev_sibling;
-            let nx = slot.deriv_next_sibling;
-            // Clear node's own pointers.
-            slot.deriv_parent = None;
-            slot.deriv_prev_sibling = None;
-            slot.deriv_next_sibling = None;
-            (p, pr, nx)
-        }
-        else
-        {
-            return;
-        };
+    let (parent, prev, next) = if let Some(slot) = unsafe { resolve_slot_mut(node) }
+    {
+        let p = slot.deriv_parent;
+        let pr = slot.deriv_prev_sibling;
+        let nx = slot.deriv_next_sibling;
+        // Clear node's own pointers.
+        slot.deriv_parent = None;
+        slot.deriv_prev_sibling = None;
+        slot.deriv_next_sibling = None;
+        (p, pr, nx)
+    }
+    else
+    {
+        return;
+    };
 
     // Splice node out of the sibling chain.
     if let Some(prev_id) = prev
@@ -400,8 +399,7 @@ pub unsafe fn revoke_subtree(root: SlotId) -> Vec<NonNull<KernelObjectHeader>>
         let mut child = first_child;
         while let Some(child_id) = child
         {
-            let next = unsafe { resolve_slot_mut(child_id) }
-                .and_then(|s| s.deriv_next_sibling);
+            let next = unsafe { resolve_slot_mut(child_id) }.and_then(|s| s.deriv_next_sibling);
             stack.push(child_id);
             child = next;
         }

@@ -394,15 +394,24 @@ pub unsafe fn unmap_user_page(root_virt: u64, virt: u64)
 
     let root = unsafe { table_at(root_virt) };
     let e = root[vpn3_index(virt)];
-    if !e.is_present() { return; }
+    if !e.is_present()
+    {
+        return;
+    }
 
     let l2 = unsafe { table_at(phys_to_virt(e.phys_addr())) };
     let e = l2[vpn2_index(virt)];
-    if !e.is_present() { return; }
+    if !e.is_present()
+    {
+        return;
+    }
 
     let l1 = unsafe { table_at(phys_to_virt(e.phys_addr())) };
     let e = l1[vpn1_index(virt)];
-    if !e.is_present() { return; }
+    if !e.is_present()
+    {
+        return;
+    }
 
     let l0 = unsafe { table_at(phys_to_virt(e.phys_addr())) };
     l0[vpn0_index(virt)] = PageTableEntry(0);
@@ -430,19 +439,31 @@ pub unsafe fn protect_user_page(
 
     let root = unsafe { table_at(root_virt) };
     let e = root[vpn3_index(virt)];
-    if !e.is_present() { return Err(PagingError::NotMapped); }
+    if !e.is_present()
+    {
+        return Err(PagingError::NotMapped);
+    }
 
     let l2 = unsafe { table_at(phys_to_virt(e.phys_addr())) };
     let e = l2[vpn2_index(virt)];
-    if !e.is_present() { return Err(PagingError::NotMapped); }
+    if !e.is_present()
+    {
+        return Err(PagingError::NotMapped);
+    }
 
     let l1 = unsafe { table_at(phys_to_virt(e.phys_addr())) };
     let e = l1[vpn1_index(virt)];
-    if !e.is_present() { return Err(PagingError::NotMapped); }
+    if !e.is_present()
+    {
+        return Err(PagingError::NotMapped);
+    }
 
     let l0 = unsafe { table_at(phys_to_virt(e.phys_addr())) };
     let leaf = &mut l0[vpn0_index(virt)];
-    if !leaf.is_present() { return Err(PagingError::NotMapped); }
+    if !leaf.is_present()
+    {
+        return Err(PagingError::NotMapped);
+    }
 
     let phys = leaf.phys_addr();
     // Set USER (U) bit (bit 4) to preserve user accessibility.
@@ -471,19 +492,31 @@ pub unsafe fn translate_user_page(root_virt: u64, virt: u64) -> Option<(u64, u64
 
     let root = unsafe { table_at(root_virt) };
     let e = root[vpn3_index(virt)];
-    if !e.is_present() { return None; }
+    if !e.is_present()
+    {
+        return None;
+    }
 
     let l2 = unsafe { table_at(phys_to_virt(e.phys_addr())) };
     let e = l2[vpn2_index(virt)];
-    if !e.is_present() { return None; }
+    if !e.is_present()
+    {
+        return None;
+    }
 
     let l1 = unsafe { table_at(phys_to_virt(e.phys_addr())) };
     let e = l1[vpn1_index(virt)];
-    if !e.is_present() { return None; }
+    if !e.is_present()
+    {
+        return None;
+    }
 
     let l0 = unsafe { table_at(phys_to_virt(e.phys_addr())) };
     let leaf = l0[vpn0_index(virt)];
-    if !leaf.is_present() { return None; }
+    if !leaf.is_present()
+    {
+        return None;
+    }
 
     Some((leaf.phys_addr(), leaf.0))
 }

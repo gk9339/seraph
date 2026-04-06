@@ -41,88 +41,180 @@ use crate::TestContext;
 pub fn run_all(ctx: &TestContext)
 {
     // ── Capability syscalls ───────────────────────────────────────────────────
-    run_test!("cap::create_signal",    cap::create_signal(ctx));
-    run_test!("cap::create_endpoint",  cap::create_endpoint(ctx));
-    run_test!("cap::create_event_q",   cap::create_event_q(ctx));
-    run_test!("cap::create_cspace",    cap::create_cspace(ctx));
-    run_test!("cap::create_aspace",    cap::create_aspace(ctx));
-    run_test!("cap::create_thread",    cap::create_thread(ctx));
-    run_test!("cap::create_wait_set",  cap::create_wait_set(ctx));
-    run_test!("cap::copy",             cap::copy(ctx));
-    run_test!("cap::insert",           cap::insert(ctx));
-    run_test!("cap::move",             cap::r#move(ctx));
+    run_test!("cap::create_signal", cap::create_signal(ctx));
+    run_test!("cap::create_endpoint", cap::create_endpoint(ctx));
+    run_test!("cap::create_event_q", cap::create_event_q(ctx));
+    run_test!("cap::create_cspace", cap::create_cspace(ctx));
+    run_test!("cap::create_aspace", cap::create_aspace(ctx));
+    run_test!("cap::create_thread", cap::create_thread(ctx));
+    run_test!("cap::create_wait_set", cap::create_wait_set(ctx));
+    run_test!("cap::copy", cap::copy(ctx));
+    run_test!("cap::insert", cap::insert(ctx));
+    run_test!("cap::move", cap::r#move(ctx));
     run_test!("cap::derive_attenuation", cap::derive_attenuation(ctx));
     run_test!("cap::revoke_invalidates", cap::revoke_invalidates(ctx));
-    run_test!("cap::delete",           cap::delete(ctx));
-    run_test!("cap::insert_to_occupied_slot_err",   cap::insert_to_occupied_slot_err(ctx));
-    run_test!("cap::copy_into_non_cspace_err",      cap::copy_into_non_cspace_err(ctx));
+    run_test!("cap::delete", cap::delete(ctx));
+    run_test!(
+        "cap::insert_to_occupied_slot_err",
+        cap::insert_to_occupied_slot_err(ctx)
+    );
+    run_test!(
+        "cap::copy_into_non_cspace_err",
+        cap::copy_into_non_cspace_err(ctx)
+    );
 
     // ── Memory management syscalls ────────────────────────────────────────────
-    run_test!("mm::frame_split",         mm::frame_split(ctx));
-    run_test!("mm::mem_map_unmap",       mm::mem_map_unmap(ctx));
-    run_test!("mm::mem_protect",         mm::mem_protect(ctx));
-    run_test!("mm::mem_protect_unmapped_err", mm::mem_protect_unmapped_err(ctx));
-    run_test!("mm::mem_unmap_idempotent",mm::mem_unmap_idempotent(ctx));
+    run_test!("mm::frame_split", mm::frame_split(ctx));
+    run_test!("mm::mem_map_unmap", mm::mem_map_unmap(ctx));
+    run_test!("mm::mem_protect", mm::mem_protect(ctx));
+    run_test!(
+        "mm::mem_protect_unmapped_err",
+        mm::mem_protect_unmapped_err(ctx)
+    );
+    run_test!("mm::mem_unmap_idempotent", mm::mem_unmap_idempotent(ctx));
     run_test!("mm::aspace_query_mapped", mm::aspace_query_mapped(ctx));
-    run_test!("mm::aspace_query_unmapped_err", mm::aspace_query_unmapped_err(ctx));
-    run_test!("mm::mem_map_unaligned_vaddr_err",    mm::mem_map_unaligned_vaddr_err(ctx));
-    run_test!("mm::mem_map_kernel_half_err",         mm::mem_map_kernel_half_err(ctx));
-    run_test!("mm::frame_split_at_zero_err",         mm::frame_split_at_zero_err(ctx));
-    run_test!("mm::mem_protect_exceeds_cap_rights_err", mm::mem_protect_exceeds_cap_rights_err(ctx));
+    run_test!(
+        "mm::aspace_query_unmapped_err",
+        mm::aspace_query_unmapped_err(ctx)
+    );
+    run_test!(
+        "mm::mem_map_unaligned_vaddr_err",
+        mm::mem_map_unaligned_vaddr_err(ctx)
+    );
+    run_test!(
+        "mm::mem_map_kernel_half_err",
+        mm::mem_map_kernel_half_err(ctx)
+    );
+    run_test!(
+        "mm::frame_split_at_zero_err",
+        mm::frame_split_at_zero_err(ctx)
+    );
+    run_test!(
+        "mm::mem_protect_exceeds_cap_rights_err",
+        mm::mem_protect_exceeds_cap_rights_err(ctx)
+    );
 
     // ── Signal syscalls ───────────────────────────────────────────────────────
-    run_test!("signal::send",           signal::send(ctx));
-    run_test!("signal::send_wait_blocking", signal::send_wait_blocking(ctx));
-    run_test!("signal::send_before_wait_immediate", signal::send_before_wait_immediate(ctx));
-    run_test!("signal::wait_insufficient_rights", signal::wait_insufficient_rights(ctx));
-    run_test!("signal::multiple_sends_before_wait_accumulate_bits", signal::multiple_sends_before_wait_accumulate_bits(ctx));
-    run_test!("signal::send_zero_bits_is_noop", signal::send_zero_bits_is_noop(ctx));
+    run_test!("signal::send", signal::send(ctx));
+    run_test!(
+        "signal::send_wait_blocking",
+        signal::send_wait_blocking(ctx)
+    );
+    run_test!(
+        "signal::send_before_wait_immediate",
+        signal::send_before_wait_immediate(ctx)
+    );
+    run_test!(
+        "signal::wait_insufficient_rights",
+        signal::wait_insufficient_rights(ctx)
+    );
+    run_test!(
+        "signal::multiple_sends_before_wait_accumulate_bits",
+        signal::multiple_sends_before_wait_accumulate_bits(ctx)
+    );
+    run_test!(
+        "signal::send_zero_bits_is_noop",
+        signal::send_zero_bits_is_noop(ctx)
+    );
 
     // ── Event queue syscalls ──────────────────────────────────────────────────
-    run_test!("event::create",          event::create(ctx));
-    run_test!("event::post_recv_fifo",  event::post_recv_fifo(ctx));
-    run_test!("event::queue_full_err",  event::queue_full_err(ctx));
-    run_test!("event::recv_blocks_until_post", event::recv_blocks_until_post(ctx));
+    run_test!("event::create", event::create(ctx));
+    run_test!("event::post_recv_fifo", event::post_recv_fifo(ctx));
+    run_test!("event::queue_full_err", event::queue_full_err(ctx));
+    run_test!(
+        "event::recv_blocks_until_post",
+        event::recv_blocks_until_post(ctx)
+    );
 
     // ── Wait set syscalls ─────────────────────────────────────────────────────
-    run_test!("wait_set::add_signal_immediate", wait_set::add_signal_immediate(ctx));
-    run_test!("wait_set::add_queue_immediate",  wait_set::add_queue_immediate(ctx));
-    run_test!("wait_set::blocking_wait",        wait_set::blocking_wait(ctx));
-    run_test!("wait_set::remove",               wait_set::remove(ctx));
+    run_test!(
+        "wait_set::add_signal_immediate",
+        wait_set::add_signal_immediate(ctx)
+    );
+    run_test!(
+        "wait_set::add_queue_immediate",
+        wait_set::add_queue_immediate(ctx)
+    );
+    run_test!("wait_set::blocking_wait", wait_set::blocking_wait(ctx));
+    run_test!("wait_set::remove", wait_set::remove(ctx));
 
     // ── IPC syscalls ──────────────────────────────────────────────────────────
-    run_test!("ipc::call_reply_recv",        ipc::call_reply_recv(ctx));
-    run_test!("ipc::recv_finds_queued_caller", ipc::recv_finds_queued_caller(ctx));
-    run_test!("ipc::ipc_buffer_misaligned_err", ipc::ipc_buffer_misaligned_err(ctx));
+    run_test!("ipc::call_reply_recv", ipc::call_reply_recv(ctx));
+    run_test!(
+        "ipc::recv_finds_queued_caller",
+        ipc::recv_finds_queued_caller(ctx)
+    );
+    run_test!(
+        "ipc::ipc_buffer_misaligned_err",
+        ipc::ipc_buffer_misaligned_err(ctx)
+    );
 
     // ── Thread syscalls ───────────────────────────────────────────────────────
     run_test!("thread::configure_start", thread::configure_start(ctx));
-    run_test!("thread::yield",           thread::r#yield(ctx));
-    run_test!("thread::stop_read_regs",  thread::stop_read_regs(ctx));
-    run_test!("thread::stop_again_invalid_state", thread::stop_again_invalid_state(ctx));
+    run_test!("thread::yield", thread::r#yield(ctx));
+    run_test!("thread::stop_read_regs", thread::stop_read_regs(ctx));
+    run_test!(
+        "thread::stop_again_invalid_state",
+        thread::stop_again_invalid_state(ctx)
+    );
     run_test!("thread::write_regs_resume", thread::write_regs_resume(ctx));
-    run_test!("thread::set_priority_normal", thread::set_priority_normal(ctx));
-    run_test!("thread::set_priority_elevated_no_cap_err", thread::set_priority_elevated_no_cap_err(ctx));
-    run_test!("thread::set_priority_elevated_with_cap", thread::set_priority_elevated_with_cap(ctx));
-    run_test!("thread::set_affinity_valid",   thread::set_affinity_valid(ctx));
-    run_test!("thread::set_affinity_invalid_err", thread::set_affinity_invalid_err(ctx));
-    run_test!("thread::configure_running_thread_err", thread::configure_running_thread_err(ctx));
-    run_test!("thread::set_priority_zero_err", thread::set_priority_zero_err(ctx));
-    run_test!("thread::set_priority_31_err",   thread::set_priority_31_err(ctx));
+    run_test!(
+        "thread::set_priority_normal",
+        thread::set_priority_normal(ctx)
+    );
+    run_test!(
+        "thread::set_priority_elevated_no_cap_err",
+        thread::set_priority_elevated_no_cap_err(ctx)
+    );
+    run_test!(
+        "thread::set_priority_elevated_with_cap",
+        thread::set_priority_elevated_with_cap(ctx)
+    );
+    run_test!(
+        "thread::set_affinity_valid",
+        thread::set_affinity_valid(ctx)
+    );
+    run_test!(
+        "thread::set_affinity_invalid_err",
+        thread::set_affinity_invalid_err(ctx)
+    );
+    run_test!(
+        "thread::configure_running_thread_err",
+        thread::configure_running_thread_err(ctx)
+    );
+    run_test!(
+        "thread::set_priority_zero_err",
+        thread::set_priority_zero_err(ctx)
+    );
+    run_test!(
+        "thread::set_priority_31_err",
+        thread::set_priority_31_err(ctx)
+    );
+    run_test!(
+        "thread::affinity_bind_cpu1",
+        thread::affinity_bind_cpu1(ctx)
+    );
 
     // ── Hardware access syscalls ──────────────────────────────────────────────
-    run_test!("hw::dma_grant_unsafe_flag_required", hw::dma_grant_unsafe_flag_required(ctx));
-    run_test!("hw::dma_grant_with_flag",            hw::dma_grant_with_flag(ctx));
-    run_test!("hw::mmio_map",                       hw::mmio_map(ctx));
-    run_test!("hw::irq_register_ack",               hw::irq_register_ack(ctx));
-    run_test!("hw::ioport_bind",                    hw::ioport_bind(ctx));
+    run_test!(
+        "hw::dma_grant_unsafe_flag_required",
+        hw::dma_grant_unsafe_flag_required(ctx)
+    );
+    run_test!("hw::dma_grant_with_flag", hw::dma_grant_with_flag(ctx));
+    run_test!("hw::mmio_map", hw::mmio_map(ctx));
+    run_test!("hw::irq_register_ack", hw::irq_register_ack(ctx));
+    run_test!("hw::ioport_bind", hw::ioport_bind(ctx));
 
     // ── System info syscalls ──────────────────────────────────────────────────
-    run_test!("sysinfo::kernel_version",         sysinfo::kernel_version(ctx));
-    run_test!("sysinfo::cpu_count",              sysinfo::cpu_count(ctx));
-    run_test!("sysinfo::frame_counts",           sysinfo::frame_counts(ctx));
-    run_test!("sysinfo::page_size",              sysinfo::page_size(ctx));
-    run_test!("sysinfo::boot_protocol_version",  sysinfo::boot_protocol_version(ctx));
-    run_test!("sysinfo::unknown_kind_err",       sysinfo::unknown_kind_err(ctx));
-    run_test!("sysinfo::debug_log",              sysinfo::debug_log_works(ctx));
+    run_test!("sysinfo::kernel_version", sysinfo::kernel_version(ctx));
+    run_test!("sysinfo::cpu_count", sysinfo::cpu_count(ctx));
+    run_test!("sysinfo::frame_counts", sysinfo::frame_counts(ctx));
+    run_test!("sysinfo::page_size", sysinfo::page_size(ctx));
+    run_test!(
+        "sysinfo::boot_protocol_version",
+        sysinfo::boot_protocol_version(ctx)
+    );
+    run_test!("sysinfo::unknown_kind_err", sysinfo::unknown_kind_err(ctx));
+    run_test!("sysinfo::debug_log", sysinfo::debug_log_works(ctx));
+    run_test!("sysinfo::cpu_count_smp", sysinfo::cpu_count_smp(ctx));
 }

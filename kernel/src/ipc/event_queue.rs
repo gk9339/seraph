@@ -127,7 +127,9 @@ pub unsafe fn event_queue_post(
     // Enqueue into ring.
     let ring_len = eq.capacity + 1;
     // SAFETY: write_idx < ring_len (invariant); ring is a valid allocation.
-    unsafe { *eq.ring.add(eq.write_idx as usize) = payload; }
+    unsafe {
+        *eq.ring.add(eq.write_idx as usize) = payload;
+    }
     eq.write_idx = (eq.write_idx + 1) % ring_len;
     eq.count += 1;
 

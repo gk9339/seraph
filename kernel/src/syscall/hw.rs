@@ -44,12 +44,14 @@ pub fn sys_irq_ack(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     let irq_cap_idx = tf.arg(0) as u32;
 
     let tcb = unsafe { current_tcb() };
-    if tcb.is_null() { return Err(SyscallError::InvalidCapability); }
+    if tcb.is_null()
+    {
+        return Err(SyscallError::InvalidCapability);
+    }
     let cspace = unsafe { (*tcb).cspace };
 
-    let irq_slot = unsafe {
-        super::lookup_cap(cspace, irq_cap_idx, CapTag::Interrupt, Rights::SIGNAL)
-    }?;
+    let irq_slot =
+        unsafe { super::lookup_cap(cspace, irq_cap_idx, CapTag::Interrupt, Rights::SIGNAL) }?;
     let irq_id = {
         let obj = irq_slot.object.ok_or(SyscallError::InvalidCapability)?;
         // SAFETY: tag confirmed Interrupt; pointer is valid.
@@ -92,17 +94,19 @@ pub fn sys_irq_register(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     use crate::cap::slot::{CapTag, Rights};
     use crate::syscall::current_tcb;
 
-    let irq_cap_idx  = tf.arg(0) as u32;
-    let sig_cap_idx  = tf.arg(1) as u32;
+    let irq_cap_idx = tf.arg(0) as u32;
+    let sig_cap_idx = tf.arg(1) as u32;
 
     let tcb = unsafe { current_tcb() };
-    if tcb.is_null() { return Err(SyscallError::InvalidCapability); }
+    if tcb.is_null()
+    {
+        return Err(SyscallError::InvalidCapability);
+    }
     let cspace = unsafe { (*tcb).cspace };
 
     // Resolve Interrupt cap.
-    let irq_slot = unsafe {
-        super::lookup_cap(cspace, irq_cap_idx, CapTag::Interrupt, Rights::SIGNAL)
-    }?;
+    let irq_slot =
+        unsafe { super::lookup_cap(cspace, irq_cap_idx, CapTag::Interrupt, Rights::SIGNAL) }?;
     let irq_id = {
         let obj = irq_slot.object.ok_or(SyscallError::InvalidCapability)?;
         // SAFETY: tag confirmed Interrupt.
@@ -110,9 +114,8 @@ pub fn sys_irq_register(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     };
 
     // Resolve Signal cap.
-    let sig_slot = unsafe {
-        super::lookup_cap(cspace, sig_cap_idx, CapTag::Signal, Rights::SIGNAL)
-    }?;
+    let sig_slot =
+        unsafe { super::lookup_cap(cspace, sig_cap_idx, CapTag::Signal, Rights::SIGNAL) }?;
     let sig_state = {
         let obj = sig_slot.object.ok_or(SyscallError::InvalidCapability)?;
         // SAFETY: tag confirmed Signal.
@@ -182,9 +185,9 @@ pub fn sys_mmio_map(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     use crate::syscall::current_tcb;
 
     let aspace_idx = tf.arg(0) as u32;
-    let mmio_idx   = tf.arg(1) as u32;
-    let virt_base  = tf.arg(2);
-    let flags      = tf.arg(3);
+    let mmio_idx = tf.arg(1) as u32;
+    let virt_base = tf.arg(2);
+    let flags = tf.arg(3);
 
     // Virtual address must be page-aligned and in user half.
     const USER_HALF_TOP: u64 = 0x0000_8000_0000_0000;
@@ -194,13 +197,15 @@ pub fn sys_mmio_map(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     }
 
     let tcb = unsafe { current_tcb() };
-    if tcb.is_null() { return Err(SyscallError::InvalidCapability); }
+    if tcb.is_null()
+    {
+        return Err(SyscallError::InvalidCapability);
+    }
     let cspace = unsafe { (*tcb).cspace };
 
     // Resolve MmioRegion cap.
-    let mmio_slot = unsafe {
-        super::lookup_cap(cspace, mmio_idx, CapTag::MmioRegion, Rights::MAP)
-    }?;
+    let mmio_slot =
+        unsafe { super::lookup_cap(cspace, mmio_idx, CapTag::MmioRegion, Rights::MAP) }?;
     let (mmio_phys, mmio_size) = {
         let obj = mmio_slot.object.ok_or(SyscallError::InvalidCapability)?;
         // SAFETY: tag confirmed MmioRegion.
@@ -225,9 +230,8 @@ pub fn sys_mmio_map(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     }
 
     // Resolve AddressSpace cap.
-    let as_slot = unsafe {
-        super::lookup_cap(cspace, aspace_idx, CapTag::AddressSpace, Rights::MAP)
-    }?;
+    let as_slot =
+        unsafe { super::lookup_cap(cspace, aspace_idx, CapTag::AddressSpace, Rights::MAP) }?;
     let as_ptr = {
         let obj = as_slot.object.ok_or(SyscallError::InvalidCapability)?;
         // SAFETY: tag confirmed AddressSpace.
@@ -240,9 +244,9 @@ pub fn sys_mmio_map(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     let writable = mmio_slot.rights.contains(Rights::WRITE);
     let _ = flags; // reserved
     let page_flags = PageFlags {
-        readable:    true,
+        readable: true,
         writable,
-        executable:  false,
+        executable: false,
         uncacheable: true,
     };
 
@@ -298,28 +302,32 @@ pub fn sys_ioport_bind(_tf: &mut TrapFrame) -> Result<u64, SyscallError>
         use crate::cap::slot::{CapTag, Rights};
         use crate::syscall::current_tcb;
 
-        let thread_idx  = _tf.arg(0) as u32;
-        let ioport_idx  = _tf.arg(1) as u32;
+        let thread_idx = _tf.arg(0) as u32;
+        let ioport_idx = _tf.arg(1) as u32;
 
         let caller_tcb = unsafe { current_tcb() };
-        if caller_tcb.is_null() { return Err(SyscallError::InvalidCapability); }
+        if caller_tcb.is_null()
+        {
+            return Err(SyscallError::InvalidCapability);
+        }
         let cspace = unsafe { (*caller_tcb).cspace };
 
         // Resolve Thread cap.
-        let th_slot = unsafe {
-            super::lookup_cap(cspace, thread_idx, CapTag::Thread, Rights::CONTROL)
-        }?;
+        let th_slot =
+            unsafe { super::lookup_cap(cspace, thread_idx, CapTag::Thread, Rights::CONTROL) }?;
         let target_tcb = {
             let obj = th_slot.object.ok_or(SyscallError::InvalidCapability)?;
             // SAFETY: tag confirmed Thread.
             unsafe { (*(obj.as_ptr() as *const ThreadObject)).tcb }
         };
-        if target_tcb.is_null() { return Err(SyscallError::InvalidCapability); }
+        if target_tcb.is_null()
+        {
+            return Err(SyscallError::InvalidCapability);
+        }
 
         // Resolve IoPortRange cap.
-        let port_slot = unsafe {
-            super::lookup_cap(cspace, ioport_idx, CapTag::IoPortRange, Rights::USE)
-        }?;
+        let port_slot =
+            unsafe { super::lookup_cap(cspace, ioport_idx, CapTag::IoPortRange, Rights::USE) }?;
         let (port_base, port_size) = {
             let obj = port_slot.object.ok_or(SyscallError::InvalidCapability)?;
             // SAFETY: tag confirmed IoPortRange.
@@ -332,19 +340,25 @@ pub fn sys_ioport_bind(_tf: &mut TrapFrame) -> Result<u64, SyscallError>
         if unsafe { (*target_tcb).iopb.is_null() }
         {
             let bitmap = alloc::boxed::Box::new([0xFFu8; gdt::IOPB_SIZE]);
-            unsafe { (*target_tcb).iopb = alloc::boxed::Box::into_raw(bitmap); }
+            unsafe {
+                (*target_tcb).iopb = alloc::boxed::Box::into_raw(bitmap);
+            }
         }
 
         // Clear the bits for the requested port range (0 = allow).
         // SAFETY: iopb is non-null after the allocation above.
-        unsafe { gdt::permit_port_range(&mut *(*target_tcb).iopb, port_base, port_size); }
+        unsafe {
+            gdt::permit_port_range(&mut *(*target_tcb).iopb, port_base, port_size);
+        }
 
         // If binding to the currently running thread, reload the TSS IOPB
         // immediately so in/out instructions work without a context switch.
         if target_tcb == caller_tcb
         {
             // SAFETY: iopb is non-null.
-            unsafe { gdt::load_iopb(Some(&*(*target_tcb).iopb)); }
+            unsafe {
+                gdt::load_iopb(Some(&*(*target_tcb).iopb));
+            }
         }
 
         Ok(0)
@@ -387,15 +401,16 @@ pub fn sys_dma_grant(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 
     let frame_idx = tf.arg(0) as u32;
     // arg1 = device_id: reserved for future IOMMU domain lookup; unused now.
-    let flags     = tf.arg(2);
+    let flags = tf.arg(2);
 
     let tcb = unsafe { current_tcb() };
-    if tcb.is_null() { return Err(SyscallError::InvalidCapability); }
+    if tcb.is_null()
+    {
+        return Err(SyscallError::InvalidCapability);
+    }
     let cspace = unsafe { (*tcb).cspace };
 
-    let frame_slot = unsafe {
-        super::lookup_cap(cspace, frame_idx, CapTag::Frame, Rights::MAP)
-    }?;
+    let frame_slot = unsafe { super::lookup_cap(cspace, frame_idx, CapTag::Frame, Rights::MAP) }?;
     let frame_phys = {
         let obj = frame_slot.object.ok_or(SyscallError::InvalidCapability)?;
         // SAFETY: tag confirmed Frame.

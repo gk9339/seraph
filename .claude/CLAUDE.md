@@ -2,14 +2,39 @@
 
 @../README.md
 
-## Source of truth
-- Design and architecture docs in `docs/` are authoritative.
-- Module-specific design docs are referenced from each `<module>/README.md`.
-- When implementation changes invalidate documentation, the documentation must always be updated.
+## Authority
+- System-wide design and architectural invariants are defined exclusively in `docs/`.
+- Each component’s `README.md` defines that component’s scope, role, and links to any authoritative
+  design documents.
+- Detailed behavior is defined only in component-specific `docs/` where present.
+- `docs/coding-standards.md` is a system-wide, non-negotiable authority.
+  - All code changes MUST comply with its rules.
+  - Any deviation MUST be minimal, local, and explicitly justified at the point of use.
 
-## Global constraints
-- Use `cargo xtask build`, `cargo xtask run`, and `cargo xtask clean` for building, running, and cleaning; do not invoke `cargo` directly for these tasks.
-- Use `cargo xtask clean` in between any builds or runs of a different architecture.
-- Always validate changes as much as possible, not just that it builds successfully, but also runs.
-- Follow @docs/coding-standards.md at all times.
-- Respect architectural invariants defined in the design docs.
+
+## Documentation invariants
+- Higher-level documents may summarize but MUST NOT specify behavior already defined elsewhere.
+- Lower-level documents are authoritative over summaries.
+- When implementation changes invalidate documentation:
+  - The most specific authoritative document MUST be updated first.
+  - Any higher-level summaries that reference it MUST be reviewed and updated if necessary.
+
+## Operating procedure
+- Documentation MUST be consumed by scope:
+  1. System scope (`docs/`)
+  2. Component scope (`<component>/README.md`)
+  3. Component design scope (`<component>/docs/*.md`)
+- Additional documentation MUST NOT be loaded unless required by the task.
+
+## Tooling constraints
+- All build, run, clean, lint, and test actions MUST be performed via `cargo xtask` commands.
+- Direct invocation of `cargo build`, `cargo run`, `cargo test`, or `cargo clippy` is forbidden.
+- When switching architectures or targets, `cargo xtask clean` MUST be run first.
+
+## Validation
+- Changes MUST be validated beyond successful compilation.
+- At minimum: the relevant build and a runnable smoke path MUST succeed.
+
+## Conflicts
+- If any instruction, plan, or change conflicts with documented invariants or these constraints,
+  the assistant MUST stop and surface the conflict explicitly.

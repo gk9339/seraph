@@ -254,16 +254,16 @@ pub enum SystemInfoType
 {
     /// Kernel version packed as `(major << 32) | (minor << 16) | patch`.
     /// See [`KERNEL_VERSION`] for the current value and encoding details.
-    KernelVersion      = 0,
+    KernelVersion = 0,
     /// Number of logical CPUs initialised at boot.
-    CpuCount           = 1,
+    CpuCount = 1,
     /// Number of free 4 KiB physical frames at the time of the call.
-    FreeFrames         = 2,
+    FreeFrames = 2,
     /// Total number of 4 KiB physical frames detected at boot.
     /// `FreeFrames / TotalFrames` gives current memory pressure.
-    TotalFrames        = 3,
+    TotalFrames = 3,
     /// Size of a physical page in bytes (always 4096 on supported platforms).
-    PageSize           = 4,
+    PageSize = 4,
     /// Boot protocol version used by the bootloader.
     /// Userspace can use this to interpret fields in the boot info struct.
     BootProtocolVersion = 5,

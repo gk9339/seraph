@@ -461,15 +461,24 @@ pub unsafe fn unmap_user_page(root_virt: u64, virt: u64)
     // Walk PML4 → PDPT → PD → PT, bailing silently at any absent level.
     let pml4 = unsafe { table_at(root_virt) };
     let e = pml4[pml4_index(virt)];
-    if !e.is_present() { return; }
+    if !e.is_present()
+    {
+        return;
+    }
 
     let pdpt = unsafe { table_at(phys_to_virt(e.phys_addr())) };
     let e = pdpt[pdpt_index(virt)];
-    if !e.is_present() { return; }
+    if !e.is_present()
+    {
+        return;
+    }
 
     let pd = unsafe { table_at(phys_to_virt(e.phys_addr())) };
     let e = pd[pd_index(virt)];
-    if !e.is_present() { return; }
+    if !e.is_present()
+    {
+        return;
+    }
 
     let pt = unsafe { table_at(phys_to_virt(e.phys_addr())) };
     pt[pt_index(virt)] = PageTableEntry(0);
@@ -498,19 +507,31 @@ pub unsafe fn protect_user_page(
 
     let pml4 = unsafe { table_at(root_virt) };
     let e = pml4[pml4_index(virt)];
-    if !e.is_present() { return Err(PagingError::NotMapped); }
+    if !e.is_present()
+    {
+        return Err(PagingError::NotMapped);
+    }
 
     let pdpt = unsafe { table_at(phys_to_virt(e.phys_addr())) };
     let e = pdpt[pdpt_index(virt)];
-    if !e.is_present() { return Err(PagingError::NotMapped); }
+    if !e.is_present()
+    {
+        return Err(PagingError::NotMapped);
+    }
 
     let pd = unsafe { table_at(phys_to_virt(e.phys_addr())) };
     let e = pd[pd_index(virt)];
-    if !e.is_present() { return Err(PagingError::NotMapped); }
+    if !e.is_present()
+    {
+        return Err(PagingError::NotMapped);
+    }
 
     let pt = unsafe { table_at(phys_to_virt(e.phys_addr())) };
     let leaf = &mut pt[pt_index(virt)];
-    if !leaf.is_present() { return Err(PagingError::NotMapped); }
+    if !leaf.is_present()
+    {
+        return Err(PagingError::NotMapped);
+    }
 
     let phys = leaf.phys_addr();
     // Set USER bit (bit 2) to preserve user accessibility.
@@ -539,19 +560,31 @@ pub unsafe fn translate_user_page(root_virt: u64, virt: u64) -> Option<(u64, u64
 
     let pml4 = unsafe { table_at(root_virt) };
     let e = pml4[pml4_index(virt)];
-    if !e.is_present() { return None; }
+    if !e.is_present()
+    {
+        return None;
+    }
 
     let pdpt = unsafe { table_at(phys_to_virt(e.phys_addr())) };
     let e = pdpt[pdpt_index(virt)];
-    if !e.is_present() { return None; }
+    if !e.is_present()
+    {
+        return None;
+    }
 
     let pd = unsafe { table_at(phys_to_virt(e.phys_addr())) };
     let e = pd[pd_index(virt)];
-    if !e.is_present() { return None; }
+    if !e.is_present()
+    {
+        return None;
+    }
 
     let pt = unsafe { table_at(phys_to_virt(e.phys_addr())) };
     let leaf = pt[pt_index(virt)];
-    if !leaf.is_present() { return None; }
+    if !leaf.is_present()
+    {
+        return None;
+    }
 
     Some((leaf.phys_addr(), leaf.0))
 }

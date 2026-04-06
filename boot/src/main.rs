@@ -41,9 +41,9 @@ use crate::error::BootError;
 use crate::firmware::discover_firmware;
 use crate::paging::{build_initial_tables, PageTableBuilder};
 use crate::uefi::{
-    allocate_pages, connect_all_controllers, exit_boot_services, file_read, file_size,
-    get_loaded_image, get_memory_map, open_esp_volume, open_file, query_gop, EfiHandle,
-    EfiSystemTable,
+    allocate_pages, allocate_pages_max_addr, connect_all_controllers, exit_boot_services,
+    file_read, file_size, get_loaded_image, get_memory_map, open_esp_volume, open_file, query_gop,
+    EfiHandle, EfiSystemTable,
 };
 use boot_protocol::{
     BootInfo, BootModule, MemoryMapEntry, MemoryMapSlice, ModuleSlice, PlatformResource,
@@ -335,8 +335,10 @@ unsafe fn boot_sequence(image: EfiHandle, st: *mut EfiSystemTable) -> Result<!, 
             let mut ids = [0u32; 64];
             ids[0] = bsp_hw_id;
             let mut ap_idx = 1usize;
-            for i in 0..n as usize {
-                if hart_ids[i] != bsp_hw_id && ap_idx < 64 {
+            for i in 0..n as usize
+            {
+                if hart_ids[i] != bsp_hw_id && ap_idx < 64
+                {
                     ids[ap_idx] = hart_ids[i];
                     ap_idx += 1;
                 }
@@ -492,6 +494,55 @@ unsafe fn boot_sequence(image: EfiHandle, st: *mut EfiSystemTable) -> Result<!, 
         track_region!(resources_phys, (resource_array_size + 4095) & !4095);
     }
 
+    // ── Step 5b: Allocate AP trampoline page (x86-64 only) ───────────────────
+    // Must happen before ExitBootServices. Allocate exactly one 4 KiB page below
+    // 1 MiB (physical < 0x100000) so the SIPI vector (bits[19:12]) fits in 8 bits.
+    // The kernel writes AP startup code here at Phase C; the page appears as
+    // `Loaded` in the memory map and is protected from the buddy allocator.
+    #[cfg(target_arch = "x86_64")]
+    let ap_trampoline_phys: u64 = {
+        // Reserve just below 1 MiB. AllocateMaxAddress places the page anywhere
+        // below the supplied upper bound (= 0xFFFFF = last byte of first MiB).
+        match unsafe { allocate_pages_max_addr(bs, 0xFFFFF, 1) }
+        {
+            Ok(phys) =>
+            {
+                bprint!("[--------] boot: AP trampoline page: 0x");
+                unsafe { crate::console::console_write_hex64(phys) };
+                bprintln!("");
+                phys
+            }
+            Err(_) =>
+            {
+                bprintln!("[--------] boot: WARNING: cannot allocate AP trampoline page below 1 MiB — SMP disabled");
+                0
+            }
+        }
+    };
+    // RISC-V: allocate any 4 KiB page for the AP trampoline. No below-1 MiB
+    // constraint — SBI HSM accepts any physical start address. The kernel
+    // identity-maps this page (Phase 3) before copying trampoline code there.
+    #[cfg(target_arch = "riscv64")]
+    let ap_trampoline_phys: u64 = match unsafe { allocate_pages(bs, 1) }
+    {
+        Ok(phys) =>
+        {
+            bprint!("[--------] boot: AP trampoline page: 0x");
+            unsafe { crate::console::console_write_hex64(phys) };
+            bprintln!("");
+            phys
+        }
+        Err(_) =>
+        {
+            bprintln!(
+                "[--------] boot: WARNING: cannot allocate AP trampoline page — SMP disabled"
+            );
+            0
+        }
+    };
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "riscv64")))]
+    let ap_trampoline_phys: u64 = 0;
+
     bprintln!("[--------] boot: step 6/10: allocate and build page tables");
 
     // Build the initial page tables. All AllocatePages calls for page table
@@ -628,9 +679,7 @@ unsafe fn boot_sequence(image: EfiHandle, st: *mut EfiSystemTable) -> Result<!, 
                 cpu_count: cpu_count.max(1),
                 bsp_id: boot_cpu_id,
                 cpu_ids: boot_cpu_ids,
-                // AP trampoline page: allocated below 1 MiB in Phase C (WSMP).
-                // Requires AllocateMaxAddress UEFI policy; deferred to that phase.
-                ap_trampoline_page: 0,
+                ap_trampoline_page: ap_trampoline_phys,
             },
         )
     };

@@ -35,10 +35,16 @@ use crate::TestContext;
 /// it with `pub mod` above, then add a `run_integration_test!` call here.
 pub fn run_all(ctx: &TestContext)
 {
-    run_integration_test!("integration::thread_lifecycle",      thread_lifecycle::run(ctx));
-    run_integration_test!("integration::cap_transfer",          cap_transfer::run(ctx));
-    run_integration_test!("integration::wait_concurrency",      wait_concurrency::run(ctx));
-    run_integration_test!("integration::memory_lifecycle",      memory_lifecycle::run(ctx));
-    run_integration_test!("integration::multi_caller_ipc_fifo", multi_caller_ipc_fifo::run(ctx));
-    run_integration_test!("integration::cap_delegation_chain",  cap_delegation_chain::run(ctx));
+    run_integration_test!("integration::thread_lifecycle", thread_lifecycle::run(ctx));
+    run_integration_test!("integration::cap_transfer", cap_transfer::run(ctx));
+    run_integration_test!("integration::wait_concurrency", wait_concurrency::run(ctx));
+    run_integration_test!("integration::memory_lifecycle", memory_lifecycle::run(ctx));
+    run_integration_test!(
+        "integration::multi_caller_ipc_fifo",
+        multi_caller_ipc_fifo::run(ctx)
+    );
+    run_integration_test!(
+        "integration::cap_delegation_chain",
+        cap_delegation_chain::run(ctx)
+    );
 }

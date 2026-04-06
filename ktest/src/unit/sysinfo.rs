@@ -38,8 +38,8 @@ pub fn kernel_version(_ctx: &TestContext) -> TestResult
 /// been initialised. Until WSMP (SMP) the kernel reports 1 regardless.
 pub fn cpu_count(_ctx: &TestContext) -> TestResult
 {
-    let cpus = system_info(SystemInfoType::CpuCount as u64)
-        .map_err(|_| "system_info(CpuCount) failed")?;
+    let cpus =
+        system_info(SystemInfoType::CpuCount as u64).map_err(|_| "system_info(CpuCount) failed")?;
     if cpus == 0
     {
         return Err("system_info(CpuCount) returned 0 (expected at least 1)");
@@ -78,8 +78,8 @@ pub fn frame_counts(_ctx: &TestContext) -> TestResult
 /// `system_info(PageSize)` must return 4096.
 pub fn page_size(_ctx: &TestContext) -> TestResult
 {
-    let sz = system_info(SystemInfoType::PageSize as u64)
-        .map_err(|_| "system_info(PageSize) failed")?;
+    let sz =
+        system_info(SystemInfoType::PageSize as u64).map_err(|_| "system_info(PageSize) failed")?;
     if sz != 4096
     {
         return Err("system_info(PageSize) did not return 4096");
@@ -107,6 +107,23 @@ pub fn unknown_kind_err(_ctx: &TestContext) -> TestResult
     {
         return Err("system_info(unknown kind) did not return InvalidArgument");
     }
+    Ok(())
+}
+
+/// `system_info(CpuCount)` returns ≥ 2 when the kernel was booted with SMP.
+///
+/// Requires QEMU `-smp N` with N ≥ 2. Skips with a log message rather than
+/// failing if only one CPU is online, so single-CPU runs stay green.
+pub fn cpu_count_smp(_ctx: &TestContext) -> TestResult
+{
+    let cpus =
+        system_info(SystemInfoType::CpuCount as u64).map_err(|_| "system_info(CpuCount) failed")?;
+    if cpus < 2
+    {
+        crate::klog("ktest: sysinfo::cpu_count_smp SKIP (boot with -smp N for SMP test)");
+        return Ok(());
+    }
+    crate::log_u64("ktest: SMP CpuCount=", cpus);
     Ok(())
 }
 

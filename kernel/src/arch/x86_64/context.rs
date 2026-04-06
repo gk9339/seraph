@@ -63,13 +63,19 @@ impl SavedState
     ///
     /// For a newly created thread this is the entry function address; for a
     /// resumed thread it is the return address from the previous `switch` call.
-    pub fn entry_point(&self) -> u64 { self.rip }
+    pub fn entry_point(&self) -> u64
+    {
+        self.rip
+    }
 
     /// Return the initial user-mode argument stored at thread creation.
     ///
     /// `new_state` stashes `arg` in `rbx`; `sched::enter` reads it back here
     /// and forwards it to the user-mode TrapFrame via `set_arg0`.
-    pub fn user_arg(&self) -> u64 { self.rbx }
+    pub fn user_arg(&self) -> u64
+    {
+        self.rbx
+    }
 }
 
 // ── new_state ─────────────────────────────────────────────────────────────────
@@ -84,9 +90,9 @@ impl SavedState
 pub fn new_state(entry: u64, stack_top: u64, arg: u64, _is_user: bool) -> SavedState
 {
     SavedState {
-        rip:    entry,
-        rsp:    stack_top,
-        rbx:    arg,   // carried to entry via rbx; idle ignores it
+        rip: entry,
+        rsp: stack_top,
+        rbx: arg,      // carried to entry via rbx; idle ignores it
         rflags: 0x200, // IF=1 so timer can fire once thread starts
         ..SavedState::default()
     }
@@ -113,8 +119,8 @@ pub unsafe extern "C" fn switch(current: *mut SavedState, next: *const SavedStat
         // Pop return address into rax; the caller will "return" to it when this
         // thread is resumed. This is the standard rip-via-ret trick.
         "pop rax",
-        "mov [rdi + 0],  rax",   // rip  = return address
-        "mov [rdi + 8],  rsp",   // rsp  (after pop; matches what restore expects)
+        "mov [rdi + 0],  rax", // rip  = return address
+        "mov [rdi + 8],  rsp", // rsp  (after pop; matches what restore expects)
         "mov [rdi + 16], rbx",
         "mov [rdi + 24], rbp",
         "mov [rdi + 32], r12",
@@ -128,7 +134,6 @@ pub unsafe extern "C" fn switch(current: *mut SavedState, next: *const SavedStat
         "pushfq",
         "pop rax",
         "mov [rdi + 72], rax",
-
         // ── Restore next thread ───────────────────────────────────────────
         // Update TSS RSP0 with the next thread's kernel_stack_top.
         // Caller (sched::enter / context_switch) is responsible for this
@@ -138,16 +143,15 @@ pub unsafe extern "C" fn switch(current: *mut SavedState, next: *const SavedStat
         "mov rax, [rsi + 72]",
         "push rax",
         "popfq",
-
         "mov r15, [rsi + 56]",
         "mov r14, [rsi + 48]",
         "mov r13, [rsi + 40]",
         "mov r12, [rsi + 32]",
         "mov rbp, [rsi + 24]",
         "mov rbx, [rsi + 16]",
-        "mov rsp, [rsi + 8]",    // restore stack pointer
-        "mov rax, [rsi + 0]",   // rip (jump target)
-        "jmp rax",               // jump to next thread's rip
+        "mov rsp, [rsi + 8]", // restore stack pointer
+        "mov rax, [rsi + 0]", // rip (jump target)
+        "jmp rax",            // jump to next thread's rip
     );
 }
 
@@ -195,7 +199,6 @@ pub unsafe extern "C" fn return_to_user(tf: *const super::trap_frame::TrapFrame)
         // because the TrapFrame occupies [tf_ptr, tf_ptr+167].
         // tf_ptr is on init's kernel stack (direct map), accessible after CR3.
         "lea rsp, [rdi]",
-
         // Build the iretq frame on the current kernel stack.
         // iretq pops (low → high address): RIP, CS, RFLAGS, RSP, SS.
         // We push in reverse order: SS first, RIP last.
@@ -209,7 +212,6 @@ pub unsafe extern "C" fn return_to_user(tf: *const super::trap_frame::TrapFrame)
         "push rax",
         "mov rax, [rdi + 120]", // rip (user entry point)
         "push rax",
-
         // Restore GPRs from TrapFrame (rdi restored last).
         "mov rax, [rdi + 0]",
         "mov rbx, [rdi + 8]",
@@ -226,7 +228,6 @@ pub unsafe extern "C" fn return_to_user(tf: *const super::trap_frame::TrapFrame)
         "mov r14, [rdi + 104]",
         "mov r15, [rdi + 112]",
         "mov rdi, [rdi + 40]", // restore rdi last (was TrapFrame pointer)
-
         "iretq",
     );
 }
@@ -243,10 +244,7 @@ pub unsafe extern "C" fn return_to_user(tf: *const super::trap_frame::TrapFrame)
 /// Same contract as [`switch_and_enter_user`]: TSS RSP0 and
 /// `SYSCALL_KERNEL_RSP` must already be set to init's `kernel_stack_top`.
 #[cfg(not(test))]
-pub unsafe fn first_entry_to_user(
-    root_phys: u64,
-    tf: *const super::trap_frame::TrapFrame,
-) -> !
+pub unsafe fn first_entry_to_user(root_phys: u64, tf: *const super::trap_frame::TrapFrame) -> !
 {
     unsafe { switch_and_enter_user(root_phys, tf) }
 }
@@ -292,20 +290,22 @@ pub unsafe extern "C" fn switch_and_enter_user(
         //    (accessible from init's page tables) when we next need the stack.
         //    iretq frame (5 × 8 = 40 bytes) will sit at [rsi-40, rsi-1].
         "mov rsp, rsi",
-
         // 2. Switch page tables.  After this instruction the boot stack's
         //    identity mapping is gone; RSP now points to the direct-mapped init
         //    kernel stack, which is covered by the copied kernel-upper entries.
         "mov cr3, rdi",
-
         // 3. Build iretq frame below TrapFrame (RSP = tf_ptr = rsi).
         //    iretq pops (low → high address): RIP, CS, RFLAGS, RSP, SS.
-        "mov rax, [rsi + 152]", "push rax",  // ss
-        "mov rax, [rsi + 136]", "push rax",  // rsp (user stack)
-        "mov rax, [rsi + 128]", "push rax",  // rflags
-        "mov rax, [rsi + 144]", "push rax",  // cs
-        "mov rax, [rsi + 120]", "push rax",  // rip (user entry point)
-
+        "mov rax, [rsi + 152]",
+        "push rax", // ss
+        "mov rax, [rsi + 136]",
+        "push rax", // rsp (user stack)
+        "mov rax, [rsi + 128]",
+        "push rax", // rflags
+        "mov rax, [rsi + 144]",
+        "push rax", // cs
+        "mov rax, [rsi + 120]",
+        "push rax", // rip (user entry point)
         // 4. Restore GPRs from TrapFrame (rsi and rdi restored last).
         "mov rax, [rsi + 0]",
         "mov rbx, [rsi + 8]",
@@ -320,9 +320,8 @@ pub unsafe extern "C" fn switch_and_enter_user(
         "mov r13, [rsi + 96]",
         "mov r14, [rsi + 104]",
         "mov r15, [rsi + 112]",
-        "mov rdi, [rsi + 40]",  // restore rdi before rsi
-        "mov rsi, [rsi + 32]",  // restore rsi last (was TrapFrame pointer)
-
+        "mov rdi, [rsi + 40]", // restore rdi before rsi
+        "mov rsi, [rsi + 32]", // restore rsi last (was TrapFrame pointer)
         "iretq",
     );
 }

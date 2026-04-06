@@ -27,30 +27,36 @@ pub fn sys_system_info(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     // pattern used by other handlers (e.g. cap create).
     match tf.arg(0)
     {
-        0 => // KernelVersion — packed (major << 32) | (minor << 16) | patch
+        0 =>
+        // KernelVersion — packed (major << 32) | (minor << 16) | patch
         {
             Ok(syscall::KERNEL_VERSION)
         }
-        1 => // CpuCount
+        1 =>
+        // CpuCount
         {
             let n = crate::sched::CPU_COUNT.load(core::sync::atomic::Ordering::Relaxed);
             Ok(n as u64)
         }
-        2 => // FreeFrames
+        2 =>
+        // FreeFrames
         {
             let free = crate::mm::with_frame_allocator(|a| a.free_page_count());
             Ok(free as u64)
         }
-        3 => // TotalFrames
+        3 =>
+        // TotalFrames
         {
             let total = crate::mm::with_frame_allocator(|a| a.total_page_count());
             Ok(total as u64)
         }
-        4 => // PageSize
+        4 =>
+        // PageSize
         {
             Ok(crate::mm::PAGE_SIZE as u64)
         }
-        5 => // BootProtocolVersion
+        5 =>
+        // BootProtocolVersion
         {
             Ok(boot_protocol::BOOT_PROTOCOL_VERSION as u64)
         }
@@ -90,11 +96,19 @@ pub fn sys_aspace_query(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 
     // Resolve AddressSpace cap. READ right is required to inspect mappings.
     let tcb = unsafe { super::current_tcb() };
-    if tcb.is_null() { return Err(SyscallError::InvalidCapability); }
+    if tcb.is_null()
+    {
+        return Err(SyscallError::InvalidCapability);
+    }
     let caller_cspace = unsafe { (*tcb).cspace };
 
     let aspace_slot = unsafe {
-        super::lookup_cap(caller_cspace, aspace_idx, CapTag::AddressSpace, Rights::READ)
+        super::lookup_cap(
+            caller_cspace,
+            aspace_idx,
+            CapTag::AddressSpace,
+            Rights::READ,
+        )
     }?;
     let as_ptr = {
         let obj = aspace_slot.object.ok_or(SyscallError::InvalidCapability)?;
@@ -102,7 +116,10 @@ pub fn sys_aspace_query(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         let as_obj = unsafe { &*(obj.as_ptr() as *const AddressSpaceObject) };
         as_obj.address_space
     };
-    if as_ptr.is_null() { return Err(SyscallError::InvalidCapability); }
+    if as_ptr.is_null()
+    {
+        return Err(SyscallError::InvalidCapability);
+    }
 
     // SAFETY: as_ptr is a valid heap-allocated AddressSpace.
     let aspace = unsafe { &*as_ptr };

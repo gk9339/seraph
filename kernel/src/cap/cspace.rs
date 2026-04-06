@@ -282,9 +282,7 @@ impl CSpace
         if self.free_head == Some(target)
         {
             // Target is the head: pop it.
-            let next = self
-                .slot(target)
-                .and_then(|s| s.next_free());
+            let next = self.slot(target).and_then(|s| s.next_free());
             self.free_head = next;
             self.free_count -= 1;
             return true;
@@ -563,8 +561,15 @@ mod tests
 
         // Must return s1 (from free list), not a fresh slot past s3.
         let s4 = cs.allocate_slot().unwrap();
-        assert_eq!(s4, s1, "free list entry must be reused before consuming new slot space");
-        assert_ne!(s4, s3 + 1, "should not allocate a brand-new slot when free list is non-empty");
+        assert_eq!(
+            s4, s1,
+            "free list entry must be reused before consuming new slot space"
+        );
+        assert_ne!(
+            s4,
+            s3 + 1,
+            "should not allocate a brand-new slot when free list is non-empty"
+        );
         let _ = (s2, s3);
     }
 
@@ -575,7 +580,8 @@ mod tests
         let mut cs = CSpace::new(0, 16384);
         let obj = dummy_object();
 
-        for expected in 1..=5usize {
+        for expected in 1..=5usize
+        {
             cs.insert_cap(CapTag::Frame, Rights::MAP, obj).unwrap();
             assert_eq!(
                 cs.populated_count(),

@@ -1,9 +1,18 @@
 {
   "permissions": {
     "allow": [
-      "Bash(./build.sh *)",
-      "Bash(./clean.sh *)",
-      "Bash(./run.sh *)"
+      "Bash(cargo xtask build *)",
+      "Bash(cargo xtask run *)",
+      "Bash(cargo xtask clean *)",
+
+      "Bash(readelf *)",
+      "Bash(nm -C *)",
+
+      "Bash(riscv64-linux-gnu-objdump *)",
+      "Bash(riscv64-unknown-elf-objdump *)",
+
+      "Bash(grep *)",
+      "Bash(echo *)"
     ]
   }
 }

@@ -268,6 +268,70 @@ pub unsafe fn init(period_us: u64)
 #[cfg(test)]
 pub unsafe fn init(_period_us: u64) {}
 
+/// Initialise the APIC timer on an AP using the BSP's calibrated tick rate.
+///
+/// The BSP must have called [`init`] first to populate [`TICKS_PER_SEC`].
+/// Configures periodic timer at `period_us` on this AP's local APIC.
+/// Enables interrupts (`sti`) after programming the timer.
+///
+/// # Safety
+/// Ring 0. LAPIC must be software-enabled ([`interrupts::init_ap`]) before calling.
+#[cfg(not(test))]
+pub unsafe fn init_ap(period_us: u64)
+{
+    let tps = TICKS_PER_SEC.load(Ordering::Relaxed);
+    if tps == 0
+    {
+        // BSP calibration not yet done — skip. This path should not occur in
+        // practice since APs start after BSP completes Phase 5.
+        return;
+    }
+    let initial_count = (tps * period_us / 1_000_000).max(1);
+    unsafe {
+        apic_write(APIC_TIMER_DIVIDE, DIVIDE_BY_16);
+        apic_write(APIC_LVT_TIMER, LVT_TIMER_PERIODIC | TIMER_VECTOR as u32);
+        apic_write(APIC_TIMER_INITIAL, initial_count as u32);
+        interrupts::enable();
+    }
+}
+
+/// No-op test stub.
+#[cfg(test)]
+pub unsafe fn init_ap(_period_us: u64) {}
+
+/// Busy-wait for approximately `us` microseconds using the TSC.
+///
+/// Uses the TSC frequency calibrated during [`init`] (stored in [`TSC_PER_US`]).
+/// If calibration has not yet run (pre-Phase 5), falls back to a coarse spin loop
+/// so callers in early boot do not need to handle the unavailable case specially.
+///
+/// Suitable for short delays (microseconds to low milliseconds). For longer
+/// waits, prefer event-driven approaches.
+#[cfg(not(test))]
+pub fn delay_us(us: u64)
+{
+    let per_us = TSC_PER_US.load(Ordering::Relaxed);
+    if per_us == 0
+    {
+        // Fallback before calibration: spin ~200 iterations per µs (very rough).
+        for _ in 0..us * 200
+        {
+            core::hint::spin_loop();
+        }
+        return;
+    }
+    let start = read_tsc();
+    let target = start.wrapping_add(per_us.saturating_mul(us));
+    while read_tsc() < target
+    {
+        core::hint::spin_loop();
+    }
+}
+
+/// No-op test stub.
+#[cfg(test)]
+pub fn delay_us(_us: u64) {}
+
 /// Timer ISR body — called from the naked stub in `idt.rs`.
 ///
 /// Increments the tick counter, sends EOI to the local APIC, then calls
@@ -280,7 +344,9 @@ pub extern "C" fn timer_isr()
     // EOI must be sent before calling schedule() to avoid masking the APIC.
     interrupts::acknowledge(TIMER_VECTOR as u32);
     // SAFETY: called from interrupt handler on a valid kernel stack.
-    unsafe { crate::sched::timer_tick(); }
+    unsafe {
+        crate::sched::timer_tick();
+    }
 }
 
 /// Return the current monotonic tick count.
@@ -306,7 +372,10 @@ pub fn ticks_per_second() -> u64
 pub fn elapsed_us() -> Option<u64>
 {
     let per_us = TSC_PER_US.load(Ordering::Relaxed);
-    if per_us == 0 { return None; }
+    if per_us == 0
+    {
+        return None;
+    }
     let boot = BOOT_TSC.load(Ordering::Relaxed);
     Some(read_tsc().saturating_sub(boot) / per_us)
 }

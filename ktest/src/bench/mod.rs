@@ -103,8 +103,14 @@ fn bench_null_syscall(_ctx: &crate::TestContext)
         let _ = syscall::system_info(SystemInfoType::KernelVersion as u64);
         let t1 = cycles_now();
         let delta = t1.saturating_sub(t0);
-        if delta < min { min = delta; }
-        if delta > max { max = delta; }
+        if delta < min
+        {
+            min = delta;
+        }
+        if delta > max
+        {
+            max = delta;
+        }
         total = total.saturating_add(delta);
     }
 
@@ -125,9 +131,9 @@ static mut BENCH_IPC_STACK: ChildStack = ChildStack::ZERO;
 /// `arg`: bits[15:0] = ep_slot, bits[31:16] = done_slot, bits[47:32] = N.
 fn ipc_caller_entry(arg: u64) -> !
 {
-    let ep_slot   = (arg         & 0xFFFF) as u32;
+    let ep_slot = (arg & 0xFFFF) as u32;
     let done_slot = ((arg >> 16) & 0xFFFF) as u32;
-    let n         = (arg >> 32) as u64;
+    let n = (arg >> 32) as u64;
 
     for _ in 0..n
     {
@@ -155,15 +161,39 @@ fn bench_ipc_round_trip(ctx: &crate::TestContext)
     // SEND | GRANT rights for the child endpoint copy.
     const RIGHTS_SEND_GRANT: u64 = (1 << 4) | (1 << 6);
 
-    let ep   = match cap_create_endpoint() { Ok(v) => v, Err(_) => return };
-    let done = match cap_create_signal()   { Ok(v) => v, Err(_) => return };
+    let ep = match cap_create_endpoint()
+    {
+        Ok(v) => v,
+        Err(_) => return,
+    };
+    let done = match cap_create_signal()
+    {
+        Ok(v) => v,
+        Err(_) => return,
+    };
 
-    let cs      = match cap_create_cspace(16)              { Ok(v) => v, Err(_) => return };
-    let child_ep   = match cap_copy(ep,   cs, RIGHTS_SEND_GRANT) { Ok(v) => v, Err(_) => return };
-    let child_done = match cap_copy(done, cs, 1 << 7)            { Ok(v) => v, Err(_) => return };
+    let cs = match cap_create_cspace(16)
+    {
+        Ok(v) => v,
+        Err(_) => return,
+    };
+    let child_ep = match cap_copy(ep, cs, RIGHTS_SEND_GRANT)
+    {
+        Ok(v) => v,
+        Err(_) => return,
+    };
+    let child_done = match cap_copy(done, cs, 1 << 7)
+    {
+        Ok(v) => v,
+        Err(_) => return,
+    };
 
     let arg = (child_ep as u64) | ((child_done as u64) << 16) | (N << 32);
-    let th  = match cap_create_thread(ctx.aspace_cap, cs)        { Ok(v) => v, Err(_) => return };
+    let th = match cap_create_thread(ctx.aspace_cap, cs)
+    {
+        Ok(v) => v,
+        Err(_) => return,
+    };
     let stack_top = ChildStack::top(core::ptr::addr_of!(BENCH_IPC_STACK));
 
     if thread_configure(th, ipc_caller_entry as *const () as u64, stack_top, arg).is_err()
@@ -175,8 +205,14 @@ fn bench_ipc_round_trip(ctx: &crate::TestContext)
     let t0 = cycles_now();
     for _ in 0..N
     {
-        if ipc_recv(ep).is_err() { break; }
-        if ipc_reply(0, 0, &[]).is_err() { break; }
+        if ipc_recv(ep).is_err()
+        {
+            break;
+        }
+        if ipc_reply(0, 0, &[]).is_err()
+        {
+            break;
+        }
     }
     let t1 = cycles_now();
 
@@ -204,14 +240,20 @@ static mut BENCH_SIGNAL_STACK: ChildStack = ChildStack::ZERO;
 /// `arg`: bits[15:0] = in_slot, bits[31:16] = out_slot, bits[47:32] = N.
 fn signal_pong_entry(arg: u64) -> !
 {
-    let in_slot  = (arg         & 0xFFFF) as u32;
+    let in_slot = (arg & 0xFFFF) as u32;
     let out_slot = ((arg >> 16) & 0xFFFF) as u32;
-    let n        = (arg >> 32) as u64;
+    let n = (arg >> 32) as u64;
 
     for _ in 0..n
     {
-        if signal_wait(in_slot).is_err()  { break; }
-        if signal_send(out_slot, 1).is_err() { break; }
+        if signal_wait(in_slot).is_err()
+        {
+            break;
+        }
+        if signal_send(out_slot, 1).is_err()
+        {
+            break;
+        }
     }
     thread_exit()
 }
@@ -227,18 +269,42 @@ fn bench_signal_roundtrip(ctx: &crate::TestContext)
 
     // SIGNAL right (bit 7) and WAIT right (bit 8).
     const RIGHTS_SIGNAL: u64 = 1 << 7;
-    const RIGHTS_WAIT:   u64 = 1 << 8;
+    const RIGHTS_WAIT: u64 = 1 << 8;
 
-    let ping = match cap_create_signal() { Ok(v) => v, Err(_) => return };
-    let pong = match cap_create_signal() { Ok(v) => v, Err(_) => return };
+    let ping = match cap_create_signal()
+    {
+        Ok(v) => v,
+        Err(_) => return,
+    };
+    let pong = match cap_create_signal()
+    {
+        Ok(v) => v,
+        Err(_) => return,
+    };
 
-    let cs           = match cap_create_cspace(16)                  { Ok(v) => v, Err(_) => return };
+    let cs = match cap_create_cspace(16)
+    {
+        Ok(v) => v,
+        Err(_) => return,
+    };
     // Child waits on ping → needs WAIT right; sends on pong → needs SIGNAL right.
-    let child_ping   = match cap_copy(ping, cs, RIGHTS_WAIT)        { Ok(v) => v, Err(_) => return };
-    let child_pong   = match cap_copy(pong, cs, RIGHTS_SIGNAL)      { Ok(v) => v, Err(_) => return };
+    let child_ping = match cap_copy(ping, cs, RIGHTS_WAIT)
+    {
+        Ok(v) => v,
+        Err(_) => return,
+    };
+    let child_pong = match cap_copy(pong, cs, RIGHTS_SIGNAL)
+    {
+        Ok(v) => v,
+        Err(_) => return,
+    };
 
     let arg = (child_ping as u64) | ((child_pong as u64) << 16) | (N << 32);
-    let th  = match cap_create_thread(ctx.aspace_cap, cs)           { Ok(v) => v, Err(_) => return };
+    let th = match cap_create_thread(ctx.aspace_cap, cs)
+    {
+        Ok(v) => v,
+        Err(_) => return,
+    };
     let stack_top = ChildStack::top(core::ptr::addr_of!(BENCH_SIGNAL_STACK));
 
     if thread_configure(th, signal_pong_entry as *const () as u64, stack_top, arg).is_err()
@@ -250,8 +316,14 @@ fn bench_signal_roundtrip(ctx: &crate::TestContext)
     let t0 = cycles_now();
     for _ in 0..N
     {
-        if signal_send(ping, 1).is_err()  { break; }
-        if signal_wait(pong).is_err()     { break; }
+        if signal_send(ping, 1).is_err()
+        {
+            break;
+        }
+        if signal_wait(pong).is_err()
+        {
+            break;
+        }
     }
     let t1 = cycles_now();
 

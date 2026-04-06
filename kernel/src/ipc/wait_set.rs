@@ -44,8 +44,8 @@ pub const WAIT_SET_MAX_MEMBERS: usize = 16;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WaitSetSourceTag
 {
-    Endpoint   = 0,
-    Signal     = 1,
+    Endpoint = 0,
+    Signal = 1,
     EventQueue = 2,
 }
 
@@ -126,7 +126,10 @@ impl WaitSetState
 
     /// Return true if the ready ring has pending entries.
     #[inline]
-    fn has_ready(&self) -> bool { self.ready_head != self.ready_tail }
+    fn has_ready(&self) -> bool
+    {
+        self.ready_head != self.ready_tail
+    }
 
     /// Push `member_idx` onto the ready ring.
     ///
@@ -269,7 +272,11 @@ pub unsafe fn waitset_add(
 
     // Find a free slot.
     let idx = ws.members.iter().position(|m| m.is_none()).ok_or(())?;
-    ws.members[idx] = Some(WaitSetMember { source_ptr, source_tag, token });
+    ws.members[idx] = Some(WaitSetMember {
+        source_ptr,
+        source_tag,
+        token,
+    });
     ws.member_count += 1;
 
     // Check ready-at-add-time so notifications are not missed.
@@ -315,7 +322,11 @@ pub unsafe fn waitset_remove(ws: *mut WaitSetState, source_ptr: *mut u8) -> Resu
     let idx = ws
         .members
         .iter()
-        .position(|m| m.as_ref().map(|m| m.source_ptr == source_ptr).unwrap_or(false))
+        .position(|m| {
+            m.as_ref()
+                .map(|m| m.source_ptr == source_ptr)
+                .unwrap_or(false)
+        })
         .ok_or(())?;
 
     ws.members[idx] = None;

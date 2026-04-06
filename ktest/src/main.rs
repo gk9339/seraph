@@ -56,12 +56,15 @@ pub static FAIL_COUNT: AtomicUsize = AtomicUsize::new(0);
 macro_rules! run_test {
     ($name:literal, $body:expr) => {{
         let result: $crate::TestResult = { $body };
-        match result {
-            Ok(()) => {
+        match result
+        {
+            Ok(()) =>
+            {
                 $crate::klog(concat!("ktest: PASS ", $name));
                 $crate::PASS_COUNT.fetch_add(1, ::core::sync::atomic::Ordering::Relaxed);
             }
-            Err(reason) => {
+            Err(reason) =>
+            {
                 $crate::klog(concat!("ktest: FAIL ", $name));
                 $crate::klog(reason);
                 $crate::FAIL_COUNT.fetch_add(1, ::core::sync::atomic::Ordering::Relaxed);
@@ -84,12 +87,15 @@ macro_rules! run_integration_test {
     ($name:literal, $body:expr) => {{
         $crate::klog(concat!("ktest: ", $name, " starting"));
         let result: $crate::TestResult = { $body };
-        match result {
-            Ok(()) => {
+        match result
+        {
+            Ok(()) =>
+            {
                 $crate::klog(concat!("ktest: PASS ", $name));
                 $crate::PASS_COUNT.fetch_add(1, ::core::sync::atomic::Ordering::Relaxed);
             }
-            Err(reason) => {
+            Err(reason) =>
+            {
                 $crate::klog(concat!("ktest: FAIL ", $name));
                 $crate::klog(reason);
                 $crate::FAIL_COUNT.fetch_add(1, ::core::sync::atomic::Ordering::Relaxed);
@@ -184,7 +190,10 @@ fn run(aspace_cap: u32) -> !
         halt()
     });
 
-    let ctx = TestContext { aspace_cap, ipc_buf: ipc_buf_ptr };
+    let ctx = TestContext {
+        aspace_cap,
+        ipc_buf: ipc_buf_ptr,
+    };
 
     // ── Tier 1: per-syscall isolation ─────────────────────────────────────────
     klog("ktest: --- Tier 1: syscall isolation ---");

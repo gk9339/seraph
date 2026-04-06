@@ -36,15 +36,15 @@ use syscall::SyscallError;
 #[cfg(not(test))]
 use syscall::{
     SYS_ASPACE_QUERY, SYS_CAP_COPY, SYS_CAP_CREATE_ASPACE, SYS_CAP_CREATE_CSPACE,
-    SYS_CAP_CREATE_ENDPOINT, SYS_CAP_CREATE_EVENT_Q, SYS_CAP_CREATE_SIGNAL,
-    SYS_CAP_CREATE_THREAD, SYS_CAP_CREATE_WAIT_SET, SYS_CAP_DELETE, SYS_CAP_DERIVE,
-    SYS_CAP_INSERT, SYS_CAP_MOVE, SYS_CAP_REVOKE, SYS_DEBUG_LOG, SYS_DMA_GRANT, SYS_EVENT_POST,
-    SYS_EVENT_RECV, SYS_FRAME_SPLIT, SYS_IPC_BUFFER_SET, SYS_IPC_CALL, SYS_IPC_RECV,
-    SYS_IPC_REPLY, SYS_IOPORT_BIND, SYS_IRQ_ACK, SYS_IRQ_REGISTER, SYS_MEM_MAP, SYS_MEM_PROTECT,
-    SYS_MEM_UNMAP, SYS_MMIO_MAP, SYS_SIGNAL_SEND, SYS_SIGNAL_WAIT, SYS_SYSTEM_INFO,
-    SYS_THREAD_CONFIGURE, SYS_THREAD_EXIT, SYS_THREAD_READ_REGS, SYS_THREAD_SET_AFFINITY,
-    SYS_THREAD_SET_PRIORITY, SYS_THREAD_START, SYS_THREAD_STOP, SYS_THREAD_WRITE_REGS,
-    SYS_THREAD_YIELD, SYS_WAIT_SET_ADD, SYS_WAIT_SET_REMOVE, SYS_WAIT_SET_WAIT,
+    SYS_CAP_CREATE_ENDPOINT, SYS_CAP_CREATE_EVENT_Q, SYS_CAP_CREATE_SIGNAL, SYS_CAP_CREATE_THREAD,
+    SYS_CAP_CREATE_WAIT_SET, SYS_CAP_DELETE, SYS_CAP_DERIVE, SYS_CAP_INSERT, SYS_CAP_MOVE,
+    SYS_CAP_REVOKE, SYS_DEBUG_LOG, SYS_DMA_GRANT, SYS_EVENT_POST, SYS_EVENT_RECV, SYS_FRAME_SPLIT,
+    SYS_IOPORT_BIND, SYS_IPC_BUFFER_SET, SYS_IPC_CALL, SYS_IPC_RECV, SYS_IPC_REPLY, SYS_IRQ_ACK,
+    SYS_IRQ_REGISTER, SYS_MEM_MAP, SYS_MEM_PROTECT, SYS_MEM_UNMAP, SYS_MMIO_MAP, SYS_SIGNAL_SEND,
+    SYS_SIGNAL_WAIT, SYS_SYSTEM_INFO, SYS_THREAD_CONFIGURE, SYS_THREAD_EXIT, SYS_THREAD_READ_REGS,
+    SYS_THREAD_SET_AFFINITY, SYS_THREAD_SET_PRIORITY, SYS_THREAD_START, SYS_THREAD_STOP,
+    SYS_THREAD_WRITE_REGS, SYS_THREAD_YIELD, SYS_WAIT_SET_ADD, SYS_WAIT_SET_REMOVE,
+    SYS_WAIT_SET_WAIT,
 };
 
 // ── TrapFrame accessor shims ──────────────────────────────────────────────────
@@ -94,13 +94,13 @@ pub unsafe fn dispatch(tf: *mut TrapFrame)
         SYS_MEM_UNMAP => mem::sys_mem_unmap(tf),
         SYS_MEM_PROTECT => mem::sys_mem_protect(tf),
         SYS_FRAME_SPLIT => mem::sys_frame_split(tf),
-        SYS_THREAD_CONFIGURE    => thread::sys_thread_configure(tf),
-        SYS_THREAD_START        => thread::sys_thread_start(tf),
-        SYS_THREAD_STOP         => thread::sys_thread_stop(tf),
+        SYS_THREAD_CONFIGURE => thread::sys_thread_configure(tf),
+        SYS_THREAD_START => thread::sys_thread_start(tf),
+        SYS_THREAD_STOP => thread::sys_thread_stop(tf),
         SYS_THREAD_SET_PRIORITY => thread::sys_thread_set_priority(tf),
         SYS_THREAD_SET_AFFINITY => thread::sys_thread_set_affinity(tf),
-        SYS_THREAD_READ_REGS    => thread::sys_thread_read_regs(tf),
-        SYS_THREAD_WRITE_REGS   => thread::sys_thread_write_regs(tf),
+        SYS_THREAD_READ_REGS => thread::sys_thread_read_regs(tf),
+        SYS_THREAD_WRITE_REGS => thread::sys_thread_write_regs(tf),
         SYS_IPC_BUFFER_SET => sys_ipc_buffer_set(tf),
         SYS_THREAD_YIELD => sys_yield(tf),
         SYS_THREAD_EXIT => sys_exit(tf),
@@ -138,7 +138,9 @@ pub unsafe fn dispatch(tf: *mut TrapFrame)
 fn sys_yield(_tf: &mut TrapFrame) -> Result<u64, SyscallError>
 {
     // SAFETY: called from syscall handler on a valid kernel stack.
-    unsafe { crate::sched::schedule(); }
+    unsafe {
+        crate::sched::schedule();
+    }
     Ok(0)
 }
 
@@ -157,12 +159,16 @@ fn sys_exit(_tf: &mut TrapFrame) -> Result<u64, SyscallError>
     let tcb = unsafe { current_tcb() };
     if !tcb.is_null()
     {
-        unsafe { (*tcb).state = ThreadState::Exited; }
+        unsafe {
+            (*tcb).state = ThreadState::Exited;
+        }
     }
     // Switch to the next runnable thread. The exited thread is in Exited state
     // so schedule() will not re-enqueue it.
     // SAFETY: called from syscall handler on a valid kernel stack.
-    unsafe { crate::sched::schedule(); }
+    unsafe {
+        crate::sched::schedule();
+    }
     // schedule() returns here if the same thread is re-selected (shouldn't
     // happen for an Exited thread, but halt as a safety net).
     crate::arch::current::cpu::halt_loop();
@@ -173,13 +179,14 @@ fn sys_exit(_tf: &mut TrapFrame) -> Result<u64, SyscallError>
 /// Get the current thread's TCB pointer (BSP only; single-CPU until WSMP).
 ///
 /// # Safety
-/// Must be called from a kernel context. SCHEDULERS[0] must have been
-/// initialised by `sched::init`.
+/// Must be called from a kernel context. The current CPU's scheduler must have
+/// been initialised by `sched::init`.
 #[cfg(not(test))]
 pub(crate) unsafe fn current_tcb() -> *mut crate::sched::thread::ThreadControlBlock
 {
-    // SAFETY: SCHEDULERS[0] is initialised; single-CPU until WSMP.
-    unsafe { crate::sched::scheduler_for(0).current }
+    // SAFETY: SCHEDULERS[cpu] is initialised for all online CPUs.
+    let cpu = crate::arch::current::cpu::current_cpu() as usize;
+    unsafe { crate::sched::scheduler_for(cpu).current }
 }
 
 /// Look up a capability slot in a CSpace by index.
@@ -237,7 +244,9 @@ fn sys_ipc_buffer_set(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         return Err(SyscallError::InvalidCapability);
     }
     // SAFETY: tcb is a valid TCB.
-    unsafe { (*tcb).ipc_buffer = virt; }
+    unsafe {
+        (*tcb).ipc_buffer = virt;
+    }
     Ok(0)
 }
 

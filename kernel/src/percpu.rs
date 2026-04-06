@@ -7,7 +7,7 @@
 //!
 //! One [`PerCpuData`] instance exists per logical CPU. The BSP's entry
 //! (`PER_CPU[0]`) is initialised during Phase 5 via [`init_bsp`].
-//! AP entries are initialised in Phase C during AP startup.
+//! AP entries are initialised in SMP startup during AP startup.
 //!
 //! ## Access mechanism
 //!
@@ -99,13 +99,13 @@ impl PerCpuData
 /// One `PerCpuData` per potential CPU, indexed by logical CPU ID.
 ///
 /// Only `[0..cpu_count]` entries are initialised. Entry 0 is set up by
-/// [`init_bsp`] during Phase 5; AP entries are set up in Phase C.
+/// [`init_bsp`] during Phase 5; AP entries are set up in SMP startup.
 ///
 /// # Safety
 /// Each entry is written exclusively by its owning CPU during init and
 /// read exclusively by that CPU during runtime. No concurrent mutable
 /// access occurs after the entry is published (sequenced by the AP
-/// synchronization barrier in Phase C).
+/// synchronization barrier in SMP startup).
 #[cfg(not(test))]
 pub static mut PER_CPU: [PerCpuData; MAX_CPUS] = {
     const D: PerCpuData = PerCpuData::new();
@@ -143,7 +143,7 @@ pub unsafe fn init_bsp()
 /// Initialise per-CPU state for an AP (logical CPU `cpu_id`) and install the
 /// architecture-specific access register.
 ///
-/// Called from `kernel_entry_ap` during Phase C AP startup.
+/// Called from `kernel_entry_ap` during SMP startup AP startup.
 ///
 /// # Safety
 /// Must execute at ring 0 / S-mode on the AP being initialised.

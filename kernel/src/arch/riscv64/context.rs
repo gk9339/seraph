@@ -19,6 +19,10 @@
 
 /// Kernel-mode callee-saved register state for one thread.
 ///
+/// `tp` is intentionally absent: on RISC-V, `tp` always points to
+/// `PerCpuData` for the current hart and is a kernel-reserved register.
+/// It is never thread-private and must not be saved/restored in `switch`.
+///
 /// ## Field offsets (used by assembly in `switch`)
 ///
 /// | Offset | Field   |
@@ -37,9 +41,8 @@
 /// | 88     | s9      |
 /// | 96     | s10     |
 /// | 104    | s11     |
-/// | 112    | tp      |
-/// | 120    | sstatus |
-/// | 128    | a0      |
+/// | 112    | sstatus |
+/// | 120    | a0      |
 #[derive(Debug, Default, Clone, Copy)]
 #[repr(C)]
 pub struct SavedState
@@ -61,8 +64,6 @@ pub struct SavedState
     pub s9: u64,
     pub s10: u64,
     pub s11: u64,
-    /// Thread pointer — per-thread TLS pointer.
-    pub tp: u64,
     /// sstatus snapshot (SIE bit controls interrupt enable).
     pub sstatus: u64,
     /// First argument register `a0`, used to deliver the argument on first
@@ -77,13 +78,19 @@ impl SavedState
     ///
     /// For a newly created thread this is the entry function address; for a
     /// resumed thread it is the return address from the previous `switch` call.
-    pub fn entry_point(&self) -> u64 { self.ra }
+    pub fn entry_point(&self) -> u64
+    {
+        self.ra
+    }
 
     /// Return the initial user-mode argument stored at thread creation.
     ///
     /// `new_state` stashes `arg` in `a0`; `sched::enter` reads it back here
     /// and forwards it to the user-mode TrapFrame via `set_arg0`.
-    pub fn user_arg(&self) -> u64 { self.a0 }
+    pub fn user_arg(&self) -> u64
+    {
+        self.a0
+    }
 }
 
 // ── new_state ─────────────────────────────────────────────────────────────────
@@ -108,9 +115,9 @@ pub fn new_state(entry: u64, stack_top: u64, arg: u64, _is_user: bool) -> SavedS
     let sstatus: u64 = 0;
 
     SavedState {
-        ra:      entry,
-        sp:      stack_top,
-        a0:      arg,
+        ra: entry,
+        sp: stack_top,
+        a0: arg,
         sstatus,
         ..SavedState::default()
     }
@@ -136,6 +143,8 @@ pub unsafe extern "C" fn switch(current: *mut SavedState, next: *const SavedStat
         // ── Save current thread to *a0 ────────────────────────────────────
         // `ra` holds the return address from the `call switch` instruction;
         // saving it means the resumed thread will "return" to the call site.
+        // `tp` is NOT saved: it is a kernel-reserved per-hart register that
+        // always holds &PER_CPU[cpu_id] and must never be thread-switched.
         "sd ra,     8(a0)",
         "sd sp,     0(a0)",
         "sd s0,    16(a0)",
@@ -150,14 +159,12 @@ pub unsafe extern "C" fn switch(current: *mut SavedState, next: *const SavedStat
         "sd s9,    88(a0)",
         "sd s10,   96(a0)",
         "sd s11,  104(a0)",
-        "sd tp,   112(a0)",
         "csrr t0, sstatus",
-        "sd t0,   120(a0)",
-
+        "sd t0,   112(a0)",
         // ── Restore next thread from *a1 ──────────────────────────────────
-        "ld t0,   120(a1)",     // sstatus
+        "ld t0,   112(a1)", // sstatus
         "csrw sstatus, t0",
-        "ld ra,     8(a1)",     // return address (or entry function)
+        "ld ra,     8(a1)", // return address (or entry function)
         "ld sp,     0(a1)",
         "ld s0,    16(a1)",
         "ld s1,    24(a1)",
@@ -171,10 +178,8 @@ pub unsafe extern "C" fn switch(current: *mut SavedState, next: *const SavedStat
         "ld s9,    88(a1)",
         "ld s10,   96(a1)",
         "ld s11,  104(a1)",
-        "ld tp,   112(a1)",
-        "ld a0,   128(a1)",     // argument for first-entry threads
-
-        "ret",                  // jr ra → jumps to next thread's entry or resume point
+        "ld a0,   120(a1)", // argument for first-entry threads
+        "ret",              // jr ra → jumps to next thread's entry or resume point
     );
 }
 
@@ -194,10 +199,7 @@ pub unsafe extern "C" fn switch(current: *mut SavedState, next: *const SavedStat
 /// `root_phys` must be a valid page-table root. `tf` must point to a
 /// [`TrapFrame`] on the init thread's kernel stack with `sepc` and `sp` set.
 #[cfg(not(test))]
-pub unsafe fn first_entry_to_user(
-    root_phys: u64,
-    tf: *const super::trap_frame::TrapFrame,
-) -> !
+pub unsafe fn first_entry_to_user(root_phys: u64, tf: *const super::trap_frame::TrapFrame) -> !
 {
     unsafe {
         crate::arch::current::paging::activate(root_phys);
@@ -232,47 +234,50 @@ pub unsafe extern "C" fn return_to_user(tf: *const super::trap_frame::TrapFrame)
         // Set sepc = user entry point.
         "ld t0, 248(a0)",
         "csrw sepc, t0",
-
         // Set sstatus for U-mode return:
         //   SPP  = 0 (bit 8): return to U-mode after sret.
         //   SPIE = 1 (bit 5): enable interrupts after sret.
         "li t0, 0x20",
         "csrw sstatus, t0",
-
+        // Arm sscratch with &PER_CPU so that the next U-mode trap entry can
+        // detect U-mode (sscratch != 0) and recover the per-CPU pointer.
+        // tp still equals &PER_CPU[cpu_id] here (kernel-reserved register).
+        // This must be done BEFORE tp is overwritten by the user tp restore below.
+        "csrw sscratch, tp",
         // Restore GPRs x1–x31; restore x10 (a0) last since it is our pointer.
-        "ld x1,    0(a0)",   // ra
-        "ld x2,    8(a0)",   // sp (user stack)
-        "ld x3,   16(a0)",   // gp
-        "ld x4,   24(a0)",   // tp
-        "ld x5,   32(a0)",   // t0
-        "ld x6,   40(a0)",   // t1
-        "ld x7,   48(a0)",   // t2
-        "ld x8,   56(a0)",   // s0
-        "ld x9,   64(a0)",   // s1
+        // x4 (tp) is restored from TrapFrame here — after this, tp = user TLS ptr.
+        "ld x1,    0(a0)", // ra
+        "ld x2,    8(a0)", // sp (user stack)
+        "ld x3,   16(a0)", // gp
+        "ld x4,   24(a0)", // tp
+        "ld x5,   32(a0)", // t0
+        "ld x6,   40(a0)", // t1
+        "ld x7,   48(a0)", // t2
+        "ld x8,   56(a0)", // s0
+        "ld x9,   64(a0)", // s1
         // skip x10 (a0) for last
-        "ld x11,  80(a0)",   // a1
-        "ld x12,  88(a0)",   // a2
-        "ld x13,  96(a0)",   // a3
-        "ld x14, 104(a0)",   // a4
-        "ld x15, 112(a0)",   // a5
-        "ld x16, 120(a0)",   // a6
-        "ld x17, 128(a0)",   // a7
-        "ld x18, 136(a0)",   // s2
-        "ld x19, 144(a0)",   // s3
-        "ld x20, 152(a0)",   // s4
-        "ld x21, 160(a0)",   // s5
-        "ld x22, 168(a0)",   // s6
-        "ld x23, 176(a0)",   // s7
-        "ld x24, 184(a0)",   // s8
-        "ld x25, 192(a0)",   // s9
-        "ld x26, 200(a0)",   // s10
-        "ld x27, 208(a0)",   // s11
-        "ld x28, 216(a0)",   // t3
-        "ld x29, 224(a0)",   // t4
-        "ld x30, 232(a0)",   // t5
-        "ld x31, 240(a0)",   // t6
-        "ld x10,  72(a0)",   // a0 — restore last (was TrapFrame pointer)
-
+        "ld x11,  80(a0)", // a1
+        "ld x12,  88(a0)", // a2
+        "ld x13,  96(a0)", // a3
+        "ld x14, 104(a0)", // a4
+        "ld x15, 112(a0)", // a5
+        "ld x16, 120(a0)", // a6
+        "ld x17, 128(a0)", // a7
+        "ld x18, 136(a0)", // s2
+        "ld x19, 144(a0)", // s3
+        "ld x20, 152(a0)", // s4
+        "ld x21, 160(a0)", // s5
+        "ld x22, 168(a0)", // s6
+        "ld x23, 176(a0)", // s7
+        "ld x24, 184(a0)", // s8
+        "ld x25, 192(a0)", // s9
+        "ld x26, 200(a0)", // s10
+        "ld x27, 208(a0)", // s11
+        "ld x28, 216(a0)", // t3
+        "ld x29, 224(a0)", // t4
+        "ld x30, 232(a0)", // t5
+        "ld x31, 240(a0)", // t6
+        "ld x10,  72(a0)", // a0 — restore last (was TrapFrame pointer)
         "sret",
     );
 }

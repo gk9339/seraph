@@ -56,12 +56,16 @@ pub fn run(ctx: &TestContext) -> TestResult
         .map_err(|_| "integration::thread_lifecycle: cap_create_thread failed")?;
 
     let stack_top = ChildStack::top(core::ptr::addr_of!(CHILD_STACK));
-    thread_configure(th, blocker_entry as *const () as u64, stack_top, child_sync as u64)
-        .map_err(|_| "integration::thread_lifecycle: thread_configure failed")?;
+    thread_configure(
+        th,
+        blocker_entry as *const () as u64,
+        stack_top,
+        child_sync as u64,
+    )
+    .map_err(|_| "integration::thread_lifecycle: thread_configure failed")?;
 
     // ── Step 3: Start — child signals readiness. ──────────────────────────────
-    thread_start(th)
-        .map_err(|_| "integration::thread_lifecycle: thread_start failed")?;
+    thread_start(th).map_err(|_| "integration::thread_lifecycle: thread_start failed")?;
     let ready = signal_wait(sync)
         .map_err(|_| "integration::thread_lifecycle: signal_wait (readiness) failed")?;
     if ready != 0x1
@@ -70,8 +74,7 @@ pub fn run(ctx: &TestContext) -> TestResult
     }
 
     // ── Step 4: Stop while child is blocked. ──────────────────────────────────
-    thread_stop(th)
-        .map_err(|_| "integration::thread_lifecycle: thread_stop failed")?;
+    thread_stop(th).map_err(|_| "integration::thread_lifecycle: thread_stop failed")?;
 
     // ── Step 5: Read registers — verify IP is non-zero. ───────────────────────
     const BUF: usize = 512;
@@ -97,8 +100,7 @@ pub fn run(ctx: &TestContext) -> TestResult
         .map_err(|_| "integration::thread_lifecycle: thread_write_regs failed")?;
 
     // ── Step 7: Resume — child lands in phase2_entry and sends 0x2. ──────────
-    thread_start(th)
-        .map_err(|_| "integration::thread_lifecycle: thread_start (resume) failed")?;
+    thread_start(th).map_err(|_| "integration::thread_lifecycle: thread_start (resume) failed")?;
     let phase2_bits = signal_wait(sync)
         .map_err(|_| "integration::thread_lifecycle: signal_wait (phase2) failed")?;
     if phase2_bits != 0x2

@@ -74,4 +74,7 @@ pub fn bsp_hardware_id() -> u32
 }
 
 #[cfg(test)]
-pub fn bsp_hardware_id() -> u32 { 0 }
+pub fn bsp_hardware_id() -> u32
+{
+    0
+}

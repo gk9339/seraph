@@ -364,8 +364,8 @@ pub unsafe fn dealloc_object(ptr: core::ptr::NonNull<KernelObjectHeader>)
                 // Free the kernel stack back to the buddy allocator.
                 // Stack order matches sys_cap_create_thread (KERNEL_STACK_PAGES = 4).
                 let kstack_top = unsafe { (*tcb).kernel_stack_top };
-                let kstack_virt = kstack_top
-                    - (crate::sched::KERNEL_STACK_PAGES * crate::mm::PAGE_SIZE) as u64;
+                let kstack_virt =
+                    kstack_top - (crate::sched::KERNEL_STACK_PAGES * crate::mm::PAGE_SIZE) as u64;
                 let kstack_phys = crate::mm::paging::virt_to_phys(kstack_virt);
                 const STACK_ORDER: usize = 2; // 2^2 = 4 pages
                 unsafe {
@@ -456,10 +456,7 @@ pub unsafe fn dealloc_object(ptr: core::ptr::NonNull<KernelObjectHeader>)
                     if !ep.wait_set.is_null()
                     {
                         let ws = ep.wait_set as *mut crate::ipc::wait_set::WaitSetState;
-                        let _ = crate::ipc::wait_set::waitset_remove(
-                            ws,
-                            state as *mut u8,
-                        );
+                        let _ = crate::ipc::wait_set::waitset_remove(ws, state as *mut u8);
                         ep.wait_set = core::ptr::null_mut();
                         ep.wait_set_member_idx = 0;
                     }
@@ -535,10 +532,7 @@ pub unsafe fn dealloc_object(ptr: core::ptr::NonNull<KernelObjectHeader>)
                     if !sig.wait_set.is_null()
                     {
                         let ws = sig.wait_set as *mut crate::ipc::wait_set::WaitSetState;
-                        let _ = crate::ipc::wait_set::waitset_remove(
-                            ws,
-                            state as *mut u8,
-                        );
+                        let _ = crate::ipc::wait_set::waitset_remove(ws, state as *mut u8);
                         sig.wait_set = core::ptr::null_mut();
                         sig.wait_set_member_idx = 0;
                     }
@@ -581,10 +575,7 @@ pub unsafe fn dealloc_object(ptr: core::ptr::NonNull<KernelObjectHeader>)
                     if !eq.wait_set.is_null()
                     {
                         let ws = eq.wait_set as *mut crate::ipc::wait_set::WaitSetState;
-                        let _ = crate::ipc::wait_set::waitset_remove(
-                            ws,
-                            state as *mut u8,
-                        );
+                        let _ = crate::ipc::wait_set::waitset_remove(ws, state as *mut u8);
                         eq.wait_set = core::ptr::null_mut();
                         eq.wait_set_member_idx = 0;
                     }

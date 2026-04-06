@@ -327,7 +327,8 @@ impl Fdt
     {
         // Node state for one open node during traversal.
         #[derive(Clone, Copy)]
-        struct CpuNodeState {
+        struct CpuNodeState
+        {
             is_riscv_cpu: bool,
             reg_u32: u32,
             has_reg: bool,
@@ -371,27 +372,44 @@ impl Fdt
                 }
                 FDT_END_NODE =>
                 {
-                    if depth == 0 { break; }
+                    if depth == 0
+                    {
+                        break;
+                    }
                     depth -= 1;
                     if depth < MAX_DEPTH
                     {
                         let s = &states[depth];
                         if s.is_riscv_cpu && s.has_reg && !s.disabled
                         {
-                            if !callback(s.reg_u32) { break; }
+                            if !callback(s.reg_u32)
+                            {
+                                break;
+                            }
                         }
                     }
                 }
                 FDT_PROP =>
                 {
-                    let prop_len = match self.read_struct_u32(off) { Some(l) => l, None => break };
+                    let prop_len = match self.read_struct_u32(off)
+                    {
+                        Some(l) => l,
+                        None => break,
+                    };
                     off += 4;
-                    let nameoff = match self.read_struct_u32(off) { Some(n) => n, None => break };
+                    let nameoff = match self.read_struct_u32(off)
+                    {
+                        Some(n) => n,
+                        None => break,
+                    };
                     off += 4;
                     let data_off = off;
                     off += (prop_len + 3) & !3;
 
-                    if depth == 0 || depth > MAX_DEPTH { continue; }
+                    if depth == 0 || depth > MAX_DEPTH
+                    {
+                        continue;
+                    }
                     let state = &mut states[depth - 1];
                     let name = self.string_at(nameoff);
 
@@ -411,7 +429,8 @@ impl Fdt
                         let data = self.struct_slice(data_off, 4);
                         if data.len() >= 4
                         {
-                            state.reg_u32 = u32::from_be_bytes([data[0], data[1], data[2], data[3]]);
+                            state.reg_u32 =
+                                u32::from_be_bytes([data[0], data[1], data[2], data[3]]);
                             state.has_reg = true;
                         }
                     }
@@ -425,7 +444,8 @@ impl Fdt
                         }
                     }
                 }
-                FDT_NOP => {}
+                FDT_NOP =>
+                {}
                 FDT_END => break,
                 _ => break,
             }

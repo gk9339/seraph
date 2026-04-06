@@ -142,11 +142,18 @@ unsafe extern "C" fn common_exception_handler(frame: *const ExceptionFrame) -> !
     // SAFETY: frame pointer is valid — constructed by ISR stubs on this stack.
     let f = unsafe { &*frame };
     // Read CR2 (faulting address) for page faults (vector 14).
-    let cr2: u64 = if f.vector == 14 {
+    let cr2: u64 = if f.vector == 14
+    {
         let v: u64;
-        unsafe { core::arch::asm!("mov {}, cr2", out(reg) v, options(nostack, nomem)); }
+        unsafe {
+            core::arch::asm!("mov {}, cr2", out(reg) v, options(nostack, nomem));
+        }
         v
-    } else { 0 };
+    }
+    else
+    {
+        0
+    };
     crate::kprintln!(
         "EXCEPTION: vector={} error_code={:#x} rip={:#x} cs={:#x} rflags={:#x} cr2={:#x}",
         f.vector,
@@ -326,16 +333,16 @@ macro_rules! device_irq_stub {
     };
 }
 
-device_irq_stub!(isr_dev0,   0);
-device_irq_stub!(isr_dev1,   1);
-device_irq_stub!(isr_dev2,   2);
-device_irq_stub!(isr_dev3,   3);
-device_irq_stub!(isr_dev4,   4);
-device_irq_stub!(isr_dev5,   5);
-device_irq_stub!(isr_dev6,   6);
-device_irq_stub!(isr_dev7,   7);
-device_irq_stub!(isr_dev8,   8);
-device_irq_stub!(isr_dev9,   9);
+device_irq_stub!(isr_dev0, 0);
+device_irq_stub!(isr_dev1, 1);
+device_irq_stub!(isr_dev2, 2);
+device_irq_stub!(isr_dev3, 3);
+device_irq_stub!(isr_dev4, 4);
+device_irq_stub!(isr_dev5, 5);
+device_irq_stub!(isr_dev6, 6);
+device_irq_stub!(isr_dev7, 7);
+device_irq_stub!(isr_dev8, 8);
+device_irq_stub!(isr_dev9, 9);
 device_irq_stub!(isr_dev10, 10);
 device_irq_stub!(isr_dev11, 11);
 device_irq_stub!(isr_dev12, 12);
@@ -454,16 +461,16 @@ pub unsafe fn init()
     set(255, isr_spurious, 0);
 
     // Device IRQ stubs for IOAPIC GSIs 0–22 (vectors 33–55).
-    set(33, isr_dev0,  0);
-    set(34, isr_dev1,  0);
-    set(35, isr_dev2,  0);
-    set(36, isr_dev3,  0);
-    set(37, isr_dev4,  0);
-    set(38, isr_dev5,  0);
-    set(39, isr_dev6,  0);
-    set(40, isr_dev7,  0);
-    set(41, isr_dev8,  0);
-    set(42, isr_dev9,  0);
+    set(33, isr_dev0, 0);
+    set(34, isr_dev1, 0);
+    set(35, isr_dev2, 0);
+    set(36, isr_dev3, 0);
+    set(37, isr_dev4, 0);
+    set(38, isr_dev5, 0);
+    set(39, isr_dev6, 0);
+    set(40, isr_dev7, 0);
+    set(41, isr_dev8, 0);
+    set(42, isr_dev9, 0);
     set(43, isr_dev10, 0);
     set(44, isr_dev11, 0);
     set(45, isr_dev12, 0);
@@ -484,6 +491,34 @@ pub unsafe fn init()
         base: idt.as_ptr() as u64,
     };
     // SAFETY: idtr is live on the stack; idt is valid for the lifetime of the kernel.
+    unsafe {
+        core::arch::asm!(
+            "lidt [{0}]",
+            in(reg) &idtr,
+            options(readonly, nostack, preserves_flags),
+        );
+    }
+}
+
+/// Load the already-populated IDT on the current CPU (AP startup path).
+///
+/// Unlike [`init`], this function does not re-populate the IDT — it only
+/// executes `lidt` to load the shared BSS IDT on a new CPU. Must be called
+/// after the AP has loaded its own GDT (since gate descriptors reference
+/// `KERNEL_CS` which must be valid in the loaded GDT).
+///
+/// # Safety
+/// Ring 0. GDT must be loaded before calling. IDT must have been populated by
+/// [`init`] on the BSP first.
+#[cfg(not(test))]
+pub unsafe fn load()
+{
+    // SAFETY: IDT is in BSS and was populated by init(); valid for kernel lifetime.
+    let idt = unsafe { &*core::ptr::addr_of!(IDT) };
+    let idtr = Idtr {
+        limit: (core::mem::size_of_val(idt) - 1) as u16,
+        base: idt.as_ptr() as u64,
+    };
     unsafe {
         core::arch::asm!(
             "lidt [{0}]",

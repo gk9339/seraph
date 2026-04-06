@@ -31,6 +31,8 @@ pub const EFI_NOT_FOUND: EfiStatus = 0x8000_0000_0000_000E;
 
 /// Allocate pages at any available physical address.
 pub const ALLOCATE_ANY_PAGES: u32 = 0;
+/// Allocate pages at or below a specified maximum physical address.
+pub const ALLOCATE_MAX_ADDRESS: u32 = 1;
 /// Allocate pages at a specified physical address.
 pub const ALLOCATE_ADDRESS: u32 = 2;
 
@@ -635,6 +637,31 @@ pub unsafe fn allocate_address(
         return Err(BootError::OutOfMemory);
     }
     Ok(())
+}
+
+/// Allocate `count` pages at or below `max_phys` physical address.
+///
+/// Uses `AllocateMaxAddress` UEFI policy: the allocator picks any available
+/// pages with physical base ≤ `max_phys`. `max_phys` is an in-out parameter;
+/// on success it holds the actual allocated physical base.
+///
+/// # Safety
+/// `bs` must be valid boot services.
+pub unsafe fn allocate_pages_max_addr(
+    bs: *mut EfiBootServices,
+    max_phys: u64,
+    count: usize,
+) -> Result<u64, BootError>
+{
+    let mut addr: u64 = max_phys;
+    // SAFETY: bs is valid; addr is an in-out parameter.
+    let status =
+        unsafe { ((*bs).allocate_pages)(ALLOCATE_MAX_ADDRESS, EFI_LOADER_DATA, count, &mut addr) };
+    if status != EFI_SUCCESS
+    {
+        return Err(BootError::OutOfMemory);
+    }
+    Ok(addr)
 }
 
 /// Query the UEFI memory map.

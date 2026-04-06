@@ -19,7 +19,7 @@
 
 use syscall::{
     cap_copy, cap_create_cspace, cap_create_endpoint, cap_create_signal, cap_create_thread,
-    cap_delete, ipc_call, ipc_buffer_set, ipc_recv, ipc_reply, signal_send, signal_wait,
+    cap_delete, ipc_buffer_set, ipc_call, ipc_recv, ipc_reply, signal_send, signal_wait,
     thread_configure, thread_exit, thread_start, thread_yield,
 };
 
@@ -46,8 +46,8 @@ pub fn call_reply_recv(ctx: &TestContext) -> TestResult
     let ep = cap_create_endpoint().map_err(|_| "cap_create_endpoint for IPC test failed")?;
 
     // Notification signal: child sends 0xDEAD (success) or 0xBAD (failure).
-    let notify = syscall::cap_create_signal()
-        .map_err(|_| "cap_create_signal for IPC notify failed")?;
+    let notify =
+        syscall::cap_create_signal().map_err(|_| "cap_create_signal for IPC notify failed")?;
 
     // Build child CSpace: endpoint (SEND | GRANT) + notify signal (SIGNAL only).
     let child_cs = cap_create_cspace(16).map_err(|_| "child CSpace create failed")?;
@@ -63,8 +63,13 @@ pub fn call_reply_recv(ctx: &TestContext) -> TestResult
         .map_err(|_| "cap_create_thread for IPC test failed")?;
 
     let stack_top = ChildStack::top(core::ptr::addr_of!(CHILD_STACK));
-    thread_configure(child_th, caller_entry as *const () as u64, stack_top, child_arg)
-        .map_err(|_| "thread_configure for IPC test failed")?;
+    thread_configure(
+        child_th,
+        caller_entry as *const () as u64,
+        stack_top,
+        child_arg,
+    )
+    .map_err(|_| "thread_configure for IPC test failed")?;
     thread_start(child_th).map_err(|_| "thread_start for IPC test failed")?;
 
     // Server: wait for the child's IPC call.
@@ -104,8 +109,8 @@ pub fn recv_finds_queued_caller(ctx: &TestContext) -> TestResult
 {
     let ep = cap_create_endpoint()
         .map_err(|_| "cap_create_endpoint for recv_finds_queued_caller failed")?;
-    let done = cap_create_signal()
-        .map_err(|_| "cap_create_signal for recv_finds_queued_caller failed")?;
+    let done =
+        cap_create_signal().map_err(|_| "cap_create_signal for recv_finds_queued_caller failed")?;
 
     let child_cs = cap_create_cspace(16)
         .map_err(|_| "cap_create_cspace for recv_finds_queued_caller failed")?;
@@ -118,26 +123,29 @@ pub fn recv_finds_queued_caller(ctx: &TestContext) -> TestResult
     let th = cap_create_thread(ctx.aspace_cap, child_cs)
         .map_err(|_| "cap_create_thread for recv_finds_queued_caller failed")?;
     let stack_top = ChildStack::top(core::ptr::addr_of!(RECV_BLOCKS_STACK));
-    thread_configure(th, queued_caller_entry as *const () as u64, stack_top, child_arg)
-        .map_err(|_| "thread_configure for recv_finds_queued_caller failed")?;
+    thread_configure(
+        th,
+        queued_caller_entry as *const () as u64,
+        stack_top,
+        child_arg,
+    )
+    .map_err(|_| "thread_configure for recv_finds_queued_caller failed")?;
     thread_start(th).map_err(|_| "thread_start for recv_finds_queued_caller failed")?;
 
     // Yield CPU once so the child runs and blocks on ipc_call (no server yet).
     thread_yield().map_err(|_| "thread_yield for recv_finds_queued_caller failed")?;
 
     // Now call ipc_recv — the child should be on the send queue.
-    let (label, _) = ipc_recv(ep)
-        .map_err(|_| "ipc_recv for recv_finds_queued_caller failed")?;
+    let (label, _) = ipc_recv(ep).map_err(|_| "ipc_recv for recv_finds_queued_caller failed")?;
     if label != 0xFACE
     {
         return Err("ipc_recv returned wrong label (expected 0xFACE)");
     }
 
-    ipc_reply(0xC0DE, 0, &[])
-        .map_err(|_| "ipc_reply for recv_finds_queued_caller failed")?;
+    ipc_reply(0xC0DE, 0, &[]).map_err(|_| "ipc_reply for recv_finds_queued_caller failed")?;
 
-    let result = signal_wait(done)
-        .map_err(|_| "signal_wait done for recv_finds_queued_caller failed")?;
+    let result =
+        signal_wait(done).map_err(|_| "signal_wait done for recv_finds_queued_caller failed")?;
     if result != 0xDEAD
     {
         return Err("child post-reply check failed (expected 0xDEAD)");
@@ -173,7 +181,7 @@ pub fn ipc_buffer_misaligned_err(_ctx: &TestContext) -> TestResult
 /// `arg`: bits[15:0] = ep_slot, bits[31:16] = notify_slot (in child's CSpace).
 fn caller_entry(arg: u64) -> !
 {
-    let ep_slot     = (arg & 0xFFFF) as u32;
+    let ep_slot = (arg & 0xFFFF) as u32;
     let notify_slot = ((arg >> 16) & 0xFFFF) as u32;
 
     // Call the server. Blocks until server calls ipc_reply.
@@ -204,7 +212,7 @@ fn caller_entry(arg: u64) -> !
 /// `arg`: bits[15:0] = ep_slot, bits[31:16] = done_slot (in child's CSpace).
 fn queued_caller_entry(arg: u64) -> !
 {
-    let ep_slot   = (arg         & 0xFFFF) as u32;
+    let ep_slot = (arg & 0xFFFF) as u32;
     let done_slot = ((arg >> 16) & 0xFFFF) as u32;
 
     // ipc_call with no server yet — blocks on the endpoint's send queue.
@@ -215,7 +223,10 @@ fn queued_caller_entry(arg: u64) -> !
             let result = if reply_label == 0xC0DE { 0xDEAD } else { 0xBAD };
             signal_send(done_slot, result).ok();
         }
-        Err(_) => { signal_send(done_slot, 0xBAD).ok(); }
+        Err(_) =>
+        {
+            signal_send(done_slot, 0xBAD).ok();
+        }
     }
     thread_exit()
 }

@@ -167,6 +167,18 @@ fn collect_exclusions(info: &BootInfo) -> RangeList<MAX_EXCL>
         boot_info_addr + size_of::<BootInfo>() as u64,
     );
 
+    // AP SIPI trampoline page (x86-64 SMP). Reported as Usable by the bootloader
+    // (EfiBootServicesData → Usable), so without this exclusion the buddy
+    // allocator would hand it out for IST stacks or heap, zeroing the trampoline
+    // code that the BSP writes there during AP startup.
+    if info.ap_trampoline_page != 0
+    {
+        add(
+            info.ap_trampoline_page,
+            info.ap_trampoline_page + PAGE_SIZE as u64,
+        );
+    }
+
     excl
 }
 

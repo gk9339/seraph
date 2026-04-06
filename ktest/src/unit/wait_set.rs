@@ -104,8 +104,13 @@ pub fn blocking_wait(ctx: &TestContext) -> TestResult
         .map_err(|_| "cap_create_thread for blocking test failed")?;
 
     let stack_top = ChildStack::top(core::ptr::addr_of!(CHILD_STACK));
-    thread_configure(th, sender_entry as *const () as u64, stack_top, child_sig as u64)
-        .map_err(|_| "thread_configure for blocking test failed")?;
+    thread_configure(
+        th,
+        sender_entry as *const () as u64,
+        stack_top,
+        child_sig as u64,
+    )
+    .map_err(|_| "thread_configure for blocking test failed")?;
     thread_start(th).map_err(|_| "thread_start for blocking test failed")?;
 
     // Block until the child fires the signal.

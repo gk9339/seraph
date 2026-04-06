@@ -19,3 +19,11 @@ pub fn bsp_tss_ptr() -> u64
 {
     0
 }
+
+/// Per-AP GDT/TSS init stub for RISC-V.
+///
+/// RISC-V has no GDT or TSS. This no-op exists so that `kernel_entry_ap`
+/// compiles unchanged on both x86-64 and RISC-V. All arguments are ignored.
+#[cfg(not(test))]
+#[allow(unused_variables)]
+pub unsafe fn init_ap(_cpu_id: u32, _rsp0: u64, _ist1_top: u64, _ist2_top: u64) {}

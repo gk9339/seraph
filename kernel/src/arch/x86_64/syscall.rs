@@ -21,9 +21,9 @@
 //!
 //! We save R11 (user RFLAGS) to `SYSCALL_SCRATCH` immediately, use R11 to
 //! shuttle user RSP to `SYSCALL_USER_RSP`, switch to `SYSCALL_KERNEL_RSP`,
-//! then rebuild R11 from the scratch before saving the full TrapFrame.
+//! then rebuild R11 from the scratch before saving the full `TrapFrame.`
 //!
-//! ## Per-CPU layout (PerCpuData GS-relative offsets)
+//! ## Per-CPU layout (`PerCpuData` GS-relative offsets)
 //! - `gs:[8]`  (`PERCPU_KERNEL_RSP_OFFSET`) — kernel RSP loaded at entry
 //! - `gs:[16]` (`PERCPU_USER_RSP_OFFSET`)   — saved user RSP
 //! - `gs:[24]` (`PERCPU_SCRATCH_OFFSET`)    — temp save of R11 (user RFLAGS)

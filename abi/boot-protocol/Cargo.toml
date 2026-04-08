@@ -6,3 +6,6 @@ publish = false
 
 [lib]
 doctest = false
+
+[lints]
+workspace = true

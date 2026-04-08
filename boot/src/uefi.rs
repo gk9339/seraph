@@ -31,7 +31,8 @@ pub const EFI_NOT_FOUND: EfiStatus = 0x8000_0000_0000_000E;
 
 /// Allocate pages at any available physical address.
 pub const ALLOCATE_ANY_PAGES: u32 = 0;
-/// Allocate pages at or below a specified maximum physical address.
+/// Allocate pages at or below a specified maximum physical address (x86-64 only).
+#[cfg(target_arch = "x86_64")]
 pub const ALLOCATE_MAX_ADDRESS: u32 = 1;
 /// Allocate pages at a specified physical address.
 pub const ALLOCATE_ADDRESS: u32 = 2;
@@ -46,7 +47,7 @@ pub const EFI_LOADER_DATA: u32 = 2;
 
 /// `EFI_LOADED_IMAGE_PROTOCOL_GUID`
 /// `{5B1B31A1-9562-11D2-8E3F-00A0C969723B}`
-pub const EFI_LOADED_IMAGE_PROTOCOL_GUID: EfiGuid = EfiGuid {
+pub static EFI_LOADED_IMAGE_PROTOCOL_GUID: EfiGuid = EfiGuid {
     data1: 0x5B1B_31A1,
     data2: 0x9562,
     data3: 0x11D2,
@@ -55,7 +56,7 @@ pub const EFI_LOADED_IMAGE_PROTOCOL_GUID: EfiGuid = EfiGuid {
 
 /// `EFI_SIMPLE_FILE_SYSTEM_PROTOCOL_GUID`
 /// `{964E5B22-6459-11D2-8E39-00A0C969723B}`
-pub const EFI_SIMPLE_FILE_SYSTEM_PROTOCOL_GUID: EfiGuid = EfiGuid {
+pub static EFI_SIMPLE_FILE_SYSTEM_PROTOCOL_GUID: EfiGuid = EfiGuid {
     data1: 0x964E_5B22,
     data2: 0x6459,
     data3: 0x11D2,
@@ -64,7 +65,7 @@ pub const EFI_SIMPLE_FILE_SYSTEM_PROTOCOL_GUID: EfiGuid = EfiGuid {
 
 /// `EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID`
 /// `{9042A9DE-23DC-4A38-96FB-7ADED080516A}`
-pub const EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID: EfiGuid = EfiGuid {
+pub static EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID: EfiGuid = EfiGuid {
     data1: 0x9042_A9DE,
     data2: 0x23DC,
     data3: 0x4A38,
@@ -73,7 +74,7 @@ pub const EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID: EfiGuid = EfiGuid {
 
 /// `EFI_ACPI_20_TABLE_GUID` (ACPI 2.0 RSDP)
 /// `{8868E871-E4F1-11D3-BC22-0080C73C8881}`
-pub const EFI_ACPI_20_TABLE_GUID: EfiGuid = EfiGuid {
+pub static EFI_ACPI_20_TABLE_GUID: EfiGuid = EfiGuid {
     data1: 0x8868_E871,
     data2: 0xE4F1,
     data3: 0x11D3,
@@ -82,7 +83,7 @@ pub const EFI_ACPI_20_TABLE_GUID: EfiGuid = EfiGuid {
 
 /// `EFI_DTB_TABLE_GUID` (Device Tree Blob)
 /// `{B1B621D5-F19C-41A5-830B-D9152C69AAE0}`
-pub const EFI_DTB_TABLE_GUID: EfiGuid = EfiGuid {
+pub static EFI_DTB_TABLE_GUID: EfiGuid = EfiGuid {
     data1: 0xB1B6_21D5,
     data2: 0xF19C,
     data3: 0x41A5,
@@ -91,7 +92,7 @@ pub const EFI_DTB_TABLE_GUID: EfiGuid = EfiGuid {
 
 /// `EFI_FILE_INFO_ID` GUID
 /// `{09576E92-6D3F-11D2-8E39-00A0C969723B}`
-pub const EFI_FILE_INFO_ID: EfiGuid = EfiGuid {
+pub static EFI_FILE_INFO_ID: EfiGuid = EfiGuid {
     data1: 0x0957_6E92,
     data2: 0x6D3F,
     data3: 0x11D2,
@@ -176,11 +177,17 @@ pub const EFI_LOADER_CODE: u32 = 1;
 // EFI_LOADER_DATA is 2, shared with the allocation constant above.
 pub const EFI_BOOT_SERVICES_CODE: u32 = 3;
 pub const EFI_BOOT_SERVICES_DATA: u32 = 4;
+// Defined for completeness — used by memory_map translation logic that matches on all types.
+#[allow(dead_code)]
 pub const EFI_RUNTIME_SERVICES_CODE: u32 = 5;
+#[allow(dead_code)]
 pub const EFI_RUNTIME_SERVICES_DATA: u32 = 6;
 pub const EFI_ACPI_RECLAIM_MEMORY: u32 = 9;
+#[allow(dead_code)]
 pub const EFI_ACPI_MEMORY_NVS: u32 = 10;
+#[allow(dead_code)]
 pub const EFI_MEMORY_MAPPED_IO: u32 = 11;
+#[allow(dead_code)]
 pub const EFI_MEMORY_MAPPED_IO_PORT_SPACE: u32 = 12;
 pub const EFI_PERSISTENT_MEMORY: u32 = 14;
 
@@ -376,7 +383,7 @@ pub struct EfiFileInfo
     // Variable-length file_name (UTF-16) follows; omitted here.
 }
 
-/// Pixel format constants for GOP pixel_format field.
+/// Pixel format constants for GOP `pixel_format` field.
 const GOP_PIXEL_RED_GREEN_BLUE_RESERVED_8BIT_PER_COLOR: u32 = 0;
 const GOP_PIXEL_BLUE_GREEN_RED_RESERVED_8BIT_PER_COLOR: u32 = 1;
 const GOP_PIXEL_BIT_MASK: u32 = 2;
@@ -429,16 +436,16 @@ pub struct EfiGraphicsOutputProtocol
 // ── UEFI open-protocol attribute ──────────────────────────────────────────────
 
 /// `EFI_OPEN_PROTOCOL_BY_HANDLE_PROTOCOL` attribute for `OpenProtocol`.
-const EFI_OPEN_PROTOCOL_BY_HANDLE_PROTOCOL: u32 = 0x00000001;
+const EFI_OPEN_PROTOCOL_BY_HANDLE_PROTOCOL: u32 = 0x0000_0001;
 
-/// LocateHandleBuffer search type: return all handles in the system.
+/// `LocateHandleBuffer` search type: return all handles in the system.
 const LOCATE_ALL_HANDLES: u32 = 0;
 
-/// LocateHandleBuffer search type: return handles supporting a given protocol.
+/// `LocateHandleBuffer` search type: return handles supporting a given protocol.
 const LOCATE_BY_PROTOCOL: u32 = 2;
 
 /// Read-only file open mode.
-const EFI_FILE_MODE_READ: u64 = 0x0000000000000001;
+const EFI_FILE_MODE_READ: u64 = 0x0000_0000_0000_0001;
 
 // ── Safe wrappers ─────────────────────────────────────────────────────────────
 
@@ -457,8 +464,8 @@ pub unsafe fn get_loaded_image(
     let status = unsafe {
         ((*bs).open_protocol)(
             image,
-            &EFI_LOADED_IMAGE_PROTOCOL_GUID,
-            &mut iface,
+            core::ptr::addr_of!(EFI_LOADED_IMAGE_PROTOCOL_GUID),
+            core::ptr::addr_of_mut!(iface),
             image,
             core::ptr::null_mut(),
             EFI_OPEN_PROTOCOL_BY_HANDLE_PROTOCOL,
@@ -468,7 +475,7 @@ pub unsafe fn get_loaded_image(
     {
         return Err(BootError::ProtocolNotFound("EFI_LOADED_IMAGE_PROTOCOL"));
     }
-    Ok(iface as *mut EfiLoadedImageProtocol)
+    Ok(iface.cast::<EfiLoadedImageProtocol>())
 }
 
 /// Open the ESP root volume via `EFI_SIMPLE_FILE_SYSTEM_PROTOCOL`.
@@ -484,7 +491,11 @@ pub unsafe fn open_esp_volume(
     let mut iface: *mut core::ffi::c_void = core::ptr::null_mut();
     // SAFETY: caller guarantees bs and device are valid.
     let status = unsafe {
-        ((*bs).handle_protocol)(device, &EFI_SIMPLE_FILE_SYSTEM_PROTOCOL_GUID, &mut iface)
+        ((*bs).handle_protocol)(
+            device,
+            core::ptr::addr_of!(EFI_SIMPLE_FILE_SYSTEM_PROTOCOL_GUID),
+            core::ptr::addr_of_mut!(iface),
+        )
     };
     if status != EFI_SUCCESS
     {
@@ -492,10 +503,10 @@ pub unsafe fn open_esp_volume(
             "EFI_SIMPLE_FILE_SYSTEM_PROTOCOL",
         ));
     }
-    let fs = iface as *mut EfiSimpleFileSystemProtocol;
+    let fs = iface.cast::<EfiSimpleFileSystemProtocol>();
     let mut root: *mut EfiFileProtocol = core::ptr::null_mut();
     // SAFETY: fs is a valid protocol pointer.
-    let status = unsafe { ((*fs).open_volume)(fs, &mut root) };
+    let status = unsafe { ((*fs).open_volume)(fs, core::ptr::addr_of_mut!(root)) };
     if status != EFI_SUCCESS
     {
         return Err(BootError::UefiError(status));
@@ -518,7 +529,8 @@ pub unsafe fn open_file(
 {
     let mut file: *mut EfiFileProtocol = core::ptr::null_mut();
     // SAFETY: root is valid; path is a null-terminated UTF-16 string.
-    let status = unsafe { ((*root).open)(root, &mut file, path, EFI_FILE_MODE_READ, 0) };
+    let status =
+        unsafe { ((*root).open)(root, core::ptr::addr_of_mut!(file), path, EFI_FILE_MODE_READ, 0) };
     if status != EFI_SUCCESS
     {
         return Err(BootError::FileNotFound(name));
@@ -538,8 +550,8 @@ pub unsafe fn file_size(file: *mut EfiFileProtocol) -> Result<u64, BootError>
     let status = unsafe {
         ((*file).get_info)(
             file,
-            &EFI_FILE_INFO_ID,
-            &mut info_size,
+            core::ptr::addr_of!(EFI_FILE_INFO_ID),
+            core::ptr::addr_of_mut!(info_size),
             core::ptr::null_mut(),
         )
     };
@@ -556,9 +568,9 @@ pub unsafe fn file_size(file: *mut EfiFileProtocol) -> Result<u64, BootError>
     let status = unsafe {
         ((*file).get_info)(
             file,
-            &EFI_FILE_INFO_ID,
-            &mut buf_size,
-            buf.as_mut_ptr() as *mut core::ffi::c_void,
+            core::ptr::addr_of!(EFI_FILE_INFO_ID),
+            core::ptr::addr_of_mut!(buf_size),
+            buf.as_mut_ptr().cast::<core::ffi::c_void>(),
         )
     };
     if status != EFI_SUCCESS
@@ -567,7 +579,10 @@ pub unsafe fn file_size(file: *mut EfiFileProtocol) -> Result<u64, BootError>
     }
 
     // SAFETY: buf starts with EfiFileInfo, which is correctly laid out.
-    let info = unsafe { &*(buf.as_ptr() as *const EfiFileInfo) };
+    // cast_ptr_alignment: the stack buffer is not guaranteed 8-byte aligned; EfiFileInfo
+    // fields are accessed individually through the reference, which the compiler handles.
+    #[allow(clippy::cast_ptr_alignment)]
+    let info = unsafe { &*(buf.as_ptr().cast::<EfiFileInfo>()) };
     Ok(info.file_size)
 }
 
@@ -585,8 +600,8 @@ pub unsafe fn file_read(file: *mut EfiFileProtocol, buffer: &mut [u8]) -> Result
     let status = unsafe {
         ((*file).read)(
             file,
-            &mut size,
-            buffer.as_mut_ptr() as *mut core::ffi::c_void,
+            core::ptr::addr_of_mut!(size),
+            buffer.as_mut_ptr().cast::<core::ffi::c_void>(),
         )
     };
     if status != EFI_SUCCESS
@@ -607,8 +622,14 @@ pub unsafe fn allocate_pages(bs: *mut EfiBootServices, count: usize) -> Result<u
 {
     let mut addr: u64 = 0;
     // SAFETY: bs is valid; addr is an output parameter.
-    let status =
-        unsafe { ((*bs).allocate_pages)(ALLOCATE_ANY_PAGES, EFI_LOADER_DATA, count, &mut addr) };
+    let status = unsafe {
+        ((*bs).allocate_pages)(
+            ALLOCATE_ANY_PAGES,
+            EFI_LOADER_DATA,
+            count,
+            core::ptr::addr_of_mut!(addr),
+        )
+    };
     if status != EFI_SUCCESS
     {
         return Err(BootError::OutOfMemory);
@@ -630,8 +651,14 @@ pub unsafe fn allocate_address(
 {
     let mut out_addr = addr;
     // SAFETY: bs is valid; out_addr is an in-out parameter (ALLOCATE_ADDRESS mode).
-    let status =
-        unsafe { ((*bs).allocate_pages)(ALLOCATE_ADDRESS, EFI_LOADER_DATA, count, &mut out_addr) };
+    let status = unsafe {
+        ((*bs).allocate_pages)(
+            ALLOCATE_ADDRESS,
+            EFI_LOADER_DATA,
+            count,
+            core::ptr::addr_of_mut!(out_addr),
+        )
+    };
     if status != EFI_SUCCESS
     {
         return Err(BootError::OutOfMemory);
@@ -645,8 +672,11 @@ pub unsafe fn allocate_address(
 /// pages with physical base ≤ `max_phys`. `max_phys` is an in-out parameter;
 /// on success it holds the actual allocated physical base.
 ///
+/// Only used on x86-64 (AP SIPI trampoline must be below 1 MiB).
+///
 /// # Safety
 /// `bs` must be valid boot services.
+#[cfg(target_arch = "x86_64")]
 pub unsafe fn allocate_pages_max_addr(
     bs: *mut EfiBootServices,
     max_phys: u64,
@@ -655,8 +685,14 @@ pub unsafe fn allocate_pages_max_addr(
 {
     let mut addr: u64 = max_phys;
     // SAFETY: bs is valid; addr is an in-out parameter.
-    let status =
-        unsafe { ((*bs).allocate_pages)(ALLOCATE_MAX_ADDRESS, EFI_LOADER_DATA, count, &mut addr) };
+    let status = unsafe {
+        ((*bs).allocate_pages)(
+            ALLOCATE_MAX_ADDRESS,
+            EFI_LOADER_DATA,
+            count,
+            core::ptr::addr_of_mut!(addr),
+        )
+    };
     if status != EFI_SUCCESS
     {
         return Err(BootError::OutOfMemory);
@@ -686,11 +722,11 @@ pub unsafe fn get_memory_map(bs: *mut EfiBootServices) -> Result<MemoryMapResult
     // SAFETY: Null map pointer with zero size requests the required size.
     let status = unsafe {
         ((*bs).get_memory_map)(
-            &mut map_size,
+            core::ptr::addr_of_mut!(map_size),
             core::ptr::null_mut(),
-            &mut map_key,
-            &mut descriptor_size,
-            &mut descriptor_version,
+            core::ptr::addr_of_mut!(map_key),
+            core::ptr::addr_of_mut!(descriptor_size),
+            core::ptr::addr_of_mut!(descriptor_version),
         )
     };
     // EFI_BUFFER_TOO_SMALL is the expected result when querying the size.
@@ -702,21 +738,23 @@ pub unsafe fn get_memory_map(bs: *mut EfiBootServices) -> Result<MemoryMapResult
     // Add slack for the buffer allocation itself (which creates one new entry).
     map_size += 16 * descriptor_size;
 
-    let page_size: usize = 4096;
-    let pages = (map_size + page_size - 1) / page_size;
+    let pages = map_size.div_ceil(4096);
     // SAFETY: bs is valid.
     let buffer_phys = unsafe { allocate_pages(bs, pages)? };
 
     // Second call: fill the buffer. This call's map_key is the one to use.
-    map_size = pages * page_size;
+    map_size = pages * 4096;
     // SAFETY: buffer_phys is a valid allocated region of map_size bytes.
+    // cast_possible_truncation: buffer_phys is a UEFI physical address; on all supported
+    // targets (x86_64, riscv64) usize is 64-bit, so the cast is exact.
+    #[allow(clippy::cast_possible_truncation)]
     let status = unsafe {
         ((*bs).get_memory_map)(
-            &mut map_size,
+            core::ptr::addr_of_mut!(map_size),
             buffer_phys as *mut EfiMemoryDescriptor,
-            &mut map_key,
-            &mut descriptor_size,
-            &mut descriptor_version,
+            core::ptr::addr_of_mut!(map_key),
+            core::ptr::addr_of_mut!(descriptor_size),
+            core::ptr::addr_of_mut!(descriptor_version),
         )
     };
     if status != EFI_SUCCESS
@@ -765,13 +803,16 @@ pub unsafe fn exit_boot_services(
     let mut descriptor_version: u32 = 0;
     let mut map_size = map.map_size;
     // SAFETY: buffer_phys is the existing allocated buffer.
+    // cast_possible_truncation: buffer_phys is a UEFI u64 address; usize is 64-bit on all
+    // supported targets, so the cast to *mut is exact.
+    #[allow(clippy::cast_possible_truncation)]
     let status = unsafe {
         ((*bs).get_memory_map)(
-            &mut map_size,
+            core::ptr::addr_of_mut!(map_size),
             map.buffer_phys as *mut EfiMemoryDescriptor,
-            &mut map.map_key,
-            &mut descriptor_size,
-            &mut descriptor_version,
+            core::ptr::addr_of_mut!(map.map_key),
+            core::ptr::addr_of_mut!(descriptor_size),
+            core::ptr::addr_of_mut!(descriptor_version),
         )
     };
     if status != EFI_SUCCESS
@@ -814,10 +855,10 @@ pub unsafe fn query_gop(bs: *mut EfiBootServices) -> Option<FramebufferInfo>
     let status = unsafe {
         ((*bs).locate_handle_buffer)(
             LOCATE_BY_PROTOCOL,
-            &EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID,
+            core::ptr::addr_of!(EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID),
             core::ptr::null_mut(),
-            &mut count,
-            &mut handles,
+            core::ptr::addr_of_mut!(count),
+            core::ptr::addr_of_mut!(handles),
         )
     };
     if status != EFI_SUCCESS || handles.is_null()
@@ -834,13 +875,17 @@ pub unsafe fn query_gop(bs: *mut EfiBootServices) -> Option<FramebufferInfo>
         let mut iface: *mut core::ffi::c_void = core::ptr::null_mut();
         // SAFETY: bs is valid; handle is from the LocateHandleBuffer result.
         let s = unsafe {
-            ((*bs).handle_protocol)(handle, &EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID, &mut iface)
+            ((*bs).handle_protocol)(
+                handle,
+                core::ptr::addr_of!(EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID),
+                core::ptr::addr_of_mut!(iface),
+            )
         };
         if s != EFI_SUCCESS || iface.is_null()
         {
             continue;
         }
-        let gop = iface as *mut EfiGraphicsOutputProtocol;
+        let gop = iface.cast::<EfiGraphicsOutputProtocol>();
         // SAFETY: gop is a valid protocol pointer; mode is populated by firmware.
         let mode = unsafe { &*(*gop).mode };
         // SAFETY: mode.info is populated by firmware.
@@ -895,7 +940,7 @@ pub unsafe fn query_gop(bs: *mut EfiBootServices) -> Option<FramebufferInfo>
 
     // SAFETY: handles was allocated by LocateHandleBuffer; must be freed with FreePool.
     unsafe {
-        ((*bs).free_pool)(handles as *mut core::ffi::c_void);
+        ((*bs).free_pool)(handles.cast::<core::ffi::c_void>());
     }
 
     result
@@ -924,8 +969,8 @@ pub unsafe fn connect_all_controllers(bs: *mut EfiBootServices)
             LOCATE_ALL_HANDLES,
             core::ptr::null(),
             core::ptr::null_mut(),
-            &mut count,
-            &mut handles,
+            core::ptr::addr_of_mut!(count),
+            core::ptr::addr_of_mut!(handles),
         )
     };
     if status != EFI_SUCCESS || handles.is_null()
@@ -951,7 +996,7 @@ pub unsafe fn connect_all_controllers(bs: *mut EfiBootServices)
 
     // SAFETY: handles was allocated by LocateHandleBuffer; must be freed.
     unsafe {
-        ((*bs).free_pool)(handles as *mut core::ffi::c_void);
+        ((*bs).free_pool)(handles.cast::<core::ffi::c_void>());
     }
 }
 

@@ -10,14 +10,12 @@
 - `docs/coding-standards.md` is a system-wide, non-negotiable authority.
   - All code changes MUST comply with its rules.
   - Any deviation MUST be minimal, local, and explicitly justified at the point of use.
+- `docs/documentation-standards.md` is a system-wide, non-negotiable authority.
+  - All documentation changes MUST comply with its rules.
 
 
 ## Documentation invariants
-- Higher-level documents may summarize but MUST NOT specify behavior already defined elsewhere.
-- Lower-level documents are authoritative over summaries.
-- When implementation changes invalidate documentation:
-  - The most specific authoritative document MUST be updated first.
-  - Any higher-level summaries that reference it MUST be reviewed and updated if necessary.
+See [docs/documentation-standards.md](docs/documentation-standards.md) — non-negotiable authority.
 
 ## Operating procedure
 - Documentation MUST be consumed by scope:

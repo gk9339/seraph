@@ -1,25 +1,26 @@
 # Architecture Overview
 
+This document describes Seraph's component structure and the boundaries between
+kernel mechanisms and userspace policy.
+
+---
+
 ## Philosophy
 
 Seraph is a microkernel‑based operating system. The kernel is a minimal, trusted
 component that provides only core mechanisms: isolation, communication, scheduling,
 memory management, and capability enforcement.
 
-All policy, device support, and system services live in userspace. The kernel does
-not implement protocols or higher‑level abstractions; it enforces boundaries and
-provides primitives that userspace composes into a complete system.
+All policy and services live in userspace.
 
-This boundary is strict by design. Expanding kernel functionality increases the
-trusted computing base and the impact of failure, and must be treated as an
-architectural decision rather than an implementation shortcut.
+Expanding kernel scope increases the TCB and MUST be treated as an architectural
+decision.
 
 ---
 
 ## Kernel Responsibilities
 
-The kernel provides only the core mechanisms required to support the system. It
-implements no policy and does not interpret higher‑level abstractions.
+The kernel provides only the core mechanisms required to support the system.
 
 The kernel is responsible for:
 
@@ -64,58 +65,43 @@ services and applications. All services communicate exclusively via IPC and oper
 under explicit capability grants.
 
 **init**
-The first userspace process, started by the kernel at the end of boot. init is a
-minimal bootstrapper: it starts procmgr using a built-in ELF parser, then requests
-that procmgr start the remaining early services (devmgr, svcmgr, drivers, VFS),
-delegates all capabilities, and exits. init does not supervise services and is not
-long-lived. See `boot-protocol.md`.
+First userspace process. Starts procmgr, requests early services (devmgr, svcmgr,
+drivers, vfsd), delegates capabilities, and exits. See [boot-protocol.md](boot-protocol.md).
 
 **procmgr**
-Userspace process lifecycle manager, started by init. procmgr handles all subsequent
-process creation, ELF loading, and teardown. No process is created after early boot
-without going through procmgr (except svcmgr restarting procmgr itself).
+Process lifecycle manager. All post-boot process creation, ELF loading, and teardown
+go through procmgr.
 
 **svcmgr**
-Service health monitor, started by init before init exits. svcmgr monitors running
-services, detects crashes, and requests restarts through procmgr. svcmgr holds raw
-process-creation syscall capabilities as a fallback to restart procmgr if procmgr
-crashes.
+Service health monitor. Detects crashes and requests restarts via procmgr; holds
+direct process-creation capabilities to restart procmgr itself.
 
 **devmgr**
-The device manager, launched during bootstrap. devmgr receives platform resource
-capabilities and read‑only access to firmware tables from init, enumerates devices,
-spawns driver processes, and delegates per‑device capabilities. See `device-management.md`.
+Device manager. Receives platform resource capabilities from init, enumerates devices,
+spawns driver processes, and delegates per-device capabilities.
+See [device-management.md](device-management.md).
 
 **drivers**
-Device drivers run as isolated userspace processes. Each driver accesses hardware only
-through capabilities granted by devmgr and the kernel. No driver code executes in
-kernel space.
+Isolated userspace processes. Access hardware only through capabilities granted by
+devmgr.
 
 **vfsd**
-The virtual filesystem daemon. vfsd provides a unified namespace over one or more
-filesystem driver processes (see `fs/`). Block device access is mediated via driver
-IPC; vfsd delegates per-filesystem operations to the appropriate fs driver.
+Unified filesystem namespace over separate fs driver processes. Delegates operations
+to the appropriate driver.
 
 **fs drivers**
-Filesystem implementations (FAT, ext4, tmpfs, etc.) run as separate binaries in
-`fs/`, launched by vfsd. Each fs driver communicates with block device drivers in
-`drivers/` via IPC and with vfsd via the fs driver IPC protocol. Filesystem drivers
-are distinct from hardware device drivers: they operate on block I/O streams, not
-hardware registers.
+Separate binaries in `fs/` (FAT, ext4, tmpfs, etc.), launched by vfsd. Communicate
+with block drivers via IPC.
 
 **netd**
-The network stack daemon. netd manages network interfaces via driver IPC, implements
-network protocols, and exposes socket‑like interfaces to applications.
+Network stack. Manages interfaces via driver IPC and exposes socket-like endpoints
+to applications.
 
 **logd**
-The logging daemon. logd receives structured log messages via IPC from the kernel and
-all userspace components, and routes them to configured sinks. The kernel retains a
-direct serial logger for pre-logd output and panic reporting.
+Receives structured log messages via IPC and routes them to configured sinks.
 
 **base**
-General‑purpose userspace applications and utilities (shell, terminal, editor,
-core tools). These are unprivileged applications with no authority beyond their
-capabilities.
+Unprivileged applications (shell, terminal, editor, core tools).
 
 ---
 
@@ -183,7 +169,7 @@ support port I/O.
 **DMA**
 DMA access requires an explicit DMA capability. On platforms with an IOMMU, the
 kernel programs the IOMMU to restrict DMA to authorised regions. On platforms
-without an IOMMU, DMA isolation is not enforced; callers must explicitly acknowledge
+without an IOMMU, DMA isolation is not enforced; callers MUST explicitly acknowledge
 this when granting DMA access. See `device-management.md`.
 
 **Interrupts**
@@ -193,52 +179,27 @@ after handling.
 
 ---
 
-## IPC Overview
+## IPC (summary — [ipc-design.md](ipc-design.md))
 
-All inter‑process communication in Seraph occurs via the kernel’s IPC mechanism.
-There are no implicit shared‑memory shortcuts; any shared memory is established
-explicitly via capability‑granted mappings.
+All inter‑process communication occurs via the kernel’s IPC mechanism. Shared memory
+is established only via explicit capability-granted mappings.
 
-Seraph uses a hybrid IPC model:
-
-- **Synchronous calls** for structured request/reply interactions between services.
-- **Asynchronous notifications** for events such as interrupts and completion signals.
-
-Processes may block on a set of endpoints and notifications, enabling event‑driven
-and multiplexed I/O patterns.
-
-Full IPC semantics, message formats, endpoint lifecycle rules, and capability‑passing
-behavior are defined in [ipc-design.md](ipc-design.md).
+- **Synchronous calls** for structured request/reply between services.
+- **Asynchronous notifications** for interrupts and completion signals.
 
 ---
 
-## Memory Model Overview
+## Memory Model (summary — [memory-model.md](memory-model.md))
 
-The kernel occupies the higher half of the virtual address space on both
-architectures. Each userspace process has its own isolated address space.
-Physical memory is managed by the kernel's frame allocator; virtual mappings
-are managed per address space. The kernel enforces W^X (no page is simultaneously
-writable and executable) at the page table level.
-
-Full virtual address space layout, frame allocator design, and heap management
-are documented in [memory-model.md](memory-model.md).
+Higher-half kernel layout on both architectures. Each process has an isolated address
+space. The kernel enforces W^X at the page table level.
 
 ---
 
-## Capability Model Overview
+## Capability Model (summary — [capability-model.md](capability-model.md))
 
-
-Capabilities are the sole access control mechanism in Seraph. Every resource—
-memory regions, IPC endpoints, interrupt lines, and CPU time—is represented by a
-capability and enforced by the kernel.
-
-A thread may interact with a resource only if it holds a valid capability for it.
-Capabilities may be delegated and revoked by their issuer. There is no separate
-permission or identity-based authority model.
-
-
-The complete capability design, including delegation, revocation, and lifetime
-rules, is defined in [capability-model.md](capability-model.md).
+Capabilities are the sole access control mechanism. Every resource is represented by
+a capability; threads MUST hold a valid capability to access any resource.
 
 ---
 
@@ -247,14 +208,11 @@ rules, is defined in [capability-model.md](capability-model.md).
 Seraph targets 64‑bit architectures with modern MMU and privilege support.
 
 **x86‑64**
-Seraph supports the x86‑64 architecture and makes use of contemporary architectural
-features where available (e.g. APIC, PCIDs, IOMMU). Legacy x86 variants (32‑bit and
-earlier) are not supported.
+Uses APIC, PCIDs, IOMMU where available. 32-bit and legacy x86 are not supported.
 
 **RISC‑V (RV64GC)**
-Seraph supports the RISC‑V 64‑bit architecture with the RV64GC base ISA and standard
-extensions (IMAFD with compressed instructions). More minimal or embedded‑focused
-configurations are not targeted.
+RV64GC base ISA (IMAFD + compressed). Embedded or non-standard configurations are
+not targeted.
 
 See [coding-standards.md#architecture-specific-code](coding-standards.md#architecture-specific-code)
 for the architectural code isolation rules.
@@ -264,11 +222,15 @@ for the architectural code isolation rules.
 ## Non-Goals
 
 **POSIX API compatibility.**
-POSIX was designed around monolithic kernel assumptions.
-`fork()`, signals, and related APIs are a poor fit for a capability-based microkernel.
 Seraph defines its own native interfaces. Filesystem formats and network protocols
-are adopted where useful as data formats, not as API commitments.
+may be adopted as data formats, not as API commitments.
 
 **Binary compatibility with other operating systems.**
 Seraph does not aim to run Linux or other OS binaries.
+
+---
+
+## Summarized By
+
+None
 

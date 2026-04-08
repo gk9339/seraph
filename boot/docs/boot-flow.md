@@ -1,15 +1,8 @@
 # Boot Flow
 
-## Overview
-
-This document describes the bootloader's execution from `efi_main` to the kernel
-handoff. It is the orchestration document for the `boot/loader/` crate — each
-numbered step below has a dedicated document covering its implementation. The
-contract that the bootloader must satisfy at the point of handoff is defined in
-[docs/boot-protocol.md](../../docs/boot-protocol.md); read that document first.
-
-This document covers *how* the bootloader fulfils that contract, not what the
-contract requires.
+This document describes the bootloader's execution from `efi_main` to kernel handoff.
+The contract at handoff is defined in [docs/boot-protocol.md](../../docs/boot-protocol.md);
+this document covers how the bootloader fulfils that contract.
 
 ---
 
@@ -264,3 +257,9 @@ not import any crate that has an `std` dependency. When the boot protocol change
 an incompatible way (new fields, reordered fields, changed enum discriminants),
 `BOOT_PROTOCOL_VERSION` is incremented and both the bootloader and the kernel are
 updated in the same commit.
+
+---
+
+## Summarized By
+
+None

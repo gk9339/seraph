@@ -42,7 +42,7 @@ const SPCR_GAS_ADDRESS: usize = SPCR_OFF_GAS + 4; // u64
 /// Find the UART base address from the ACPI SPCR table.
 ///
 /// Returns `None` if RSDP is invalid, SPCR is not found, or the base address
-/// space is not MMIO (address_space_id != 0).
+/// space is not MMIO (`address_space_id != 0`).
 ///
 /// # Safety
 /// `rsdp_addr` must be a physical address of a valid, identity-mapped RSDP.
@@ -145,7 +145,11 @@ pub unsafe fn discover_uart(st: *mut EfiSystemTable)
         let rsdp_addr = rsdp_ptr as u64;
         if let Some(base) = unsafe { find_spcr_uart_base(rsdp_addr) }
         {
-            unsafe { UART_BASE_ADDR = base as usize };
+            // SAFETY: usize is 64-bit on all supported UEFI targets; no truncation.
+            #[allow(clippy::cast_possible_truncation)]
+            unsafe {
+                UART_BASE_ADDR = base as usize;
+            };
             return;
         }
     }
@@ -156,8 +160,11 @@ pub unsafe fn discover_uart(st: *mut EfiSystemTable)
         let dtb_addr = dtb_ptr as u64;
         if let Some(base) = unsafe { find_dtb_uart_base(dtb_addr) }
         {
-            unsafe { UART_BASE_ADDR = base as usize };
-            return;
+            // SAFETY: usize is 64-bit on all supported UEFI targets; no truncation.
+            #[allow(clippy::cast_possible_truncation)]
+            unsafe {
+                UART_BASE_ADDR = base as usize;
+            };
         }
     }
     // Both failed: UART_BASE_ADDR retains the QEMU default (0x10000000).

@@ -1,15 +1,11 @@
 # Page Tables
 
-## Overview
+The bootloader establishes minimal initial page tables before kernel handoff: enough
+for the kernel to execute at its ELF virtual addresses and read `BootInfo` before its
+own page tables are ready. The kernel replaces them during Phase 3.
 
-The bootloader establishes a minimal set of initial page tables before handing off to
-the kernel. These tables serve one purpose: allow the kernel to begin executing at its
-ELF virtual addresses and to access `BootInfo` and the boot modules before its own
-page tables are ready. The kernel replaces them during Phase 3 of its initialisation
-sequence; the bootloader's tables are temporary.
-
-All page table frames are allocated via `AllocatePages` before `ExitBootServices`.
-No page table allocation occurs after the firmware exits.
+All page table frames MUST be allocated via `AllocatePages` before `ExitBootServices`;
+no page table allocation occurs after the firmware exits.
 
 ---
 
@@ -272,3 +268,9 @@ The bootloader records the root page table's physical address but does not
 separately track intermediate frames. The kernel does not need to enumerate them
 — it simply replaces the entire page table structure during Phase 3 and the old
 frames become reclaimable as `EfiLoaderData` entries in the memory map are processed.
+
+---
+
+## Summarized By
+
+None

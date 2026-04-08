@@ -76,7 +76,7 @@ fn bin_index(effective: usize) -> Option<usize>
 /// Returns the smallest order O such that `2^O * PAGE_SIZE >= size`.
 fn large_order(size: usize) -> usize
 {
-    let pages = (size + PAGE_SIZE - 1) / PAGE_SIZE;
+    let pages = size.div_ceil(PAGE_SIZE);
     if pages <= 1
     {
         return 0;

@@ -57,6 +57,10 @@
 //! `rcx`/`r11` GPR slots. Userspace wrappers must not rely on `rcx`/`r11`
 //! being preserved across a syscall.
 
+// cast_sign_loss: i64→u64 register interpretation; sign semantics are intentional (SYSRET RIP).
+// cast_lossless: u16→u64 segment register widening.
+#![allow(clippy::cast_sign_loss, clippy::cast_lossless)]
+
 /// Full user-mode register snapshot saved on the kernel stack at every
 /// kernel entry (syscall, exception, or interrupt from ring-3).
 ///
@@ -94,9 +98,9 @@ pub struct TrapFrame
     pub rflags: u64,
     /// User-mode stack pointer (saved from a per-CPU scratch location).
     pub rsp: u64,
-    /// User code segment selector (e.g. 0x23 = USER_CS, ring 3).
+    /// User code segment selector (e.g. 0x23 = `USER_CS`, ring 3).
     pub cs: u64,
-    /// User stack segment selector (e.g. 0x1B = USER_DS, ring 3).
+    /// User stack segment selector (e.g. 0x1B = `USER_DS`, ring 3).
     pub ss: u64,
     /// FS.base MSR value — user-mode thread-local-storage pointer.
     pub fs_base: u64,

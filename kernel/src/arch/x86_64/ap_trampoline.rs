@@ -41,20 +41,24 @@
 //! - If the trampoline binary changes, recompute byte offsets carefully and
 //!   update `TRAMP_PATCH_*` constants. The host-side tests verify all offsets.
 
+// cast_possible_truncation: u64→u32 trampoline vector shift; value < 256 by design.
+#![allow(clippy::cast_possible_truncation)]
+
 #[cfg(not(test))]
 use crate::mm::paging::DIRECT_MAP_BASE;
 
 // ── Trampoline byte offsets ───────────────────────────────────────────────────
 
 /// Offset of the 6-byte far-jmp target used by real-mode code to jump to PM32.
-/// Layout: [u32 little-endian: AP_PAGE+0x90, u16 little-endian: 0x0008].
+/// Layout: [u32 little-endian: `AP_PAGE+0x90`, u16 little-endian: 0x0008].
 pub const TRAMP_PATCH_RM_FAR_JMP: usize = 0x20;
 
 /// Offset of the GDTR descriptor within the trampoline page.
-/// Layout: [u16: GDT limit = 0x001F, u32: GDT linear base = AP_PAGE+0x48].
+/// Layout: [u16: GDT limit = 0x001F, u32: GDT linear base = `AP_PAGE+0x48`].
 pub const TRAMP_PATCH_GDTR: usize = 0x40;
 
 /// Offset of the GDT within the trampoline page (four 8-byte descriptors).
+#[allow(dead_code)] // Documented layout constant; used as a reference even if not accessed directly
 pub const TRAMP_GDT_OFFSET: usize = 0x48;
 
 /// Byte offset of AP startup parameters within the trampoline page.
@@ -75,7 +79,7 @@ pub const TRAMP_PARAMS: usize = 0x68;
 pub const TRAMP_PATCH_PM32_STACK: usize = 0x9F;
 
 /// Offset of the 6-byte far-jmp target used by PM32 code to enter LM64.
-/// Layout: [u32 little-endian: AP_PAGE+0x100, u16 little-endian: 0x0010].
+/// Layout: [u32 little-endian: `AP_PAGE+0x100`, u16 little-endian: 0x0010].
 pub const TRAMP_PATCH_LM64_FAR_JMP: usize = 0xF8;
 
 // ── Param sub-offsets (relative to TRAMP_PARAMS) ─────────────────────────────
@@ -108,7 +112,7 @@ const GDT_DATA: u64 = 0x00CF_9200_0000_FFFF;
 
 /// Fixed-content trampoline bytes copied to the AP trampoline page.
 ///
-/// Variable addresses (AP_PAGE, pml4_phys, etc.) are zeroed here and written
+/// Variable addresses (`AP_PAGE`, `pml4_phys`, etc.) are zeroed here and written
 /// by [`setup_trampoline`] / [`setup_ap_params`] at runtime.
 ///
 /// See module-level layout table for byte-offset annotations.
@@ -371,12 +375,16 @@ pub unsafe fn setup_trampoline(ap_trampoline_phys: u64)
     }
 
     // Patch: real-mode far-jmp target at 0x20 → [u32: AP_PAGE+0x90, u16: 0x0008]
+    // cast_possible_truncation: ap_page is a SIPI vector << 12, always < 1 MiB; fits u32
+    #[allow(clippy::cast_possible_truncation)]
     unsafe {
         write_u32(virt, TRAMP_PATCH_RM_FAR_JMP, (ap_page + 0x90) as u32);
         write_u16(virt, TRAMP_PATCH_RM_FAR_JMP + 4, 0x0008);
     }
 
     // Patch: GDTR base at 0x42 → AP_PAGE+0x48
+    // cast_possible_truncation: ap_page is always < 1 MiB; fits u32
+    #[allow(clippy::cast_possible_truncation)]
     unsafe {
         write_u32(virt, TRAMP_PATCH_GDTR + 2, (ap_page + 0x48) as u32);
     }
@@ -384,11 +392,15 @@ pub unsafe fn setup_trampoline(ap_trampoline_phys: u64)
     // Patch: PM32 temporary stack address at 0x9F → AP_PAGE+0x200.
     // Must be above all trampoline code (which ends at 0x11B) to avoid the
     // `call +0` push clobbering code bytes. 0x200 is well within the 4 KiB page.
+    // cast_possible_truncation: ap_page is always < 1 MiB; fits u32
+    #[allow(clippy::cast_possible_truncation)]
     unsafe {
         write_u32(virt, TRAMP_PATCH_PM32_STACK, (ap_page + 0x200) as u32);
     }
 
     // Patch: LM64 far-jmp target at 0xF8 → [u32: AP_PAGE+0x100, u16: 0x0010]
+    // cast_possible_truncation: ap_page is always < 1 MiB; fits u32
+    #[allow(clippy::cast_possible_truncation)]
     unsafe {
         write_u32(virt, TRAMP_PATCH_LM64_FAR_JMP, (ap_page + 0x100) as u32);
         write_u16(virt, TRAMP_PATCH_LM64_FAR_JMP + 4, 0x0010);

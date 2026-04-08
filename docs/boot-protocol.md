@@ -1,16 +1,13 @@
 # Boot Protocol
 
-## Overview
+Seraph uses a custom UEFI-native boot protocol. The bootloader loads the kernel,
+establishes a known CPU and memory state, and jumps to the kernel entry point. The
+kernel MUST NOT assume anything about the environment beyond what this document
+guarantees.
 
-Seraph uses a custom UEFI-native boot protocol. The bootloader is a UEFI application
-that runs under the system firmware, loads the kernel and initial modules, establishes
-a known CPU and memory state, and jumps to the kernel entry point. The kernel makes no
-assumptions about the environment beyond what this document guarantees.
-
-The protocol is defined here. The bootloader in `boot/` is the reference implementation.
-Any compliant bootloader that satisfies this contract may be used in its place.
-
-The shared types are in `abi/boot-protocol/` (crate: `boot-protocol`).
+The bootloader in `boot/` is the reference implementation. Any compliant bootloader
+that satisfies this contract MAY be used in its place. Shared types are in
+`abi/boot-protocol/` (crate: `boot-protocol`).
 
 ---
 
@@ -433,3 +430,9 @@ The bootloader must not:
 - Leave UEFI boot services active at kernel entry
 - Map any region as both writable and executable
 - Assume anything about the kernel's internal layout beyond the ELF headers
+
+---
+
+## Summarized By
+
+[Architecture Overview](architecture.md)

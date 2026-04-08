@@ -8,8 +8,8 @@
 //! Covers: `SYS_DMA_GRANT`, `SYS_MMIO_MAP`, `SYS_IRQ_REGISTER`,
 //! `SYS_IRQ_ACK`, `SYS_IOPORT_BIND`.
 //!
-//! Tests that require specific hardware capability types (MmioRegion, Interrupt,
-//! IoPortRange) scan the initial capability set for a matching cap. If none is
+//! Tests that require specific hardware capability types (`MmioRegion`, Interrupt,
+//! `IoPortRange`) scan the initial capability set for a matching cap. If none is
 //! found in the current boot configuration, the test is skipped and reports Ok.
 //! Skips are logged to serial so they are visible in the test run output.
 
@@ -65,7 +65,7 @@ pub fn dma_grant_with_flag(ctx: &TestContext) -> TestResult
 ///
 /// Scans the initial capability set for the first `MmioRegion` cap. On a
 /// successful map, verifies the VA is now mapped via `aspace_query`. If no
-/// MmioRegion cap exists in this boot configuration, the test is skipped.
+/// `MmioRegion` cap exists in this boot configuration, the test is skipped.
 pub fn mmio_map(ctx: &TestContext) -> TestResult
 {
     // Hardware caps live in slots 1..aspace_cap. Scan for the first MmioRegion.
@@ -74,8 +74,8 @@ pub fn mmio_map(ctx: &TestContext) -> TestResult
     {
         match syscall::mmio_map(ctx.aspace_cap, slot, MMIO_TEST_VA, 0)
         {
-            Err(e) if e == SyscallError::InvalidCapability as i64 => continue,
-            Err(_) => continue, // Wrong type or other error — keep scanning.
+            Err(e) if e == SyscallError::InvalidCapability as i64 => {}
+            Err(_) => {} // Wrong type or other error — keep scanning.
             Ok(()) =>
             {
                 let phys = aspace_query(ctx.aspace_cap, MMIO_TEST_VA)
@@ -108,8 +108,8 @@ pub fn irq_register_ack(ctx: &TestContext) -> TestResult
     {
         match irq_register(slot, irq_sig)
         {
-            Err(e) if e == SyscallError::InvalidCapability as i64 => continue,
-            Err(_) => continue,
+            Err(e) if e == SyscallError::InvalidCapability as i64 => {}
+            Err(_) => {}
             Ok(()) =>
             {
                 irq_ack(slot).map_err(|_| "irq_ack failed")?;
@@ -130,8 +130,11 @@ pub fn irq_register_ack(ctx: &TestContext) -> TestResult
 /// `ioport_bind` binds an I/O port range to a thread.
 ///
 /// On RISC-V this syscall is not supported and must return `NotSupported`.
-/// On x86_64, scans for the first `IoPortRange` cap and binds it to a test
-/// thread. If no IoPortRange cap is found, the test is skipped.
+/// On `x86_64`, scans for the first `IoPortRange` cap and binds it to a test
+/// thread. If no `IoPortRange` cap is found, the test is skipped.
+// needless_return: cfg-gated early return is required to terminate the riscv64
+// path; the x86_64 path follows in the same function body.
+#[allow(clippy::needless_return)]
 pub fn ioport_bind(ctx: &TestContext) -> TestResult
 {
     // RISC-V: verify NotSupported is returned regardless of arguments.
@@ -157,8 +160,8 @@ pub fn ioport_bind(ctx: &TestContext) -> TestResult
         {
             match syscall::ioport_bind(th, slot)
             {
-                Err(e) if e == SyscallError::InvalidCapability as i64 => continue,
-                Err(_) => continue,
+                Err(e) if e == SyscallError::InvalidCapability as i64 => {}
+                Err(_) => {}
                 Ok(()) =>
                 {
                     syscall::cap_delete(th).ok();

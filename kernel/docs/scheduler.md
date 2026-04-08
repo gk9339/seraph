@@ -1,7 +1,5 @@
 # Scheduler Internals
 
-## Overview
-
 The Seraph kernel scheduler is preemptive, priority-based, and SMP-aware. Scheduling
 policy is minimal: the highest-priority runnable thread runs. SMT topology is used
 to prefer spreading threads across physical cores rather than packing them onto one.
@@ -468,3 +466,9 @@ may be migrated away from its preferred CPU when load balancing requires it.
 
 The scheduler does not expose soft affinity as a syscall parameter — it is an internal
 optimisation.
+
+---
+
+## Summarized By
+
+None

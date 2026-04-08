@@ -71,7 +71,7 @@ impl SavedState
     /// Return the initial user-mode argument stored at thread creation.
     ///
     /// `new_state` stashes `arg` in `rbx`; `sched::enter` reads it back here
-    /// and forwards it to the user-mode TrapFrame via `set_arg0`.
+    /// and forwards it to the user-mode `TrapFrame` via `set_arg0`.
     pub fn user_arg(&self) -> u64
     {
         self.rbx
@@ -268,7 +268,7 @@ pub unsafe fn first_entry_to_user(root_phys: u64, tf: *const super::trap_frame::
 /// # Safety
 /// - `root_phys` must be the physical address of a valid 4 KiB-aligned PML4
 ///   that maps the kernel upper half (entries 256–511) and the direct map.
-/// - `tf` must point to a TrapFrame on the direct-mapped init kernel stack,
+/// - `tf` must point to a `TrapFrame` on the direct-mapped init kernel stack,
 ///   with `rip`, `rsp`, `cs`, `ss`, and `rflags` set for user-mode entry.
 /// - TSS RSP0 and `SYSCALL_KERNEL_RSP` must be set to init's `kernel_stack_top`
 ///   before this call.

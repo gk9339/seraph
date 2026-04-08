@@ -11,7 +11,7 @@
 //!
 //! # Design
 //!
-//! - `Slab`: one buddy-allocated block of pages, capacity = block_bytes / obj_size.
+//! - `Slab`: one buddy-allocated block of pages, capacity = `block_bytes` / `obj_size.`
 //! - Embedded free list: each free slot stores the VA of the next free slot (0 = end).
 //! - `SlabCache`: up to 16 slabs. Alloc scans for a slab with free slots; grows when
 //!   all are full. Free scans slabs to find the owner; collapses fully-empty slabs if
@@ -19,6 +19,9 @@
 //! - `backing_addr()`: converts buddy physical addresses to writable virtual addresses.
 //!   In production it calls `paging::phys_to_virt()`; in test mode returns identity
 //!   because test buddies are backed by host heap memory (phys == host VA).
+
+// cast_possible_truncation: usize→u16 slot indices bounded by slab capacity.
+#![allow(clippy::cast_possible_truncation)]
 
 use super::{BuddyAllocator, PAGE_SIZE};
 
@@ -78,8 +81,8 @@ pub struct Slab
 ///
 /// Holds up to 16 slabs. If all are full and a 17th alloc arrives, returns `None`.
 ///
-/// To add support for larger object sizes: extend the slab_order formula and
-/// increase the slabs array (with a corresponding SlabCache struct size increase).
+/// To add support for larger object sizes: extend the `slab_order` formula and
+/// increase the slabs array (with a corresponding `SlabCache` struct size increase).
 pub struct SlabCache
 {
     /// Diagnostic label (shown in future debug/stats output).
@@ -147,8 +150,7 @@ impl SlabCache
         let idx = (0..self.slab_count).find(|&i| {
             self.slabs[i]
                 .as_ref()
-                .map(|s| s.free_head != 0)
-                .unwrap_or(false)
+                .is_some_and(|s| s.free_head != 0)
         });
 
         let idx = if let Some(i) = idx
@@ -173,8 +175,11 @@ impl SlabCache
         let slab = self.slabs[idx].as_mut().unwrap();
         let ptr = slab.free_head as *mut u8;
         // Read the embedded next-pointer from the free slot.
-        // SAFETY: free_head is a valid slot VA in a live slab.
-        let next = unsafe { core::ptr::read(ptr as *const u64) };
+        // SAFETY: free_head is a valid slot VA in a live slab; free-list links are
+        // written by the same code using write_unaligned, so alignment is unconstrained.
+        // cast_ptr_alignment: intentional; the free-list link may be below u64 align.
+        #[allow(clippy::cast_ptr_alignment)]
+        let next = unsafe { core::ptr::read_unaligned(ptr.cast::<u64>()) };
         slab.free_head = next;
         slab.used += 1;
         Some(ptr)
@@ -196,11 +201,7 @@ impl SlabCache
         let addr = ptr as u64;
         for i in 0..self.slab_count
         {
-            let slab = match &self.slabs[i]
-            {
-                Some(s) => s,
-                None => continue,
-            };
+            let Some(slab) = &self.slabs[i] else { continue };
             let slab_bytes = (PAGE_SIZE << slab.order) as u64;
             if addr < slab.base || addr >= slab.base + slab_bytes
             {
@@ -209,7 +210,9 @@ impl SlabCache
             // Found the owning slab. Push ptr onto its free list.
             let old_head = slab.free_head;
             // SAFETY: ptr is a valid slot VA; we write the free-list link.
-            unsafe { core::ptr::write(ptr as *mut u64, old_head) };
+            // cast_ptr_alignment: intentional unaligned write; slot alignment unconstrained.
+            #[allow(clippy::cast_ptr_alignment)]
+            unsafe { core::ptr::write_unaligned(ptr.cast::<u64>(), old_head) };
             let slab = self.slabs[i].as_mut().unwrap();
             slab.free_head = addr;
             slab.used -= 1;

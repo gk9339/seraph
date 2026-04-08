@@ -107,10 +107,10 @@ fn cap_create_wait_set() -> Result<u32, i64>
 
 // ── SYS_CAP_COPY ─────────────────────────────────────────────────────────────
 
-/// `cap_copy` places a copy of a cap into another CSpace.
+/// `cap_copy` places a copy of a cap into another `CSpace`.
 ///
-/// The copy is verified to be independently usable (signal_send still works
-/// on the source; the destination CSpace is deleted as cleanup, which drops
+/// The copy is verified to be independently usable (`signal_send` still works
+/// on the source; the destination `CSpace` is deleted as cleanup, which drops
 /// all caps inside it).
 pub fn copy(_ctx: &TestContext) -> TestResult
 {
@@ -130,7 +130,7 @@ pub fn copy(_ctx: &TestContext) -> TestResult
 
 // ── SYS_CAP_INSERT ───────────────────────────────────────────────────────────
 
-/// `cap_insert` places a copy at a caller-chosen slot index in another CSpace.
+/// `cap_insert` places a copy at a caller-chosen slot index in another `CSpace`.
 ///
 /// Like `cap_copy` but the destination slot is explicit. We verify the source
 /// is unaffected (insert is a copy, not a move).
@@ -152,7 +152,7 @@ pub fn insert(_ctx: &TestContext) -> TestResult
 
 // ── SYS_CAP_MOVE ─────────────────────────────────────────────────────────────
 
-/// `cap_move` transfers a cap to another CSpace and nulls the source slot.
+/// `cap_move` transfers a cap to another `CSpace` and nulls the source slot.
 pub fn r#move(_ctx: &TestContext) -> TestResult
 {
     let sig = cap_create_signal().map_err(|_| "create_signal for move test failed")?;
@@ -180,7 +180,7 @@ pub fn r#move(_ctx: &TestContext) -> TestResult
 /// We create a signal with SIGNAL+WAIT rights, derive a copy with SIGNAL only,
 /// then verify:
 ///  - The derived cap can send (has SIGNAL).
-///  - The derived cap cannot wait (lacks WAIT) — kernel returns InsufficientRights.
+///  - The derived cap cannot wait (lacks WAIT) — kernel returns `InsufficientRights`.
 pub fn derive_attenuation(_ctx: &TestContext) -> TestResult
 {
     let sig = cap_create_signal().map_err(|_| "create_signal for derive test failed")?;
@@ -264,9 +264,9 @@ pub fn insert_to_occupied_slot_err(_ctx: &TestContext) -> TestResult
 
 // ── SYS_CAP_COPY negative ─────────────────────────────────────────────────────
 
-/// `cap_copy` using a non-CSpace cap as the destination CSpace must fail.
+/// `cap_copy` using a non-`CSpace` cap as the destination `CSpace` must fail.
 ///
-/// Passing a Signal cap where a CSpace cap is expected should be rejected
+/// Passing a Signal cap where a `CSpace` cap is expected should be rejected
 /// before any modification occurs.
 pub fn copy_into_non_cspace_err(_ctx: &TestContext) -> TestResult
 {
@@ -285,7 +285,7 @@ pub fn copy_into_non_cspace_err(_ctx: &TestContext) -> TestResult
 
 // ── SYS_CAP_DELETE ───────────────────────────────────────────────────────────
 
-/// `cap_delete` removes a cap from the CSpace; the slot becomes unusable.
+/// `cap_delete` removes a cap from the `CSpace`; the slot becomes unusable.
 pub fn delete(_ctx: &TestContext) -> TestResult
 {
     let sig = cap_create_signal().map_err(|_| "create_signal for delete test failed")?;

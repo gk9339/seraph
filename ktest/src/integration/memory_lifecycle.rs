@@ -41,14 +41,10 @@ pub fn run(ctx: &TestContext) -> TestResult
             break;
         }
     }
-    let (frame_a, frame_b) = match split_result
+    let Some((frame_a, frame_b)) = split_result else
     {
-        Some(pair) => pair,
-        None =>
-        {
-            crate::klog("ktest: integration::memory_lifecycle SKIP (no splittable frame cap)");
-            return Ok(());
-        }
+        crate::klog("ktest: integration::memory_lifecycle SKIP (no splittable frame cap)");
+        return Ok(());
     };
 
     // ── 2. Map frame_a (one page) at TEST_VA. ────────────────────────────────

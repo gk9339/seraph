@@ -5,7 +5,7 @@
 
 //! Capability creation and manipulation syscall handlers.
 //!
-//! Allocates kernel objects and inserts them into a CSpace.
+//! Allocates kernel objects and inserts them into a `CSpace`.
 //! Returns a slot index on success.
 //!
 //! # Adding a new capability creation syscall
@@ -14,6 +14,11 @@
 //! 3. Call `nonnull_from_box` to get a `NonNull<KernelObjectHeader>`.
 //! 4. Call `(*cspace).insert_cap(tag, rights, nonnull)`.
 //! 5. Return the slot index as `u64`.
+
+// cast_possible_truncation: all u64→u32 casts in this file extract cap slot indices
+// from 64-bit trap frame registers. Seraph runs on 64-bit only; slot indices are
+// defined as u32 and always fit. No truncation occurs in practice.
+#![allow(clippy::cast_possible_truncation)]
 
 #[cfg(not(test))]
 extern crate alloc;
@@ -27,10 +32,10 @@ use syscall::SyscallError;
 #[cfg(not(test))]
 use super::current_tcb;
 
-/// SYS_CAP_CREATE_ENDPOINT (7): create a new Endpoint object.
+/// `SYS_CAP_CREATE_ENDPOINT` (7): create a new Endpoint object.
 ///
 /// Allocates `EndpointState` and `EndpointObject`, inserts a cap with
-/// `SEND | RECEIVE | GRANT` rights into the current thread's CSpace.
+/// `SEND | RECEIVE | GRANT` rights into the current thread's `CSpace`.
 /// Returns the slot index in rax/a0.
 #[cfg(not(test))]
 pub fn sys_cap_create_endpoint(_tf: &mut TrapFrame) -> Result<u64, SyscallError>
@@ -62,7 +67,7 @@ pub fn sys_cap_create_endpoint(_tf: &mut TrapFrame) -> Result<u64, SyscallError>
     }));
 
     // Build NonNull<KernelObjectHeader> by casting (header is at offset 0).
-    let nonnull = unsafe { NonNull::new_unchecked(ep_obj_ptr as *mut KernelObjectHeader) };
+    let nonnull = unsafe { NonNull::new_unchecked(ep_obj_ptr.cast::<KernelObjectHeader>()) };
 
     // Insert into CSpace.
     let idx = unsafe {
@@ -74,13 +79,13 @@ pub fn sys_cap_create_endpoint(_tf: &mut TrapFrame) -> Result<u64, SyscallError>
     }
     .map_err(|_| SyscallError::OutOfMemory)?;
 
-    Ok(idx as u64)
+    Ok(u64::from(idx))
 }
 
-/// SYS_CAP_CREATE_SIGNAL (8): create a new Signal object.
+/// `SYS_CAP_CREATE_SIGNAL` (8): create a new Signal object.
 ///
 /// Allocates `SignalState` and `SignalObject`, inserts a cap with
-/// `SIGNAL | WAIT` rights into the current thread's CSpace.
+/// `SIGNAL | WAIT` rights into the current thread's `CSpace`.
 /// Returns the slot index in rax/a0.
 #[cfg(not(test))]
 pub fn sys_cap_create_signal(_tf: &mut TrapFrame) -> Result<u64, SyscallError>
@@ -106,17 +111,17 @@ pub fn sys_cap_create_signal(_tf: &mut TrapFrame) -> Result<u64, SyscallError>
         header: KernelObjectHeader::new(ObjectType::Signal),
         state: sig_state_ptr,
     }));
-    let nonnull = unsafe { NonNull::new_unchecked(sig_obj_ptr as *mut KernelObjectHeader) };
+    let nonnull = unsafe { NonNull::new_unchecked(sig_obj_ptr.cast::<KernelObjectHeader>()) };
     let idx =
         unsafe { (*cspace).insert_cap(CapTag::Signal, Rights::SIGNAL | Rights::WAIT, nonnull) }
             .map_err(|_| SyscallError::OutOfMemory)?;
-    Ok(idx as u64)
+    Ok(u64::from(idx))
 }
 
-/// SYS_CAP_CREATE_ASPACE (11): create a new AddressSpace object.
+/// `SYS_CAP_CREATE_ASPACE` (11): create a new `AddressSpace` object.
 ///
 /// Allocates a fresh user address space (root page table + kernel-half copy)
-/// and inserts a cap with `MAP | READ` rights into the caller's CSpace.
+/// and inserts a cap with `MAP | READ` rights into the caller's `CSpace`.
 /// Returns the slot index in rax/a0.
 #[cfg(not(test))]
 pub fn sys_cap_create_aspace(_tf: &mut TrapFrame) -> Result<u64, SyscallError>
@@ -149,21 +154,21 @@ pub fn sys_cap_create_aspace(_tf: &mut TrapFrame) -> Result<u64, SyscallError>
         address_space: Box::into_raw(Box::new(as_obj)),
     }));
 
-    let nonnull = unsafe { NonNull::new_unchecked(as_obj_ptr as *mut KernelObjectHeader) };
+    let nonnull = unsafe { NonNull::new_unchecked(as_obj_ptr.cast::<KernelObjectHeader>()) };
 
     let idx =
         unsafe { (*cspace).insert_cap(CapTag::AddressSpace, Rights::MAP | Rights::READ, nonnull) }
             .map_err(|_| SyscallError::OutOfMemory)?;
 
-    Ok(idx as u64)
+    Ok(u64::from(idx))
 }
 
-/// SYS_CAP_CREATE_CSPACE (12): create a new CSpace object.
+/// `SYS_CAP_CREATE_CSPACE` (12): create a new `CSpace` object.
 ///
-/// arg0 = max_slots (clamped to 16384; 0 → default 256).
+/// arg0 = `max_slots` (clamped to 16384; 0 → default 256).
 ///
 /// Inserts a cap with `INSERT | DELETE | DERIVE` rights into the caller's
-/// CSpace. Returns the new CSpace slot index.
+/// `CSpace`. Returns the new `CSpace` slot index.
 #[cfg(not(test))]
 pub fn sys_cap_create_cspace(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 {
@@ -172,6 +177,10 @@ pub fn sys_cap_create_cspace(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     use crate::cap::object::{CSpaceKernelObject, KernelObjectHeader, ObjectType};
     use crate::cap::slot::{CapTag, Rights};
     use core::ptr::NonNull;
+
+    // Clamp: 0 → 256 (small default), anything above 16384 → 16384.
+    const DEFAULT_SLOTS: usize = 256;
+    const MAX_SLOTS: usize = 16384;
 
     let tcb = unsafe { current_tcb() };
     if tcb.is_null()
@@ -184,9 +193,8 @@ pub fn sys_cap_create_cspace(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         return Err(SyscallError::InvalidCapability);
     }
 
-    // Clamp: 0 → 256 (small default), anything above 16384 → 16384.
-    const DEFAULT_SLOTS: usize = 256;
-    const MAX_SLOTS: usize = 16384;
+    #[allow(clippy::cast_possible_truncation)]
+    // cast_possible_truncation: Seraph targets 64-bit only; usize == u64.
     let requested = tf.arg(0) as usize;
     let max_slots = if requested == 0
     {
@@ -209,7 +217,7 @@ pub fn sys_cap_create_cspace(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         cspace: new_cs_raw,
     }));
 
-    let nonnull = unsafe { NonNull::new_unchecked(cs_obj_ptr as *mut KernelObjectHeader) };
+    let nonnull = unsafe { NonNull::new_unchecked(cs_obj_ptr.cast::<KernelObjectHeader>()) };
 
     let idx = unsafe {
         (*cspace).insert_cap(
@@ -220,30 +228,40 @@ pub fn sys_cap_create_cspace(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     }
     .map_err(|_| SyscallError::OutOfMemory)?;
 
-    Ok(idx as u64)
+    Ok(u64::from(idx))
 }
 
-/// SYS_CAP_CREATE_THREAD (10): create a new Thread object.
+/// `SYS_CAP_CREATE_THREAD` (10): create a new Thread object.
 ///
-/// arg0 = AddressSpace cap index (must have MAP).
-/// arg1 = CSpace cap index (must have INSERT).
+/// arg0 = `AddressSpace` cap index (must have MAP).
+/// arg1 = `CSpace` cap index (must have INSERT).
 ///
 /// Allocates a kernel stack and a TCB in `Created` state, bound to the
-/// provided address space and CSpace. Inserts a cap with `CONTROL | OBSERVE`
-/// rights into the caller's CSpace. Returns the Thread cap slot index.
+/// provided address space and `CSpace`. Inserts a cap with `CONTROL | OBSERVE`
+/// rights into the caller's `CSpace`. Returns the Thread cap slot index.
 #[cfg(not(test))]
 pub fn sys_cap_create_thread(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 {
+    use crate::arch::current::trap_frame::TrapFrame as ArchTF;
     use crate::cap::object::{KernelObjectHeader, ObjectType, ThreadObject};
     use crate::cap::slot::{CapTag, Rights};
     use crate::ipc::message::Message;
     use crate::mm::paging::phys_to_virt;
     use crate::mm::{with_frame_allocator, PAGE_SIZE};
+    use crate::sched::alloc_thread_id;
     use crate::sched::thread::{IpcThreadState, ThreadControlBlock, ThreadState};
     use crate::sched::{AFFINITY_ANY, INIT_PRIORITY, KERNEL_STACK_PAGES, TIME_SLICE_TICKS};
     use core::ptr::NonNull;
 
+    // TRAMPOLINE_FRAME_SIZE: reserved gap between trampoline's starting RSP and the
+    // TrapFrame base. 512 bytes is sufficient for the minimal C frame.
+    const TRAMPOLINE_FRAME_SIZE: u64 = 512;
+
+    #[allow(clippy::cast_possible_truncation)]
+    // cast_possible_truncation: Seraph targets 64-bit only; cap slot indices fit in u32.
     let as_idx = tf.arg(0) as u32;
+    #[allow(clippy::cast_possible_truncation)]
+    // cast_possible_truncation: Seraph targets 64-bit only; cap slot indices fit in u32.
     let cs_idx = tf.arg(1) as u32;
 
     let tcb = unsafe { current_tcb() };
@@ -264,7 +282,11 @@ pub fn sys_cap_create_thread(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         use crate::cap::object::AddressSpaceObject;
         let obj = as_slot.object.ok_or(SyscallError::InvalidCapability)?;
         // SAFETY: cap tag confirmed AddressSpace; object pointer is valid.
-        let as_obj = unsafe { &*(obj.as_ptr() as *const AddressSpaceObject) };
+        // cast_ptr_alignment: kernel allocator guarantees object alignment; header is at the start of the slab allocation.
+        #[allow(clippy::cast_ptr_alignment)]
+        // cast_ptr_alignment: header is at offset 0 of AddressSpaceObject; allocator guarantees alignment.
+        #[allow(clippy::cast_ptr_alignment)]
+        let as_obj = unsafe { &*(obj.as_ptr().cast::<AddressSpaceObject>()) };
         as_obj.address_space
     };
 
@@ -275,7 +297,11 @@ pub fn sys_cap_create_thread(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         use crate::cap::object::CSpaceKernelObject;
         let obj = cs_slot.object.ok_or(SyscallError::InvalidCapability)?;
         // SAFETY: cap tag confirmed CSpace; object pointer is valid.
-        let cs_obj = unsafe { &*(obj.as_ptr() as *const CSpaceKernelObject) };
+        // cast_ptr_alignment: kernel allocator guarantees object alignment; header is at the start of the slab allocation.
+        #[allow(clippy::cast_ptr_alignment)]
+        // cast_ptr_alignment: header is at offset 0 of CSpaceKernelObject; allocator guarantees alignment.
+        #[allow(clippy::cast_ptr_alignment)]
+        let cs_obj = unsafe { &*(obj.as_ptr().cast::<CSpaceKernelObject>()) };
         cs_obj.cspace
     };
 
@@ -301,10 +327,6 @@ pub fn sys_cap_create_thread(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     // The TrapFrame will be placed at kstack_top - sizeof(TrapFrame) by
     // SYS_THREAD_CONFIGURE. Set the trampoline's initial RSP BELOW the TrapFrame
     // so the trampoline's C stack frame cannot overwrite TrapFrame fields.
-    // TRAMPOLINE_FRAME_SIZE is the reserved gap between the trampoline's starting
-    // RSP and the TrapFrame base. 512 bytes is sufficient for the minimal C frame.
-    const TRAMPOLINE_FRAME_SIZE: u64 = 512;
-    use crate::arch::current::trap_frame::TrapFrame as ArchTF;
     let tf_size = core::mem::size_of::<ArchTF>() as u64;
     let trampoline_rsp = kstack_top - tf_size - TRAMPOLINE_FRAME_SIZE;
     let saved = crate::arch::current::context::new_state(
@@ -314,7 +336,6 @@ pub fn sys_cap_create_thread(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         true,
     );
 
-    use crate::sched::alloc_thread_id;
     let new_tcb = Box::into_raw(Box::new(ThreadControlBlock {
         state: ThreadState::Created,
         priority: INIT_PRIORITY,
@@ -345,23 +366,23 @@ pub fn sys_cap_create_thread(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         tcb: new_tcb,
     }));
 
-    let nonnull = unsafe { NonNull::new_unchecked(thread_obj_ptr as *mut KernelObjectHeader) };
+    let nonnull = unsafe { NonNull::new_unchecked(thread_obj_ptr.cast::<KernelObjectHeader>()) };
 
     let idx = unsafe {
         (*caller_cspace).insert_cap(CapTag::Thread, Rights::CONTROL | Rights::OBSERVE, nonnull)
     }
     .map_err(|_| SyscallError::OutOfMemory)?;
 
-    Ok(idx as u64)
+    Ok(u64::from(idx))
 }
 
-/// SYS_CAP_COPY (24): copy a capability into another CSpace.
+/// `SYS_CAP_COPY` (24): copy a capability into another `CSpace.`
 ///
-/// arg0 = source slot index (in caller's CSpace).
-/// arg1 = destination CSpace cap index (in caller's CSpace; must have INSERT).
+/// arg0 = source slot index (in caller's `CSpace`).
+/// arg1 = destination `CSpace` cap index (in caller's `CSpace`; must have INSERT).
 /// arg2 = rights mask for the new slot (must be a subset of source rights).
 ///
-/// Allocates a new slot in the destination CSpace, populates it with the same
+/// Allocates a new slot in the destination `CSpace`, populates it with the same
 /// kernel object and the requested (attenuated) rights, increments the object's
 /// reference count, and wires the new slot as a child of the source in the
 /// derivation tree.
@@ -420,7 +441,9 @@ pub fn sys_cap_copy(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     let dest_cs_ptr = {
         use crate::cap::object::CSpaceKernelObject;
         let obj = dest_cs_slot.object.ok_or(SyscallError::InvalidCapability)?;
-        let cs_obj = unsafe { &*(obj.as_ptr() as *const CSpaceKernelObject) };
+        // cast_ptr_alignment: header is at offset 0 of CSpaceKernelObject; allocator guarantees alignment.
+        #[allow(clippy::cast_ptr_alignment)]
+        let cs_obj = unsafe { &*(obj.as_ptr().cast::<CSpaceKernelObject>()) };
         cs_obj.cspace
     };
     let dest_cs_id = unsafe { (*dest_cs_ptr).id() };
@@ -454,17 +477,17 @@ pub fn sys_cap_copy(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     }
     crate::cap::DERIVATION_LOCK.write_unlock();
 
-    Ok(new_idx as u64)
+    Ok(u64::from(new_idx))
 }
 
-/// SYS_CAP_DERIVE (14): attenuate a capability within the caller's own CSpace.
+/// `SYS_CAP_DERIVE` (14): attenuate a capability within the caller's own `CSpace.`
 ///
-/// arg0 = source slot index (caller's CSpace).
+/// arg0 = source slot index (caller's `CSpace`).
 /// arg1 = rights mask (must be a subset of source rights).
 ///
-/// Creates a new slot in the caller's CSpace with the attenuated rights, wired
+/// Creates a new slot in the caller's `CSpace` with the attenuated rights, wired
 /// as a child of the source in the derivation tree. Unlike `SYS_CAP_COPY`, the
-/// destination is always the caller's own CSpace, and no CSpace cap is required.
+/// destination is always the caller's own `CSpace`, and no `CSpace` cap is required.
 ///
 /// Returns the new slot index.
 #[cfg(not(test))]
@@ -530,16 +553,16 @@ pub fn sys_cap_derive(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     }
     crate::cap::DERIVATION_LOCK.write_unlock();
 
-    Ok(new_idx as u64)
+    Ok(u64::from(new_idx))
 }
 
-/// SYS_CAP_DELETE (31): delete a capability slot.
+/// `SYS_CAP_DELETE` (31): delete a capability slot.
 ///
-/// arg0 = slot index in the caller's CSpace.
+/// arg0 = slot index in the caller's `CSpace.`
 ///
 /// Reparents any children to the deleted slot's parent (preserving revocability
 /// from the grandparent), unlinks the slot from the derivation tree, clears it,
-/// and dec_refs the kernel object. If refcount reaches 0, frees the object.
+/// and `dec_refs` the kernel object. If refcount reaches 0, frees the object.
 ///
 /// Idempotent: deleting a Null slot returns success.
 #[cfg(not(test))]
@@ -600,9 +623,9 @@ pub fn sys_cap_delete(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     Ok(0)
 }
 
-/// SYS_CAP_REVOKE (15): revoke all capabilities derived from a slot.
+/// `SYS_CAP_REVOKE` (15): revoke all capabilities derived from a slot.
 ///
-/// arg0 = slot index in the caller's CSpace.
+/// arg0 = slot index in the caller's `CSpace.`
 ///
 /// Walks and clears the entire descendant subtree of the target slot. The
 /// target slot itself is preserved. For each revoked capability, the kernel
@@ -656,16 +679,20 @@ pub fn sys_cap_revoke(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     Ok(0)
 }
 
-/// SYS_CAP_MOVE (25): atomically move a capability to another CSpace.
+/// `SYS_CAP_MOVE` (25): atomically move a capability to another `CSpace.`
 ///
-/// arg0 = source slot index (caller's CSpace).
-/// arg1 = destination CSpace cap index (must have INSERT right).
-/// arg2 = destination slot index in the target CSpace, or 0 to auto-allocate.
+/// arg0 = source slot index (caller's `CSpace`).
+/// arg1 = destination `CSpace` cap index (must have INSERT right).
+/// arg2 = destination slot index in the target `CSpace`, or 0 to auto-allocate.
 ///
 /// The source slot is cleared and the capability (with its full derivation tree
 /// links) is relocated to the destination. The object refcount is unchanged.
 ///
 /// Returns the destination slot index.
+// too_many_lines: cap-move logic requires atomically resolving two CSpaces, handling
+// both auto-allocate and fixed-index paths, and updating the derivation tree.
+// Splitting would not improve clarity.
+#[allow(clippy::too_many_lines)]
 #[cfg(not(test))]
 pub fn sys_cap_move(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 {
@@ -698,7 +725,9 @@ pub fn sys_cap_move(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     }?;
     let dest_cs_ptr = {
         let obj = dest_cs_slot.object.ok_or(SyscallError::InvalidCapability)?;
-        let cs_obj = unsafe { &*(obj.as_ptr() as *const CSpaceKernelObject) };
+        // cast_ptr_alignment: header is at offset 0 of CSpaceKernelObject; allocator guarantees alignment.
+        #[allow(clippy::cast_ptr_alignment)]
+        let cs_obj = unsafe { &*(obj.as_ptr().cast::<CSpaceKernelObject>()) };
         cs_obj.cspace
     };
 
@@ -710,7 +739,7 @@ pub fn sys_cap_move(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         let result =
             unsafe { crate::cap::move_cap_between_cspaces(caller_cspace, src_idx, dest_cs_ptr) };
         crate::cap::DERIVATION_LOCK.write_unlock();
-        return Ok(result? as u64);
+        return Ok(u64::from(result?));
     }
 
     // Explicit destination index — keep inline so we can use insert_cap_at.
@@ -835,18 +864,18 @@ pub fn sys_cap_move(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 
     crate::cap::DERIVATION_LOCK.write_unlock();
 
-    Ok(dest_idx as u64)
+    Ok(u64::from(dest_idx))
 }
 
-/// SYS_CAP_INSERT (32): copy a capability to a caller-chosen slot index.
+/// `SYS_CAP_INSERT` (32): copy a capability to a caller-chosen slot index.
 ///
-/// arg0 = source slot index (caller's CSpace).
-/// arg1 = destination CSpace cap index (must have INSERT right).
-/// arg2 = destination slot index in the target CSpace.
+/// arg0 = source slot index (caller's `CSpace`).
+/// arg1 = destination `CSpace` cap index (must have INSERT right).
+/// arg2 = destination slot index in the target `CSpace.`
 /// arg3 = rights mask (subset of source rights).
 ///
 /// Like `SYS_CAP_COPY` but the destination slot index is caller-chosen. Used
-/// by init to populate well-known slot indices in child process CSpaces.
+/// by init to populate well-known slot indices in child process `CSpaces.`
 ///
 /// Returns 0 on success (destination index is already known from arg2).
 #[cfg(not(test))]
@@ -900,7 +929,9 @@ pub fn sys_cap_insert(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     }?;
     let dest_cs_ptr = {
         let obj = dest_cs_slot.object.ok_or(SyscallError::InvalidCapability)?;
-        let cs_obj = unsafe { &*(obj.as_ptr() as *const CSpaceKernelObject) };
+        // cast_ptr_alignment: header is at offset 0 of CSpaceKernelObject; allocator guarantees alignment.
+        #[allow(clippy::cast_ptr_alignment)]
+        let cs_obj = unsafe { &*(obj.as_ptr().cast::<CSpaceKernelObject>()) };
         cs_obj.cspace
     };
     let dest_cspace_id = unsafe { (*dest_cs_ptr).id() };
@@ -936,12 +967,12 @@ pub fn sys_cap_insert(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     Ok(0)
 }
 
-/// SYS_CAP_CREATE_EVENT_Q (9): create a new EventQueue object.
+/// `SYS_CAP_CREATE_EVENT_Q` (9): create a new `EventQueue` object.
 ///
-/// arg0 = capacity (1..=EVENT_QUEUE_MAX_CAPACITY).
+/// arg0 = capacity (`1..=EVENT_QUEUE_MAX_CAPACITY`).
 ///
 /// Allocates `EventQueueState` (with its ring buffer) and `EventQueueObject`,
-/// inserts a cap with `POST | RECV` rights into the caller's CSpace.
+/// inserts a cap with `POST | RECV` rights into the caller's `CSpace.`
 /// Returns the slot index in rax/a0.
 #[cfg(not(test))]
 pub fn sys_cap_create_event_queue(tf: &mut TrapFrame) -> Result<u64, SyscallError>
@@ -978,21 +1009,21 @@ pub fn sys_cap_create_event_queue(tf: &mut TrapFrame) -> Result<u64, SyscallErro
         state: eq_state_ptr,
     }));
 
-    let nonnull = unsafe { NonNull::new_unchecked(eq_obj_ptr as *mut KernelObjectHeader) };
+    let nonnull = unsafe { NonNull::new_unchecked(eq_obj_ptr.cast::<KernelObjectHeader>()) };
 
     let idx =
         unsafe { (*cspace).insert_cap(CapTag::EventQueue, Rights::POST | Rights::RECV, nonnull) }
             .map_err(|_| SyscallError::OutOfMemory)?;
 
-    Ok(idx as u64)
+    Ok(u64::from(idx))
 }
 
-/// SYS_CAP_CREATE_WAIT_SET (13): create a new WaitSet object.
+/// `SYS_CAP_CREATE_WAIT_SET` (13): create a new `WaitSet` object.
 ///
 /// No arguments.
 ///
 /// Allocates `WaitSetState` and `WaitSetObject`, inserts a cap with
-/// `MODIFY | WAIT` rights into the caller's CSpace.
+/// `MODIFY | WAIT` rights into the caller's `CSpace.`
 /// Returns the slot index in rax/a0.
 #[cfg(not(test))]
 pub fn sys_cap_create_wait_set(_tf: &mut TrapFrame) -> Result<u64, SyscallError>
@@ -1022,13 +1053,13 @@ pub fn sys_cap_create_wait_set(_tf: &mut TrapFrame) -> Result<u64, SyscallError>
         state: ws_state_ptr,
     }));
 
-    let nonnull = unsafe { NonNull::new_unchecked(ws_obj_ptr as *mut KernelObjectHeader) };
+    let nonnull = unsafe { NonNull::new_unchecked(ws_obj_ptr.cast::<KernelObjectHeader>()) };
 
     let idx =
         unsafe { (*cspace).insert_cap(CapTag::WaitSet, Rights::MODIFY | Rights::WAIT, nonnull) }
             .map_err(|_| SyscallError::OutOfMemory)?;
 
-    Ok(idx as u64)
+    Ok(u64::from(idx))
 }
 
 // ── Test stubs ─────────────────────────────────────────────────────────────────

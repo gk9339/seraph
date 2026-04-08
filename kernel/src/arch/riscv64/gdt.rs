@@ -12,6 +12,9 @@
 //! `tss_ptr` in `PerCpuData` is unused on RISC-V; this returns 0.
 
 /// I/O Permission Bitmap size. Zero on RISC-V (no I/O port space).
+// dead_code: IOPB_SIZE is used by x86_64 but not riscv64; it must exist here
+// to satisfy the shared arch interface without conditional compilation at call sites.
+#[allow(dead_code)]
 pub const IOPB_SIZE: usize = 0;
 
 /// Return the BSP TSS pointer. On RISC-V this is always 0 — there is no TSS.

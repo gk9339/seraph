@@ -1,31 +1,19 @@
 # Device Management
 
-## Overview
-
-Device management in Seraph is a userspace concern. The kernel does not parse
-firmware tables, enumerate buses, or bind drivers. Its role is limited to minting
-initial capabilities from boot-provided resource descriptors and enforcing access
-control on hardware regions. All enumeration, binding, and policy live in `devmgr`,
-a privileged userspace process launched by init.
+Device management is a userspace concern. The kernel mints initial capabilities from
+boot-provided resource descriptors and enforces hardware access control. All
+enumeration, binding, and policy live in `devmgr`.
 
 ---
 
-## Boot-Provided Resource Descriptors
+## Boot-Provided Resource Descriptors (summary — [boot-protocol.md](boot-protocol.md))
 
-The bootloader parses platform firmware tables (ACPI on x86-64; Device Tree on
-RISC-V) and extracts structured resource descriptors before jumping to the kernel.
-These descriptors are passed to the kernel in the `platform_resources` field of
-`BootInfo` (see [boot-protocol.md](boot-protocol.md)).
+The kernel consumes `PlatformResource` entries from `BootInfo.platform_resources`
+and mints capabilities from them during Phase 7 of initialization. Firmware parsing
+is outside the kernel's TCB.
 
-The kernel does not parse ACPI or Device Tree itself. It consumes the already-parsed
-`PlatformResource` entries and mints capabilities from them during Phase 7 of
-initialization. Each entry describes one discrete hardware resource: an MMIO range,
-an interrupt line, a PCI ECAM window, an I/O port range, an IOMMU unit, or a
-platform firmware table region.
-
-This design keeps firmware parsing code out of the kernel's trusted computing base.
-Bugs in ACPI or Device Tree parsing cannot corrupt the kernel — they can only produce
-incorrect resource descriptors, which init and devmgr observe and can reject.
+See [boot-protocol.md](boot-protocol.md) for the `PlatformResource` type and field
+definitions.
 
 ---
 
@@ -36,9 +24,7 @@ userspace as opaque physical addresses. The kernel creates read-only frame
 capabilities for these regions so that devmgr (or any other process init authorises)
 can parse them directly.
 
-This enables userspace to perform its own firmware interpretation without requiring
-any firmware parsing code in the kernel. The kernel treats these regions as opaque
-byte ranges.
+The kernel treats these regions as opaque byte ranges.
 
 ---
 
@@ -52,56 +38,37 @@ binding in a running system.
 
 At startup, devmgr receives from init (via `SYS_CAP_INSERT`):
 
-- **Platform resource capabilities** — one capability per `PlatformResource` entry
-  in the initial CSpace: MMIO region caps, interrupt caps, IoPortRange caps, and
-  IOMMU unit caps.
+- **Platform resource capabilities** — one per `PlatformResource` entry: MMIO,
+  interrupt, IoPortRange, and IOMMU unit caps.
 - **Firmware table capabilities** — read-only frame caps for the ACPI RSDP and/or
-  Device Tree blob, enabling devmgr to parse them in userspace.
-- **SchedControl capability** — so devmgr can assign slightly elevated priorities
-  to latency-sensitive driver threads if needed.
+  Device Tree blob.
+- **SchedControl capability** — for assigning elevated priorities to latency-sensitive
+  driver threads.
 
-Init retains its own copies (derived from the boot capabilities) so that it can
-revoke devmgr's authority if devmgr crashes or is restarted.
+Init retains derived copies to revoke devmgr's authority if devmgr crashes.
 
 ### What devmgr does
 
-1. **Parse firmware tables** — devmgr walks the ACPI tables or Device Tree blob
-   to build a complete picture of the platform's device topology beyond what the
-   bootloader extracted. It resolves interrupt routing, identifies device power
-   domains, and records the full PCI hierarchy.
+1. **Parse firmware tables** — walks ACPI or Device Tree to resolve interrupt
+   routing, power domains, and the full PCI hierarchy.
 
-2. **Enumerate PCI** — devmgr maps the ECAM region (via the PciEcam capability
-   from init) and reads the PCI configuration space to discover all devices on all
-   buses. It identifies device classes, vendor IDs, BARs, and interrupt assignments.
+2. **Enumerate PCI** — maps the ECAM region and reads configuration space to
+   discover all devices, BARs, and interrupt assignments.
 
-3. **Bind drivers** — for each discovered device, devmgr consults a driver registry
-   to identify the appropriate driver binary. It:
-   - Spawns a new process for the driver
-   - Delegates per-device capabilities: the MMIO cap for the device's BARs, the
-     interrupt cap for the device's IRQ lines, and (if the device is a DMA master)
-     a DMA grant to its IOMMU domain
-   - Passes the driver process's endpoint to the appropriate service (e.g. passes
-     a storage driver endpoint to the VFS server)
+3. **Bind drivers** — for each device, spawns a driver process, delegates
+   per-device capabilities (MMIO, interrupt, optionally DMA), and routes the
+   driver's endpoint to the consuming service.
 
-4. **Expose a device registry** — devmgr maintains an IPC service that other
-   userspace processes can query to discover device capabilities. This is the
-   mechanism by which higher-level services find their devices after boot.
+4. **Expose a device registry** — maintains an IPC service for querying device
+   capabilities.
 
-5. **Handle hotplug** — on platforms that support it, devmgr receives hotplug
-   notifications (via interrupt or firmware callbacks routed through the kernel
-   as IPC notifications) and dynamically spawns or terminates driver processes.
+5. **Handle hotplug** — on supported platforms, receives hotplug notifications
+   and dynamically spawns or terminates driver processes.
 
 ### Security boundary
 
-devmgr is privileged but not omnipotent. It holds only the capabilities delegated
-to it by init — it cannot access hardware it was not given access to. Its authority
-is revocable: if init kills devmgr (e.g. after a crash), all capabilities devmgr
-has delegated to driver processes can be revoked by revoking init's intermediary
-capabilities, and devmgr can be restarted with a fresh capability set.
-
-A compromised devmgr can misdelegate or misuse the capabilities it holds, but it
-cannot escalate beyond the authority init gave it. Kernel resources it was never
-given (e.g. memory regions belonging to another process) remain inaccessible.
+devmgr holds only the capabilities delegated to it by init. Its authority is
+revocable; init can kill devmgr and restart it with a fresh capability set.
 
 ---
 
@@ -164,3 +131,9 @@ init
 devmgr is not a dependency of vfsd or netd directly — those services receive device
 endpoints after devmgr has completed initial binding. The dependency ordering is
 managed by init's bootstrap sequence (for early boot) and svcmgr (for restarts).
+
+---
+
+## Summarized By
+
+[Architecture Overview](architecture.md)

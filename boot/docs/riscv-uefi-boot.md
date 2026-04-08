@@ -1,33 +1,18 @@
 # RISC-V UEFI Boot
 
-## Overview
-
-UEFI requires bootloader images to be PE32+ binaries. LLVM's x86-64 backend can emit
-PE/COFF directly; its RISC-V backend cannot. The Seraph bootloader resolves this by
-compiling the RISC-V bootloader as a position-independent ELF, prepending a
-hand-crafted PE32+ header in assembly, and converting the result to a flat binary
-with `llvm-objcopy`. The flat binary is a valid PE32+ image that UEFI firmware can
-load and execute.
-
-This document is self-contained and specific to RISC-V. x86-64 uses the standard
-Rust PE/COFF output path and does not require this workaround.
+UEFI requires PE32+ bootloader images. LLVM's RISC-V backend has no PE/COFF output
+mode, so the Seraph RISC-V bootloader uses a hand-crafted PE32+ header in assembly,
+prepended to a position-independent ELF and converted to a flat binary via
+`llvm-objcopy`. x86-64 uses the standard Rust PE/COFF output path.
 
 ---
 
-## The Problem
+## PE/COFF Workaround
 
-UEFI firmware loads EFI applications as PE32+ images (the 64-bit variant of the
-Windows PE format). On x86-64, the Rust compiler's built-in
-`x86_64-unknown-uefi` target produces PE/COFF output directly — the linker emits a
-`.efi` file that UEFI can parse and load without further processing.
+LLVM's RISC-V backend produces ELF only; UEFI will not load an ELF file. The
+approach (following Linux `arch/riscv/kernel/efi-header.S`):
 
-LLVM's RISC-V backend has no PE/COFF output mode. Compiling the bootloader with a
-RISC-V target produces an ELF file. UEFI firmware will not load an ELF file.
-
-The solution used by the Linux kernel (in `arch/riscv/kernel/efi-header.S`) and
-adopted here is:
-
-1. Write a minimal PE32+ header in assembly that describes the image structure.
+1. Write a minimal PE32+ header in assembly describing the image structure.
 2. Place this header at the start of the output image.
 3. Use a custom linker script to position the header before the Rust code.
 4. Convert the ELF to a flat binary with `llvm-objcopy -O binary`, producing a
@@ -289,3 +274,9 @@ technique and has been validated against UEFI firmware implementations on produc
 RISC-V hardware. Divergences between the Linux kernel's header and the Seraph header
 should be understood and documented; do not assume the Linux version is always correct
 for Seraph's specific binary layout.
+
+---
+
+## Summarized By
+
+None

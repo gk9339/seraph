@@ -1,7 +1,5 @@
 # IPC Subsystem Internals
 
-## Overview
-
 This document covers the implementation of the IPC subsystem. IPC semantics —
 the call/reply model, signals, event queues, wait sets, and capability transfer —
 are specified in [docs/ipc-design.md](../../docs/ipc-design.md). This document
@@ -502,3 +500,9 @@ within the endpoint lock. The timer interrupt may fire during this sequence; the
 interrupt handler will observe that the current thread is in kernel mode (not
 preemptible at the scheduler level) and defer preemption until the thread returns
 to userspace.
+
+---
+
+## Summarized By
+
+None

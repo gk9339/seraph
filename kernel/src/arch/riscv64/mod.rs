@@ -28,7 +28,7 @@ pub const MAX_IRQ_ID: u32 = 127;
 /// wired to a real device.
 pub const MIN_IRQ_ID: u32 = 1;
 
-/// RISC-V has no I/O port space; IoPortRange resources are silently skipped.
+/// RISC-V has no I/O port space; `IoPortRange` resources are silently skipped.
 pub const HAS_IO_PORTS: bool = false;
 
 /// Size of the I/O Permission Bitmap. Zero on RISC-V (no I/O port concept).

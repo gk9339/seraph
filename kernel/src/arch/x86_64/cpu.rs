@@ -93,7 +93,7 @@ pub unsafe fn read_msr(msr: u32) -> u64
             options(nostack, nomem),
         );
     }
-    ((hi as u64) << 32) | lo as u64
+    (u64::from(hi) << 32) | u64::from(lo)
 }
 
 /// Write `val` to model-specific register `msr`.
@@ -179,7 +179,9 @@ pub unsafe fn user_access_end()
 /// Must execute at ring 0. May only be called after the IDT is loaded so that
 /// a CR4 write fault is catchable (in practice SMEP/SMAP are always present
 /// on any QEMU configuration we support).
+// similar_names: smep_present and smap_present are distinct CPU security features.
 #[cfg(not(test))]
+#[allow(clippy::similar_names)]
 pub unsafe fn enable_smep_smap()
 {
     // CPUID leaf 7, sub-leaf 0.
@@ -236,7 +238,7 @@ const IA32_GS_BASE: u32 = 0xC000_0101;
 
 /// Install `addr` as the per-CPU data pointer for the current CPU.
 ///
-/// Writes `addr` to `IA32_GS_BASE` (MSR 0xC000_0101) so that
+/// Writes `addr` to `IA32_GS_BASE` (MSR `0xC000_0101`) so that
 /// GS-relative loads (`gs:[offset]`) reach the `PerCpuData` entry for
 /// this CPU. Must be called from Phase 5 (BSP) and `kernel_entry_ap`
 /// (each AP) before any GS-relative access occurs.

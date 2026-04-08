@@ -28,9 +28,9 @@ pub struct Message
     pub label: u64,
     /// Inline data words.
     pub data: [u64; MSG_DATA_WORDS_MAX],
-    /// Actual number of valid entries in `data` (0..=MSG_DATA_WORDS_MAX).
+    /// Actual number of valid entries in `data` (`0..=MSG_DATA_WORDS_MAX`).
     pub data_count: usize,
-    /// Capability slot indices to transfer (from the sender's CSpace).
+    /// Capability slot indices to transfer (from the sender's `CSpace`).
     pub cap_slots: [u32; MSG_CAP_SLOTS_MAX],
     /// Actual number of valid entries in `cap_slots`.
     pub cap_count: usize,

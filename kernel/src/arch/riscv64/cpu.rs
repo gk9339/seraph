@@ -93,9 +93,9 @@ pub fn current_cpu() -> u32
 /// Set the kernel stack pointer used when a trap fires from U-mode.
 ///
 /// On RISC-V, `sscratch` holds `&PER_CPU[cpu_id]` (not the stack pointer)
-/// so trap_entry can recover the per-CPU pointer on U-mode entry.  The
+/// so `trap_entry` can recover the per-CPU pointer on U-mode entry.  The
 /// actual kernel stack top is stored in `PerCpuData::kernel_rsp` (offset 8
-/// from `tp`), from which trap_entry loads it when switching stacks.
+/// from `tp`), from which `trap_entry` loads it when switching stacks.
 ///
 /// Must be called before the first `sret` to U-mode and again whenever the
 /// current thread changes.

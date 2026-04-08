@@ -8,15 +8,15 @@
 //! Exercises the complete thread management lifecycle as a single coherent
 //! scenario:
 //!
-//!   1. Create thread (cap_create_thread, cap_create_cspace)
-//!   2. Configure entry, stack, arg (thread_configure)
-//!   3. Start (thread_start) → child signals readiness (0x1)
-//!   4. Stop while child is blocked in signal_wait (thread_stop)
-//!   5. Read register state (thread_read_regs) → verify IP non-zero
-//!   6. Redirect IP via write_regs (thread_write_regs) → phase2_entry
-//!   7. Resume (thread_start) → child sends 0x2 to confirm redirection
-//!   8. Set priority in normal range (thread_set_priority)
-//!   9. Set affinity to CPU 0 (thread_set_affinity)
+//!   1. Create thread (`cap_create_thread`, `cap_create_cspace`)
+//!   2. Configure entry, stack, arg (`thread_configure`)
+//!   3. Start (`thread_start`) → child signals readiness (0x1)
+//!   4. Stop while child is blocked in `signal_wait` (`thread_stop`)
+//!   5. Read register state (`thread_read_regs`) → verify IP non-zero
+//!   6. Redirect IP via `write_regs` (`thread_write_regs`) → `phase2_entry`
+//!   7. Resume (`thread_start`) → child sends 0x2 to confirm redirection
+//!   8. Set priority in normal range (`thread_set_priority`)
+//!   9. Set affinity to CPU 0 (`thread_set_affinity`)
 //!
 //! The intent is to validate that each step leaves the thread in the correct
 //! state for the next step — not to test each syscall in isolation (that is
@@ -41,11 +41,12 @@ const IP_OFFSET: usize = 248;
 
 static mut CHILD_STACK: ChildStack = ChildStack::ZERO;
 
-/// Cap slot for phase2_entry (see unit/thread.rs for the rationale).
+/// Cap slot for `phase2_entry` (see unit/thread.rs for the rationale).
 static PHASE2_SIG: AtomicU32 = AtomicU32::new(0);
 
 pub fn run(ctx: &TestContext) -> TestResult
 {
+    const BUF: usize = 512;
     let sync = cap_create_signal()
         .map_err(|_| "integration::thread_lifecycle: cap_create_signal failed")?;
     let cs = cap_create_cspace(16)
@@ -60,7 +61,7 @@ pub fn run(ctx: &TestContext) -> TestResult
         th,
         blocker_entry as *const () as u64,
         stack_top,
-        child_sync as u64,
+        u64::from(child_sync),
     )
     .map_err(|_| "integration::thread_lifecycle: thread_configure failed")?;
 
@@ -77,7 +78,6 @@ pub fn run(ctx: &TestContext) -> TestResult
     thread_stop(th).map_err(|_| "integration::thread_lifecycle: thread_stop failed")?;
 
     // ── Step 5: Read registers — verify IP is non-zero. ───────────────────────
-    const BUF: usize = 512;
     let mut reg_buf = [0u8; BUF];
     thread_read_regs(th, reg_buf.as_mut_ptr(), BUF)
         .map_err(|_| "integration::thread_lifecycle: thread_read_regs failed")?;
@@ -131,6 +131,8 @@ pub fn run(ctx: &TestContext) -> TestResult
     Ok(())
 }
 
+// cast_possible_truncation: sig_slot is a kernel cap slot index, guaranteed < 2^32.
+#[allow(clippy::cast_possible_truncation)]
 fn blocker_entry(sig_slot: u64) -> !
 {
     signal_send(sig_slot as u32, 0x1).ok();

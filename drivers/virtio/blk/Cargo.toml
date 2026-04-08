@@ -11,3 +11,6 @@ test = false
 
 [dependencies]
 virtio-core = { path = "../core" }
+
+[lints]
+workspace = true

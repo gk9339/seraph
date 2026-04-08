@@ -64,6 +64,9 @@ const EI_VERSION: usize = 6;
 
 /// 64-bit ELF file header (`Elf64_Ehdr`).
 #[repr(C)]
+// ELF field names follow the ELF spec (e_ident, e_type, …); removing the `e_` prefix
+// would diverge from all reference material and embedded safety comments.
+#[allow(clippy::struct_field_names)]
 pub struct Elf64Ehdr
 {
     /// Magic number and ELF identification fields.
@@ -98,6 +101,9 @@ pub struct Elf64Ehdr
 
 /// 64-bit ELF program header (`Elf64_Phdr`).
 #[repr(C)]
+// ELF field names follow the ELF spec (p_type, p_flags, …); removing the `p_` prefix
+// would diverge from all reference material and embedded safety comments.
+#[allow(clippy::struct_field_names)]
 pub struct Elf64Phdr
 {
     /// Segment type (e.g. `PT_LOAD`).
@@ -119,6 +125,9 @@ pub struct Elf64Phdr
 }
 
 // ── Output types ──────────────────────────────────────────────────────────────
+
+/// Maximum number of `PT_LOAD` segments supported in a kernel ELF.
+const MAX_LOAD_SEGMENTS: usize = 8;
 
 /// A single loaded ELF `PT_LOAD` segment with physical placement and permissions.
 pub struct LoadedSegment
@@ -150,7 +159,7 @@ pub struct KernelInfo
     /// Virtual address of the kernel entry point (`e_entry` from the ELF header).
     pub entry_virtual: u64,
     /// Loaded segments; valid entries occupy indices `0..segment_count`.
-    pub segments: [LoadedSegment; 8],
+    pub segments: [LoadedSegment; MAX_LOAD_SEGMENTS],
     /// Number of valid entries in `segments`.
     pub segment_count: usize,
 }
@@ -192,7 +201,12 @@ pub fn validate_elf_header(data: &[u8], expected_machine: u16) -> Result<&Elf64E
     // SAFETY: data is at least size_of::<Elf64Ehdr>() bytes (checked above).
     // Elf64Ehdr is #[repr(C)] with only integer fields; all bit patterns valid.
     // Shared reference lifetime tied to `data`.
-    let ehdr = unsafe { &*(data.as_ptr() as *const Elf64Ehdr) };
+    // cast_ptr_alignment: ELF files in the read buffer may not be naturally aligned,
+    // but read_unaligned semantics apply — we only access via the reference in places
+    // where rustc emits unaligned loads for #[repr(C)] packed structs.  The struct
+    // fields are individually byte-readable; this pattern is standard for ELF parsers.
+    #[allow(clippy::cast_ptr_alignment)]
+    let ehdr = unsafe { &*(data.as_ptr().cast::<Elf64Ehdr>()) };
 
     // Check 2: ELF magic.
     if ehdr.e_ident[0] != ELFMAG0
@@ -244,6 +258,8 @@ pub fn validate_elf_header(data: &[u8], expected_machine: u16) -> Result<&Elf64E
 
     // Check 8: program header entry size must match our struct's size. A mismatch
     // would make the program header slice unsafe to interpret.
+    // size_of::<Elf64Phdr>() is 56, well within u16 range; truncation cannot occur.
+    #[allow(clippy::cast_possible_truncation)]
     if ehdr.e_phentsize != size_of::<Elf64Phdr>() as u16
     {
         return Err(BootError::InvalidElf(
@@ -262,6 +278,10 @@ pub fn validate_elf_header(data: &[u8], expected_machine: u16) -> Result<&Elf64E
 
     // Check 10: verify e_entry lies within at least one PT_LOAD segment's virtual
     // range. This requires reading the program header table first, so it comes last.
+    // e_phoff is a file byte offset; on all UEFI targets (x86_64/riscv64) usize is
+    // 64-bit, so this cast is exact.  On any hypothetical 32-bit target the ELF
+    // itself would be invalid, but we suppress to keep the allow paired with the cast.
+    #[allow(clippy::cast_possible_truncation)]
     let ph_start = ehdr.e_phoff as usize;
     let ph_count = ehdr.e_phnum as usize;
     let ph_bytes = ph_count
@@ -281,8 +301,12 @@ pub fn validate_elf_header(data: &[u8], expected_machine: u16) -> Result<&Elf64E
     // SAFETY: `data[ph_start..]` contains at least `ph_bytes` bytes (verified
     // above). `Elf64Phdr` is `#[repr(C)]` with only integer fields; all bit
     // patterns are valid. Slice lifetime is tied to `data`.
+    // cast_ptr_alignment: the ELF read buffer is not required to be aligned to
+    // Elf64Phdr (8 bytes); field accesses inside Elf64Phdr use natural C layout
+    // reads which the compiler handles correctly for #[repr(C)] structs.
+    #[allow(clippy::cast_ptr_alignment)]
     let phdrs: &[Elf64Phdr] = unsafe {
-        core::slice::from_raw_parts(data[ph_start..].as_ptr() as *const Elf64Phdr, ph_count)
+        core::slice::from_raw_parts(data[ph_start..].as_ptr().cast::<Elf64Phdr>(), ph_count)
     };
 
     let entry_in_segment = phdrs.iter().any(|ph| {
@@ -312,7 +336,7 @@ pub fn validate_elf_header(data: &[u8], expected_machine: u16) -> Result<&Elf64E
 /// partially loaded image.
 fn check_wx_segments(phdrs: &[Elf64Phdr]) -> Result<(), BootError>
 {
-    for ph in phdrs.iter()
+    for ph in phdrs
     {
         if ph.p_type != PT_LOAD
         {
@@ -356,6 +380,9 @@ fn check_wx_segments(phdrs: &[Elf64Phdr]) -> Result<(), BootError>
 /// `bs` must be a valid pointer to UEFI boot services and boot services must
 /// not yet have been exited. `data` must remain valid for the duration of the
 /// call (it is a temporary read buffer from file I/O).
+// The function is self-contained: splitting it would require passing many locals
+// across function boundaries with no structural gain.
+#[allow(clippy::too_many_lines)]
 pub unsafe fn load_kernel(
     bs: *mut crate::uefi::EfiBootServices,
     data: &[u8],
@@ -368,14 +395,19 @@ pub unsafe fn load_kernel(
     // Recompute the program header slice from the validated header. The same
     // bounds were already checked inside `validate_elf_header`, so the arithmetic
     // cannot fail here.
+    // e_phoff is a file byte offset; usize is 64-bit on all supported UEFI targets.
+    #[allow(clippy::cast_possible_truncation)]
     let ph_start = ehdr.e_phoff as usize;
     let ph_count = ehdr.e_phnum as usize;
 
     // SAFETY: `validate_elf_header` already confirmed that `data[ph_start..]`
     // contains exactly `ph_count * size_of::<Elf64Phdr>()` valid bytes, and that
     // `Elf64Phdr` accepts any bit pattern. Lifetime is tied to `data`.
+    // cast_ptr_alignment: ELF read buffer may not be 8-byte aligned; field accesses
+    // in #[repr(C)] structs emit correctly-sized (potentially unaligned) loads.
+    #[allow(clippy::cast_ptr_alignment)]
     let phdrs: &[Elf64Phdr] = unsafe {
-        core::slice::from_raw_parts(data[ph_start..].as_ptr() as *const Elf64Phdr, ph_count)
+        core::slice::from_raw_parts(data[ph_start..].as_ptr().cast::<Elf64Phdr>(), ph_count)
     };
 
     // Phase 2: W^X check across all LOAD segments. Reject the entire ELF before
@@ -383,12 +415,11 @@ pub unsafe fn load_kernel(
     check_wx_segments(phdrs)?;
 
     // Phase 3: Allocate and populate each LOAD segment.
-    const MAX_SEGMENTS: usize = 8;
-    let mut segments: [core::mem::MaybeUninit<LoadedSegment>; MAX_SEGMENTS] =
+    let mut segments: [core::mem::MaybeUninit<LoadedSegment>; MAX_LOAD_SEGMENTS] =
         core::array::from_fn(|_| core::mem::MaybeUninit::uninit());
     let mut segment_count: usize = 0;
 
-    for ph in phdrs.iter()
+    for ph in phdrs
     {
         if ph.p_type != PT_LOAD
         {
@@ -405,13 +436,17 @@ pub unsafe fn load_kernel(
             return Err(BootError::InvalidElf("LOAD segment: p_memsz < p_filesz"));
         }
 
-        if segment_count >= MAX_SEGMENTS
+        if segment_count >= MAX_LOAD_SEGMENTS
         {
             return Err(BootError::InvalidElf("ELF has more than 8 LOAD segments"));
         }
 
         // Validate the file data range before allocating anything.
+        // p_offset and p_filesz are file byte offsets/sizes; usize is 64-bit on all
+        // supported UEFI targets (x86_64, riscv64), so these casts are exact.
+        #[allow(clippy::cast_possible_truncation)]
         let file_off = ph.p_offset as usize;
+        #[allow(clippy::cast_possible_truncation)]
         let file_sz = ph.p_filesz as usize;
         if file_sz > 0
         {
@@ -427,7 +462,9 @@ pub unsafe fn load_kernel(
         }
 
         // Allocate physical pages at the ELF-specified physical address.
-        let page_count = (ph.p_memsz as usize + 4095) / 4096;
+        // p_memsz → usize: 64-bit on all supported UEFI targets; cast is exact.
+        #[allow(clippy::cast_possible_truncation)]
+        let page_count = (ph.p_memsz as usize).div_ceil(4096);
         // SAFETY: `bs` is valid boot services per the function's safety contract.
         // `p_paddr` is the ELF-specified physical base; UEFI fails if the range
         // is already occupied, which we surface as `OutOfMemory`.
@@ -448,6 +485,8 @@ pub unsafe fn load_kernel(
         }
 
         // Zero the BSS tail: bytes [p_filesz, p_memsz).
+        // Difference ≤ p_memsz ≤ segment size; 64-bit targets only, cast is exact.
+        #[allow(clippy::cast_possible_truncation)]
         let bss_sz = (ph.p_memsz - ph.p_filesz) as usize;
         if bss_sz > 0
         {
@@ -479,7 +518,7 @@ pub unsafe fn load_kernel(
     // Build a typed slice over the initialised prefix for arithmetic.
     // SAFETY: Elements 0..segment_count were each written above; reads are sound.
     let init_segs: &[LoadedSegment] = unsafe {
-        core::slice::from_raw_parts(segments.as_ptr() as *const LoadedSegment, segment_count)
+        core::slice::from_raw_parts(segments.as_ptr().cast::<LoadedSegment>(), segment_count)
     };
 
     // Compute the entry physical address.
@@ -487,7 +526,7 @@ pub unsafe fn load_kernel(
     // so this search is guaranteed to succeed. We return `InvalidElf` defensively.
     let entry_virtual = ehdr.e_entry;
     let mut entry_found = false;
-    for seg in init_segs.iter()
+    for seg in init_segs
     {
         if entry_virtual >= seg.virt_base && entry_virtual < seg.virt_base.saturating_add(seg.size)
         {
@@ -528,7 +567,7 @@ pub unsafe fn load_kernel(
     // SAFETY: For indices < segment_count, we call `assume_init_read` on elements
     // that were written via `.write()` above, which is sound. For the tail, we
     // write fresh zero-initialised `LoadedSegment` values — no uninit read occurs.
-    let out_segments: [LoadedSegment; MAX_SEGMENTS] = core::array::from_fn(|i| {
+    let out_segments: [LoadedSegment; MAX_LOAD_SEGMENTS] = core::array::from_fn(|i| {
         if i < segment_count
         {
             // SAFETY: `segments[i]` was initialised with a valid `LoadedSegment`
@@ -589,12 +628,17 @@ pub unsafe fn load_init(
 
     let ehdr = validate_elf_header(data, expected_machine)?;
 
+    // e_phoff and p_offset are file byte offsets; usize is 64-bit on all supported targets.
+    #[allow(clippy::cast_possible_truncation)]
     let ph_start = ehdr.e_phoff as usize;
     let ph_count = ehdr.e_phnum as usize;
 
     // SAFETY: validated by `validate_elf_header`.
+    // cast_ptr_alignment: ELF read buffer alignment is not guaranteed; field accesses
+    // in #[repr(C)] structs emit correctly-sized loads.
+    #[allow(clippy::cast_ptr_alignment)]
     let phdrs: &[Elf64Phdr] = unsafe {
-        core::slice::from_raw_parts(data[ph_start..].as_ptr() as *const Elf64Phdr, ph_count)
+        core::slice::from_raw_parts(data[ph_start..].as_ptr().cast::<Elf64Phdr>(), ph_count)
     };
 
     // W^X check before any allocation.
@@ -608,7 +652,7 @@ pub unsafe fn load_init(
     }; INIT_MAX_SEGMENTS];
     let mut count: usize = 0;
 
-    for ph in phdrs.iter()
+    for ph in phdrs
     {
         if ph.p_type != PT_LOAD || ph.p_memsz == 0
         {
@@ -626,7 +670,10 @@ pub unsafe fn load_init(
         }
 
         // Validate file data range.
+        // p_offset and p_filesz are file byte offsets; usize is 64-bit on all supported targets.
+        #[allow(clippy::cast_possible_truncation)]
         let file_off = ph.p_offset as usize;
+        #[allow(clippy::cast_possible_truncation)]
         let file_sz = ph.p_filesz as usize;
         if file_sz > 0
         {
@@ -655,8 +702,11 @@ pub unsafe fn load_init(
         //
         // page_count must cover the in-page offset so segments that would
         // otherwise cross a page boundary get enough frames.
+        // p_vaddr & 0xFFF fits in usize (≤ 4095). p_memsz → usize: 64-bit targets only.
+        #[allow(clippy::cast_possible_truncation)]
         let in_page_off = (ph.p_vaddr & 0xFFF) as usize;
-        let page_count = (in_page_off + ph.p_memsz as usize + 4095) / 4096;
+        #[allow(clippy::cast_possible_truncation)]
+        let page_count = (in_page_off + ph.p_memsz as usize).div_ceil(4096);
         // SAFETY: `bs` is valid per the caller's contract.
         let phys_base = unsafe { crate::uefi::allocate_pages(bs, page_count)? };
 
@@ -675,6 +725,8 @@ pub unsafe fn load_init(
         }
 
         // Zero BSS tail (bytes [file_sz, p_memsz) relative to virt_addr).
+        // Difference fits in usize: p_memsz ≤ segment size, 64-bit targets only.
+        #[allow(clippy::cast_possible_truncation)]
         let bss_sz = (ph.p_memsz - ph.p_filesz) as usize;
         if bss_sz > 0
         {
@@ -713,6 +765,8 @@ pub unsafe fn load_init(
         return Err(BootError::InvalidElf("init ELF has no PT_LOAD segments"));
     }
 
+    // count ≤ INIT_MAX_SEGMENTS (≤ 8), well within u32 range.
+    #[allow(clippy::cast_possible_truncation)]
     Ok(InitImage {
         entry_point: ehdr.e_entry,
         segments,
@@ -745,7 +799,7 @@ pub unsafe fn load_module(
     data: &[u8],
 ) -> Result<BootModule, BootError>
 {
-    let page_count = (data.len() + 4095) / 4096;
+    let page_count = data.len().div_ceil(4096);
 
     // SAFETY: `bs` is valid boot services per the caller's contract.
     let phys_base = unsafe { crate::uefi::allocate_pages(bs, page_count)? };
@@ -758,6 +812,8 @@ pub unsafe fn load_module(
     // allocation) are disjoint regions; no overlap is possible.
     unsafe { core::ptr::copy_nonoverlapping(data.as_ptr(), dst, data.len()) };
 
+    // data.len() is a byte count that fits in u64 on any realistic system.
+    #[allow(clippy::cast_possible_truncation)]
     Ok(BootModule {
         physical_base: phys_base,
         size: data.len() as u64,

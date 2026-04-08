@@ -7,7 +7,7 @@
 //!
 //! Covers: `SYS_CAP_CREATE_EVENT_Q`, `SYS_EVENT_POST`, `SYS_EVENT_RECV`.
 //!
-//! All tests are single-threaded — event_post is non-blocking and event_recv
+//! All tests are single-threaded — `event_post` is non-blocking and `event_recv`
 //! blocks only when the queue is empty. We pre-fill queues before receiving.
 
 use syscall::{
@@ -103,7 +103,7 @@ pub fn recv_blocks_until_post(ctx: &TestContext) -> TestResult
     // Pass all rights for the queue; SIGNAL right for the sync signal.
     let child_eq = cap_copy(eq, cs, !0u64).map_err(|_| "cap_copy eq failed")?;
     let child_sync = cap_copy(sync, cs, 1 << 7).map_err(|_| "cap_copy sync failed")?;
-    let child_arg = (child_eq as u64) | ((child_sync as u64) << 16);
+    let child_arg = u64::from(child_eq) | (u64::from(child_sync) << 16);
 
     let th = cap_create_thread(ctx.aspace_cap, cs).map_err(|_| "cap_create_thread failed")?;
     let stack_top = ChildStack::top(core::ptr::addr_of!(RECV_BLOCKS_STACK));
@@ -140,7 +140,7 @@ pub fn recv_blocks_until_post(ctx: &TestContext) -> TestResult
 
 /// Child: blocks on `event_recv` then signals the received payload back.
 ///
-/// `arg`: bits[15:0] = eq_slot, bits[31:16] = sync_slot (in child's CSpace).
+/// `arg`: bits[15:0] = `eq_slot`, bits[31:16] = `sync_slot` (in child's `CSpace`).
 fn recv_and_report_entry(arg: u64) -> !
 {
     let eq_slot = (arg & 0xFFFF) as u32;

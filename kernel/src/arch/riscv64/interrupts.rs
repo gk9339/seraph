@@ -22,8 +22,8 @@
 //! Base physical address `0x0C00_0000`, accessed via the direct map.
 //! - Priority registers: base + 4*source (sources 1–127).
 //! - Enable registers:  base + 0x2080 + 4*word  (hart 0 S-mode context).
-//! - Threshold:         base + 0x20_1000.
-//! - Claim/Complete:    base + 0x20_1004.
+//! - Threshold:         base + `0x20_1000`.
+//! - Claim/Complete:    base + `0x20_1004`.
 //!
 //! # Modification notes
 //! - To add a new device IRQ: enable its PLIC source in the enable register
@@ -39,14 +39,14 @@ use crate::mm::paging::DIRECT_MAP_BASE;
 /// PLIC physical base address (QEMU virt machine).
 const PLIC_BASE_PHYS: u64 = 0x0C00_0000;
 
-/// PLIC priority register base: base + 4 * source_id (source 1..=127).
+/// PLIC priority register base: base + 4 * `source_id` (source 1..=127).
 const PLIC_PRIORITY_BASE: u64 = 0x0000;
 /// PLIC enable register base for hart 0 S-mode context (context 1):
 ///   base + 0x2000 + context*0x80 + word*4.
 /// context=1 → offset = 0x2080.
 const PLIC_ENABLE_BASE: u64 = 0x2080;
-/// PLIC threshold for hart 0 S-mode context (context 1): base + 0x20_0000 + context*0x1000.
-/// context=1 → offset = 0x20_1000.
+/// PLIC threshold for hart 0 S-mode context (context 1): base + `0x20_0000` + context*0x1000.
+/// context=1 → offset = `0x20_1000`.
 const PLIC_THRESHOLD: u64 = 0x0020_1000;
 /// PLIC claim/complete register for hart 0 S-mode context.
 const PLIC_CLAIM_COMPLETE: u64 = 0x0020_1004;
@@ -299,38 +299,32 @@ extern "C" fn trap_dispatch(frame: &mut TrapFrame)
             }
         }
     }
+    else if cause_code == 8
+    {
+        // U-mode ecall: dispatch via the kernel syscall table.
+        // SAFETY: frame is a valid TrapFrame on the kernel stack.
+        let sepc_before = frame.sepc;
+        unsafe {
+            crate::syscall::dispatch(core::ptr::from_mut(frame));
+        }
+        // Advance sepc past the ecall instruction ONLY if dispatch did
+        // not modify sepc. SYS_THREAD_WRITE_REGS may redirect a blocked
+        // thread to a new instruction pointer; in that case sepc is
+        // already the target address and must not be incremented.
+        if frame.sepc == sepc_before
+        {
+            frame.sepc += 4;
+        }
+    }
     else
     {
-        match cause_code
-        {
-            8 =>
-            {
-                // U-mode ecall: dispatch via the kernel syscall table.
-                // SAFETY: frame is a valid TrapFrame on the kernel stack.
-                let sepc_before = frame.sepc;
-                unsafe {
-                    crate::syscall::dispatch(frame as *mut _);
-                }
-                // Advance sepc past the ecall instruction ONLY if dispatch did
-                // not modify sepc. SYS_THREAD_WRITE_REGS may redirect a blocked
-                // thread to a new instruction pointer; in that case sepc is
-                // already the target address and must not be incremented.
-                if frame.sepc == sepc_before
-                {
-                    frame.sepc += 4;
-                }
-            }
-            _ =>
-            {
-                crate::kprintln!(
-                    "EXCEPTION: scause={:#x} sepc={:#x} stval={:#x}",
-                    scause,
-                    frame.sepc,
-                    frame.stval
-                );
-                crate::fatal("unhandled exception");
-            }
-        }
+        crate::kprintln!(
+            "EXCEPTION: scause={:#x} sepc={:#x} stval={:#x}",
+            scause,
+            frame.sepc,
+            frame.stval
+        );
+        crate::fatal("unhandled exception");
     }
 }
 
@@ -350,7 +344,7 @@ pub fn plic_enable(source: u32)
     }
     let word_idx = source / 32;
     let bit_idx = source % 32;
-    let offset = PLIC_ENABLE_BASE + (word_idx as u64 * 4);
+    let offset = PLIC_ENABLE_BASE + (u64::from(word_idx) * 4);
     let current = plic_read(offset);
     // SAFETY: direct map active; PLIC MMIO is accessible.
     unsafe { plic_write(offset, current | (1 << bit_idx)) };
@@ -369,7 +363,7 @@ pub fn plic_disable(source: u32)
     }
     let word_idx = source / 32;
     let bit_idx = source % 32;
-    let offset = PLIC_ENABLE_BASE + (word_idx as u64 * 4);
+    let offset = PLIC_ENABLE_BASE + (u64::from(word_idx) * 4);
     let current = plic_read(offset);
     // SAFETY: direct map active; PLIC MMIO is accessible.
     unsafe { plic_write(offset, current & !(1 << bit_idx)) };
@@ -499,7 +493,7 @@ pub unsafe fn init()
     unsafe {
         for src in 1..=PLIC_NUM_SOURCES
         {
-            plic_write(PLIC_PRIORITY_BASE + (src as u64 * 4), 1);
+            plic_write(PLIC_PRIORITY_BASE + (u64::from(src) * 4), 1);
         }
         plic_write(PLIC_THRESHOLD, 0);
     }

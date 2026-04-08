@@ -14,6 +14,9 @@
 //! # Deferred work
 //! - WSMP: SMP bringup, secondary CPU idle threads, load balancing.
 
+// cast_possible_truncation: usize→u32 CPU index and u64→usize address bounded by MAX_CPUS.
+#![allow(clippy::cast_possible_truncation)]
+
 #[cfg(not(test))]
 extern crate alloc;
 
@@ -47,7 +50,7 @@ pub const TIME_SLICE_TICKS: u32 = 10;
 pub const KERNEL_STACK_PAGES: usize = 4;
 
 /// Maximum number of CPUs. Matches the `u64` TLB-shootdown cpu-mask width.
-/// TODO WSMP: enforce during SMP bringup if cpu_count exceeds this.
+/// TODO WSMP: enforce during SMP bringup if `cpu_count` exceeds this.
 pub const MAX_CPUS: usize = 64;
 
 /// Hard affinity sentinel: no hard CPU affinity.
@@ -63,7 +66,7 @@ pub const INIT_PRIORITY: u8 = 15;
 
 /// One `PerCpuScheduler` per potential CPU.
 ///
-/// Indexed by logical CPU ID (0-based). Only entries 0..cpu_count are
+/// Indexed by logical CPU ID (0-based). Only entries `0..cpu_count` are
 /// initialised by `init`.
 ///
 /// # Safety
@@ -76,6 +79,9 @@ static mut SCHEDULERS: [PerCpuScheduler; MAX_CPUS] = {
     // array repeat syntax directly. A const block evaluating to a fixed
     // 64-element literal is the correct approach until `[expr; N]` with
     // non-Copy types is stabilised.
+    // declare_interior_mutable_const: S is only used to copy-initialise the static
+    // array below; it is never used as a shared mutable reference.
+    #[allow(clippy::declare_interior_mutable_const)]
     const S: PerCpuScheduler = PerCpuScheduler::new();
     [
         S, S, S, S, S, S, S, S, // 8
@@ -172,6 +178,9 @@ fn idle_thread_entry(_cpu_id: u64) -> !
 /// # Safety
 /// Must be called exactly once, from the single boot thread, after Phase 3
 /// (page tables active) and Phase 4 (heap active).
+// needless_range_loop: SCHEDULERS is static mut; iter_mut() requires unsafe coercion
+// that is less clear than explicit indexing here.
+#[allow(clippy::needless_range_loop)]
 #[cfg(not(test))]
 pub fn init(cpu_count: u32, allocator: &mut BuddyAllocator) -> u32
 {
@@ -278,7 +287,7 @@ pub fn ap_enter(cpu_id: u32) -> !
     // SCHEDULERS[cpu_id].current already points to it. Interrupts are enabled
     // by idle_thread_entry which is the natural entry point of the idle thread.
     // We call it directly since we are "on" the idle thread's kernel stack.
-    idle_thread_entry(cpu_id as u64)
+    idle_thread_entry(u64::from(cpu_id))
 }
 
 /// Return the kernel stack top for the idle thread on CPU `cpu_id`.
@@ -471,10 +480,10 @@ pub unsafe fn schedule()
     else
     {
         // SAFETY: current is a valid TCB.
-        unsafe { &mut (*current).saved_state as *mut _ }
+        unsafe { core::ptr::addr_of_mut!((*current).saved_state) }
     };
     // SAFETY: next is a valid TCB.
-    let next_state = unsafe { &(*next).saved_state as *const _ };
+    let next_state = unsafe { core::ptr::addr_of!((*next).saved_state) };
 
     // Release the lock before calling switch. The context switch changes RSP
     // to the next thread's kernel stack; the unlock_raw call must complete on
@@ -573,7 +582,7 @@ pub(crate) unsafe extern "C" fn user_thread_trampoline() -> !
 ///
 /// Called once at the end of kernel boot after the init TCB has been enqueued.
 /// Dequeues the init thread, activates its address space, sets TSS RSP0 /
-/// SYSCALL_KERNEL_RSP, builds an initial user-mode [`TrapFrame`] on its kernel
+/// `SYSCALL_KERNEL_RSP`, builds an initial user-mode [`TrapFrame`] on its kernel
 /// stack, and calls `return_to_user`.
 ///
 /// # Panics
@@ -636,13 +645,13 @@ pub fn enter() -> !
     // Build the initial user-mode TrapFrame on the init thread's kernel stack.
     // The frame sits just below kernel_stack_top.
     let tf_size = core::mem::size_of::<TrapFrame>() as u64;
-    let tf_ptr = (kernel_stack_top - tf_size) as *mut TrapFrame;
+    let tf_ptr: *mut TrapFrame = (kernel_stack_top - tf_size) as *mut _;
 
     // Zero the frame then populate the user-mode entry fields via TrapFrame
     // methods (arch-specific field names are hidden inside trap_frame.rs).
     // SAFETY: kernel_stack_top - tf_size is within the allocated kernel stack.
     unsafe {
-        core::ptr::write_bytes(tf_ptr as *mut u8, 0, tf_size as usize);
+        core::ptr::write_bytes(tf_ptr.cast::<u8>(), 0, tf_size as usize);
         (*tf_ptr).init_user(entry_point, INIT_STACK_TOP);
         // Forward the initial user argument (cap slot, etc.) stored in
         // saved_state at TCB creation via new_state(…, arg, …).

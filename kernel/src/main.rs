@@ -17,9 +17,9 @@
 //! - Phase 4: activate kernel heap (`GlobalAlloc` via slab/size-class allocator).
 //! - Phase 5: architecture hardware init (GDT/IDT/APIC or stvec/PLIC, timer, syscall).
 //! - Phase 6: validate `platform_resources` slice; reject malformed entries before capability minting.
-//! - Phase 7: initialise capability subsystem; mint root CSpace with initial hardware caps.
+//! - Phase 7: initialise capability subsystem; mint root `CSpace` with initial hardware caps.
 //! - Phase 8: initialise per-CPU scheduler state and idle threads (BSP only; SMP in WSMP work item).
-//! - Phase 9: create init process address space + TCB; hand off root CSpace; enter user mode.
+//! - Phase 9: create init process address space + TCB; hand off root `CSpace`; enter user mode.
 
 #![cfg_attr(not(test), no_std)]
 #![cfg_attr(not(test), no_main)]
@@ -66,7 +66,19 @@ mod validate;
 /// `boot_info` is the physical address of a populated [`BootInfo`] structure,
 /// accessible before the kernel's own page tables are established because the
 /// bootloader identity-maps the `BootInfo` region.
+// too_many_lines: kernel_entry is the single-entry boot sequence; splitting it would
+// obscure the sequential phase structure without reducing actual complexity.
+// not_unsafe_ptr_arg_deref: boot_info is validated (null + alignment) before deref;
+// the function is `extern "C"` and cannot be marked unsafe per the ABI contract.
+// needless_range_loop/cast_possible_truncation: cpu_idx loop uses the index directly
+// as both slice index and CPU ID; Seraph never has > 2^32 CPUs.
 #[no_mangle]
+#[allow(
+    clippy::too_many_lines,
+    clippy::not_unsafe_ptr_arg_deref,
+    clippy::needless_range_loop,
+    clippy::cast_possible_truncation
+)]
 pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
 {
     // ── Phase 0: validate BootInfo ──────────────────────────────────────────
@@ -207,7 +219,7 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
     // Initialises the root CSpace and mints initial capabilities for all
     // boot-provided hardware resources.
     kprintln!("Phase 7: Capability System");
-    let cap_count = cap::init_capability_system(platform_resources, boot_info as u64);
+    let cap_count = cap::init_capability_system(&platform_resources, boot_info as u64);
     kprintln!(
         "capability system initialised, {} slots populated",
         cap_count
@@ -258,7 +270,7 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
             let seg = &init_image.segments[i];
             // SAFETY: segment data is in Loaded memory reachable via the direct map.
             unsafe { (*init_as_ptr).map_segment(seg, allocator) }
-                .unwrap_or_else(|_| fatal("Phase 9: failed to map init segment"));
+                .unwrap_or_else(|()|  fatal("Phase 9: failed to map init segment"));
         }
 
         // Insert an AddressSpace cap for init's own address space into the root
@@ -287,7 +299,7 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
                 address_space: init_as_ptr,
             });
             let as_nn =
-                unsafe { NonNull::new_unchecked(Box::into_raw(as_obj) as *mut KernelObjectHeader) };
+                unsafe { NonNull::new_unchecked(Box::into_raw(as_obj).cast::<KernelObjectHeader>()) };
             let slot = cs
                 .insert_cap(CapTag::AddressSpace, Rights::MAP | Rights::READ, as_nn)
                 .unwrap_or_else(|_| fatal("Phase 9: cannot insert init AddressSpace cap"));
@@ -310,7 +322,7 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
                     size: seg.size,
                 });
                 let fo_nn =
-                    unsafe { NonNull::new_unchecked(Box::into_raw(fo) as *mut KernelObjectHeader) };
+                    unsafe { NonNull::new_unchecked(Box::into_raw(fo).cast::<KernelObjectHeader>()) };
                 cs.insert_cap(CapTag::Frame, rights, fo_nn)
                     .unwrap_or_else(|_| fatal("Phase 9: cannot insert init segment Frame cap"));
             }
@@ -327,7 +339,7 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
                 allocator,
             )
         }
-        .unwrap_or_else(|_| fatal("Phase 9: failed to map init stack"));
+        .unwrap_or_else(|()|  fatal("Phase 9: failed to map init stack"));
 
         // Allocate init's kernel stack (KERNEL_STACK_PAGES = 4 pages = 16 KiB).
         let init_kstack_phys = allocator
@@ -341,7 +353,7 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
         let init_saved = arch::current::context::new_state(
             init_image.entry_point,
             init_kstack_top,
-            init_aspace_cap_slot as u64, // forwarded to init's a0/rdi on first entry
+            u64::from(init_aspace_cap_slot), // forwarded to init's a0/rdi on first entry
             true,
         );
 

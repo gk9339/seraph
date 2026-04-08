@@ -72,20 +72,23 @@ fn build_boot(ctx: &BuildContext, args: &BuildArgs) -> Result<()>
     let boot_triple = args.arch.boot_target_triple();
     let efi_name = args.arch.boot_efi_filename();
 
-    let mut cmd = cargo(&ctx.root);
-    cmd.args([
-        "build",
+    let mut flags = vec![
         "-p",
         "boot",
         "--target",
         boot_triple,
         "-Zbuild-std=core,compiler_builtins",
         "-Zbuild-std-features=compiler-builtins-mem",
-    ]);
+    ];
     if args.release
     {
-        cmd.arg("--release");
+        flags.push("--release");
     }
+
+    clippy_check(ctx, &flags)?;
+
+    let mut cmd = cargo(&ctx.root);
+    cmd.arg("build").args(&flags);
     run_cmd(&mut cmd)?;
 
     let efi_boot_dir = ctx.sysroot_efi_boot();
@@ -163,9 +166,7 @@ fn build_kernel(ctx: &BuildContext, args: &BuildArgs) -> Result<()>
     ));
 
     let triple = args.arch.kernel_target_triple();
-    let mut cmd = cargo(&ctx.root);
-    cmd.args([
-        "build",
+    let mut flags = vec![
         "-p",
         "kernel",
         "--bin",
@@ -174,11 +175,16 @@ fn build_kernel(ctx: &BuildContext, args: &BuildArgs) -> Result<()>
         triple,
         "-Zbuild-std=core,alloc,compiler_builtins",
         "-Zbuild-std-features=compiler-builtins-mem",
-    ]);
+    ];
     if args.release
     {
-        cmd.arg("--release");
+        flags.push("--release");
     }
+
+    clippy_check(ctx, &flags)?;
+
+    let mut cmd = cargo(&ctx.root);
+    cmd.arg("build").args(&flags);
     run_cmd(&mut cmd)?;
 
     let cargo_out = ctx.cargo_output_dir(triple, args.release).join("kernel");
@@ -205,9 +211,7 @@ fn build_init(ctx: &BuildContext, args: &BuildArgs) -> Result<()>
     ));
 
     let triple = args.arch.kernel_target_triple();
-    let mut cmd = cargo(&ctx.root);
-    cmd.args([
-        "build",
+    let mut flags = vec![
         "-p",
         "init",
         "--bin",
@@ -216,11 +220,16 @@ fn build_init(ctx: &BuildContext, args: &BuildArgs) -> Result<()>
         triple,
         "-Zbuild-std=core,compiler_builtins",
         "-Zbuild-std-features=compiler-builtins-mem",
-    ]);
+    ];
     if args.release
     {
-        cmd.arg("--release");
+        flags.push("--release");
     }
+
+    clippy_check(ctx, &flags)?;
+
+    let mut cmd = cargo(&ctx.root);
+    cmd.arg("build").args(&flags);
     run_cmd(&mut cmd)?;
 
     let cargo_out = ctx.cargo_output_dir(triple, args.release).join("init");
@@ -247,9 +256,7 @@ fn build_ktest(ctx: &BuildContext, args: &BuildArgs) -> Result<()>
     ));
 
     let triple = args.arch.kernel_target_triple();
-    let mut cmd = cargo(&ctx.root);
-    cmd.args([
-        "build",
+    let mut flags = vec![
         "-p",
         "ktest",
         "--bin",
@@ -258,11 +265,16 @@ fn build_ktest(ctx: &BuildContext, args: &BuildArgs) -> Result<()>
         triple,
         "-Zbuild-std=core,compiler_builtins",
         "-Zbuild-std-features=compiler-builtins-mem",
-    ]);
+    ];
     if args.release
     {
-        cmd.arg("--release");
+        flags.push("--release");
     }
+
+    clippy_check(ctx, &flags)?;
+
+    let mut cmd = cargo(&ctx.root);
+    cmd.arg("build").args(&flags);
     run_cmd(&mut cmd)?;
 
     let cargo_out = ctx.cargo_output_dir(triple, args.release).join("ktest");
@@ -299,9 +311,7 @@ fn build_module(ctx: &BuildContext, args: &BuildArgs, name: &str) -> Result<()>
     ));
 
     let triple = args.arch.kernel_target_triple();
-    let mut cmd = cargo(&ctx.root);
-    cmd.args([
-        "build",
+    let mut flags = vec![
         "-p",
         name,
         "--bin",
@@ -310,11 +320,16 @@ fn build_module(ctx: &BuildContext, args: &BuildArgs, name: &str) -> Result<()>
         triple,
         "-Zbuild-std=core,compiler_builtins",
         "-Zbuild-std-features=compiler-builtins-mem",
-    ]);
+    ];
     if args.release
     {
-        cmd.arg("--release");
+        flags.push("--release");
     }
+
+    clippy_check(ctx, &flags)?;
+
+    let mut cmd = cargo(&ctx.root);
+    cmd.arg("build").args(&flags);
     run_cmd(&mut cmd)?;
 
     let cargo_out = ctx.cargo_output_dir(triple, args.release).join(name);
@@ -347,6 +362,17 @@ fn build_modules(ctx: &BuildContext, args: &BuildArgs) -> Result<()>
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+/// Run `cargo clippy` with the given flags and treat all warnings as errors.
+///
+/// Called before every `cargo build` invocation with identical flags, so lints
+/// are enforced on every component build — not just on dedicated lint passes.
+fn clippy_check(ctx: &BuildContext, flags: &[&str]) -> Result<()>
+{
+    let mut cmd = cargo(&ctx.root);
+    cmd.arg("clippy").args(flags).args(["--", "-D", "warnings"]);
+    run_cmd(&mut cmd)
+}
 
 /// Construct a `cargo` Command with the working directory set to the workspace root.
 fn cargo(root: &Path) -> Command

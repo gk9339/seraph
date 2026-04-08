@@ -19,7 +19,7 @@ use crate::uefi::{EfiGuid, EfiStatus, EfiSystemTable, EFI_SUCCESS};
 
 /// `EFI_RISCV_BOOT_PROTOCOL_GUID`
 /// `{CCD15FEC-6F73-4EEC-8395-3E69E4B940BF}`
-const EFI_RISCV_BOOT_PROTOCOL_GUID: EfiGuid = EfiGuid {
+static EFI_RISCV_BOOT_PROTOCOL_GUID: EfiGuid = EfiGuid {
     data1: 0xCCD1_5FEC,
     data2: 0x6F73,
     data3: 0x4EEC,
@@ -76,33 +76,35 @@ pub unsafe fn discover_boot_hart_id(st: *mut EfiSystemTable) -> u64
     // SAFETY: bs is valid; locate_protocol fills iface on success.
     let status: EfiStatus = unsafe {
         ((*bs).locate_protocol)(
-            &EFI_RISCV_BOOT_PROTOCOL_GUID,
+            core::ptr::addr_of!(EFI_RISCV_BOOT_PROTOCOL_GUID),
             core::ptr::null_mut(),
-            &mut iface,
+            core::ptr::addr_of_mut!(iface),
         )
     };
     if status != EFI_SUCCESS || iface.is_null()
     {
         return 0;
     }
-    let proto = iface as *mut EfiRiscvBootProtocol;
+    let proto = iface.cast::<EfiRiscvBootProtocol>();
     let mut hart_id: u64 = 0;
     // SAFETY: proto is a valid protocol pointer returned by LocateProtocol.
-    let s: EfiStatus = unsafe { ((*proto).get_boot_hartid)(proto, &mut hart_id) };
-    if s != EFI_SUCCESS
+    let s: EfiStatus =
+        unsafe { ((*proto).get_boot_hartid)(proto, core::ptr::addr_of_mut!(hart_id)) };
+    if s == EFI_SUCCESS
     {
-        0
+        hart_id
     }
     else
     {
-        hart_id
+        0
     }
 }
 
 /// Return 0: on RISC-V, the BSP hardware ID (hart ID) comes from
-/// `discover_boot_hart_id` (EFI_RISCV_BOOT_PROTOCOL). This function is a
+/// `discover_boot_hart_id` (`EFI_RISCV_BOOT_PROTOCOL`). This function is a
 /// placeholder to satisfy the x86-64 arch interface; callers should use
 /// the value from `discover_boot_hart_id` directly.
+#[allow(dead_code)]
 pub fn bsp_hardware_id() -> u32
 {
     0

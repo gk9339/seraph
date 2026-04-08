@@ -12,9 +12,9 @@
 //! ## Protocol
 //! 1. Caller: `call(ep, msg)` — if a server is waiting → transfer message,
 //!    mint reply capability, wake server, block caller on reply.
-//!    Otherwise → enqueue caller on send_queue.
+//!    Otherwise → enqueue caller on `send_queue`.
 //! 2. Server: `recv(ep)` — if a caller is waiting → dequeue, transfer message,
-//!    mint reply cap, return to server. Otherwise → block on recv_queue.
+//!    mint reply cap, return to server. Otherwise → block on `recv_queue`.
 //! 3. Server: `reply(reply_cap, msg)` — transfer reply, wake caller, consume cap.
 //!
 //! ## Reply capability
@@ -46,7 +46,7 @@ pub struct EndpointState
     pub recv_tail: *mut ThreadControlBlock,
     /// Opaque pointer to the `WaitSetState` this endpoint is registered with,
     /// or null if not in any wait set. Type-erased to avoid a circular import.
-    /// Cast to `*mut WaitSetState` only inside wait_set.rs.
+    /// Cast to `*mut WaitSetState` only inside `wait_set.rs`.
     pub wait_set: *mut u8,
     /// Index of this endpoint's entry in `WaitSetState::members`.
     pub wait_set_member_idx: u8,
@@ -119,7 +119,7 @@ unsafe fn dequeue(
     let tcb = *head;
     // SAFETY: tcb is a valid TCB.
     let next = unsafe { (*tcb).ipc_wait_next };
-    *head = next.unwrap_or(core::ptr::null_mut());
+    *head = next.unwrap_or_default();
     if head.is_null()
     {
         *tail = core::ptr::null_mut();
@@ -171,7 +171,7 @@ pub unsafe fn endpoint_call(
         unsafe {
             (*caller).state = ThreadState::Blocked;
             (*caller).ipc_state = IpcThreadState::BlockedOnReply;
-            (*caller).blocked_on_object = server as *mut u8;
+            (*caller).blocked_on_object = server.cast::<u8>();
         }
         return Ok(server);
     }
@@ -183,7 +183,12 @@ pub unsafe fn endpoint_call(
         (*caller).ipc_msg = *msg;
         (*caller).state = ThreadState::Blocked;
         (*caller).ipc_state = IpcThreadState::BlockedOnSend;
-        (*caller).blocked_on_object = ep as *mut EndpointState as *mut u8;
+        // cast_ptr_alignment: ep is a valid EndpointState aligned to its own alignment;
+        // we type-erase to *mut u8 as a storage convention for blocked_on_object.
+        #[allow(clippy::cast_ptr_alignment)]
+        {
+        (*caller).blocked_on_object = core::ptr::from_mut::<EndpointState>(ep).cast::<u8>();
+        }
         enqueue(&mut ep.send_head, &mut ep.send_tail, caller);
     }
     // Notify a registered wait set on the transition from empty → non-empty.
@@ -228,7 +233,7 @@ pub unsafe fn endpoint_recv(
         // SAFETY: caller is a valid TCB.
         unsafe {
             (*caller).ipc_state = IpcThreadState::BlockedOnReply;
-            (*caller).blocked_on_object = server as *mut u8;
+            (*caller).blocked_on_object = server.cast::<u8>();
         }
         return Ok((caller, msg));
     }
@@ -237,7 +242,12 @@ pub unsafe fn endpoint_recv(
     unsafe {
         (*server).state = ThreadState::Blocked;
         (*server).ipc_state = IpcThreadState::BlockedOnRecv;
-        (*server).blocked_on_object = ep as *mut EndpointState as *mut u8;
+        // cast_ptr_alignment: ep is a valid EndpointState aligned to its own alignment;
+        // we type-erase to *mut u8 as a storage convention for blocked_on_object.
+        #[allow(clippy::cast_ptr_alignment)]
+        {
+        (*server).blocked_on_object = core::ptr::from_mut::<EndpointState>(ep).cast::<u8>();
+        }
         enqueue(&mut ep.recv_head, &mut ep.recv_tail, server);
     }
     Err(())
@@ -302,7 +312,7 @@ pub unsafe fn unlink_from_wait_queue(
         if core::ptr::eq(cur, tcb)
         {
             // SAFETY: cur is a valid TCB.
-            let next = unsafe { (*cur).ipc_wait_next.unwrap_or(core::ptr::null_mut()) };
+            let next = unsafe { (*cur).ipc_wait_next.unwrap_or_default() };
 
             if prev.is_null()
             {
@@ -330,7 +340,7 @@ pub unsafe fn unlink_from_wait_queue(
 
         prev = cur;
         // SAFETY: cur is a valid TCB.
-        cur = unsafe { (*cur).ipc_wait_next.unwrap_or(core::ptr::null_mut()) };
+        cur = unsafe { (*cur).ipc_wait_next.unwrap_or_default() };
     }
 
     false

@@ -179,10 +179,6 @@ pub unsafe fn panic_write_fmt(args: core::fmt::Arguments)
 {
     use core::fmt::Write;
 
-    // Force-claim: store true unconditionally. Stops other CPUs from writing
-    // (best-effort) without risking a spin-wait deadlock on re-entrant panics.
-    CONSOLE_LOCK.store(true, Ordering::Relaxed);
-
     /// A `fmt::Write` sink that writes bytes only to the serial port.
     struct SerialWriter;
     impl core::fmt::Write for SerialWriter
@@ -203,6 +199,10 @@ pub unsafe fn panic_write_fmt(args: core::fmt::Arguments)
             Ok(())
         }
     }
+
+    // Force-claim: store true unconditionally. Stops other CPUs from writing
+    // (best-effort) without risking a spin-wait deadlock on re-entrant panics.
+    CONSOLE_LOCK.store(true, Ordering::Relaxed);
 
     let _ = SerialWriter.write_fmt(args);
     // Lock intentionally not released — caller halts immediately after.
@@ -280,7 +280,7 @@ pub fn print_timestamp()
 
     // SAFETY: console is initialised before kprintln! is used.
     unsafe {
-        console_write_fmt(format_args!("[{}.{:06}] ", sec_str, us_frac));
+        console_write_fmt(format_args!("[{sec_str}.{us_frac:06}] "));
     }
 }
 
@@ -294,12 +294,15 @@ pub fn print_timestamp() {}
 /// `console::init()` to have been called.
 #[macro_export]
 macro_rules! kprint {
-    ($($arg:tt)*) => {
+    ($($arg:tt)*) => {{
+        // Capture format_args! outside the unsafe block to avoid expanding
+        // metavariables inside unsafe (clippy::macro_metavariable_expr_dep).
+        let _args = format_args!($($arg)*);
         // SAFETY: console is initialized before any macro usage.
         unsafe {
-            $crate::console::console_write_fmt(format_args!($($arg)*));
+            $crate::console::console_write_fmt(_args);
         }
-    };
+    }};
 }
 
 /// Print a formatted string followed by `\n` to the kernel console.

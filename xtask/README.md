@@ -87,3 +87,9 @@ Tests compile for the host — no `--arch` flag needed. The workspace-level
 2. Create `src/commands/<name>.rs` with `pub fn run(ctx: &Context, args: &NameArgs) -> Result<()>`.
 3. Add a match arm in `src/main.rs`.
 4. Re-export the module in `src/commands/mod.rs`.
+
+---
+
+## Summarized By
+
+None

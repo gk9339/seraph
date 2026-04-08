@@ -13,7 +13,7 @@
 //!   `aspace_cap + 2` — RODATA segment frame (MAP)
 //!   `aspace_cap + 3` — BSS/DATA segment frame (MAP | WRITE)
 //!
-//! Tests that consume a frame cap (frame_split) use the TEXT frame so the BSS
+//! Tests that consume a frame cap (`frame_split`) use the TEXT frame so the BSS
 //! frame stays intact for address-space query tests. Tests that only read a
 //! frame use whatever slot is available without consuming it.
 
@@ -182,7 +182,7 @@ pub fn mem_map_unaligned_vaddr_err(ctx: &TestContext) -> TestResult
 
 /// `mem_map` targeting the kernel virtual address half must return an error.
 ///
-/// On both x86-64 and RISC-V Sv48, 0xFFFF_8000_0000_0000 is in the kernel half.
+/// On both x86-64 and RISC-V Sv48, `0xFFFF_8000_0000_0000` is in the kernel half.
 pub fn mem_map_kernel_half_err(ctx: &TestContext) -> TestResult
 {
     let text_frame = ctx.aspace_cap + 1;
@@ -216,16 +216,16 @@ pub fn frame_split_at_zero_err(ctx: &TestContext) -> TestResult
 /// `mem_protect` requesting permissions beyond the frame cap's rights must fail.
 ///
 /// TEXT frame (`aspace_cap + 1`) has MAP | EXECUTE rights but no WRITE.
-/// Requesting WRITE (prot_bits = 2) exceeds those rights and must be rejected.
+/// Requesting WRITE (`prot_bits` = 2) exceeds those rights and must be rejected.
 ///
 /// Uses the TEXT frame rather than RODATA because TEXT is reliably large
 /// (contains the ktest binary code), has no WRITE right, and has already
 /// been used successfully by other mm tests in this session.
 pub fn mem_protect_exceeds_cap_rights_err(ctx: &TestContext) -> TestResult
 {
-    let text_frame = ctx.aspace_cap + 1;
     // Use a VA distinct from TEST_VA=0x4000_0000 to avoid conflicts.
     const PROTECT_TEST_VA: u64 = 0x4100_0000;
+    let text_frame = ctx.aspace_cap + 1;
 
     mem_map(text_frame, ctx.aspace_cap, PROTECT_TEST_VA, 0, 1)
         .map_err(|_| "mem_map for protect-rights test failed")?;

@@ -86,7 +86,7 @@ impl SavedState
     /// Return the initial user-mode argument stored at thread creation.
     ///
     /// `new_state` stashes `arg` in `a0`; `sched::enter` reads it back here
-    /// and forwards it to the user-mode TrapFrame via `set_arg0`.
+    /// and forwards it to the user-mode `TrapFrame` via `set_arg0`.
     pub fn user_arg(&self) -> u64
     {
         self.a0

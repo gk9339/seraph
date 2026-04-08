@@ -6,7 +6,7 @@
 //! Global derivation tree lock and tree manipulation.
 //!
 //! The derivation tree tracks parent/child relationships between capability
-//! slots across all CSpaces. All mutations require the write lock; traversals
+//! slots across all `CSpaces.` All mutations require the write lock; traversals
 //! require the read lock.
 //!
 //! The lock is spin-based: sufficient for single-threaded boot and
@@ -31,8 +31,8 @@
 //!
 //! ## Adding new operations
 //!
-//! All functions here assume DERIVATION_LOCK write lock is held by the caller.
-//! Resolve SlotIds via [`crate::cap::lookup_cspace`].
+//! All functions here assume `DERIVATION_LOCK` write lock is held by the caller.
+//! Resolve `SlotIds` via [`crate::cap::lookup_cspace`].
 
 extern crate alloc;
 
@@ -48,7 +48,7 @@ const WRITE_LOCKED: u32 = u32::MAX;
 /// Shared derivation tree lock.
 ///
 /// Acquire before reading or modifying any slot's `deriv_*` fields across
-/// CSpace boundaries. Within a single CSpace, the CSpace's own lock (future
+/// `CSpace` boundaries. Within a single `CSpace`, the `CSpace`'s own lock (future
 /// phases) is sufficient.
 pub static DERIVATION_LOCK: DerivationLock = DerivationLock::new();
 
@@ -83,14 +83,12 @@ impl DerivationLock
             let cur = self.state.load(Ordering::Relaxed);
             // Refuse to increment if a writer holds the lock.
             if cur != WRITE_LOCKED
-            {
-                if self
+                && self
                     .state
                     .compare_exchange_weak(cur, cur + 1, Ordering::Acquire, Ordering::Relaxed)
                     .is_ok()
-                {
-                    break;
-                }
+            {
+                break;
             }
             core::hint::spin_loop();
         }
@@ -130,12 +128,12 @@ impl DerivationLock
 
 /// Resolve a [`SlotId`] to a mutable slot reference.
 ///
-/// Returns `None` if the CSpace is not registered or the index is invalid.
+/// Returns `None` if the `CSpace` is not registered or the index is invalid.
 ///
 /// # Safety
 ///
 /// Caller must hold `DERIVATION_LOCK` (write lock). The returned reference
-/// is valid only while the lock is held and the CSpace is live.
+/// is valid only while the lock is held and the `CSpace` is live.
 unsafe fn resolve_slot_mut(id: SlotId) -> Option<&'static mut super::slot::CapabilitySlot>
 {
     let cs_ptr = crate::cap::lookup_cspace(id.cspace_id)?;
@@ -313,7 +311,7 @@ pub unsafe fn reparent_children(node: SlotId, new_parent: Option<SlotId>)
 }
 
 /// Iteratively revoke all descendants of `root`, collecting their object
-/// pointers for the caller to dec_ref/deallocate outside the lock.
+/// pointers for the caller to `dec_ref`/deallocate outside the lock.
 ///
 /// The root slot itself is NOT touched. After this call, the root has no
 /// children (the subtree is fully cleared).
@@ -324,8 +322,8 @@ pub unsafe fn reparent_children(node: SlotId, new_parent: Option<SlotId>)
 ///
 /// # Safety
 ///
-/// Caller must hold `DERIVATION_LOCK` write lock. All SlotIds in the subtree
-/// must be valid (registered in the CSpace registry).
+/// Caller must hold `DERIVATION_LOCK` write lock. All `SlotIds` in the subtree
+/// must be valid (registered in the `CSpace` registry).
 #[cfg(not(test))]
 pub unsafe fn revoke_subtree(root: SlotId) -> Vec<NonNull<KernelObjectHeader>>
 {
@@ -365,20 +363,12 @@ pub unsafe fn revoke_subtree(root: SlotId) -> Vec<NonNull<KernelObjectHeader>>
     // and push its children onto the stack.
     while let Some(node_id) = stack.pop()
     {
-        let cs_ptr = match crate::cap::lookup_cspace(node_id.cspace_id)
-        {
-            Some(p) => p,
-            None => continue,
-        };
+        let Some(cs_ptr) = crate::cap::lookup_cspace(node_id.cspace_id) else { continue };
         let cs = unsafe { &mut *cs_ptr };
 
         // Snapshot derivation fields and object pointer, then clear.
         let (obj_ptr, first_child) = {
-            let slot = match cs.slot_mut(node_id.index.get())
-            {
-                Some(s) => s,
-                None => continue,
-            };
+            let Some(slot) = cs.slot_mut(node_id.index.get()) else { continue };
             let obj = slot.object;
             let fc = slot.deriv_first_child;
             // Release the borrow on cs so free_slot can be called below.

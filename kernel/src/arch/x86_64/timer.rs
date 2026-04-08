@@ -26,6 +26,11 @@
 //! - To use TSC deadline mode: replace periodic mode programming; requires
 //!   CPUID feature check and x2APIC.
 
+// cast_possible_truncation: APIC timer counts fit in u32; TIMER_VECTOR fits in u32.
+// cast_lossless: u32→u64 conversions in TSC math are lossless.
+// inline_always: read_tsc is a tiny asm stub; always-inline is appropriate here.
+#![allow(clippy::cast_possible_truncation, clippy::cast_lossless, clippy::inline_always)]
+
 use core::sync::atomic::{AtomicU64, Ordering};
 
 #[cfg(not(test))]
@@ -173,13 +178,13 @@ unsafe fn calibrate_apic_timer() -> u64
     // SAFETY: port I/O at ring 0.
     unsafe {
         let gate = inb(PIT_GATE);
-        outb(PIT_GATE, (gate & 0xFD) | 0x00); // gate off
+        outb(PIT_GATE, gate & 0xFD); // gate off
     }
 
     // Program PIT channel 2: mode 0 (interrupt on terminal count), binary.
     // Command byte: channel=10 (ch2), access=11 (lo+hi byte), mode=000, BCD=0.
     unsafe {
-        outb(PIT_CMD, 0b10110000);
+        outb(PIT_CMD, 0b1011_0000);
         outb(PIT_CH2, (pit_counts & 0xFF) as u8);
         outb(PIT_CH2, (pit_counts >> 8) as u8);
     }

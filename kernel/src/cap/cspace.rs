@@ -17,9 +17,12 @@
 //!
 //! ## Growth
 //!
-//! CSpace pages are allocated on demand by [`CSpace::grow`]. The first page
+//! `CSpace` pages are allocated on demand by [`CSpace::grow`]. The first page
 //! skips slot 0 (always null); subsequent pages contribute all 64 slots to the
 //! free list.
+
+// cast_possible_truncation: usize→u32 slot index bounded by L1_SIZE * L2_SIZE (16384).
+#![allow(clippy::cast_possible_truncation)]
 
 // In no_std builds alloc must be declared explicitly; std builds include it implicitly.
 extern crate alloc;
@@ -32,21 +35,21 @@ use super::slot::{violates_wx, CSpaceId, CapTag, CapabilitySlot, Rights};
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-/// Slots per CSpace page (64 × 48 B = 3072 B, fits in a 4096-byte slab bin).
+/// Slots per `CSpace` page (64 × 48 B = 3072 B, fits in a 4096-byte slab bin).
 pub const L2_SIZE: usize = 64;
 
-/// Directory entries per CSpace (max 256 × 64 = 16384 slots).
+/// Directory entries per `CSpace` (max 256 × 64 = 16384 slots).
 pub const L1_SIZE: usize = 256;
 
 // ── Error type ────────────────────────────────────────────────────────────────
 
-/// Errors returned by CSpace operations.
+/// Errors returned by `CSpace` operations.
 #[derive(Debug, PartialEq, Eq)]
 pub enum CapError
 {
-    /// No free slots remain and the CSpace is at `max_slots`.
+    /// No free slots remain and the `CSpace` is at `max_slots`.
     OutOfSlots,
-    /// Heap allocation failed while growing the CSpace.
+    /// Heap allocation failed while growing the `CSpace`.
     OutOfMemory,
     /// The provided slot index is out of range or unmapped.
     InvalidIndex,
@@ -58,7 +61,7 @@ pub enum CapError
 
 /// One page of capability slots.
 ///
-/// Allocated as a `Box<CSpacePage>` when the CSpace grows. All-zeros is a
+/// Allocated as a `Box<CSpacePage>` when the `CSpace` grows. All-zeros is a
 /// valid initial state (every slot is null), so pages are allocated via
 /// `unsafe { core::mem::zeroed() }`.
 #[repr(C)]
@@ -83,17 +86,17 @@ pub struct CSpace
     directory: [Option<Box<CSpacePage>>; L1_SIZE],
     /// Total usable slots allocated across all pages (excludes slot 0).
     allocated_slots: usize,
-    /// Maximum number of usable slots this CSpace may hold.
+    /// Maximum number of usable slots this `CSpace` may hold.
     max_slots: usize,
     /// Head of the intrusive free list; None if no free slots.
     free_head: Option<u32>,
-    /// Number of slots currently on the free list (for O(1) pre_allocate).
+    /// Number of slots currently on the free list (for O(1) `pre_allocate`).
     free_count: usize,
 }
 
 impl CSpace
 {
-    /// Create an empty CSpace. No pages are allocated until the first slot
+    /// Create an empty `CSpace`. No pages are allocated until the first slot
     /// is requested.
     pub fn new(id: CSpaceId, max_slots: usize) -> Self
     {
@@ -107,13 +110,13 @@ impl CSpace
         }
     }
 
-    /// Return this CSpace's unique identifier.
+    /// Return this `CSpace`'s unique identifier.
     pub fn id(&self) -> CSpaceId
     {
         self.id
     }
 
-    /// Allocate a free slot index, growing the CSpace if needed.
+    /// Allocate a free slot index, growing the `CSpace` if needed.
     ///
     /// Returns an error if `max_slots` is reached or heap allocation fails.
     /// The returned slot is cleared to null; callers must populate it.
@@ -140,7 +143,7 @@ impl CSpace
         Ok(idx)
     }
 
-    /// Grow the CSpace by one page.
+    /// Grow the `CSpace` by one page.
     ///
     /// Allocates the next unoccupied directory entry, threads all its slots
     /// onto the free list, then returns. Slot 0 in the first page is skipped.
@@ -154,7 +157,7 @@ impl CSpace
 
         let base = page_idx * L2_SIZE;
         // Skip slot 0 in the first page (permanently null, not in free list).
-        let start_slot = if page_idx == 0 { 1usize } else { 0usize };
+        let start_slot = usize::from(page_idx == 0);
 
         // Clamp to the remaining quota. A full page may exceed max_slots (e.g.
         // when max_slots < L2_SIZE); only add the permitted number of slots to
@@ -260,7 +263,7 @@ impl CSpace
         Ok(index)
     }
 
-    /// Grow the CSpace until at least `min_free` slots are available without
+    /// Grow the `CSpace` until at least `min_free` slots are available without
     /// a further grow. Used to pre-warm the free list before bulk insertions.
     pub fn pre_allocate(&mut self, min_free: usize) -> Result<(), CapError>
     {
@@ -276,34 +279,30 @@ impl CSpace
     /// Returns `true` if the index was found and removed, `false` if not on the list.
     ///
     /// O(n) walk of the singly-linked free list. Acceptable because callers
-    /// (`insert_cap_at`) are infrequent (only init populating child CSpaces).
+    /// (`insert_cap_at`) are infrequent (only init populating child `CSpaces`).
     pub fn remove_from_free_list(&mut self, target: u32) -> bool
     {
         if self.free_head == Some(target)
         {
             // Target is the head: pop it.
-            let next = self.slot(target).and_then(|s| s.next_free());
+            let next = self.slot(target).and_then(super::slot::CapabilitySlot::next_free);
             self.free_head = next;
             self.free_count -= 1;
             return true;
         }
         // Walk the list looking for the predecessor.
-        let mut cur_idx = match self.free_head
-        {
-            Some(i) => i,
-            None => return false,
-        };
+        let Some(mut cur_idx) = self.free_head else { return false };
         loop
         {
-            let next_idx = match self.slot(cur_idx).and_then(|s| s.next_free())
+            let Some(next_idx) = self.slot(cur_idx).and_then(super::slot::CapabilitySlot::next_free)
+            else
             {
-                Some(i) => i,
-                None => return false,
+                return false;
             };
             if next_idx == target
             {
                 // Splice out: cur.next = target.next
-                let after = self.slot(target).and_then(|s| s.next_free());
+                let after = self.slot(target).and_then(super::slot::CapabilitySlot::next_free);
                 self.slot_mut(cur_idx).unwrap().set_next_free(after);
                 self.free_count -= 1;
                 return true;
@@ -315,7 +314,7 @@ impl CSpace
     /// Insert a capability at a caller-chosen slot index.
     ///
     /// Used by `SYS_CAP_INSERT` to place a cap at a well-known index (e.g.,
-    /// init populating a child's CSpace). The target slot must currently be Null.
+    /// init populating a child's `CSpace`). The target slot must currently be Null.
     ///
     /// # Errors
     ///
@@ -382,7 +381,7 @@ impl CSpace
     /// Call `f` for each non-null slot's kernel object pointer.
     ///
     /// Used by `dealloc_object(CSpaceObj)` to dec-ref all objects before
-    /// the CSpace pages are freed. Skips slot 0 (permanently null) and
+    /// the `CSpace` pages are freed. Skips slot 0 (permanently null) and
     /// unallocated pages.
     pub fn for_each_object<F>(&self, mut f: F)
     where
@@ -392,7 +391,7 @@ impl CSpace
         {
             if let Some(page) = &self.directory[page_idx]
             {
-                let start = if page_idx == 0 { 1 } else { 0 };
+                let start = usize::from(page_idx == 0);
                 for slot_idx in start..L2_SIZE
                 {
                     let slot = &page.slots[slot_idx];

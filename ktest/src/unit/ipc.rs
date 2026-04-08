@@ -57,7 +57,7 @@ pub fn call_reply_recv(ctx: &TestContext) -> TestResult
         .map_err(|_| "cap_copy notify into child CSpace failed")?;
 
     // Pack child ep and notify slots into the arg u64.
-    let child_arg = (child_ep as u64) | ((child_notify as u64) << 16);
+    let child_arg = u64::from(child_ep) | (u64::from(child_notify) << 16);
 
     let child_th = cap_create_thread(ctx.aspace_cap, child_cs)
         .map_err(|_| "cap_create_thread for IPC test failed")?;
@@ -118,7 +118,7 @@ pub fn recv_finds_queued_caller(ctx: &TestContext) -> TestResult
         .map_err(|_| "cap_copy ep for recv_finds_queued_caller failed")?;
     let child_done = cap_copy(done, child_cs, 1 << 7)
         .map_err(|_| "cap_copy done for recv_finds_queued_caller failed")?;
-    let child_arg = (child_ep as u64) | ((child_done as u64) << 16);
+    let child_arg = u64::from(child_ep) | (u64::from(child_done) << 16);
 
     let th = cap_create_thread(ctx.aspace_cap, child_cs)
         .map_err(|_| "cap_create_thread for recv_finds_queued_caller failed")?;
@@ -178,7 +178,7 @@ pub fn ipc_buffer_misaligned_err(_ctx: &TestContext) -> TestResult
 
 /// Child: calls the endpoint with label 0xCAFE, waits for reply, then signals.
 ///
-/// `arg`: bits[15:0] = ep_slot, bits[31:16] = notify_slot (in child's CSpace).
+/// `arg`: bits[15:0] = `ep_slot`, bits[31:16] = `notify_slot` (in child's `CSpace`).
 fn caller_entry(arg: u64) -> !
 {
     let ep_slot = (arg & 0xFFFF) as u32;
@@ -209,7 +209,7 @@ fn caller_entry(arg: u64) -> !
 /// Child for `recv_finds_queued_caller`: calls endpoint immediately (no server
 /// yet), then signals the result after the server replies.
 ///
-/// `arg`: bits[15:0] = ep_slot, bits[31:16] = done_slot (in child's CSpace).
+/// `arg`: bits[15:0] = `ep_slot`, bits[31:16] = `done_slot` (in child's `CSpace`).
 fn queued_caller_entry(arg: u64) -> !
 {
     let ep_slot = (arg & 0xFFFF) as u32;

@@ -13,3 +13,9 @@ destination path differs from a direct mirror of this layout.
 | File | Sysroot destination |
 |---|---|
 | `boot.conf` | `EFI/seraph/boot.conf` |
+
+---
+
+## Summarized By
+
+None

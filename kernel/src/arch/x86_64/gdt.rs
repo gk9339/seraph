@@ -22,10 +22,15 @@
 //! caller (allocated from the heap via `Box::leak`).
 //!
 //! # Modification notes
-//! - To add a new ring-3 segment: insert it after user_cs and before the TSS
+//! - To add a new ring-3 segment: insert it after `user_cs` and before the TSS
 //!   pair; update the selector constants accordingly.
 //! - To add more IST stacks: add IST fields to the TSS, pass the stack tops
 //!   into `init`, and reference them in IDT gate descriptors.
+
+// cast_possible_truncation: usize→u16 GDT/TSS limit casts; values are bounded by
+// the struct sizes and array counts that are verified by the unit tests.
+// cast_lossless: u8→u64 DPL shifts; u8 always fits in u64.
+#![allow(clippy::cast_possible_truncation, clippy::cast_lossless)]
 
 // Unit tests exercise descriptor encoding only; hardware ops are #[cfg(not(test))].
 // AP GDT/TSS init uses Box (heap allocation); alloc is available from Phase 4 onward.
@@ -88,7 +93,7 @@ pub const IOPB_SIZE: usize = 8192;
 /// to be 0xFF).
 ///
 /// The GDT TSS descriptor limit must cover the entire struct:
-///   limit = size_of::<TssWithIopb>() - 1
+///   limit = `size_of`::<TssWithIopb>() - 1
 ///
 /// `iopb_offset` in the `Tss` is 104 (the offset of `iopb` within this struct).
 #[repr(C, packed)]
@@ -261,7 +266,7 @@ pub unsafe fn init(kernel_stack_top: u64, ist1_top: u64, ist2_top: u64)
     unsafe {
         core::arch::asm!(
             "lgdt [{0}]",
-            in(reg) &gdtr,
+            in(reg) core::ptr::addr_of!(gdtr),
             options(readonly, nostack, preserves_flags),
         );
     }
@@ -314,13 +319,12 @@ pub unsafe fn init(kernel_stack_top: u64, ist1_top: u64, ist2_top: u64)
 #[cfg(not(test))]
 pub fn bsp_tss_ptr() -> u64
 {
-    // SAFETY: address-of is always safe; only reads the address, no deref.
-    unsafe { core::ptr::addr_of!(TSS) as u64 }
+    core::ptr::addr_of!(TSS) as u64
 }
 
 /// Update the ring-0 RSP stored in the current CPU's TSS.
 ///
-/// Reads `PER_CPU[current_cpu].tss_ptr` via `gs:[32]` (PERCPU_TSS_PTR_OFFSET)
+/// Reads `PER_CPU[current_cpu].tss_ptr` via `gs:[32]` (`PERCPU_TSS_PTR_OFFSET`)
 /// to locate the TSS without a global lookup. Safe to call after
 /// `percpu::init_bsp()` / `percpu::init_ap()` installs GS-base.
 ///
@@ -356,7 +360,7 @@ pub unsafe fn set_rsp0(stack_top: u64)
 /// only for APs.
 ///
 /// # Safety
-/// Must execute at ring 0 on the AP being initialised. `cpu_id` must be < MAX_CPUS.
+/// Must execute at ring 0 on the AP being initialised. `cpu_id` must be < `MAX_CPUS.`
 /// `percpu::init_ap(cpu_id)` must have been called first so GS-base and
 /// `PER_CPU[cpu_id].tss_ptr` are writable.
 #[cfg(not(test))]
@@ -365,7 +369,7 @@ pub unsafe fn init_ap(cpu_id: u32, rsp0: u64, ist1_top: u64, ist2_top: u64)
     use alloc::boxed::Box;
 
     // Allocate and configure the TSS for this AP.
-    let mut tss_box = Box::new(TssWithIopb {
+    let tss_box = Box::new(TssWithIopb {
         tss: Tss {
             _reserved0: 0,
             rsp0,
@@ -400,8 +404,8 @@ pub unsafe fn init_ap(cpu_id: u32, rsp0: u64, ist1_top: u64, ist2_top: u64)
     gdt_box[6] = tss_hi; // 0x30 TSS high
 
     // Leak both boxes — the AP runs on them for the lifetime of the kernel.
-    let gdt_ptr = Box::into_raw(gdt_box) as *const [u64; 7];
-    let _tss_ptr = Box::into_raw(tss_box) as *mut TssWithIopb;
+    let gdt_ptr: *const [u64; 7] = Box::into_raw(gdt_box).cast_const();
+    let _tss_ptr: *mut TssWithIopb = Box::into_raw(tss_box);
 
     // Load GDTR.
     let gdtr = Gdtr {
@@ -411,7 +415,7 @@ pub unsafe fn init_ap(cpu_id: u32, rsp0: u64, ist1_top: u64, ist2_top: u64)
     unsafe {
         core::arch::asm!(
             "lgdt [{0}]",
-            in(reg) &gdtr,
+            in(reg) core::ptr::addr_of!(gdtr),
             options(readonly, nostack, preserves_flags),
         );
     }

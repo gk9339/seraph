@@ -11,13 +11,17 @@
 //! 3. Add a dispatch arm to `syscall/mod.rs`.
 //! 4. Add a userspace wrapper to `shared/syscall/src/lib.rs`.
 
+// cast_possible_truncation: u64→u32/usize casts extract cap indices and sizes
+// from 64-bit trap frame args. Seraph is 64-bit only; all values fit in the target type.
+#![allow(clippy::cast_possible_truncation)]
+
 use crate::arch::current::trap_frame::TrapFrame;
 use syscall::SyscallError;
 
-/// SYS_MEM_MAP (16): map a physical Frame into a user address space.
+/// `SYS_MEM_MAP` (16): map a physical Frame into a user address space.
 ///
 /// arg0 = Frame cap index (must have MAP right; WRITE/EXECUTE determine page perms).
-/// arg1 = AddressSpace cap index (must have MAP right).
+/// arg1 = `AddressSpace` cap index (must have MAP right).
 /// arg2 = virtual address of the first page to map (must be page-aligned, user range).
 /// arg3 = offset into the frame in pages (0 = start of frame).
 /// arg4 = number of pages to map.
@@ -37,6 +41,8 @@ pub fn sys_mem_map(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     use crate::mm::{with_frame_allocator, PAGE_SIZE};
     use crate::syscall::current_tcb;
 
+    const USER_HALF_TOP: u64 = 0x0000_8000_0000_0000;
+
     let frame_idx = tf.arg(0) as u32;
     let aspace_idx = tf.arg(1) as u32;
     let virt_base = tf.arg(2);
@@ -52,7 +58,6 @@ pub fn sys_mem_map(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     }
 
     // Virtual address must be in the user half (< canonical kernel boundary).
-    const USER_HALF_TOP: u64 = 0x0000_8000_0000_0000;
     if virt_base >= USER_HALF_TOP
     {
         return Err(SyscallError::InvalidAddress);
@@ -95,7 +100,9 @@ pub fn sys_mem_map(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     let (frame_phys, frame_size) = {
         let obj = frame_slot.object.ok_or(SyscallError::InvalidCapability)?;
         // SAFETY: tag confirmed Frame; pointer is valid.
-        let fo = unsafe { &*(obj.as_ptr() as *const FrameObject) };
+        // cast_ptr_alignment: header at offset 0; allocator guarantees alignment.
+        #[allow(clippy::cast_ptr_alignment)]
+        let fo = unsafe { &*(obj.as_ptr().cast::<FrameObject>()) };
         (fo.base, fo.size)
     };
     let frame_rights = frame_slot.rights;
@@ -133,7 +140,9 @@ pub fn sys_mem_map(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     let as_ptr = {
         let obj = aspace_slot.object.ok_or(SyscallError::InvalidCapability)?;
         // SAFETY: tag confirmed AddressSpace; pointer is valid.
-        let as_obj = unsafe { &*(obj.as_ptr() as *const AddressSpaceObject) };
+        // cast_ptr_alignment: header at offset 0; allocator guarantees alignment.
+        #[allow(clippy::cast_ptr_alignment)]
+        let as_obj = unsafe { &*(obj.as_ptr().cast::<AddressSpaceObject>()) };
         as_obj.address_space
     };
 
@@ -150,7 +159,7 @@ pub fn sys_mem_map(tf: &mut TrapFrame) -> Result<u64, SyscallError>
             unsafe { (*as_ptr).map_page(virt, phys, page_flags, alloc) }
         });
 
-        result.map_err(|_| SyscallError::OutOfMemory)?;
+        result.map_err(|()| SyscallError::OutOfMemory)?;
     }
 
     Ok(0)
@@ -165,9 +174,9 @@ pub fn sys_mem_map(_tf: &mut TrapFrame) -> Result<u64, SyscallError>
 
 // ── SYS_MEM_UNMAP ─────────────────────────────────────────────────────────────
 
-/// SYS_MEM_UNMAP (17): remove page mappings from a user address space.
+/// `SYS_MEM_UNMAP` (17): remove page mappings from a user address space.
 ///
-/// arg0 = AddressSpace cap index (must have MAP right).
+/// arg0 = `AddressSpace` cap index (must have MAP right).
 /// arg1 = virtual address of the first page to unmap (page-aligned, user range).
 /// arg2 = number of pages to unmap (non-zero).
 ///
@@ -181,6 +190,7 @@ pub fn sys_mem_unmap(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 {
     use crate::cap::object::AddressSpaceObject;
     use crate::cap::slot::{CapTag, Rights};
+    const USER_HALF_TOP: u64 = 0x0000_8000_0000_0000;
     use crate::mm::PAGE_SIZE;
     use crate::syscall::current_tcb;
 
@@ -194,7 +204,6 @@ pub fn sys_mem_unmap(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     {
         return Err(SyscallError::InvalidAddress);
     }
-    const USER_HALF_TOP: u64 = 0x0000_8000_0000_0000;
     if virt_base >= USER_HALF_TOP
     {
         return Err(SyscallError::InvalidAddress);
@@ -232,7 +241,9 @@ pub fn sys_mem_unmap(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     let as_ptr = {
         let obj = aspace_slot.object.ok_or(SyscallError::InvalidCapability)?;
         // SAFETY: tag confirmed AddressSpace.
-        let as_obj = unsafe { &*(obj.as_ptr() as *const AddressSpaceObject) };
+        // cast_ptr_alignment: header at offset 0; allocator guarantees alignment.
+        #[allow(clippy::cast_ptr_alignment)]
+        let as_obj = unsafe { &*(obj.as_ptr().cast::<AddressSpaceObject>()) };
         as_obj.address_space
     };
 
@@ -257,10 +268,10 @@ pub fn sys_mem_unmap(_tf: &mut TrapFrame) -> Result<u64, SyscallError>
 
 // ── SYS_MEM_PROTECT ───────────────────────────────────────────────────────────
 
-/// SYS_MEM_PROTECT (18): change permission flags on existing page mappings.
+/// `SYS_MEM_PROTECT` (18): change permission flags on existing page mappings.
 ///
 /// arg0 = Frame cap index (must have MAP right; authorises the new permissions).
-/// arg1 = AddressSpace cap index (must have MAP right).
+/// arg1 = `AddressSpace` cap index (must have MAP right).
 /// arg2 = virtual address of the first page (page-aligned, user range).
 /// arg3 = number of pages (non-zero).
 /// arg4 = new protection bits: bit 1 = WRITE, bit 2 = EXECUTE (matches Rights layout).
@@ -278,6 +289,7 @@ pub fn sys_mem_protect(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     use crate::mm::paging::{PageFlags, PagingError};
     use crate::mm::PAGE_SIZE;
     use crate::syscall::current_tcb;
+    const USER_HALF_TOP: u64 = 0x0000_8000_0000_0000;
 
     let frame_idx = tf.arg(0) as u32;
     let aspace_idx = tf.arg(1) as u32;
@@ -291,7 +303,6 @@ pub fn sys_mem_protect(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     {
         return Err(SyscallError::InvalidAddress);
     }
-    const USER_HALF_TOP: u64 = 0x0000_8000_0000_0000;
     if virt_base >= USER_HALF_TOP
     {
         return Err(SyscallError::InvalidAddress);
@@ -363,7 +374,9 @@ pub fn sys_mem_protect(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     let as_ptr = {
         let obj = aspace_slot.object.ok_or(SyscallError::InvalidCapability)?;
         // SAFETY: tag confirmed AddressSpace.
-        let as_obj = unsafe { &*(obj.as_ptr() as *const AddressSpaceObject) };
+        // cast_ptr_alignment: header at offset 0; allocator guarantees alignment.
+        #[allow(clippy::cast_ptr_alignment)]
+        let as_obj = unsafe { &*(obj.as_ptr().cast::<AddressSpaceObject>()) };
         as_obj.address_space
     };
 
@@ -376,7 +389,7 @@ pub fn sys_mem_protect(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         unsafe { (*as_ptr).protect_page(virt, page_flags) }.map_err(|e| match e
         {
             PagingError::NotMapped => SyscallError::InvalidAddress,
-            _ => SyscallError::InvalidArgument,
+            PagingError::OutOfFrames => SyscallError::InvalidArgument,
         })?;
     }
 
@@ -392,7 +405,7 @@ pub fn sys_mem_protect(_tf: &mut TrapFrame) -> Result<u64, SyscallError>
 
 // ── SYS_FRAME_SPLIT ───────────────────────────────────────────────────────────
 
-/// SYS_FRAME_SPLIT (33): split a Frame cap into two non-overlapping children.
+/// `SYS_FRAME_SPLIT` (33): split a Frame cap into two non-overlapping children.
 ///
 /// arg0 = Frame cap index (must have MAP right).
 /// arg1 = split offset in bytes (page-aligned; must be > 0 and < frame size).
@@ -449,7 +462,10 @@ pub fn sys_frame_split(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         let slot =
             unsafe { super::lookup_cap(caller_cspace, frame_idx, CapTag::Frame, Rights::MAP) }?;
         let obj_ptr = slot.object.ok_or(SyscallError::InvalidCapability)?;
-        let fo = unsafe { &*(obj_ptr.as_ptr() as *const FrameObject) };
+        // cast_ptr_alignment: FrameObject (8-byte) behind KernelObjectHeader (4-byte header);
+        // Box<FrameObject> allocation guarantees 8-byte alignment.
+        #[allow(clippy::cast_ptr_alignment)]
+        let fo = unsafe { &*(obj_ptr.as_ptr().cast::<FrameObject>()) };
         let cspace_id = unsafe { (*caller_cspace).id() };
         (fo.base, fo.size, slot.rights, cspace_id, obj_ptr)
     };
@@ -474,7 +490,7 @@ pub fn sys_frame_split(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         size: split_offset,
     });
     let child1_ptr: NonNull<KernelObjectHeader> = {
-        let raw = Box::into_raw(child1_obj) as *mut KernelObjectHeader;
+        let raw = Box::into_raw(child1_obj).cast::<KernelObjectHeader>();
         // SAFETY: Box::into_raw is non-null.
         unsafe { NonNull::new_unchecked(raw) }
     };
@@ -486,7 +502,7 @@ pub fn sys_frame_split(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         size: frame_size - split_offset,
     });
     let child2_ptr: NonNull<KernelObjectHeader> = {
-        let raw = Box::into_raw(child2_obj) as *mut KernelObjectHeader;
+        let raw = Box::into_raw(child2_obj).cast::<KernelObjectHeader>();
         unsafe { NonNull::new_unchecked(raw) }
     };
 
@@ -548,7 +564,7 @@ pub fn sys_frame_split(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         unsafe { dealloc_object(orig_obj_ptr) };
     }
 
-    Ok((slot1 as u64) | ((slot2 as u64) << 32))
+    Ok(u64::from(slot1) | (u64::from(slot2) << 32))
 }
 
 // Test stub.

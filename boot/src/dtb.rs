@@ -29,6 +29,7 @@ const FDT_BEGIN_NODE: u32 = 1;
 const FDT_END_NODE: u32 = 2;
 const FDT_PROP: u32 = 3;
 const FDT_NOP: u32 = 4;
+#[allow(dead_code)] // Used as a sentinel that collapses into the `_ => break` arm.
 const FDT_END: u32 = 9;
 
 /// Maximum FDT node nesting depth supported by the walker.
@@ -153,7 +154,7 @@ impl Fdt
         {
             return None;
         }
-        let addr = self.base + self.off_struct as u64 + off as u64;
+        let addr = self.base + u64::from(self.off_struct) + u64::from(off);
         Some(u32::from_be(unsafe {
             core::ptr::read_unaligned(addr as *const u32)
         }))
@@ -169,7 +170,7 @@ impl Fdt
             _ => return &[],
         };
         let _ = end;
-        let addr = self.base + self.off_struct as u64 + off as u64;
+        let addr = self.base + u64::from(self.off_struct) + u64::from(off);
         unsafe { core::slice::from_raw_parts(addr as *const u8, len as usize) }
     }
 
@@ -181,7 +182,7 @@ impl Fdt
         {
             return &[];
         }
-        let addr = self.base + self.off_strings as u64 + nameoff as u64;
+        let addr = self.base + u64::from(self.off_strings) + u64::from(nameoff);
         let max_len = (self.size_strings - nameoff) as usize;
         let start = addr as *const u8;
         let mut len = 0;
@@ -205,13 +206,8 @@ impl Fdt
         let mut depth: usize = 0;
         let mut off: u32 = 0; // byte offset within struct block
 
-        loop
+        while let Some(token) = self.read_struct_u32(off)
         {
-            let token = match self.read_struct_u32(off)
-            {
-                Some(t) => t,
-                None => break,
-            };
             off += 4;
 
             match token
@@ -248,17 +244,9 @@ impl Fdt
                 }
                 FDT_PROP =>
                 {
-                    let prop_len = match self.read_struct_u32(off)
-                    {
-                        Some(l) => l,
-                        None => break,
-                    };
+                    let Some(prop_len) = self.read_struct_u32(off) else { break };
                     off += 4;
-                    let nameoff = match self.read_struct_u32(off)
-                    {
-                        Some(n) => n,
-                        None => break,
-                    };
+                    let Some(nameoff) = self.read_struct_u32(off) else { break };
                     off += 4;
                     let data_off = off;
                     // Advance past prop data (4-byte aligned).
@@ -298,8 +286,8 @@ impl Fdt
                 }
                 FDT_NOP =>
                 {}
-                FDT_END => break, // end of struct block
-                _ => break,       // malformed or unknown token
+                // FDT_END = end of struct block; any other token = malformed/unknown.
+                _ => break,
             }
         }
     }
@@ -345,13 +333,8 @@ impl Fdt
         let mut depth: usize = 0;
         let mut off: u32 = 0;
 
-        loop
+        while let Some(token) = self.read_struct_u32(off)
         {
-            let token = match self.read_struct_u32(off)
-            {
-                Some(t) => t,
-                None => break,
-            };
             off += 4;
 
             match token
@@ -380,28 +363,17 @@ impl Fdt
                     if depth < MAX_DEPTH
                     {
                         let s = &states[depth];
-                        if s.is_riscv_cpu && s.has_reg && !s.disabled
+                        if s.is_riscv_cpu && s.has_reg && !s.disabled && !callback(s.reg_u32)
                         {
-                            if !callback(s.reg_u32)
-                            {
-                                break;
-                            }
+                            break;
                         }
                     }
                 }
                 FDT_PROP =>
                 {
-                    let prop_len = match self.read_struct_u32(off)
-                    {
-                        Some(l) => l,
-                        None => break,
-                    };
+                    let Some(prop_len) = self.read_struct_u32(off) else { break };
                     off += 4;
-                    let nameoff = match self.read_struct_u32(off)
-                    {
-                        Some(n) => n,
-                        None => break,
-                    };
+                    let Some(nameoff) = self.read_struct_u32(off) else { break };
                     off += 4;
                     let data_off = off;
                     off += (prop_len + 3) & !3;
@@ -446,7 +418,7 @@ impl Fdt
                 }
                 FDT_NOP =>
                 {}
-                FDT_END => break,
+                // FDT_END = end of struct block; any other token = malformed/unknown.
                 _ => break,
             }
         }
@@ -457,9 +429,12 @@ impl Fdt
 
 /// Skip the null-terminated, 4-byte-aligned node name starting at `off` in
 /// the struct block. Returns the updated offset after the name.
+// `len` (usize) is bounded by `max` which equals `size_struct.saturating_sub(start)` (u32),
+// so the `len as u32` cast below cannot truncate.
+#[allow(clippy::cast_possible_truncation)]
 fn skip_node_name(fdt: &Fdt, start: u32) -> u32
 {
-    let base_addr = fdt.base + fdt.off_struct as u64 + start as u64;
+    let base_addr = fdt.base + u64::from(fdt.off_struct) + u64::from(start);
     let max = fdt.size_struct.saturating_sub(start) as usize;
     let mut len = 0;
     while len < max
@@ -471,7 +446,7 @@ fn skip_node_name(fdt: &Fdt, start: u32) -> u32
             break;
         }
     }
-    // Round up to 4-byte alignment.
+    // Round up to 4-byte alignment. `len ≤ max ≤ size_struct (u32::MAX)` so cast is exact.
     (start + len as u32 + 3) & !3
 }
 
@@ -520,10 +495,8 @@ fn read_be64(buf: &[u8]) -> u64
 /// `dtb_addr` must be the physical address of a valid, identity-mapped FDT.
 pub unsafe fn parse_cpu_count(dtb_addr: u64) -> (u32, [u32; 64])
 {
-    let fdt = match unsafe { Fdt::from_raw(dtb_addr) }
-    {
-        Some(f) => f,
-        None => return (0, [0u32; 64]),
+    let Some(fdt) = (unsafe { Fdt::from_raw(dtb_addr) }) else {
+        return (0, [0u32; 64]);
     };
 
     let mut hart_ids = [0u32; 64];
@@ -561,19 +534,14 @@ pub unsafe fn parse_cpu_count(dtb_addr: u64) -> (u32, [u32; 64])
 /// `dtb_addr` must be the physical address of a valid, identity-mapped FDT.
 pub unsafe fn parse_dtb_resources(dtb_addr: u64, out: &mut [PlatformResource]) -> usize
 {
-    let fdt = match unsafe { Fdt::from_raw(dtb_addr) }
-    {
-        Some(f) => f,
-        None =>
-        {
-            bprintln!("[--------] boot:     DTB: invalid magic, skipping");
-            return 0;
-        }
+    let Some(fdt) = (unsafe { Fdt::from_raw(dtb_addr) }) else {
+        bprintln!("[--------] boot:     DTB: invalid magic, skipping");
+        return 0;
     };
 
     let mut count = 0;
 
-    /// Push a PlatformResource into `out` if space remains.
+    /// Push a [`PlatformResource`] into `out` if space remains.
     macro_rules! push_resource {
         ($res:expr) => {
             if count < out.len()
@@ -653,7 +621,7 @@ pub unsafe fn parse_dtb_resources(dtb_addr: u64, out: &mut [PlatformResource]) -
         resource_type: ResourceType::PlatformTable,
         flags: 0,
         base: dtb_addr,
-        size: fdt.total_size() as u64,
+        size: u64::from(fdt.total_size()),
         id: 0,
     });
 

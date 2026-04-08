@@ -1,7 +1,5 @@
 # ELF Loading
 
-## Overview
-
 The bootloader loads three categories of binaries from the EFI System Partition:
 
 - **Kernel ELF** — fully validated and loaded at ELF-specified physical addresses.
@@ -178,3 +176,9 @@ binary. Adding boot modules requires only new keys in `boot.conf`; the parser
 silently skips unknown keys, so existing bootloader binaries are unaffected.
 `BootInfo.modules.count` accurately reflects however many modules were loaded; the
 kernel and init iterate it without assuming a fixed count or fixed ordering.
+
+---
+
+## Summarized By
+
+None

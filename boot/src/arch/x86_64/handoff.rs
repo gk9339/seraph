@@ -67,7 +67,7 @@ pub fn trampoline_page_range() -> (u64, u64)
 /// Loads the handoff parameters into registers, then jumps to the
 /// `_handoff_trampoline` stub. The trampoline clears direction/interrupt
 /// flags, installs the new page table via CR3, sets the stack pointer,
-/// loads the BootInfo argument, and jumps to the kernel entry point.
+/// loads the `BootInfo` argument, and jumps to the kernel entry point.
 ///
 /// The trampoline page must be identity-mapped RX in the new page tables
 /// before calling this function (see [`trampoline_page_range`] and the

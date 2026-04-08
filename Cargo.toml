@@ -24,6 +24,11 @@ members = [
 # Components targeting custom/embedded targets are built via build.sh.
 default-members = ["xtask"]
 
+[workspace.lints.clippy]
+all      = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+cargo    = { level = "warn", priority = -1 }
+
 [workspace.dependencies]
 boot-protocol = { path = "abi/boot-protocol" }
 font = { path = "shared/font" }

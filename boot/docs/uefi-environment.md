@@ -1,15 +1,12 @@
 # UEFI Environment
 
-## Overview
-
 The bootloader is a UEFI application. Before `ExitBootServices`, all hardware access
 and memory allocation goes through UEFI firmware services. After `ExitBootServices`,
 UEFI boot services are permanently unavailable; the bootloader operates exclusively
 from pre-allocated memory.
 
-This document describes the UEFI protocols the bootloader uses, the allocation
-strategy, how the memory map is acquired, the `ExitBootServices` call, and the error
-handling strategy throughout.
+This document covers the UEFI protocols used, allocation strategy, memory map
+acquisition, `ExitBootServices`, and error handling.
 
 ---
 
@@ -211,7 +208,6 @@ The bootloader performs no allocation-dependent operations after `ExitBootServic
 
 All errors in the bootloader are fatal. There is no recovery path, no retry beyond
 the single `ExitBootServices` retry described above, and no fallback configuration.
-A bootloader that cannot complete its sequence cannot safely hand off to the kernel.
 
 ### BootError Type
 
@@ -287,3 +283,9 @@ implementation may be slow or redirect to a serial port.
 The UEFI console (`ConOut`) is unavailable. The current implementation has no
 output path after `ExitBootServices`. The normal path proceeds directly to `BootInfo`
 population and kernel handoff without any further output.
+
+---
+
+## Summarized By
+
+None

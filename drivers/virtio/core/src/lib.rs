@@ -3,9 +3,9 @@
 
 // drivers/virtio/core/src/lib.rs
 
-//! VirtIO transport and queue primitives shared by all VirtIO drivers.
+//! `VirtIO` transport and queue primitives shared by all `VirtIO` drivers.
 //!
-//! This crate provides the common VirtIO infrastructure (virtqueue management,
+//! This crate provides the common `VirtIO` infrastructure (virtqueue management,
 //! MMIO/PCI transport abstraction, device negotiation) used by individual
 //! driver crates such as `virtio-blk`.
 //!

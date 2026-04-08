@@ -1,20 +1,13 @@
 # Firmware Parsing
 
-## Overview
-
 The bootloader performs *shallow* firmware parsing: enough to extract structured
-`PlatformResource` entries that the kernel can consume to mint initial capabilities.
-Deep interpretation — full ACPI namespace evaluation, PCI enumeration, Device Tree
-property resolution — is deferred to `devmgr` in userspace.
+`PlatformResource` entries for the kernel to mint initial capabilities. Deep
+interpretation — ACPI namespace evaluation, PCI enumeration, Device Tree property
+resolution — is deferred to `devmgr` in userspace.
 
 On x86-64, the ACPI tables are the source. On RISC-V, the Device Tree blob is the
 source. In both cases, the raw table pointer is also recorded in `BootInfo` as an
 opaque physical address for userspace to parse fully.
-
-This design keeps firmware parsing complexity out of the kernel's trusted computing
-base. Bugs in ACPI or Device Tree parsing can produce incorrect `PlatformResource`
-entries, but cannot corrupt the kernel itself — the kernel validates all entries in
-Phase 6 before minting capabilities from them.
 
 ---
 
@@ -288,3 +281,9 @@ The bootloader's firmware parsing is deliberately shallow. It does not:
 All of these are `devmgr`'s responsibility. The bootloader produces the minimum set of
 structured descriptors needed for the kernel to mint initial capabilities, and passes
 the raw firmware tables through for userspace to interpret.
+
+---
+
+## Summarized By
+
+None

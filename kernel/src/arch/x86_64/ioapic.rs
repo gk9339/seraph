@@ -34,8 +34,8 @@
 //!   // TODO: Read IOAPIC base from ACPI MADT IOAPIC record. Pick up when
 //!   // ACPI table parsing is added.
 //!
-//! - **No MSI/MSI-X support.** Required for modern PCIe devices.
-//!   // TODO: Add MSI/MSI-X programming when PCIe enumeration is implemented.
+//! - **No MSI/MSI-X support.** Required for modern `PCIe` devices.
+//!   // TODO: Add MSI/MSI-X programming when `PCIe` enumeration is implemented.
 //!
 //! - **Edge-triggered, active-high only.** Level-triggered and active-low
 //!   sources (some legacy ISA IRQs via PCI interrupt routing) are not handled.
@@ -46,6 +46,10 @@
 //!   `unmask(gsi)` after registering a signal handler.
 //! - To support level-triggered IRQs: set bit 15 (level-sensitive) and
 //!   bit 13 (active-low polarity) in the redirection entry low dword.
+
+// cast_possible_truncation: u64→usize APIC MMIO address arithmetic; bounded by APIC layout.
+// cast_lossless: u8→u32 vector widening casts.
+#![allow(clippy::cast_possible_truncation, clippy::cast_lossless)]
 
 use crate::mm::paging::DIRECT_MAP_BASE;
 
@@ -73,7 +77,7 @@ const REDIR_MASK: u32 = 1 << 16;
 
 /// Fixed delivery mode (000), physical destination, vector in [7:0].
 /// Logical destination mode would be bit 11; we leave it clear (physical).
-const REDIR_FIXED: u32 = 0x00000000;
+const REDIR_FIXED: u32 = 0x0000_0000;
 
 // ── Register access ───────────────────────────────────────────────────────────
 

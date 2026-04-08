@@ -1,7 +1,5 @@
 # Memory Subsystem Internals
 
-## Overview
-
 This document covers the implementation of the kernel's memory subsystem. The design
 goals (higher-half layout, buddy + slab allocation, W^X enforcement, PCID/ASID
 management) are specified in [docs/memory-model.md](../../docs/memory-model.md). This
@@ -438,3 +436,9 @@ root table, freeing all tracked intermediate nodes before freeing the root.
 
 No reference counting is needed for intermediate nodes — they are owned exclusively
 by the address space that contains them.
+
+---
+
+## Summarized By
+
+None

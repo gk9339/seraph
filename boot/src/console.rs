@@ -170,12 +170,13 @@ pub unsafe fn console_write_dec32(n: u32)
 /// To add: extend with another `bprint!("...")` call immediately after.
 #[macro_export]
 macro_rules! bprint {
-    ($s:expr) => {
+    ($s:expr) => {{
+        let s: &str = $s;
         // SAFETY: console is initialized before any macro usage.
         unsafe {
-            $crate::console::console_write_str($s);
+            $crate::console::console_write_str(s);
         }
-    };
+    }};
 }
 
 /// Print a literal string followed by `\r\n` to the boot console.
@@ -184,19 +185,18 @@ macro_rules! bprint {
 /// uses `core::fmt::Write`; see `bprint!` for the rationale.
 #[macro_export]
 macro_rules! bprintln {
-    ($s:expr) => {
+    ($s:expr) => {{
+        let s: &str = $s;
         // SAFETY: console is initialized before any macro usage.
         unsafe {
-            $crate::console::console_write_str($s);
+            $crate::console::console_write_str(s);
+            $crate::console::console_write_str("\r\n");
         }
+    }};
+    () => {{
+        // SAFETY: console is initialized before any macro usage.
         unsafe {
             $crate::console::console_write_str("\r\n");
         }
-    };
-    () => {
-        // SAFETY: console is initialized before any macro usage.
-        unsafe {
-            $crate::console::console_write_str("\r\n");
-        }
-    };
+    }};
 }

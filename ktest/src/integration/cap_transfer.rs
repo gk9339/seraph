@@ -10,7 +10,7 @@
 //!   1. Calls an endpoint, passing a signal cap in `cap_slots[0]`.
 //!   2. Waits for the server (ktest) to reply.
 //!   3. After the reply, verifies its original cap slot is now null (the kernel
-//!      moved the cap to the server's CSpace on transfer).
+//!      moved the cap to the server's `CSpace` on transfer).
 //!   4. Signals the result back to the server via a separate sync signal.
 //!
 //! The server:
@@ -73,7 +73,7 @@ pub fn run(ctx: &TestContext) -> TestResult
 
     // Pack three 16-bit slot indices into a single u64 argument.
     let child_arg =
-        (child_ep as u64) | ((child_test_sig as u64) << 16) | ((child_sync_sig as u64) << 32);
+        u64::from(child_ep) | (u64::from(child_test_sig) << 16) | (u64::from(child_sync_sig) << 32);
 
     let th = cap_create_thread(ctx.aspace_cap, cs)
         .map_err(|_| "integration::cap_transfer: cap_create_thread failed")?;
@@ -101,7 +101,7 @@ pub fn run(ctx: &TestContext) -> TestResult
         return Err("integration::cap_transfer: expected exactly 1 transferred cap");
     }
     let recv_sig = cap_indices[0];
-    crate::log_u64("cap_transfer: recv_sig slot=", recv_sig as u64);
+    crate::log_u64("cap_transfer: recv_sig slot=", u64::from(recv_sig));
 
     // Verify the transferred cap is usable.
     crate::klog("cap_transfer: calling signal_send on transferred cap");
@@ -135,8 +135,8 @@ pub fn run(ctx: &TestContext) -> TestResult
 
 // ── Child thread ──────────────────────────────────────────────────────────────
 
-/// `arg` packs: bits[15:0] = ep_slot, bits[31:16] = test_sig_slot,
-/// bits[47:32] = sync_sig_slot (all in the child's own CSpace).
+/// `arg` packs: bits[15:0] = `ep_slot`, bits[31:16] = `test_sig_slot`,
+/// bits[47:32] = `sync_sig_slot` (all in the child's own `CSpace`).
 fn child_entry(arg: u64) -> !
 {
     let ep_slot = (arg & 0xFFFF) as u32;

@@ -1,15 +1,10 @@
 # Kernel Initialization Sequence
 
-## Overview
+This document describes the kernel's initialization sequence from `kernel_entry()` to
+the first userspace instruction of init. The sequence is divided into numbered phases,
+each with a completion criterion and a defined failure mode.
 
-This document describes what happens between `kernel_entry()` and the first userspace
-instruction of the init process. The sequence is divided into numbered phases. Each
-phase has a clear completion criterion and a defined failure mode.
-
-A failure at any phase is fatal. The kernel does not attempt recovery from init
-failures; it halts and, where possible, emits a diagnostic message. This is correct
-behaviour — a kernel that cannot complete initialisation has no safe state to recover
-to.
+Any phase failure is fatal; the kernel halts with a diagnostic message.
 
 For the boot protocol contract (CPU state, BootInfo layout) that Phase 0 depends on,
 see [docs/boot-protocol.md](../../docs/boot-protocol.md).
@@ -19,12 +14,6 @@ see [docs/boot-protocol.md](../../docs/boot-protocol.md).
 ## Phase 0: Entry Validation
 
 **Entry point:** `kernel_entry(boot_info: *const BootInfo)`
-
-**What happens:**
-
-The first act of the kernel is to validate the `BootInfo` pointer and the protocol
-version field. The pointer arrives in `rdi` (x86-64) or `a0` (RISC-V) per the boot
-protocol.
 
 ```
 1. Verify boot_info pointer is non-null and naturally aligned for BootInfo
@@ -36,9 +25,7 @@ protocol.
 7. Validate init_image.entry_point != 0
 ```
 
-No output is produced before step 1 succeeds — the console is not yet available.
-If version validation fails, the kernel halts silently; there is no safe way to
-report the error.
+No output before step 1 succeeds; console is not yet available.
 
 **Failure mode:** Infinite halt (`loop {}` / `wfi` loop). On x86-64, the halt
 instruction is used in a loop to handle spurious wakeups.
@@ -48,12 +35,6 @@ instruction is used in a loop to handle spurious wakeups.
 ---
 
 ## Phase 1: Early Console
-
-**What happens:**
-
-The architecture's `EarlyConsole` implementation is initialised using the framebuffer
-and/or serial port information in `BootInfo`. From this point forward, the kernel can
-emit diagnostic messages.
 
 ```
 1. Call arch::current::EarlyConsole::init(&boot_info)
@@ -66,9 +47,7 @@ emit diagnostic messages.
 3. Emit: CPU architecture identifier and core count if detectable at this stage
 ```
 
-The early console is not the final console driver. It is a minimal, allocation-free
-output path used only until userspace drivers take over. It has no input, no buffering,
-and no colour support (beyond whatever the framebuffer pixel writer implements).
+The early console is allocation-free and output-only.
 
 **Failure mode:** If no output device is found, initialisation continues silently.
 This is not fatal — a headless system is valid.
@@ -78,11 +57,6 @@ This is not fatal — a headless system is valid.
 ---
 
 ## Phase 2: Memory Map Parsing and Buddy Allocator
-
-**What happens:**
-
-The physical memory map from `BootInfo` is parsed to identify usable RAM. The buddy
-allocator is initialised and all usable frames are added to it.
 
 ```
 1. Iterate boot_info.memory_map.entries
@@ -109,10 +83,8 @@ allocator is initialised and all usable frames are added to it.
 7. Emit: total usable RAM in MiB
 ```
 
-The buddy allocator at this stage cannot allocate its own metadata using itself —
-it must be initialised from a fixed-size static buffer or from the boot stack. The
-allocator's free lists are small (one pointer per order level) and fit in a static
-array.
+The buddy allocator MUST be initialized from a static buffer or boot stack, not
+from itself.
 
 **Memory at this point:** Only the buddy allocator metadata is allocated. No kernel
 heap exists yet.
@@ -125,12 +97,6 @@ heap exists yet.
 ---
 
 ## Phase 3: Kernel Page Tables
-
-**What happens:**
-
-The kernel replaces the bootloader's minimal page tables with its own, establishing
-the full virtual address space layout described in
-[docs/memory-model.md](../../docs/memory-model.md).
 
 ```
 1. Allocate a root page table frame via BuddyAllocator::alloc(order=0)
@@ -167,11 +133,6 @@ Emit "fatal: cannot build kernel page tables (OOM)" and halt.
 
 ## Phase 4: Slab Allocator and Kernel Heap
 
-**What happens:**
-
-The slab allocator and size-class allocator are initialised, enabling dynamic
-allocation of kernel objects for the first time.
-
 ```
 1. Initialise the general size-class allocator:
    - Bins at power-of-two sizes (exact range determined at implementation time)
@@ -203,10 +164,7 @@ allocations succeed.
 
 ## Phase 5: Architecture Hardware Initialisation
 
-**What happens:**
-
-Architecture-specific hardware structures are established. This is the phase where
-x86-64 and RISC-V diverge most significantly.
+Architecture-specific hardware initialization; x86-64 and RISC-V diverge here.
 
 ### x86-64
 
@@ -262,12 +220,7 @@ and the syscall entry mechanism is installed.
 
 ## Phase 6: Platform Resource Validation
 
-**What happens:**
-
-The `platform_resources` slice from `BootInfo` is validated before Phase 7 mints
-capabilities from it. The kernel does not parse ACPI or Device Tree — the bootloader
-has already done that and produced structured descriptors. The kernel's job here is
-to reject entries that would be unsafe to use.
+Validates `platform_resources` entries before Phase 7 mints capabilities from them.
 
 ```
 1. If platform_resources.count == 0: skip validation, proceed with empty set.
@@ -292,10 +245,6 @@ to reject entries that would be unsafe to use.
 6. Emit: "platform resources: N entries validated (M skipped)"
 ```
 
-Validation failures are non-fatal at the entry level — bad entries are skipped
-with a warning. The only fatal condition is a null `entries` pointer when `count > 0`,
-which indicates a corrupt BootInfo.
-
 **Failure mode:** Null `entries` when `count > 0`: halt with "fatal: platform_resources
 pointer is null with non-zero count". Individual bad entries: emit a warning and skip.
 
@@ -304,12 +253,6 @@ pointer is null with non-zero count". Individual bad entries: emit a warning and
 ---
 
 ## Phase 7: Capability System
-
-**What happens:**
-
-The capability subsystem is initialised and the root CSpace (which will be given to
-init) is created. Capabilities are minted from the validated `platform_resources`
-produced in Phase 6.
 
 ```
 1. Initialise the global derivation tree (initially empty)
@@ -335,9 +278,6 @@ produced in Phase 6.
 5. Emit: "capability system initialised, N slots populated"
 ```
 
-The initial capability population is the only point where capabilities are created
-without a parent. All authority in the running system derives from this grant.
-
 **Failure mode:** Allocation failure during CSpace construction halts with
 "fatal: cannot initialise capability system".
 
@@ -347,11 +287,6 @@ boot-provided hardware resources.
 ---
 
 ## Phase 8: Scheduler
-
-**What happens:**
-
-The per-CPU scheduler state is initialised. At this point no runnable threads exist;
-the idle threads are created here to ensure each CPU always has something to run.
 
 ```
 1. Initialise per-CPU run queues:
@@ -368,10 +303,6 @@ the idle threads are created here to ensure each CPU always has something to run
 3. Emit: "scheduler initialised, N CPUs"
 ```
 
-No scheduling decisions are made yet — the BSP continues executing init-sequence
-code as the "current thread", which will transition to being the thread that spawns
-init.
-
 **Failure mode:** Allocation failure for any idle stack or TCB halts with
 "fatal: cannot initialise scheduler".
 
@@ -384,10 +315,8 @@ for all CPUs.
 
 **Status: Implemented.**
 
-Init's AddressSpace and Thread are created using the pre-parsed segment information
-in `BootInfo.init_image`. The kernel does not parse an ELF file; the bootloader has
-already done that and provided the segment array. After enqueueing init, the kernel
-calls `sched::enter()` to hand control to init.
+Creates init's AddressSpace and Thread from `BootInfo.init_image` segments, then
+calls `sched::enter()`.
 
 ```
 1. Validate boot_info.init_image:
@@ -485,3 +414,9 @@ that CPU only; the BSP and other CPUs continue.
 | 7 | Capability system + root CSpace | Halt: OOM |
 | 8 | Scheduler + idle threads | Halt: OOM |
 | 9 | Init creation + scheduler entry (user mode) | Halt: invalid InitImage or OOM |
+
+---
+
+## Summarized By
+
+None

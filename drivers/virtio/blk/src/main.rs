@@ -3,9 +3,9 @@
 
 // drivers/virtio/blk/src/main.rs
 
-//! Seraph VirtIO block device driver — stub.
+//! Seraph `VirtIO` block device driver — stub.
 //!
-//! virtio-blk implements the VirtIO 1.2 block device driver. It registers with
+//! virtio-blk implements the `VirtIO` 1.2 block device driver. It registers with
 //! devmgr, negotiates features, and exposes block I/O capabilities to vfsd.
 //!
 //! This stub halts immediately. Full implementation is deferred.

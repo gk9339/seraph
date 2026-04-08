@@ -19,3 +19,9 @@ and re-delegated on restart.
 
 Full design, including the DMA safety model and the security boundary, is documented
 in [docs/device-management.md](../docs/device-management.md).
+
+---
+
+## Summarized By
+
+None

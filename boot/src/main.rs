@@ -41,10 +41,12 @@ use crate::error::BootError;
 use crate::firmware::discover_firmware;
 use crate::paging::{build_initial_tables, PageTableBuilder};
 use crate::uefi::{
-    allocate_pages, allocate_pages_max_addr, connect_all_controllers, exit_boot_services,
-    file_read, file_size, get_loaded_image, get_memory_map, open_esp_volume, open_file, query_gop,
-    EfiHandle, EfiSystemTable,
+    allocate_pages, connect_all_controllers, exit_boot_services, file_read, file_size,
+    get_loaded_image, get_memory_map, open_esp_volume, open_file, query_gop, EfiHandle,
+    EfiSystemTable,
 };
+#[cfg(target_arch = "x86_64")]
+use crate::uefi::allocate_pages_max_addr;
 use boot_protocol::{
     BootInfo, BootModule, MemoryMapEntry, MemoryMapSlice, ModuleSlice, PlatformResource,
     PlatformResourceSlice, BOOT_PROTOCOL_VERSION,
@@ -75,6 +77,9 @@ const MAX_IDENTITY_REGIONS: usize = 64;
 /// Returns a `usize` (UEFI `EFI_STATUS`) to satisfy the UEFI ABI, but in
 /// practice never returns — the boot sequence either jumps to the kernel or
 /// halts on error.
+// UEFI entry point — must be a public non-unsafe `extern "efiapi"` function per the UEFI spec;
+// the raw-pointer parameters are validated before first deref inside the unsafe blocks below.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[no_mangle]
 pub extern "efiapi" fn efi_main(image: EfiHandle, st: *mut EfiSystemTable) -> usize
 {
@@ -106,6 +111,9 @@ pub extern "efiapi" fn efi_main(image: EfiHandle, st: *mut EfiSystemTable) -> us
 /// # Safety
 /// `image` must be the UEFI image handle passed to `efi_main`. `st` must be
 /// a valid pointer to the UEFI system table.
+// boot_sequence orchestrates the ten sequential boot steps; each step is already
+// decomposed into focused helpers — splitting further would only scatter context.
+#[allow(clippy::too_many_lines)]
 unsafe fn boot_sequence(image: EfiHandle, st: *mut EfiSystemTable) -> Result<!, BootError>
 {
     // SAFETY: st is validated by the caller (efi_main receives it from UEFI).
@@ -162,8 +170,10 @@ unsafe fn boot_sequence(image: EfiHandle, st: *mut EfiSystemTable) -> Result<!, 
     let kernel_file =
         unsafe { open_file(esp_root, config.kernel_path.as_ptr(), "kernel (boot.conf)")? };
     // SAFETY: kernel_file is a valid open file handle.
+    // File size is a u64 from UEFI; usize is 64-bit on all supported targets so cast is exact.
+    #[allow(clippy::cast_possible_truncation)]
     let kernel_file_sz = unsafe { file_size(kernel_file)? } as usize;
-    let kernel_buf_pages = (kernel_file_sz + 4095) / 4096;
+    let kernel_buf_pages = kernel_file_sz.div_ceil(4096);
     // SAFETY: bs is valid.
     let kernel_buf_phys = unsafe { allocate_pages(bs, kernel_buf_pages)? };
     // SAFETY: kernel_buf_phys is a freshly allocated region of kernel_buf_pages*4096 bytes,
@@ -196,8 +206,10 @@ unsafe fn boot_sequence(image: EfiHandle, st: *mut EfiSystemTable) -> Result<!, 
     // SAFETY: esp_root is a valid directory handle; path is null-terminated UTF-16.
     let init_file = unsafe { open_file(esp_root, config.init_path.as_ptr(), "init (boot.conf)")? };
     // SAFETY: init_file is a valid open file handle.
+    // File size is a u64 from UEFI; usize is 64-bit on all supported targets so cast is exact.
+    #[allow(clippy::cast_possible_truncation)]
     let init_file_sz = unsafe { file_size(init_file)? } as usize;
-    let init_buf_pages = (init_file_sz + 4095) / 4096;
+    let init_buf_pages = init_file_sz.div_ceil(4096);
     // SAFETY: bs is valid.
     let init_buf_phys = unsafe { allocate_pages(bs, init_buf_pages)? };
     // SAFETY: init_buf_phys is a freshly allocated region; slice is within the allocation.
@@ -257,8 +269,10 @@ unsafe fn boot_sequence(image: EfiHandle, st: *mut EfiSystemTable) -> Result<!, 
             )?
         };
         // SAFETY: mod_file is a valid open file handle.
+        // File size is a u64 from UEFI; usize is 64-bit on all supported targets so cast is exact.
+        #[allow(clippy::cast_possible_truncation)]
         let mod_file_sz = unsafe { file_size(mod_file)? } as usize;
-        let mod_buf_pages = (mod_file_sz + 4095) / 4096;
+        let mod_buf_pages = mod_file_sz.div_ceil(4096);
         // SAFETY: bs is valid.
         let mod_buf_phys = unsafe { allocate_pages(bs, mod_buf_pages)? };
         // SAFETY: mod_buf_phys is a freshly allocated region of mod_buf_pages*4096 bytes.
@@ -310,6 +324,8 @@ unsafe fn boot_sequence(image: EfiHandle, st: *mut EfiSystemTable) -> Result<!, 
     #[cfg(target_arch = "x86_64")]
     let bsp_hw_id: u32 = arch::current::bsp_hardware_id();
     #[cfg(not(target_arch = "x86_64"))]
+    // SAFETY: hart IDs are small integers; lower 32 bits are sufficient.
+    #[allow(clippy::cast_possible_truncation)]
     let bsp_hw_id: u32 = boot_hart_id as u32;
 
     // Primary: ACPI MADT (works on both x86-64 and RISC-V UEFI).
@@ -335,11 +351,11 @@ unsafe fn boot_sequence(image: EfiHandle, st: *mut EfiSystemTable) -> Result<!, 
             let mut ids = [0u32; 64];
             ids[0] = bsp_hw_id;
             let mut ap_idx = 1usize;
-            for i in 0..n as usize
+            for &hart_id in hart_ids.iter().take(n as usize)
             {
-                if hart_ids[i] != bsp_hw_id && ap_idx < 64
+                if hart_id != bsp_hw_id && ap_idx < 64
                 {
-                    ids[ap_idx] = hart_ids[i];
+                    ids[ap_idx] = hart_id;
                     ap_idx += 1;
                 }
             }
@@ -366,6 +382,8 @@ unsafe fn boot_sequence(image: EfiHandle, st: *mut EfiSystemTable) -> Result<!, 
     let (resources_phys, resource_count) =
         unsafe { platform::parse_platform_resources(bs, &firmware)? };
     bprint!("[--------] boot: platform resources: ");
+    // resource_count is bounded by the platform_resources array size (≤ 256), fits in u32.
+    #[allow(clippy::cast_possible_truncation)]
     unsafe { crate::console::console_write_dec32(resource_count as u32) };
     bprintln!(" parsed");
 
@@ -405,8 +423,8 @@ unsafe fn boot_sequence(image: EfiHandle, st: *mut EfiSystemTable) -> Result<!, 
                 config.cmdline.as_ptr(),
                 cmdline_phys as *mut u8,
                 config.cmdline_len,
-            )
-        };
+            );
+        }
     }
     // SAFETY: cmdline_phys + cmdline_len is within the 4096-byte allocation
     // because MAX_CMDLINE_LEN (512) < 4096.
@@ -419,8 +437,8 @@ unsafe fn boot_sequence(image: EfiHandle, st: *mut EfiSystemTable) -> Result<!, 
         [(0u64, 0u64); MAX_IDENTITY_REGIONS];
     let mut region_count: usize = 0;
 
-    /// Add a (physical_base, size) pair to the identity-map tracking array.
-    /// Silently drops entries beyond MAX_IDENTITY_REGIONS (design budget is 64).
+    /// Add a (`physical_base`, `size`) pair to the identity-map tracking array.
+    /// Silently drops entries beyond `MAX_IDENTITY_REGIONS` (design budget is 64).
     macro_rules! track_region {
         ($phys:expr, $size:expr) => {
             if region_count < MAX_IDENTITY_REGIONS
@@ -473,7 +491,7 @@ unsafe fn boot_sequence(image: EfiHandle, st: *mut EfiSystemTable) -> Result<!, 
     // Framebuffer: identity-map if present so the kernel can write early output.
     if framebuffer.physical_base != 0
     {
-        let fb_size = (framebuffer.stride as u64) * (framebuffer.height as u64);
+        let fb_size = u64::from(framebuffer.stride) * u64::from(framebuffer.height);
         track_region!(framebuffer.physical_base, (fb_size + 4095) & !4095);
     }
 
@@ -503,42 +521,36 @@ unsafe fn boot_sequence(image: EfiHandle, st: *mut EfiSystemTable) -> Result<!, 
     let ap_trampoline_phys: u64 = {
         // Reserve just below 1 MiB. AllocateMaxAddress places the page anywhere
         // below the supplied upper bound (= 0xFFFFF = last byte of first MiB).
-        match unsafe { allocate_pages_max_addr(bs, 0xFFFFF, 1) }
-        {
-            Ok(phys) =>
-            {
-                bprint!("[--------] boot: AP trampoline page: 0x");
-                unsafe { crate::console::console_write_hex64(phys) };
-                bprintln!("");
-                phys
-            }
-            Err(_) =>
-            {
-                bprintln!("[--------] boot: WARNING: cannot allocate AP trampoline page below 1 MiB — SMP disabled");
-                0
-            }
-        }
-    };
-    // RISC-V: allocate any 4 KiB page for the AP trampoline. No below-1 MiB
-    // constraint — SBI HSM accepts any physical start address. The kernel
-    // identity-maps this page (Phase 3) before copying trampoline code there.
-    #[cfg(target_arch = "riscv64")]
-    let ap_trampoline_phys: u64 = match unsafe { allocate_pages(bs, 1) }
-    {
-        Ok(phys) =>
+        if let Ok(phys) = unsafe { allocate_pages_max_addr(bs, 0xFFFFF, 1) }
         {
             bprint!("[--------] boot: AP trampoline page: 0x");
             unsafe { crate::console::console_write_hex64(phys) };
             bprintln!("");
             phys
         }
-        Err(_) =>
+        else
         {
-            bprintln!(
-                "[--------] boot: WARNING: cannot allocate AP trampoline page — SMP disabled"
-            );
+            bprintln!("[--------] boot: WARNING: cannot allocate AP trampoline page below 1 MiB — SMP disabled");
             0
         }
+    };
+    // RISC-V: allocate any 4 KiB page for the AP trampoline. No below-1 MiB
+    // constraint — SBI HSM accepts any physical start address. The kernel
+    // identity-maps this page (Phase 3) before copying trampoline code there.
+    #[cfg(target_arch = "riscv64")]
+    let ap_trampoline_phys: u64 = if let Ok(phys) = unsafe { allocate_pages(bs, 1) }
+    {
+        bprint!("[--------] boot: AP trampoline page: 0x");
+        unsafe { crate::console::console_write_hex64(phys) };
+        bprintln!("");
+        phys
+    }
+    else
+    {
+        bprintln!(
+            "[--------] boot: WARNING: cannot allocate AP trampoline page — SMP disabled"
+        );
+        0
     };
     #[cfg(not(any(target_arch = "x86_64", target_arch = "riscv64")))]
     let ap_trampoline_phys: u64 = 0;
@@ -617,9 +629,9 @@ unsafe fn boot_sequence(image: EfiHandle, st: *mut EfiSystemTable) -> Result<!, 
     // SAFETY: modules_phys is a valid 4096-byte allocation. boot_module_count <=
     // MAX_MODULES (16) so the writes stay within the allocation.
     let modules_ptr = modules_phys as *mut BootModule;
-    for i in 0..boot_module_count
+    for (i, &module) in boot_modules.iter().enumerate().take(boot_module_count)
     {
-        unsafe { core::ptr::write(modules_ptr.add(i), boot_modules[i]) };
+        unsafe { core::ptr::write(modules_ptr.add(i), module) };
     }
 
     // Translate the UEFI memory descriptors into the boot protocol's MemoryMapEntry
@@ -681,8 +693,8 @@ unsafe fn boot_sequence(image: EfiHandle, st: *mut EfiSystemTable) -> Result<!, 
                 cpu_ids: boot_cpu_ids,
                 ap_trampoline_page: ap_trampoline_phys,
             },
-        )
-    };
+        );
+    }
 
     // ── Step 10: Kernel handoff ───────────────────────────────────────────────
 

@@ -15,6 +15,9 @@
 //! point, which re-derives the `BootInfo` reference via the direct physical
 //! map (active since Phase 3).
 
+// cast_possible_truncation: u64→usize address arithmetic bounded by platform memory layout.
+#![allow(clippy::cast_possible_truncation)]
+
 #[cfg(not(test))]
 extern crate alloc;
 #[cfg(not(test))]
@@ -34,7 +37,7 @@ use crate::mm::{paging::phys_to_virt, PAGE_SIZE};
 /// [`validate_resources_inner`]. Returns only valid, non-overlapping entries.
 ///
 /// Fatally halts if:
-/// - `entries` is null with a non-zero count (BootInfo corruption).
+/// - `entries` is null with a non-zero count (`BootInfo` corruption).
 /// - The entries slice falls outside Usable/Loaded memory map regions.
 pub fn validate_platform_resources(boot_info_phys: u64) -> Vec<PlatformResource>
 {
@@ -112,7 +115,8 @@ fn validate_resources_inner(info: &BootInfo) -> Vec<PlatformResource>
         // constructing a typed reference to an invalid enum value.
         // SAFETY: PlatformResource is repr(C); resource_type is the first field
         //         (repr(u32)), so reading *(entry_ptr as *const u32) is sound.
-        let discriminant: u32 = unsafe { *(entry_ref as *const PlatformResource as *const u32) };
+        let discriminant: u32 =
+            unsafe { core::ptr::read(core::ptr::addr_of!(*entry_ref).cast::<u32>()) };
 
         let resource_type = match discriminant
         {
@@ -217,8 +221,8 @@ fn slice_in_boot_memory(slice_start: u64, slice_end: u64, map: &[MemoryMapEntry]
     covered >= needed
 }
 
-/// Validate a memory-mapped address range resource (MmioRange, PciEcam,
-/// PlatformTable, IommuUnit).
+/// Validate a memory-mapped address range resource (`MmioRange`, `PciEcam`,
+/// `PlatformTable`, `IommuUnit`).
 ///
 /// Requirements:
 /// - `base` is page-aligned.
@@ -228,7 +232,7 @@ fn validate_mmio_resource(entry: &PlatformResource, index: usize) -> bool
 {
     let page = PAGE_SIZE as u64;
 
-    if entry.base % page != 0
+    if !entry.base.is_multiple_of(page)
     {
         kprintln!(
             "  platform[{}]: MMIO base {:#x} is not page-aligned, skipping",
@@ -244,7 +248,7 @@ fn validate_mmio_resource(entry: &PlatformResource, index: usize) -> bool
         return false;
     }
 
-    if entry.size % page != 0
+    if !entry.size.is_multiple_of(page)
     {
         kprintln!(
             "  platform[{}]: MMIO size {:#x} is not page-aligned, skipping",
@@ -268,7 +272,7 @@ fn validate_mmio_resource(entry: &PlatformResource, index: usize) -> bool
     true
 }
 
-/// Validate a firmware table region resource (PlatformTable).
+/// Validate a firmware table region resource (`PlatformTable`).
 ///
 /// Firmware tables (ACPI RSDP, SPCR, etc.) live at arbitrary physical
 /// addresses with arbitrary byte sizes — page-alignment is not required.
@@ -348,7 +352,7 @@ fn validate_io_port_range(entry: &PlatformResource, index: usize) -> bool
 /// architecture (GSI on x86-64; PLIC source on RISC-V).
 fn validate_irq_line(entry: &PlatformResource, index: usize) -> bool
 {
-    if entry.id < MIN_IRQ_ID as u64 || entry.id > MAX_IRQ_ID as u64
+    if entry.id < u64::from(MIN_IRQ_ID) || entry.id > u64::from(MAX_IRQ_ID)
     {
         kprintln!(
             "  platform[{}]: IRQ id {} out of range [{}, {}], skipping",
@@ -363,7 +367,7 @@ fn validate_irq_line(entry: &PlatformResource, index: usize) -> bool
     true
 }
 
-/// Remove overlapping entries within MmioRange and PciEcam resource types.
+/// Remove overlapping entries within `MmioRange` and `PciEcam` resource types.
 ///
 /// The boot protocol guarantees entries are pre-sorted by `(resource_type,
 /// base)`, so only adjacent same-type pairs need comparison. Entry `i` overlaps

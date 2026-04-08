@@ -35,11 +35,9 @@ pub unsafe fn discover_firmware(st: *mut EfiSystemTable) -> FirmwareInfo
     // SAFETY: caller guarantees st is a valid UEFI system table pointer.
     // Both GUIDs are searched unconditionally; absent entries yield zero.
     let acpi_rsdp = unsafe { find_config_table(st, &EFI_ACPI_20_TABLE_GUID) }
-        .map(|ptr| ptr as u64)
-        .unwrap_or(0);
+        .map_or(0, |ptr| ptr as u64);
     let device_tree = unsafe { find_config_table(st, &EFI_DTB_TABLE_GUID) }
-        .map(|ptr| ptr as u64)
-        .unwrap_or(0);
+        .map_or(0, |ptr| ptr as u64);
 
     FirmwareInfo {
         acpi_rsdp,

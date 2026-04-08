@@ -50,6 +50,9 @@ const PPN_MASK: u64 = 0x003F_FFFF_FFFF_FC00;
 #[repr(transparent)]
 pub struct PageTableEntry(pub u64);
 
+// verbose_bit_mask: `phys & 0xFFF == 0` is idiomatic for alignment assertions;
+// trailing_zeros() alternative is less readable here.
+#[allow(clippy::verbose_bit_mask)]
 impl PageTableEntry
 {
     /// Construct a non-leaf entry pointing to a child table at `phys`.
@@ -216,6 +219,8 @@ pub fn map_large_page(
 
 /// Return the child table physical address from `entry`, allocating and
 /// zeroing a new pool frame when the entry is not present.
+// similar_names: frame_va and frame_pa are a VA/PA pair — the similarity is intentional.
+#[allow(clippy::similar_names)]
 fn walk_or_alloc(entry: &mut PageTableEntry, pool: &mut PoolState) -> Result<u64, PagingError>
 {
     if entry.is_present()
@@ -302,7 +307,9 @@ pub unsafe fn read_root_phys() -> u64
 /// # Safety
 /// `root_virt` must be the direct-map virtual address of a valid 4 KiB Sv48
 /// root frame. `virt` must be in the lower (user) half. `phys` must be 4 KiB-aligned.
+// similar_names: frame_va and frame_pa are a VA/PA pair — the similarity is intentional.
 #[cfg(not(test))]
+#[allow(clippy::similar_names)]
 pub unsafe fn map_user_page(
     root_virt: u64,
     virt: u64,
@@ -312,6 +319,8 @@ pub unsafe fn map_user_page(
 ) -> Result<(), ()>
 {
     use crate::mm::paging::phys_to_virt;
+    // U bit (bit 4) allows user-mode access.
+    const USER: u64 = 1 << 4;
 
     let root = unsafe { table_at(root_virt) };
 
@@ -323,9 +332,6 @@ pub unsafe fn map_user_page(
 
     let l0_pa = rv_walk_or_alloc(&mut l1[vpn1_index(virt)], allocator)?;
     let l0 = unsafe { table_at(phys_to_virt(l0_pa)) };
-
-    // U bit (bit 4) allows user-mode access.
-    const USER: u64 = 1 << 4;
     let mut pte = PageTableEntry::new_page(phys, flags);
     pte.0 |= USER;
     l0[vpn0_index(virt)] = pte;
@@ -334,7 +340,9 @@ pub unsafe fn map_user_page(
 }
 
 /// Walk an existing Sv48 page table entry or allocate a new child frame.
+// similar_names: frame_va and frame_pa are a VA/PA pair — the similarity is intentional.
 #[cfg(not(test))]
+#[allow(clippy::similar_names)]
 fn rv_walk_or_alloc(
     entry: &mut PageTableEntry,
     allocator: &mut crate::mm::BuddyAllocator,
@@ -436,6 +444,8 @@ pub unsafe fn protect_user_page(
 ) -> Result<(), crate::mm::paging::PagingError>
 {
     use crate::mm::paging::{phys_to_virt, PagingError};
+    // Set USER (U) bit (bit 4) to preserve user accessibility.
+    const USER: u64 = 1 << 4;
 
     let root = unsafe { table_at(root_virt) };
     let e = root[vpn3_index(virt)];
@@ -466,8 +476,6 @@ pub unsafe fn protect_user_page(
     }
 
     let phys = leaf.phys_addr();
-    // Set USER (U) bit (bit 4) to preserve user accessibility.
-    const USER: u64 = 1 << 4;
     let mut new_pte = PageTableEntry::new_page(phys, flags);
     new_pte.0 |= USER;
     *leaf = new_pte;

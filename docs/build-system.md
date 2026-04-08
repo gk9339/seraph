@@ -1,11 +1,8 @@
 # Build System
 
-## Overview
-
-Seraph uses Cargo as its build system, with shell scripts providing convenience
-wrappers for cross-compilation, QEMU invocation, and artifact management. The
-build system supports two target architectures (x86-64 and RISC-V RV64GC) from
-a single source tree.
+Seraph uses Cargo as its build system. `cargo xtask` provides commands for
+cross-compilation, QEMU invocation, and artifact management for x86-64 and
+RISC-V RV64GC from a single source tree.
 
 ---
 
@@ -182,3 +179,9 @@ Invoke it with `cargo xtask <command>`.
 
 See [`xtask/README.md`](../xtask/README.md) for the full command reference and
 [`xtask/src/main.rs`](../xtask/src/main.rs) for the dispatch entry point.
+
+---
+
+## Summarized By
+
+None

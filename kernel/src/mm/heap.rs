@@ -212,7 +212,7 @@ unsafe impl core::alloc::GlobalAlloc for KernelHeap
 /// descriptive name string and the estimated object size.
 ///
 /// Fields are written at init time and read by object creation paths in later
-/// phases; suppress the dead_code lint until those paths are added.
+/// phases; suppress the `dead_code` lint until those paths are added.
 #[allow(dead_code)]
 pub struct KernelCaches
 {
@@ -254,7 +254,7 @@ impl KernelCaches
 /// let ptr = unsafe { &mut crate::mm::KERNEL_CACHES }.capability_slot.alloc(&mut buddy);
 /// ```
 ///
-/// Used by object creation paths added in later phases; allowed dead_code until then.
+/// Used by object creation paths added in later phases; allowed `dead_code` until then.
 #[cfg(not(test))]
 #[allow(dead_code)]
 pub static mut KERNEL_CACHES: KernelCaches = KernelCaches::new();

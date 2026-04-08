@@ -41,23 +41,23 @@ pub const SYS_IPC_RECV: u64 = 2;
 pub const SYS_SIGNAL_SEND: u64 = 3;
 /// Signal: wait (read-and-clear; blocks if zero).
 pub const SYS_SIGNAL_WAIT: u64 = 4;
-/// EventQueue: post an entry.
+/// `EventQueue`: post an entry.
 pub const SYS_EVENT_POST: u64 = 5;
-/// EventQueue: receive an entry.
+/// `EventQueue`: receive an entry.
 pub const SYS_EVENT_RECV: u64 = 6;
-/// Capability: create an Endpoint object.
+/// Capability: create an `Endpoint` object.
 pub const SYS_CAP_CREATE_ENDPOINT: u64 = 7;
-/// Capability: create a Signal object.
+/// Capability: create a `Signal` object.
 pub const SYS_CAP_CREATE_SIGNAL: u64 = 8;
-/// Capability: create an EventQueue object.
+/// Capability: create an `EventQueue` object.
 pub const SYS_CAP_CREATE_EVENT_Q: u64 = 9;
-/// Capability: create a Thread object.
+/// Capability: create a `Thread` object.
 pub const SYS_CAP_CREATE_THREAD: u64 = 10;
-/// Capability: create an AddressSpace object.
+/// Capability: create an `AddressSpace` object.
 pub const SYS_CAP_CREATE_ASPACE: u64 = 11;
-/// Capability: create a CSpace object.
+/// Capability: create a `CSpace` object.
 pub const SYS_CAP_CREATE_CSPACE: u64 = 12;
-/// Capability: create a WaitSet object.
+/// Capability: create a `WaitSet` object.
 pub const SYS_CAP_CREATE_WAIT_SET: u64 = 13;
 /// Capability: derive (attenuate rights).
 pub const SYS_CAP_DERIVE: u64 = 14;
@@ -83,11 +83,11 @@ pub const SYS_THREAD_CONFIGURE: u64 = 23;
 pub const SYS_CAP_COPY: u64 = 24;
 /// Capability: move a slot (destroying the source).
 pub const SYS_CAP_MOVE: u64 = 25;
-/// WaitSet: add a member.
+/// `WaitSet`: add a member.
 pub const SYS_WAIT_SET_ADD: u64 = 26;
-/// WaitSet: remove a member.
+/// `WaitSet`: remove a member.
 pub const SYS_WAIT_SET_REMOVE: u64 = 27;
-/// WaitSet: wait for any member to become ready.
+/// `WaitSet`: wait for any member to become ready.
 pub const SYS_WAIT_SET_WAIT: u64 = 28;
 /// IRQ: acknowledge a delivered interrupt.
 pub const SYS_IRQ_ACK: u64 = 29;
@@ -101,7 +101,7 @@ pub const SYS_CAP_INSERT: u64 = 32;
 pub const SYS_FRAME_SPLIT: u64 = 33;
 /// Memory: map an MMIO region.
 pub const SYS_MMIO_MAP: u64 = 34;
-/// I/O: bind an IoPortRange to the calling thread.
+/// I/O: bind an `IoPortRange` to the calling thread.
 pub const SYS_IOPORT_BIND: u64 = 35;
 /// DMA: grant a frame for DMA use.
 pub const SYS_DMA_GRANT: u64 = 36;
@@ -113,7 +113,7 @@ pub const SYS_THREAD_SET_AFFINITY: u64 = 38;
 pub const SYS_THREAD_READ_REGS: u64 = 39;
 /// Thread: write register state (debug / ptrace).
 pub const SYS_THREAD_WRITE_REGS: u64 = 40;
-/// AddressSpace: query mapping information.
+/// `AddressSpace`: query mapping information.
 pub const SYS_ASPACE_QUERY: u64 = 41;
 /// IPC: set the IPC buffer address for the calling thread.
 pub const SYS_IPC_BUFFER_SET: u64 = 42;
@@ -172,7 +172,7 @@ pub enum SyscallError
     /// `FLAG_DMA_UNSAFE` to acknowledge the absence of hardware isolation.
     DmaUnsafe = -14,
     /// The target object is not in the required state for this operation
-    /// (e.g. thread not Stopped for read_regs/write_regs).
+    /// (e.g. thread not `Stopped` for `read_regs`/`write_regs`).
     InvalidState = -15,
     /// A blocking operation was cancelled because the thread was stopped.
     /// The stopped thread sees this as the return value of its blocked syscall.
@@ -183,7 +183,7 @@ pub enum SyscallError
 
 /// Default scheduling priority for newly created threads.
 pub const PRIORITY_DEFAULT: u8 = 10;
-/// First priority level requiring a SchedControl capability with Elevate rights.
+/// First priority level requiring a `SchedControl` capability with `Elevate` rights.
 pub const SCHED_ELEVATED_MIN: u8 = 21;
 /// Maximum priority available to userspace threads.
 pub const PRIORITY_MAX: u8 = 30;
@@ -202,7 +202,7 @@ pub const FLAG_DMA_UNSAFE: u64 = 1 << 2;
 // ── Event Queue constants ─────────────────────────────────────────────────────
 
 /// Maximum capacity (entry count) for an event queue created via
-/// `SYS_CAP_CREATE_EVENT_Q`. Must be in the range 1..=EVENT_QUEUE_MAX_CAPACITY.
+/// `SYS_CAP_CREATE_EVENT_Q`. Must be in the range `1..=EVENT_QUEUE_MAX_CAPACITY`.
 pub const EVENT_QUEUE_MAX_CAPACITY: u32 = 4096;
 
 // ── Message constants ─────────────────────────────────────────────────────────
@@ -242,6 +242,10 @@ pub const MSG_REGS_DATA_MAX: usize = 6;
 /// The version is `0.0.1` during initial kernel development. Major will remain
 /// `0` until the kernel reaches a meaningful level of completeness; during this
 /// phase all ABI changes are considered fully fluid regardless of minor/patch.
+// Encode as (major << 32) | (minor << 16) | patch. The zero shifts are retained
+// to preserve the positional structure; they will carry non-zero values when
+// the ABI stabilises.
+#[allow(clippy::identity_op, clippy::eq_op)]
 pub const KERNEL_VERSION: u64 = (0u64 << 32) | (0u64 << 16) | 1u64; // 0.0.1
 
 /// Discriminant for `SYS_SYSTEM_INFO` queries.

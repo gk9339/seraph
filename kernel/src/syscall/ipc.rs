@@ -5,14 +5,14 @@
 
 //! IPC syscall handlers — W4.
 //!
-//! All handlers look up the target capability in the current thread's CSpace,
+//! All handlers look up the target capability in the current thread's `CSpace`,
 //! call the corresponding IPC kernel function, and enqueue/dequeue threads
 //! via the scheduler as needed.
 //!
-//! Data words (up to MSG_DATA_WORDS_MAX) are read from / written to the
-//! per-thread IPC buffer page registered via SYS_IPC_BUFFER_SET.
+//! Data words (up to `MSG_DATA_WORDS_MAX`) are read from / written to the
+//! per-thread IPC buffer page registered via `SYS_IPC_BUFFER_SET`.
 //!
-//! Capability transfer (W4): up to MSG_CAP_SLOTS_MAX capabilities can be moved
+//! Capability transfer (W4): up to `MSG_CAP_SLOTS_MAX` capabilities can be moved
 //! atomically with each message. See `transfer_caps` for the protocol.
 
 #[cfg(not(test))]
@@ -55,13 +55,15 @@ unsafe fn read_ipc_buf(
     {
         return Err(SyscallError::InvalidArgument);
     }
+    // cast_possible_truncation: Seraph targets 64-bit only; usize == u64 on all supported targets.
+    #[allow(clippy::cast_possible_truncation)]
     let ptr = buf as *const u64;
     unsafe {
         crate::arch::current::cpu::user_access_begin();
-        for i in 0..count
+        for (i, item) in dst.iter_mut().enumerate().take(count)
         {
             // SAFETY: buf is page-aligned and user-mapped; count <= MSG_DATA_WORDS_MAX.
-            dst[i] = core::ptr::read_volatile(ptr.add(i));
+            *item = core::ptr::read_volatile(ptr.add(i));
         }
         crate::arch::current::cpu::user_access_end();
     }
@@ -82,13 +84,15 @@ unsafe fn write_ipc_buf(buf: u64, count: usize, src: &[u64; MSG_DATA_WORDS_MAX])
     {
         return;
     }
+    // cast_possible_truncation: Seraph targets 64-bit only; usize == u64 on all supported targets.
+    #[allow(clippy::cast_possible_truncation)]
     let ptr = buf as *mut u64;
     unsafe {
         crate::arch::current::cpu::user_access_begin();
-        for i in 0..count
+        for (i, item) in src.iter().enumerate().take(count)
         {
             // SAFETY: buf is page-aligned and user-mapped; count <= MSG_DATA_WORDS_MAX.
-            core::ptr::write_volatile(ptr.add(i), src[i]);
+            core::ptr::write_volatile(ptr.add(i), *item);
         }
         crate::arch::current::cpu::user_access_end();
     }
@@ -116,6 +120,8 @@ unsafe fn write_cap_results(buf: u64, cap_count: usize, indices: &[u32; MSG_CAP_
     {
         return;
     }
+    // cast_possible_truncation: Seraph targets 64-bit only; usize == u64 on all supported targets.
+    #[allow(clippy::cast_possible_truncation)]
     let ptr = buf as *mut u64;
     // SAFETY: IPC buffer is at least 4 KiB; MSG_DATA_WORDS_MAX + 1 + MSG_CAP_SLOTS_MAX
     // words = at most 11 words = 88 bytes, well within the page. Brackets the
@@ -123,9 +129,9 @@ unsafe fn write_cap_results(buf: u64, cap_count: usize, indices: &[u32; MSG_CAP_
     unsafe {
         crate::arch::current::cpu::user_access_begin();
         core::ptr::write_volatile(ptr.add(MSG_DATA_WORDS_MAX), cap_count as u64);
-        for i in 0..cap_count
+        for (i, &idx) in indices.iter().enumerate().take(cap_count)
         {
-            core::ptr::write_volatile(ptr.add(MSG_DATA_WORDS_MAX + 1 + i), indices[i] as u64);
+            core::ptr::write_volatile(ptr.add(MSG_DATA_WORDS_MAX + 1 + i), u64::from(idx));
         }
         crate::arch::current::cpu::user_access_end();
     }
@@ -140,9 +146,9 @@ unsafe fn write_cap_results(buf: u64, cap_count: usize, indices: &[u32; MSG_CAP_
 fn unpack_cap_slots(packed: u64, count: usize) -> [u32; MSG_CAP_SLOTS_MAX]
 {
     let mut out = [0u32; MSG_CAP_SLOTS_MAX];
-    for i in 0..count.min(MSG_CAP_SLOTS_MAX)
+    for (i, item) in out.iter_mut().enumerate().take(count.min(MSG_CAP_SLOTS_MAX))
     {
-        out[i] = ((packed >> (i * 16)) & 0xFFFF) as u32;
+        *item = ((packed >> (i * 16)) & 0xFFFF) as u32;
     }
     out
 }
@@ -151,13 +157,13 @@ fn unpack_cap_slots(packed: u64, count: usize) -> [u32; MSG_CAP_SLOTS_MAX]
 /// the new slot indices to `dst_ipc_buf`.
 ///
 /// All-or-nothing: if any slot is null/invalid or the destination is full
-/// (pre_allocate fails), returns an error and no caps are transferred.
+/// (`pre_allocate` fails), returns an error and no caps are transferred.
 ///
-/// On success, `dst_ipc_buf` receives the cap_count and new indices at the
+/// On success, `dst_ipc_buf` receives the `cap_count` and new indices at the
 /// fixed offset `MSG_DATA_WORDS_MAX` (see `write_cap_results`).
 ///
 /// # Safety
-/// `src_cspace` and `dst_cspace` must be valid live CSpace pointers.
+/// `src_cspace` and `dst_cspace` must be valid live `CSpace` pointers.
 /// `dst_ipc_buf` must be 0 or a valid mapped IPC buffer page VA.
 ///
 /// # To add rollback on mid-transfer failure
@@ -231,24 +237,30 @@ unsafe fn transfer_caps(
 
 // ── IPC syscall handlers ──────────────────────────────────────────────────────
 
-/// SYS_IPC_CALL (0): synchronous call on an endpoint.
+/// `SYS_IPC_CALL` (0): synchronous call on an endpoint.
 ///
-/// arg0 = endpoint cap index, arg1 = label, arg2 = data_count,
-/// arg3 = cap_count (0-4), arg4 = packed cap slot indices (4 × u16).
+/// arg0 = endpoint cap index, arg1 = label, arg2 = `data_count`,
+/// arg3 = `cap_count` (0-4), arg4 = packed cap slot indices (4 × u16).
 ///
-/// If cap_count > 0, the endpoint cap must have Rights::GRANT. Capabilities
-/// at the specified slots are moved from the caller's CSpace to the server's
-/// CSpace atomically with the message.
+/// If `cap_count` > 0, the endpoint cap must have `Rights::GRANT`. Capabilities
+/// at the specified slots are moved from the caller's `CSpace` to the server's
+/// `CSpace` atomically with the message.
 ///
 /// Blocks caller until a server replies. On return, label and data words are
 /// in the return registers and IPC buffer. Reply-direction cap indices are
-/// written to the IPC buffer at word MSG_DATA_WORDS_MAX by the replier.
+/// written to the IPC buffer at word `MSG_DATA_WORDS_MAX` by the replier.
 #[cfg(not(test))]
 pub fn sys_ipc_call(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 {
+    // cast_possible_truncation: kernel runs on 64-bit only; value is bounded by kernel policy.
+    #[allow(clippy::cast_possible_truncation)]
     let ep_idx = tf.arg(0) as u32;
     let label = tf.arg(1);
+    // cast_possible_truncation: Seraph targets 64-bit only; usize == u64 on all supported targets.
+    #[allow(clippy::cast_possible_truncation)]
     let data_count = (tf.arg(2) as usize).min(MSG_DATA_WORDS_MAX);
+    // cast_possible_truncation: Seraph targets 64-bit only; usize == u64 on all supported targets.
+    #[allow(clippy::cast_possible_truncation)]
     let cap_count = (tf.arg(3) as usize).min(MSG_CAP_SLOTS_MAX);
     let cap_packed = tf.arg(4);
 
@@ -279,7 +291,9 @@ pub fn sys_ipc_call(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     // EndpointObject; EndpointObject.state is valid.
     let ep_state = unsafe {
         let obj_ptr = slot.object.ok_or(SyscallError::InvalidCapability)?.as_ptr();
-        let ep_obj = obj_ptr as *mut crate::cap::object::EndpointObject;
+        // cast_ptr_alignment: kernel allocator guarantees object alignment; header is at the start of the allocation.
+        #[allow(clippy::cast_ptr_alignment)]
+        let ep_obj = obj_ptr.cast::<crate::cap::object::EndpointObject>();
         (*ep_obj).state
     };
 
@@ -299,9 +313,9 @@ pub fn sys_ipc_call(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         // Pre-validate source slots before blocking (all-or-nothing).
         {
             let cs = unsafe { &*cspace_ptr };
-            for i in 0..cap_count
+            for &idx in indices.iter().take(cap_count)
             {
-                let slot = cs.slot(indices[i]).ok_or(SyscallError::InvalidCapability)?;
+                let slot = cs.slot(idx).ok_or(SyscallError::InvalidCapability)?;
                 if slot.tag == CapTag::Null
                 {
                     return Err(SyscallError::InvalidCapability);
@@ -315,22 +329,16 @@ pub fn sys_ipc_call(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     // SAFETY: ep_state is valid; scheduler lock not held.
     let result = unsafe { crate::ipc::endpoint::endpoint_call(ep_state, tcb, &msg) };
 
-    match result
+    if let Ok(woken_server) = result
     {
-        Ok(woken_server) =>
-        {
-            // A server was waiting; enqueue it and yield so it can run.
-            // SAFETY: woken_server is a valid TCB.
-            unsafe {
-                let prio = (*woken_server).priority;
-                crate::sched::scheduler_for(0).enqueue(woken_server, prio);
-            }
-        }
-        Err(()) =>
-        {
-            // No server; caller is blocked on send queue. Yield to another thread.
+        // A server was waiting; enqueue it and yield so it can run.
+        // SAFETY: woken_server is a valid TCB.
+        unsafe {
+            let prio = (*woken_server).priority;
+            crate::sched::scheduler_for(0).enqueue(woken_server, prio);
         }
     }
+    // else: No server; caller is blocked on send queue. Yield to another thread.
 
     // Yield CPU — the current thread is now Blocked.
     // SAFETY: called from syscall handler.
@@ -357,17 +365,19 @@ pub fn sys_ipc_call(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     Ok(0) // primary return; set_ipc_return already wrote both values
 }
 
-/// SYS_IPC_RECV (2): receive the next message on an endpoint.
+/// `SYS_IPC_RECV` (2): receive the next message on an endpoint.
 ///
 /// arg0 = endpoint cap index.
 ///
 /// Blocks server until a caller sends. On return, the message label and data
 /// words are available in return registers and the server's IPC buffer.
 /// If the message carried capabilities, their new slot indices in the server's
-/// CSpace are written to the IPC buffer at word MSG_DATA_WORDS_MAX.
+/// `CSpace` are written to the IPC buffer at word `MSG_DATA_WORDS_MAX`.
 #[cfg(not(test))]
 pub fn sys_ipc_recv(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 {
+    // cast_possible_truncation: kernel runs on 64-bit only; value is bounded by kernel policy.
+    #[allow(clippy::cast_possible_truncation)]
     let ep_idx = tf.arg(0) as u32;
 
     let tcb = unsafe { current_tcb() };
@@ -380,51 +390,47 @@ pub fn sys_ipc_recv(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 
     let ep_state = unsafe {
         let obj_ptr = slot.object.ok_or(SyscallError::InvalidCapability)?.as_ptr();
-        let ep_obj = obj_ptr as *mut crate::cap::object::EndpointObject;
+        // cast_ptr_alignment: kernel allocator guarantees object alignment; header is at the start of the allocation.
+        #[allow(clippy::cast_ptr_alignment)]
+        let ep_obj = obj_ptr.cast::<crate::cap::object::EndpointObject>();
         (*ep_obj).state
     };
 
     // SAFETY: ep_state valid; scheduler lock not held.
     let result = unsafe { crate::ipc::endpoint::endpoint_recv(ep_state, tcb) };
 
-    match result
+    if let Ok((caller, msg)) = result
     {
-        Ok((caller, msg)) =>
-        {
-            // A caller was waiting; deliver message immediately.
-            let server_buf = unsafe { (*tcb).ipc_buffer };
+        // A caller was waiting; deliver message immediately.
+        let server_buf = unsafe { (*tcb).ipc_buffer };
 
-            // Transfer caps from caller to server (if any).
-            // On failure: all-or-nothing — return error. Caller stays blocked
-            // on reply (TODO: for robustness, re-enqueue caller on send queue).
-            if msg.cap_count > 0
-            {
-                let caller_cspace = unsafe { (*caller).cspace };
-                let server_cspace = unsafe { (*tcb).cspace };
-                unsafe {
-                    transfer_caps(
-                        caller_cspace,
-                        &msg.cap_slots[..msg.cap_count],
-                        server_cspace,
-                        server_buf,
-                    )
-                }?;
-            }
-
-            if msg.data_count > 0
-            {
-                unsafe {
-                    write_ipc_buf(server_buf, msg.data_count, &msg.data);
-                }
-            }
-            tf.set_ipc_return(0, msg.label);
-            return Ok(0);
-        }
-        Err(()) =>
+        // Transfer caps from caller to server (if any).
+        // On failure: all-or-nothing — return error. Caller stays blocked
+        // on reply (TODO: for robustness, re-enqueue caller on send queue).
+        if msg.cap_count > 0
         {
-            // No caller; server is now Blocked on recv queue. Yield.
+            let caller_cspace = unsafe { (*caller).cspace };
+            let server_cspace = unsafe { (*tcb).cspace };
+            unsafe {
+                transfer_caps(
+                    caller_cspace,
+                    &msg.cap_slots[..msg.cap_count],
+                    server_cspace,
+                    server_buf,
+                )
+            }?;
         }
+
+        if msg.data_count > 0
+        {
+            unsafe {
+                write_ipc_buf(server_buf, msg.data_count, &msg.data);
+            }
+        }
+        tf.set_ipc_return(0, msg.label);
+        return Ok(0);
     }
+    // else: No caller; server is now Blocked on recv queue. Yield.
 
     // SAFETY: called from syscall handler.
     unsafe {
@@ -464,19 +470,23 @@ pub fn sys_ipc_recv(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     Ok(0)
 }
 
-/// SYS_IPC_REPLY (1): reply to a blocked caller.
+/// `SYS_IPC_REPLY` (1): reply to a blocked caller.
 ///
-/// arg0 = label, arg1 = data_count,
-/// arg2 = cap_count (0-4), arg3 = packed cap slot indices (4 × u16).
+/// arg0 = label, arg1 = `data_count`,
+/// arg2 = `cap_count` (0-4), arg3 = packed cap slot indices (4 × u16).
 ///
-/// Capabilities are moved from the server's CSpace to the caller's CSpace
+/// Capabilities are moved from the server's `CSpace` to the caller's `CSpace`
 /// atomically with the reply. No GRANT right check: the server is trusted
 /// by virtue of holding RECEIVE on the endpoint.
 #[cfg(not(test))]
 pub fn sys_ipc_reply(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 {
     let label = tf.arg(0);
+    // cast_possible_truncation: Seraph targets 64-bit only; usize == u64 on all supported targets.
+    #[allow(clippy::cast_possible_truncation)]
     let data_count = (tf.arg(1) as usize).min(MSG_DATA_WORDS_MAX);
+    // cast_possible_truncation: Seraph targets 64-bit only; usize == u64 on all supported targets.
+    #[allow(clippy::cast_possible_truncation)]
     let cap_count = (tf.arg(2) as usize).min(MSG_CAP_SLOTS_MAX);
     let cap_packed = tf.arg(3);
 
@@ -501,9 +511,9 @@ pub fn sys_ipc_reply(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         let indices = unpack_cap_slots(cap_packed, cap_count);
         {
             let cs = unsafe { &*server_cspace };
-            for i in 0..cap_count
+            for &idx in indices.iter().take(cap_count)
             {
-                let slot = cs.slot(indices[i]).ok_or(SyscallError::InvalidCapability)?;
+                let slot = cs.slot(idx).ok_or(SyscallError::InvalidCapability)?;
                 if slot.tag == CapTag::Null
                 {
                     return Err(SyscallError::InvalidCapability);
@@ -567,12 +577,14 @@ pub fn sys_ipc_reply(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     }
 }
 
-/// SYS_SIGNAL_SEND (3): OR bits into a signal object.
+/// `SYS_SIGNAL_SEND` (3): OR bits into a signal object.
 ///
 /// arg0 = signal cap index, arg1 = bits to send (must be non-zero).
 #[cfg(not(test))]
 pub fn sys_signal_send(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 {
+    // cast_possible_truncation: kernel runs on 64-bit only; value is bounded by kernel policy.
+    #[allow(clippy::cast_possible_truncation)]
     let sig_idx = tf.arg(0) as u32;
     let bits = tf.arg(1);
 
@@ -591,7 +603,9 @@ pub fn sys_signal_send(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 
     let sig_state = unsafe {
         let obj_ptr = slot.object.ok_or(SyscallError::InvalidCapability)?.as_ptr();
-        let sig_obj = obj_ptr as *mut crate::cap::object::SignalObject;
+        // cast_ptr_alignment: kernel allocator guarantees object alignment; header is at the start of the allocation.
+        #[allow(clippy::cast_ptr_alignment)]
+        let sig_obj = obj_ptr.cast::<crate::cap::object::SignalObject>();
         (*sig_obj).state
     };
 
@@ -610,7 +624,7 @@ pub fn sys_signal_send(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     Ok(0)
 }
 
-/// SYS_SIGNAL_WAIT (4): block until a signal bit is set, then return the bits.
+/// `SYS_SIGNAL_WAIT` (4): block until a signal bit is set, then return the bits.
 ///
 /// arg0 = signal cap index.
 ///
@@ -618,6 +632,8 @@ pub fn sys_signal_send(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 #[cfg(not(test))]
 pub fn sys_signal_wait(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 {
+    // cast_possible_truncation: kernel runs on 64-bit only; value is bounded by kernel policy.
+    #[allow(clippy::cast_possible_truncation)]
     let sig_idx = tf.arg(0) as u32;
 
     let tcb = unsafe { current_tcb() };
@@ -630,41 +646,38 @@ pub fn sys_signal_wait(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 
     let sig_state = unsafe {
         let obj_ptr = slot.object.ok_or(SyscallError::InvalidCapability)?.as_ptr();
-        let sig_obj = obj_ptr as *mut crate::cap::object::SignalObject;
+        // cast_ptr_alignment: kernel allocator guarantees object alignment; header is at the start of the allocation.
+        #[allow(clippy::cast_ptr_alignment)]
+        let sig_obj = obj_ptr.cast::<crate::cap::object::SignalObject>();
         (*sig_obj).state
     };
 
     // SAFETY: sig_state valid; scheduler lock not held.
     let result = unsafe { crate::ipc::signal::signal_wait(sig_state, tcb) };
 
-    match result
+    if let Ok(bits) = result
     {
-        Ok(bits) =>
-        {
-            // Bits were already set; return immediately.
-            Ok(bits)
-        }
-        Err(()) =>
-        {
-            // No bits; thread is Blocked. Yield CPU.
-            // SAFETY: called from syscall handler.
-            unsafe {
-                crate::sched::schedule();
-            }
-
-            // On resume, `signal_send` stored the delivered bits in wakeup_value.
-            let bits = unsafe { (*tcb).wakeup_value };
-            unsafe {
-                (*tcb).wakeup_value = 0;
-            }
-            Ok(bits)
-        }
+        // Bits were already set; return immediately.
+        return Ok(bits);
     }
+
+    // No bits; thread is Blocked. Yield CPU.
+    // SAFETY: called from syscall handler.
+    unsafe {
+        crate::sched::schedule();
+    }
+
+    // On resume, `signal_send` stored the delivered bits in wakeup_value.
+    let bits = unsafe { (*tcb).wakeup_value };
+    unsafe {
+        (*tcb).wakeup_value = 0;
+    }
+    Ok(bits)
 }
 
 // ── Event Queue handlers ──────────────────────────────────────────────────────
 
-/// SYS_EVENT_POST (5): append a payload word to an event queue (non-blocking).
+/// `SYS_EVENT_POST` (5): append a payload word to an event queue (non-blocking).
 ///
 /// arg0 = event queue cap index (must have POST right).
 /// arg1 = payload word to enqueue.
@@ -675,6 +688,8 @@ pub fn sys_signal_wait(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 #[cfg(not(test))]
 pub fn sys_event_post(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 {
+    // cast_possible_truncation: kernel runs on 64-bit only; value is bounded by kernel policy.
+    #[allow(clippy::cast_possible_truncation)]
     let eq_idx = tf.arg(0) as u32;
     let payload = tf.arg(1);
 
@@ -688,7 +703,9 @@ pub fn sys_event_post(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 
     let eq_state = unsafe {
         let obj_ptr = slot.object.ok_or(SyscallError::InvalidCapability)?.as_ptr();
-        let eq_obj = obj_ptr as *mut crate::cap::object::EventQueueObject;
+        // cast_ptr_alignment: kernel allocator guarantees object alignment; header is at the start of the allocation.
+        #[allow(clippy::cast_ptr_alignment)]
+        let eq_obj = obj_ptr.cast::<crate::cap::object::EventQueueObject>();
         (*eq_obj).state
     };
 
@@ -712,7 +729,7 @@ pub fn sys_event_post(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     }
 }
 
-/// SYS_EVENT_RECV (6): dequeue the next entry from an event queue.
+/// `SYS_EVENT_RECV` (6): dequeue the next entry from an event queue.
 ///
 /// arg0 = event queue cap index (must have RECV right).
 ///
@@ -721,6 +738,8 @@ pub fn sys_event_post(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 #[cfg(not(test))]
 pub fn sys_event_recv(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 {
+    // cast_possible_truncation: kernel runs on 64-bit only; value is bounded by kernel policy.
+    #[allow(clippy::cast_possible_truncation)]
     let eq_idx = tf.arg(0) as u32;
 
     let tcb = unsafe { current_tcb() };
@@ -733,58 +752,63 @@ pub fn sys_event_recv(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 
     let eq_state = unsafe {
         let obj_ptr = slot.object.ok_or(SyscallError::InvalidCapability)?.as_ptr();
-        let eq_obj = obj_ptr as *mut crate::cap::object::EventQueueObject;
+        // cast_ptr_alignment: kernel allocator guarantees object alignment; header is at the start of the allocation.
+        #[allow(clippy::cast_ptr_alignment)]
+        let eq_obj = obj_ptr.cast::<crate::cap::object::EventQueueObject>();
         (*eq_obj).state
     };
 
     // SAFETY: eq_state valid; scheduler lock not held.
     let result = unsafe { crate::ipc::event_queue::event_queue_recv(eq_state, tcb) };
 
-    match result
+    if let Ok(payload) = result
     {
-        Ok(payload) =>
-        {
-            // Entry available immediately; deliver payload in secondary register.
-            tf.set_ipc_return(0, payload);
-            Ok(0)
-        }
-        Err(()) =>
-        {
-            // Queue empty; thread is Blocked. Yield CPU.
-            // SAFETY: called from syscall handler.
-            unsafe {
-                crate::sched::schedule();
-            }
-
-            // On resume, event_queue_post stored the payload in wakeup_value.
-            let payload = unsafe { (*tcb).wakeup_value };
-            unsafe {
-                (*tcb).wakeup_value = 0;
-            }
-            tf.set_ipc_return(0, payload);
-            Ok(0)
-        }
+        // Entry available immediately; deliver payload in secondary register.
+        tf.set_ipc_return(0, payload);
+        return Ok(0);
     }
+    // else: Queue empty; thread is Blocked. Yield CPU.
+
+    // SAFETY: called from syscall handler.
+    unsafe {
+        crate::sched::schedule();
+    }
+
+    // On resume, event_queue_post stored the payload in wakeup_value.
+    let payload = unsafe { (*tcb).wakeup_value };
+    unsafe {
+        (*tcb).wakeup_value = 0;
+    }
+    tf.set_ipc_return(0, payload);
+    Ok(0)
 }
 
 // ── Wait Set handlers ─────────────────────────────────────────────────────────
 
-/// SYS_WAIT_SET_ADD (26): register a source in a wait set.
+/// `SYS_WAIT_SET_ADD` (26): register a source in a wait set.
 ///
 /// arg0 = wait set cap index (must have MODIFY right).
 /// arg1 = source cap index (Endpoint with RECEIVE, Signal with WAIT, or
-///        EventQueue with RECV).
-/// arg2 = caller-chosen opaque u64 token (returned by SYS_WAIT_SET_WAIT
+///        `EventQueue` with RECV).
+/// arg2 = caller-chosen opaque u64 token (returned by `SYS_WAIT_SET_WAIT`
 ///        when this source fires).
 ///
 /// Returns `SyscallError::InvalidArgument` if the wait set is full
 /// or the source is already registered in a wait set.
+// too_many_lines: this function performs a single logical operation (cap resolution + wait set
+// registration) that requires dispatching over three source types; splitting it would
+// obscure the all-or-nothing atomicity contract.
 #[cfg(not(test))]
+#[allow(clippy::too_many_lines)]
 pub fn sys_wait_set_add(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 {
     use crate::ipc::wait_set::WaitSetSourceTag;
 
+    // cast_possible_truncation: kernel runs on 64-bit only; value is bounded by kernel policy.
+    #[allow(clippy::cast_possible_truncation)]
     let ws_idx = tf.arg(0) as u32;
+    // cast_possible_truncation: kernel runs on 64-bit only; value is bounded by kernel policy.
+    #[allow(clippy::cast_possible_truncation)]
     let src_idx = tf.arg(1) as u32;
     let token = tf.arg(2);
 
@@ -802,7 +826,9 @@ pub fn sys_wait_set_add(tf: &mut TrapFrame) -> Result<u64, SyscallError>
             .object
             .ok_or(SyscallError::InvalidCapability)?
             .as_ptr();
-        let ws_obj = obj_ptr as *mut crate::cap::object::WaitSetObject;
+        // cast_ptr_alignment: kernel allocator guarantees object alignment; header is at the start of the allocation.
+        #[allow(clippy::cast_ptr_alignment)]
+        let ws_obj = obj_ptr.cast::<crate::cap::object::WaitSetObject>();
         (*ws_obj).state
     };
 
@@ -824,8 +850,10 @@ pub fn sys_wait_set_add(tf: &mut TrapFrame) -> Result<u64, SyscallError>
                     .object
                     .ok_or(SyscallError::InvalidCapability)?
                     .as_ptr();
-                let ep_obj = obj_ptr as *mut crate::cap::object::EndpointObject;
-                let ep_state = (*ep_obj).state as *mut u8;
+                // cast_ptr_alignment: kernel allocator guarantees object alignment; header is at the start of the allocation.
+                #[allow(clippy::cast_ptr_alignment)]
+                let ep_obj = obj_ptr.cast::<crate::cap::object::EndpointObject>();
+                let ep_state = (*ep_obj).state.cast::<u8>();
                 (ep_state, WaitSetSourceTag::Endpoint)
             }
             CapTag::Signal =>
@@ -838,8 +866,10 @@ pub fn sys_wait_set_add(tf: &mut TrapFrame) -> Result<u64, SyscallError>
                     .object
                     .ok_or(SyscallError::InvalidCapability)?
                     .as_ptr();
-                let sig_obj = obj_ptr as *mut crate::cap::object::SignalObject;
-                let sig_state = (*sig_obj).state as *mut u8;
+                // cast_ptr_alignment: kernel allocator guarantees object alignment; header is at the start of the allocation.
+                #[allow(clippy::cast_ptr_alignment)]
+                let sig_obj = obj_ptr.cast::<crate::cap::object::SignalObject>();
+                let sig_state = (*sig_obj).state.cast::<u8>();
                 (sig_state, WaitSetSourceTag::Signal)
             }
             CapTag::EventQueue =>
@@ -852,8 +882,10 @@ pub fn sys_wait_set_add(tf: &mut TrapFrame) -> Result<u64, SyscallError>
                     .object
                     .ok_or(SyscallError::InvalidCapability)?
                     .as_ptr();
-                let eq_obj = obj_ptr as *mut crate::cap::object::EventQueueObject;
-                let eq_state = (*eq_obj).state as *mut u8;
+                // cast_ptr_alignment: kernel allocator guarantees object alignment; header is at the start of the allocation.
+                #[allow(clippy::cast_ptr_alignment)]
+                let eq_obj = obj_ptr.cast::<crate::cap::object::EventQueueObject>();
+                let eq_state = (*eq_obj).state.cast::<u8>();
                 (eq_state, WaitSetSourceTag::EventQueue)
             }
             _ => return Err(SyscallError::InvalidCapability),
@@ -868,17 +900,23 @@ pub fn sys_wait_set_add(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         {
             WaitSetSourceTag::Endpoint =>
             {
-                let ep = source_ptr as *const crate::ipc::endpoint::EndpointState;
+                // cast_ptr_alignment: kernel allocator guarantees object alignment; header is at the start of the allocation.
+                #[allow(clippy::cast_ptr_alignment)]
+                let ep = source_ptr.cast::<crate::ipc::endpoint::EndpointState>();
                 !(*ep).wait_set.is_null()
             }
             WaitSetSourceTag::Signal =>
             {
-                let sig = source_ptr as *const crate::ipc::signal::SignalState;
+                // cast_ptr_alignment: kernel allocator guarantees object alignment; header is at the start of the allocation.
+                #[allow(clippy::cast_ptr_alignment)]
+                let sig = source_ptr.cast::<crate::ipc::signal::SignalState>();
                 !(*sig).wait_set.is_null()
             }
             WaitSetSourceTag::EventQueue =>
             {
-                let eq = source_ptr as *const crate::ipc::event_queue::EventQueueState;
+                // cast_ptr_alignment: kernel allocator guarantees object alignment; header is at the start of the allocation.
+                #[allow(clippy::cast_ptr_alignment)]
+                let eq = source_ptr.cast::<crate::ipc::event_queue::EventQueueState>();
                 !(*eq).wait_set.is_null()
             }
         }
@@ -892,7 +930,7 @@ pub fn sys_wait_set_add(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     // SAFETY: ws_state, source_ptr valid; scheduler lock not held.
     let member_idx =
         unsafe { crate::ipc::wait_set::waitset_add(ws_state, source_ptr, source_tag, token) }
-            .map_err(|_| SyscallError::InvalidArgument)?;
+            .map_err(|()| SyscallError::InvalidArgument)?;
 
     // Write back-pointer on the source.
     unsafe {
@@ -900,20 +938,26 @@ pub fn sys_wait_set_add(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         {
             WaitSetSourceTag::Endpoint =>
             {
-                let ep = source_ptr as *mut crate::ipc::endpoint::EndpointState;
-                (*ep).wait_set = ws_state as *mut u8;
+                // cast_ptr_alignment: kernel allocator guarantees object alignment; header is at the start of the allocation.
+                #[allow(clippy::cast_ptr_alignment)]
+                let ep = source_ptr.cast::<crate::ipc::endpoint::EndpointState>();
+                (*ep).wait_set = ws_state.cast::<u8>();
                 (*ep).wait_set_member_idx = member_idx;
             }
             WaitSetSourceTag::Signal =>
             {
-                let sig = source_ptr as *mut crate::ipc::signal::SignalState;
-                (*sig).wait_set = ws_state as *mut u8;
+                // cast_ptr_alignment: kernel allocator guarantees object alignment; header is at the start of the allocation.
+                #[allow(clippy::cast_ptr_alignment)]
+                let sig = source_ptr.cast::<crate::ipc::signal::SignalState>();
+                (*sig).wait_set = ws_state.cast::<u8>();
                 (*sig).wait_set_member_idx = member_idx;
             }
             WaitSetSourceTag::EventQueue =>
             {
-                let eq = source_ptr as *mut crate::ipc::event_queue::EventQueueState;
-                (*eq).wait_set = ws_state as *mut u8;
+                // cast_ptr_alignment: kernel allocator guarantees object alignment; header is at the start of the allocation.
+                #[allow(clippy::cast_ptr_alignment)]
+                let eq = source_ptr.cast::<crate::ipc::event_queue::EventQueueState>();
+                (*eq).wait_set = ws_state.cast::<u8>();
                 (*eq).wait_set_member_idx = member_idx;
             }
         }
@@ -922,19 +966,23 @@ pub fn sys_wait_set_add(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     Ok(0)
 }
 
-/// SYS_WAIT_SET_REMOVE (27): unregister a source from a wait set.
+/// `SYS_WAIT_SET_REMOVE` (27): unregister a source from a wait set.
 ///
 /// arg0 = wait set cap index (must have MODIFY right).
 /// arg1 = source cap index (same cap used to add).
 ///
 /// Clears the back-pointer on the source. Stale entries for the removed
-/// member are silently skipped by subsequent SYS_WAIT_SET_WAIT calls.
+/// member are silently skipped by subsequent `SYS_WAIT_SET_WAIT` calls.
 #[cfg(not(test))]
 pub fn sys_wait_set_remove(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 {
     use crate::ipc::wait_set::WaitSetSourceTag;
 
+    // cast_possible_truncation: kernel runs on 64-bit only; value is bounded by kernel policy.
+    #[allow(clippy::cast_possible_truncation)]
     let ws_idx = tf.arg(0) as u32;
+    // cast_possible_truncation: kernel runs on 64-bit only; value is bounded by kernel policy.
+    #[allow(clippy::cast_possible_truncation)]
     let src_idx = tf.arg(1) as u32;
 
     let tcb = unsafe { current_tcb() };
@@ -951,7 +999,9 @@ pub fn sys_wait_set_remove(tf: &mut TrapFrame) -> Result<u64, SyscallError>
             .object
             .ok_or(SyscallError::InvalidCapability)?
             .as_ptr();
-        let ws_obj = obj_ptr as *mut crate::cap::object::WaitSetObject;
+        // cast_ptr_alignment: kernel allocator guarantees object alignment; header is at the start of the allocation.
+        #[allow(clippy::cast_ptr_alignment)]
+        let ws_obj = obj_ptr.cast::<crate::cap::object::WaitSetObject>();
         (*ws_obj).state
     };
 
@@ -967,8 +1017,10 @@ pub fn sys_wait_set_remove(tf: &mut TrapFrame) -> Result<u64, SyscallError>
                     .object
                     .ok_or(SyscallError::InvalidCapability)?
                     .as_ptr();
-                let ep_obj = obj_ptr as *mut crate::cap::object::EndpointObject;
-                ((*ep_obj).state as *mut u8, WaitSetSourceTag::Endpoint)
+                // cast_ptr_alignment: kernel allocator guarantees object alignment; header is at the start of the allocation.
+                #[allow(clippy::cast_ptr_alignment)]
+                let ep_obj = obj_ptr.cast::<crate::cap::object::EndpointObject>();
+                ((*ep_obj).state.cast::<u8>(), WaitSetSourceTag::Endpoint)
             }
             CapTag::Signal =>
             {
@@ -976,8 +1028,10 @@ pub fn sys_wait_set_remove(tf: &mut TrapFrame) -> Result<u64, SyscallError>
                     .object
                     .ok_or(SyscallError::InvalidCapability)?
                     .as_ptr();
-                let sig_obj = obj_ptr as *mut crate::cap::object::SignalObject;
-                ((*sig_obj).state as *mut u8, WaitSetSourceTag::Signal)
+                // cast_ptr_alignment: kernel allocator guarantees object alignment; header is at the start of the allocation.
+                #[allow(clippy::cast_ptr_alignment)]
+                let sig_obj = obj_ptr.cast::<crate::cap::object::SignalObject>();
+                ((*sig_obj).state.cast::<u8>(), WaitSetSourceTag::Signal)
             }
             CapTag::EventQueue =>
             {
@@ -985,8 +1039,10 @@ pub fn sys_wait_set_remove(tf: &mut TrapFrame) -> Result<u64, SyscallError>
                     .object
                     .ok_or(SyscallError::InvalidCapability)?
                     .as_ptr();
-                let eq_obj = obj_ptr as *mut crate::cap::object::EventQueueObject;
-                ((*eq_obj).state as *mut u8, WaitSetSourceTag::EventQueue)
+                // cast_ptr_alignment: kernel allocator guarantees object alignment; header is at the start of the allocation.
+                #[allow(clippy::cast_ptr_alignment)]
+                let eq_obj = obj_ptr.cast::<crate::cap::object::EventQueueObject>();
+                ((*eq_obj).state.cast::<u8>(), WaitSetSourceTag::EventQueue)
             }
             _ => return Err(SyscallError::InvalidCapability),
         }
@@ -995,7 +1051,7 @@ pub fn sys_wait_set_remove(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     // Remove from wait set.
     // SAFETY: ws_state, source_ptr valid.
     unsafe { crate::ipc::wait_set::waitset_remove(ws_state, source_ptr) }
-        .map_err(|_| SyscallError::InvalidCapability)?;
+        .map_err(|()| SyscallError::InvalidCapability)?;
 
     // Clear source back-pointer.
     unsafe {
@@ -1003,19 +1059,25 @@ pub fn sys_wait_set_remove(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         {
             WaitSetSourceTag::Endpoint =>
             {
-                let ep = source_ptr as *mut crate::ipc::endpoint::EndpointState;
+                // cast_ptr_alignment: kernel allocator guarantees object alignment; header is at the start of the allocation.
+                #[allow(clippy::cast_ptr_alignment)]
+                let ep = source_ptr.cast::<crate::ipc::endpoint::EndpointState>();
                 (*ep).wait_set = core::ptr::null_mut();
                 (*ep).wait_set_member_idx = 0;
             }
             WaitSetSourceTag::Signal =>
             {
-                let sig = source_ptr as *mut crate::ipc::signal::SignalState;
+                // cast_ptr_alignment: kernel allocator guarantees object alignment; header is at the start of the allocation.
+                #[allow(clippy::cast_ptr_alignment)]
+                let sig = source_ptr.cast::<crate::ipc::signal::SignalState>();
                 (*sig).wait_set = core::ptr::null_mut();
                 (*sig).wait_set_member_idx = 0;
             }
             WaitSetSourceTag::EventQueue =>
             {
-                let eq = source_ptr as *mut crate::ipc::event_queue::EventQueueState;
+                // cast_ptr_alignment: kernel allocator guarantees object alignment; header is at the start of the allocation.
+                #[allow(clippy::cast_ptr_alignment)]
+                let eq = source_ptr.cast::<crate::ipc::event_queue::EventQueueState>();
                 (*eq).wait_set = core::ptr::null_mut();
                 (*eq).wait_set_member_idx = 0;
             }
@@ -1025,18 +1087,20 @@ pub fn sys_wait_set_remove(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     Ok(0)
 }
 
-/// SYS_WAIT_SET_WAIT (28): block until any registered source becomes ready.
+/// `SYS_WAIT_SET_WAIT` (28): block until any registered source becomes ready.
 ///
 /// arg0 = wait set cap index (must have WAIT right).
 ///
 /// If a source is already ready (from a prior notification), returns immediately.
 /// Otherwise blocks until any member fires. The opaque token chosen at
-/// SYS_WAIT_SET_ADD time is returned in the secondary return register
+/// `SYS_WAIT_SET_ADD` time is returned in the secondary return register
 /// (rdx on x86-64, a1 on RISC-V). The caller then reads from the identified
 /// source normally.
 #[cfg(not(test))]
 pub fn sys_wait_set_wait(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 {
+    // cast_possible_truncation: kernel runs on 64-bit only; value is bounded by kernel policy.
+    #[allow(clippy::cast_possible_truncation)]
     let ws_idx = tf.arg(0) as u32;
 
     let tcb = unsafe { current_tcb() };
@@ -1052,36 +1116,33 @@ pub fn sys_wait_set_wait(tf: &mut TrapFrame) -> Result<u64, SyscallError>
             .object
             .ok_or(SyscallError::InvalidCapability)?
             .as_ptr();
-        let ws_obj = obj_ptr as *mut crate::cap::object::WaitSetObject;
+        // cast_ptr_alignment: kernel allocator guarantees object alignment; header is at the start of the allocation.
+        #[allow(clippy::cast_ptr_alignment)]
+        let ws_obj = obj_ptr.cast::<crate::cap::object::WaitSetObject>();
         (*ws_obj).state
     };
 
     // SAFETY: ws_state valid; scheduler lock not held.
     let result = unsafe { crate::ipc::wait_set::waitset_wait(ws_state, tcb) };
 
-    match result
+    if let Ok(token) = result
     {
-        Ok(token) =>
-        {
-            // A source was already ready; return its token.
-            tf.set_ipc_return(0, token);
-            Ok(0)
-        }
-        Err(()) =>
-        {
-            // No source ready; thread is Blocked. Yield CPU.
-            // SAFETY: called from syscall handler.
-            unsafe {
-                crate::sched::schedule();
-            }
-
-            // On resume, waitset_notify stored the token in wakeup_value.
-            let token = unsafe { (*tcb).wakeup_value };
-            unsafe {
-                (*tcb).wakeup_value = 0;
-            }
-            tf.set_ipc_return(0, token);
-            Ok(0)
-        }
+        // A source was already ready; return its token.
+        tf.set_ipc_return(0, token);
+        return Ok(0);
     }
+    // else: No source ready; thread is Blocked. Yield CPU.
+
+    // SAFETY: called from syscall handler.
+    unsafe {
+        crate::sched::schedule();
+    }
+
+    // On resume, waitset_notify stored the token in wakeup_value.
+    let token = unsafe { (*tcb).wakeup_value };
+    unsafe {
+        (*tcb).wakeup_value = 0;
+    }
+    tf.set_ipc_return(0, token);
+    Ok(0)
 }

@@ -15,3 +15,9 @@ structured log output to IPC.
 ## Status
 
 Not yet implemented.
+
+---
+
+## Summarized By
+
+None

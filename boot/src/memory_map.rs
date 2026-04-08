@@ -9,10 +9,8 @@
 //! `MemoryMapEntry` format and sorts the result by physical base address.
 
 use crate::uefi::{
-    EfiMemoryDescriptor, EFI_ACPI_MEMORY_NVS, EFI_ACPI_RECLAIM_MEMORY, EFI_BOOT_SERVICES_CODE,
-    EFI_BOOT_SERVICES_DATA, EFI_CONVENTIONAL_MEMORY, EFI_LOADER_CODE, EFI_LOADER_DATA,
-    EFI_MEMORY_MAPPED_IO, EFI_MEMORY_MAPPED_IO_PORT_SPACE, EFI_PERSISTENT_MEMORY,
-    EFI_RUNTIME_SERVICES_CODE, EFI_RUNTIME_SERVICES_DATA,
+    EfiMemoryDescriptor, EFI_ACPI_RECLAIM_MEMORY, EFI_BOOT_SERVICES_CODE, EFI_BOOT_SERVICES_DATA,
+    EFI_CONVENTIONAL_MEMORY, EFI_LOADER_CODE, EFI_LOADER_DATA, EFI_PERSISTENT_MEMORY,
 };
 use boot_protocol::{MemoryMapEntry, MemoryType};
 
@@ -39,6 +37,9 @@ pub unsafe fn translate_memory_map(
     {
         // SAFETY: uefi_map.buffer_phys is the UEFI raw map buffer; offset is
         // within map_size; the descriptor at this offset is a valid EfiMemoryDescriptor.
+        // cast_possible_truncation: buffer_phys is a UEFI physical address; on all
+        // supported UEFI targets (x86_64, riscv64) usize == u64, so no truncation occurs.
+        #[allow(clippy::cast_possible_truncation)]
         let desc =
             unsafe { &*((uefi_map.buffer_phys as usize + offset) as *const EfiMemoryDescriptor) };
 
@@ -88,12 +89,6 @@ fn translate_memory_type(uefi_type: u32) -> MemoryType
 
         // EfiRuntimeServicesCode/Data, EfiACPIMemoryNVS, EfiMemoryMappedIO,
         // EfiMemoryMappedIOPortSpace, and all unrecognised types are Reserved.
-        EFI_RUNTIME_SERVICES_CODE
-        | EFI_RUNTIME_SERVICES_DATA
-        | EFI_ACPI_MEMORY_NVS
-        | EFI_MEMORY_MAPPED_IO
-        | EFI_MEMORY_MAPPED_IO_PORT_SPACE => MemoryType::Reserved,
-
         _ => MemoryType::Reserved,
     }
 }

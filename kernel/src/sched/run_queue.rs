@@ -144,7 +144,7 @@ pub struct PerCpuScheduler
 
     /// Lock protecting this struct.
     ///
-    /// Acquire before any enqueue/dequeue/set_current operation.
+    /// Acquire before any `enqueue`/`dequeue`/`set_current` operation.
     /// The lock disables interrupts while held, preventing timer-driven deadlock.
     pub lock: crate::sync::Spinlock,
 }
@@ -281,9 +281,12 @@ impl PerCpuScheduler
     }
 }
 
-// RunQueue is not Copy, so derive Copy on the containing const is not possible.
-// Provide the impl manually for the const array construction above.
+// RunQueue needs Copy+Clone for the const array construction in sched::init_schedulers.
 impl Copy for RunQueue {}
+// expl_impl_clone_on_copy: clone delegates to copy (*self) since RunQueue is Copy;
+// explicit impl is required because #[derive(Clone)] cannot be used on a struct
+// that is assembled as a const value and then assigned in a static array.
+#[allow(clippy::expl_impl_clone_on_copy)]
 impl Clone for RunQueue
 {
     fn clone(&self) -> Self

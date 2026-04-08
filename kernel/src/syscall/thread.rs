@@ -11,10 +11,14 @@
 //! 3. Add a dispatch arm to `syscall/mod.rs`.
 //! 4. Add a userspace wrapper to `shared/syscall/src/lib.rs`.
 
+// cast_possible_truncation: u64→u32/usize casts extract cap indices and field values
+// from 64-bit trap frame args. Seraph is 64-bit only; all values fit in the target type.
+#![allow(clippy::cast_possible_truncation)]
+
 use crate::arch::current::trap_frame::TrapFrame;
 use syscall::SyscallError;
 
-/// SYS_THREAD_CONFIGURE (23): set entry point, stack, and argument for a thread.
+/// `SYS_THREAD_CONFIGURE` (23): set entry point, stack, and argument for a thread.
 ///
 /// arg0 = Thread cap index (must have CONTROL).
 /// arg1 = user entry point (virtual address).
@@ -22,7 +26,7 @@ use syscall::SyscallError;
 /// arg3 = argument value (passed in rdi/a0 when the thread first runs).
 ///
 /// The thread must be in `Created` state (not yet started). Builds the initial
-/// user-mode TrapFrame on the thread's kernel stack. The thread is not enqueued;
+/// user-mode `TrapFrame` on the thread's kernel stack. The thread is not enqueued;
 /// call `SYS_THREAD_START` to start it.
 ///
 /// Returns 0 on success.
@@ -54,7 +58,9 @@ pub fn sys_thread_configure(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     let target_tcb = {
         let obj = thread_slot.object.ok_or(SyscallError::InvalidCapability)?;
         // SAFETY: tag confirmed Thread; pointer is valid.
-        let to = unsafe { &*(obj.as_ptr() as *const ThreadObject) };
+        // cast_ptr_alignment: header at offset 0; allocator guarantees alignment.
+        #[allow(clippy::cast_ptr_alignment)]
+        let to = unsafe { &*(obj.as_ptr().cast::<ThreadObject>()) };
         to.tcb
     };
 
@@ -80,7 +86,7 @@ pub fn sys_thread_configure(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     // Zero then populate user-mode entry fields.
     // SAFETY: kstack_top - tf_size is within the allocated kernel stack (4 pages).
     unsafe {
-        core::ptr::write_bytes(tf_ptr as *mut u8, 0, tf_size as usize);
+        core::ptr::write_bytes(tf_ptr.cast::<u8>(), 0, tf_size as usize);
         (*tf_ptr).init_user(entry, stack_ptr);
         // Pass the argument in the first argument register.
         (*tf_ptr).set_arg0(arg);
@@ -95,12 +101,12 @@ pub fn sys_thread_configure(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     Ok(0)
 }
 
-/// SYS_THREAD_START (19): move a configured thread from Created to Ready.
+/// `SYS_THREAD_START` (19): move a configured thread from Created to Ready.
 ///
 /// arg0 = Thread cap index (must have CONTROL).
 ///
 /// The thread must have been configured via `SYS_THREAD_CONFIGURE` first
-/// (trap_frame must be non-null). Enqueues the thread on the BSP scheduler.
+/// (`trap_frame` must be non-null). Enqueues the thread on the BSP scheduler.
 ///
 /// Returns 0 on success.
 #[cfg(not(test))]
@@ -125,7 +131,9 @@ pub fn sys_thread_start(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 
     let target_tcb = {
         let obj = thread_slot.object.ok_or(SyscallError::InvalidCapability)?;
-        let to = unsafe { &*(obj.as_ptr() as *const ThreadObject) };
+        // cast_ptr_alignment: header at offset 0 of ThreadObject; allocator guarantees alignment.
+        #[allow(clippy::cast_ptr_alignment)]
+        let to = unsafe { &*(obj.as_ptr().cast::<ThreadObject>()) };
         to.tcb
     };
 
@@ -153,13 +161,13 @@ pub fn sys_thread_start(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         // Enqueue on the affinity CPU if set; otherwise CPU 0 (BSP).
         // Full preferred_cpu migration is Phase D.
         let affinity = (*target_tcb).cpu_affinity;
-        let target_cpu = if affinity != crate::sched::AFFINITY_ANY
+        let target_cpu = if affinity == crate::sched::AFFINITY_ANY
         {
-            affinity as usize
+            0
         }
         else
         {
-            0
+            affinity as usize
         };
         crate::sched::scheduler_for(target_cpu).enqueue(target_tcb, prio);
     }
@@ -167,7 +175,7 @@ pub fn sys_thread_start(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     Ok(0)
 }
 
-/// SYS_THREAD_STOP (20): transition a thread to the Stopped state.
+/// `SYS_THREAD_STOP` (20): transition a thread to the Stopped state.
 ///
 /// arg0 = Thread cap index (must have CONTROL).
 ///
@@ -198,7 +206,9 @@ pub fn sys_thread_stop(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 
     let target_tcb = {
         let obj = thread_slot.object.ok_or(SyscallError::InvalidCapability)?;
-        let to = unsafe { &*(obj.as_ptr() as *const ThreadObject) };
+        // cast_ptr_alignment: header at offset 0 of ThreadObject; allocator guarantees alignment.
+        #[allow(clippy::cast_ptr_alignment)]
+        let to = unsafe { &*(obj.as_ptr().cast::<ThreadObject>()) };
         to.tcb
     };
 
@@ -225,16 +235,10 @@ pub fn sys_thread_stop(tf: &mut TrapFrame) -> Result<u64, SyscallError>
                 cancel_ipc_block(target_tcb);
             }
 
-            ThreadState::Ready =>
+            ThreadState::Ready | ThreadState::Running =>
             {
-                // Thread is in a run queue. Set state to Stopped; the
-                // scheduler's skip loop will ignore it on dequeue.
-            }
-
-            ThreadState::Running =>
-            {
-                // On single-CPU, the only running thread is the caller. If the
-                // target is the caller, stop self and yield.
+                // Thread is in a run queue or currently running. Set state to Stopped;
+                // the scheduler's skip loop will handle it on the next context switch.
                 // TODO(Phase-11): send IPI when target is running on another CPU.
             }
         }
@@ -279,7 +283,9 @@ unsafe fn cancel_ipc_block(tcb: *mut crate::sched::thread::ThreadControlBlock)
         {
             if !blocked_on.is_null()
             {
-                let ep = blocked_on as *mut EndpointState;
+                // cast_ptr_alignment: blocked_on_object stores type-erased pointer; original allocation guarantees alignment.
+                #[allow(clippy::cast_ptr_alignment)]
+                let ep = blocked_on.cast::<EndpointState>();
                 // SAFETY: blocked_on_object is a valid EndpointState ptr.
                 unsafe {
                     unlink_from_wait_queue(tcb, &mut (*ep).send_head, &mut (*ep).send_tail);
@@ -291,7 +297,9 @@ unsafe fn cancel_ipc_block(tcb: *mut crate::sched::thread::ThreadControlBlock)
         {
             if !blocked_on.is_null()
             {
-                let ep = blocked_on as *mut EndpointState;
+                // cast_ptr_alignment: blocked_on_object stores type-erased pointer; original allocation guarantees alignment.
+                #[allow(clippy::cast_ptr_alignment)]
+                let ep = blocked_on.cast::<EndpointState>();
                 // SAFETY: blocked_on_object is a valid EndpointState ptr.
                 unsafe {
                     unlink_from_wait_queue(tcb, &mut (*ep).recv_head, &mut (*ep).recv_tail);
@@ -305,7 +313,9 @@ unsafe fn cancel_ipc_block(tcb: *mut crate::sched::thread::ThreadControlBlock)
             // target so its next reply call is a no-op for this caller.
             if !blocked_on.is_null()
             {
-                let server = blocked_on as *mut crate::sched::thread::ThreadControlBlock;
+                // cast_ptr_alignment: blocked_on_object stores type-erased pointer; original allocation guarantees alignment.
+                #[allow(clippy::cast_ptr_alignment)]
+                let server = blocked_on.cast::<crate::sched::thread::ThreadControlBlock>();
                 // SAFETY: server is a valid TCB pointer.
                 unsafe {
                     (*server).reply_tcb = core::ptr::null_mut();
@@ -317,7 +327,9 @@ unsafe fn cancel_ipc_block(tcb: *mut crate::sched::thread::ThreadControlBlock)
         {
             if !blocked_on.is_null()
             {
-                let sig = blocked_on as *mut SignalState;
+                // cast_ptr_alignment: blocked_on_object stores type-erased pointer; original allocation guarantees alignment.
+                #[allow(clippy::cast_ptr_alignment)]
+                let sig = blocked_on.cast::<SignalState>();
                 // SAFETY: blocked_on_object is a valid SignalState ptr.
                 unsafe {
                     if core::ptr::eq((*sig).waiter, tcb)
@@ -332,7 +344,9 @@ unsafe fn cancel_ipc_block(tcb: *mut crate::sched::thread::ThreadControlBlock)
         {
             if !blocked_on.is_null()
             {
-                let eq = blocked_on as *mut EventQueueState;
+                // cast_ptr_alignment: blocked_on_object stores type-erased pointer; original allocation guarantees alignment.
+                #[allow(clippy::cast_ptr_alignment)]
+                let eq = blocked_on.cast::<EventQueueState>();
                 // SAFETY: blocked_on_object is a valid EventQueueState ptr.
                 unsafe {
                     if core::ptr::eq((*eq).waiter, tcb)
@@ -347,7 +361,9 @@ unsafe fn cancel_ipc_block(tcb: *mut crate::sched::thread::ThreadControlBlock)
         {
             if !blocked_on.is_null()
             {
-                let ws = blocked_on as *mut WaitSetState;
+                // cast_ptr_alignment: blocked_on_object stores type-erased pointer; original allocation guarantees alignment.
+                #[allow(clippy::cast_ptr_alignment)]
+                let ws = blocked_on.cast::<WaitSetState>();
                 // SAFETY: blocked_on_object is a valid WaitSetState ptr.
                 unsafe {
                     if core::ptr::eq((*ws).waiter, tcb)
@@ -382,11 +398,11 @@ unsafe fn cancel_ipc_block(tcb: *mut crate::sched::thread::ThreadControlBlock)
     }
 }
 
-/// SYS_THREAD_SET_PRIORITY (37): change a thread's scheduling priority.
+/// `SYS_THREAD_SET_PRIORITY` (37): change a thread's scheduling priority.
 ///
 /// arg0 = Thread cap index (must have CONTROL).
-/// arg1 = New priority (1–PRIORITY_MAX; 0 and 31 are rejected).
-/// arg2 = SchedControl cap index (required only when priority ≥ SCHED_ELEVATED_MIN).
+/// arg1 = New priority (`1`–`PRIORITY_MAX`; 0 and 31 are rejected).
+/// arg2 = `SchedControl` cap index (required only when priority ≥ `SCHED_ELEVATED_MIN`).
 ///
 /// The change takes effect at the next scheduler invocation. If the thread is
 /// currently in the Ready state, it is moved to the new priority queue immediately.
@@ -436,7 +452,9 @@ pub fn sys_thread_set_priority(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 
     let target_tcb = {
         let obj = thread_slot.object.ok_or(SyscallError::InvalidCapability)?;
-        let to = unsafe { &*(obj.as_ptr() as *const ThreadObject) };
+        // cast_ptr_alignment: header at offset 0 of ThreadObject; allocator guarantees alignment.
+        #[allow(clippy::cast_ptr_alignment)]
+        let to = unsafe { &*(obj.as_ptr().cast::<ThreadObject>()) };
         to.tcb
     };
 
@@ -461,10 +479,10 @@ pub fn sys_thread_set_priority(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     Ok(0)
 }
 
-/// SYS_THREAD_SET_AFFINITY (38): set a thread's CPU affinity.
+/// `SYS_THREAD_SET_AFFINITY` (38): set a thread's CPU affinity.
 ///
 /// arg0 = Thread cap index (must have CONTROL).
-/// arg1 = CPU ID, or AFFINITY_ANY (u32::MAX) to clear hard affinity.
+/// arg1 = CPU ID, or `AFFINITY_ANY` (`u32::MAX`) to clear hard affinity.
 ///
 /// The change is recorded immediately. On single-CPU systems this is a
 /// bookkeeping operation; WSMP (SMP) will enforce it during migration.
@@ -494,7 +512,9 @@ pub fn sys_thread_set_affinity(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 
     let target_tcb = {
         let obj = thread_slot.object.ok_or(SyscallError::InvalidCapability)?;
-        let to = unsafe { &*(obj.as_ptr() as *const ThreadObject) };
+        // cast_ptr_alignment: header at offset 0 of ThreadObject; allocator guarantees alignment.
+        #[allow(clippy::cast_ptr_alignment)]
+        let to = unsafe { &*(obj.as_ptr().cast::<ThreadObject>()) };
         to.tcb
     };
 
@@ -521,7 +541,7 @@ pub fn sys_thread_set_affinity(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     Ok(0)
 }
 
-/// SYS_THREAD_READ_REGS (39): read register state of a stopped thread.
+/// `SYS_THREAD_READ_REGS` (39): read register state of a stopped thread.
 ///
 /// arg0 = Thread cap index (must have OBSERVE).
 /// arg1 = Pointer to caller-supplied buffer (user VA).
@@ -556,7 +576,9 @@ pub fn sys_thread_read_regs(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 
     let target_tcb = {
         let obj = thread_slot.object.ok_or(SyscallError::InvalidCapability)?;
-        let to = unsafe { &*(obj.as_ptr() as *const ThreadObject) };
+        // cast_ptr_alignment: header at offset 0 of ThreadObject; allocator guarantees alignment.
+        #[allow(clippy::cast_ptr_alignment)]
+        let to = unsafe { &*(obj.as_ptr().cast::<ThreadObject>()) };
         to.tcb
     };
 
@@ -596,7 +618,7 @@ pub fn sys_thread_read_regs(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     Ok(copy_size as u64)
 }
 
-/// SYS_THREAD_WRITE_REGS (40): write register state into a stopped thread.
+/// `SYS_THREAD_WRITE_REGS` (40): write register state into a stopped thread.
 ///
 /// arg0 = Thread cap index (must have CONTROL).
 /// arg1 = Pointer to register-file buffer in caller's address space.
@@ -630,7 +652,9 @@ pub fn sys_thread_write_regs(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 
     let target_tcb = {
         let obj = thread_slot.object.ok_or(SyscallError::InvalidCapability)?;
-        let to = unsafe { &*(obj.as_ptr() as *const ThreadObject) };
+        // cast_ptr_alignment: header at offset 0 of ThreadObject; allocator guarantees alignment.
+        #[allow(clippy::cast_ptr_alignment)]
+        let to = unsafe { &*(obj.as_ptr().cast::<ThreadObject>()) };
         to.tcb
     };
 
@@ -665,7 +689,7 @@ pub fn sys_thread_write_regs(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         crate::arch::current::cpu::user_access_begin();
         core::ptr::copy_nonoverlapping(
             buf_ptr as *const u8,
-            tmp.as_mut_ptr() as *mut u8,
+            tmp.as_mut_ptr().cast::<u8>(),
             copy_size,
         );
         crate::arch::current::cpu::user_access_end();
@@ -681,8 +705,8 @@ pub fn sys_thread_write_regs(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     // SAFETY: target_tcb and trap_frame are valid.
     unsafe {
         core::ptr::copy_nonoverlapping(
-            &regs as *const ArchTF as *const u8,
-            (*target_tcb).trap_frame as *mut u8,
+            core::ptr::addr_of!(regs).cast::<u8>(),
+            (*target_tcb).trap_frame.cast::<u8>(),
             copy_size,
         );
     }
@@ -690,7 +714,7 @@ pub fn sys_thread_write_regs(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     Ok(0)
 }
 
-/// Validate and sanitize a user-supplied TrapFrame before writing it into a
+/// Validate and sanitize a user-supplied `TrapFrame` before writing it into a
 /// thread. Enforces that no privilege bits are set and instruction/stack
 /// pointers are in the canonical user address range.
 ///
@@ -719,8 +743,8 @@ fn validate_write_regs(
         }
 
         // Force segment selectors to user-mode values (ring 3, RPL=3).
-        regs.cs = crate::arch::current::gdt::USER_CS as u64;
-        regs.ss = crate::arch::current::gdt::USER_DS as u64;
+        regs.cs = u64::from(crate::arch::current::gdt::USER_CS);
+        regs.ss = u64::from(crate::arch::current::gdt::USER_DS);
 
         // rflags: must have IF (bit 9) set. Clear IOPL (bits 12-13), VM (bit
         // 17), VIF (bit 19), VIP (bit 20) — none of which should be set in

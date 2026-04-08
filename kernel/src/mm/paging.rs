@@ -28,6 +28,16 @@
 //! 256 frames (1 MiB) supports direct-mapping ≈ 248 GiB of RAM. Systems that
 //! exceed this limit halt with a clear fatal message.
 
+// cast_possible_truncation: u64→usize page table index arithmetic; addresses bounded by canonical VA.
+// cast_lossless: u32→u64 widening in page count arithmetic.
+// inline_always: phys_to_virt/virt_to_phys are called on every memory access path; always-inline
+//   avoids call overhead in these hot helpers.
+#![allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_lossless,
+    clippy::inline_always
+)]
+
 use boot_protocol::BootInfo;
 
 // Production-only imports (linker symbols and arch paging are unavailable
@@ -109,6 +119,9 @@ pub enum PagingError
 /// On x86-64, `readable` has no effect (all present pages are readable);
 /// it is included for cross-architecture symmetry with RISC-V Sv48 which
 /// has an explicit R bit.
+// more_than_3_bools: PageFlags is a cross-arch PTE flag set; each bool is a distinct
+// architectural attribute. A bitfield enum would need extra decode logic at every call site.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Clone, Copy, Debug)]
 pub struct PageFlags
 {
@@ -184,7 +197,9 @@ impl PoolState
     ///
     /// # Safety
     /// Must be called from a single-threaded context (boot, before SMP).
+    // similar_names: pool_va_base and pool_pa_base are the VA and PA of the same pool region.
     #[cfg(not(test))]
+    #[allow(clippy::similar_names)]
     pub fn new(info: &BootInfo) -> Self
     {
         // SAFETY: BOOT_TABLE_POOL is in BSS; single-threaded boot access.
@@ -255,7 +270,7 @@ impl PoolState
 ///
 /// Only `Usable`, `Loaded`, `AcpiReclaimable`, and `Persistent` entries are
 /// considered. `Reserved` entries are excluded because they may represent
-/// high-address MMIO regions (PCIe BARs, firmware flash, LAPIC, etc.) whose
+/// high-address MMIO regions (`PCIe` BARs, firmware flash, LAPIC, etc.) whose
 /// physical addresses can be in the hundreds-of-GiB range, which would
 /// require far more page table frames than the boot pool provides.
 ///
@@ -332,7 +347,9 @@ pub fn init_kernel_page_tables(
     Ok(())
 }
 
+// similar_names: root_va/root_pa and other va/pa pairs are VA/PA of the same frame.
 #[cfg(not(test))]
+#[allow(clippy::similar_names)]
 pub fn init_kernel_page_tables(
     info: &BootInfo,
     _alloc: &mut BuddyAllocator,
@@ -548,7 +565,7 @@ fn map_boot_stack(root_va: u64, info: &BootInfo, pool: &mut PoolState) -> Result
 
 /// If the framebuffer's physical base is above `max_phys_rounded`, add
 /// explicit 4 KiB mappings in the direct map region so it is accessible
-/// after the switch. Frames within [0, max_phys_rounded) are already
+/// after the switch. Frames within [0, `max_phys_rounded`) are already
 /// covered by the large-page direct map loop.
 #[cfg(not(test))]
 fn map_framebuffer_if_needed(

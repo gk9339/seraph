@@ -32,6 +32,8 @@ const PTE_D: u64 = 1 << 7;
 
 /// Page size in bytes (4 KiB).
 const PAGE_SIZE: u64 = 4096;
+/// Page size as `usize` — 4096 always fits, cast is exact.
+const PAGE_SIZE_USIZE: usize = 4096;
 /// Number of entries in a single page table (all levels).
 const TABLE_ENTRIES: usize = 512;
 
@@ -58,7 +60,7 @@ impl PageTableBuilder for BootPageTable
         // Zeroing ensures all entries have V=0 (invalid), which is the correct
         // initial state for an Sv48 page table.
         unsafe {
-            core::ptr::write_bytes(root_phys as *mut u8, 0, PAGE_SIZE as usize);
+            core::ptr::write_bytes(root_phys as *mut u8, 0, PAGE_SIZE_USIZE);
         }
         Some(Self { root_phys, bs })
     }
@@ -192,7 +194,7 @@ impl BootPageTable
         // SAFETY: frame points to one PAGE_SIZE region of allocated memory.
         // Zeroing ensures all entries have V=0 (invalid).
         unsafe {
-            core::ptr::write_bytes(frame as *mut u8, 0, PAGE_SIZE as usize);
+            core::ptr::write_bytes(frame as *mut u8, 0, PAGE_SIZE_USIZE);
         }
         Some(frame)
     }

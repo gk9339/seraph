@@ -5,14 +5,14 @@
 
 //! Buddy allocator for physical frames.
 //!
-//! Manages physical memory as power-of-two blocks (orders 0..=MAX_ORDER).
+//! Manages physical memory as power-of-two blocks (orders `0..=MAX_ORDER`).
 //!
 //! # Design
 //!
 //! Free block metadata is stored in a fixed-size internal pool of index-linked
 //! list nodes. This avoids writing into the free physical pages themselves,
 //! which is necessary because the bootloader only identity-maps specific
-//! regions (BootInfo, modules, stack, memory map buffer) — not all usable RAM.
+//! regions (`BootInfo`, modules, stack, memory map buffer) — not all usable RAM.
 //!
 //! Each order maintains a singly-linked list of free block addresses. Links are
 //! pool slot indices (u16, 1-indexed). Slot 0 is the list/pool sentinel (NONE).
@@ -31,13 +31,18 @@
 //! (or transition to in-page node storage after Phase 3 establishes page
 //! tables) for larger systems.
 
+// cast_possible_truncation: u64→usize and usize→u16 casts bounded by physical address ranges.
+// large_stack_arrays: BuddyAllocator is placed in .bss as a static; the large arrays are
+// legitimate kernel data structures, not accidental stack allocations.
+#![allow(clippy::cast_possible_truncation, clippy::large_stack_arrays)]
+
 /// Size of a single physical page in bytes.
 pub const PAGE_SIZE: usize = 4096;
 
 /// Maximum allocation order. Order N spans 2^N pages (4 KiB..4 MiB).
 pub const MAX_ORDER: usize = 10;
 
-/// Number of order levels (0 through MAX_ORDER inclusive).
+/// Number of order levels (0 through `MAX_ORDER` inclusive).
 const ORDER_COUNT: usize = MAX_ORDER + 1;
 
 /// Maximum simultaneously tracked free blocks across all orders.
@@ -45,7 +50,7 @@ const ORDER_COUNT: usize = MAX_ORDER + 1;
 const POOL_SIZE: usize = 4096;
 
 /// Sentinel slot index meaning "end of list" or "empty".
-/// Slot 0 is reserved; valid slots are 1..=POOL_SIZE.
+/// Slot 0 is reserved; valid slots are `1..=POOL_SIZE`.
 const NONE: u16 = 0;
 
 /// Physical buddy allocator.
@@ -103,8 +108,8 @@ impl BuddyAllocator
     /// - No other code will access the region until frames are allocated from it.
     pub unsafe fn add_region(&mut self, start: u64, end: u64)
     {
-        debug_assert!(start % PAGE_SIZE as u64 == 0, "start not page-aligned");
-        debug_assert!(end % PAGE_SIZE as u64 == 0, "end not page-aligned");
+        debug_assert!(start.is_multiple_of(PAGE_SIZE as u64), "start not page-aligned");
+        debug_assert!(end.is_multiple_of(PAGE_SIZE as u64), "end not page-aligned");
 
         if start >= end
         {
@@ -123,7 +128,7 @@ impl BuddyAllocator
                 .rev()
                 .find(|&o| {
                     let pages = 1usize << o;
-                    pages <= remaining_pages && cursor % (PAGE_SIZE * pages) as u64 == 0
+                    pages <= remaining_pages && cursor.is_multiple_of((PAGE_SIZE * pages) as u64)
                 })
                 .unwrap_or(0);
 
@@ -174,7 +179,7 @@ impl BuddyAllocator
     pub unsafe fn free(&mut self, addr: u64, order: usize)
     {
         debug_assert!(order <= MAX_ORDER);
-        debug_assert!(addr % PAGE_SIZE as u64 == 0);
+        debug_assert!(addr.is_multiple_of(PAGE_SIZE as u64));
 
         let mut current_addr = addr;
         let mut current_order = order;
@@ -216,7 +221,7 @@ impl BuddyAllocator
 
     /// Build the unused-slot chain on first use.
     ///
-    /// Chains slots 1 → 2 → … → POOL_SIZE → 0 (NONE) through `nexts`.
+    /// Chains slots 1 → 2 → … → `POOL_SIZE` → 0 (NONE) through `nexts`.
     /// Must be called before any `pool_alloc`.
     fn init_pool(&mut self)
     {

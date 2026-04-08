@@ -23,11 +23,11 @@ fn main()
 
     let linker_script = if target.starts_with("x86_64")
     {
-        format!("{}/linker/x86_64.ld", manifest_dir)
+        format!("{manifest_dir}/linker/x86_64.ld")
     }
     else if target.starts_with("riscv64")
     {
-        format!("{}/linker/riscv64.ld", manifest_dir)
+        format!("{manifest_dir}/linker/riscv64.ld")
     }
     else
     {
@@ -35,7 +35,7 @@ fn main()
         return;
     };
 
-    println!("cargo:rustc-link-arg=-T{}", linker_script);
-    println!("cargo:rerun-if-changed={}", linker_script);
+    println!("cargo:rustc-link-arg=-T{linker_script}");
+    println!("cargo:rerun-if-changed={linker_script}");
     println!("cargo:rerun-if-changed=build.rs");
 }

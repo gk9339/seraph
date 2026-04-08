@@ -196,3 +196,9 @@ single argument: a `*const BootInfo` pointer whose physical address is in `rdi`
 | [docs/capability-model.md](../docs/capability-model.md) | Capability types, rights, revocation |
 | [docs/boot-protocol.md](../docs/boot-protocol.md) | Entry point contract, BootInfo structure |
 | [docs/coding-standards.md](../docs/coding-standards.md) | Formatting, naming, safety rules |
+
+---
+
+## Summarized By
+
+None

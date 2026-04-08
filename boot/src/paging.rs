@@ -23,7 +23,7 @@ pub struct PageFlags
 }
 
 /// Errors that can occur during page table construction.
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum MapError
 {
     /// Physical memory allocation for an intermediate table frame failed.
@@ -82,7 +82,7 @@ fn map_err(e: MapError) -> BootError
 /// Build the initial page tables for kernel handoff.
 ///
 /// Maps all kernel ELF segments at their virtual addresses with per-segment
-/// permissions, then identity-maps all provided boot regions (BootInfo, modules,
+/// permissions, then identity-maps all provided boot regions (`BootInfo`, modules,
 /// stack, memory map buffer, etc.) as readable+writable.
 ///
 /// # Errors

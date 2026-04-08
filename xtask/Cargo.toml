@@ -15,3 +15,6 @@ test = false
 clap = { version = "4", features = ["derive"] }
 # Ergonomic error propagation with .context().
 anyhow = "1"
+
+[lints]
+workspace = true

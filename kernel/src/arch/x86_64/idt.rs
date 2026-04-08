@@ -25,6 +25,9 @@
 //! - To change IST assignments: update the `IST` argument in the `isr_stub!`
 //!   invocation and ensure the matching IST stack is configured in the TSS.
 
+// cast_possible_truncation: usize→u16 IDT descriptor size calculations; bounded by descriptor count.
+#![allow(clippy::cast_possible_truncation)]
+
 use super::gdt::KERNEL_CS;
 #[cfg(not(test))]
 use crate::fatal;
@@ -45,7 +48,7 @@ pub struct IdtEntry
     selector: u16,
     /// IST index (bits [2:0]); 0 = use RSP from TSS, 1–7 = IST stack.
     ist: u8,
-    /// Type and attributes: P | DPL | 0 | gate_type.
+    /// Type and attributes: P | DPL | 0 | `gate_type`.
     type_attr: u8,
     /// Handler offset bits [31:16].
     offset_mid: u16,
@@ -219,7 +222,7 @@ macro_rules! isr_stub {
 /// [rsp+40] rsp (if CPL change)
 /// [rsp+48] ss  (if CPL change)
 /// ```
-/// We pass `rsp` as the first argument (pointer to ExceptionFrame).
+/// We pass `rsp` as the first argument (pointer to `ExceptionFrame`).
 #[cfg(not(test))]
 #[unsafe(naked)]
 unsafe extern "C" fn common_exception_trampoline()
@@ -287,6 +290,7 @@ isr_stub!(isr31, 31, has_error_code = false, ist = 0);
 /// # Modification notes
 /// - To add more GSIs: invoke `device_irq_stub!(isr_devN, N)` for each
 ///   new vector N, then add `set(N, isr_devN, 0)` in `init()`.
+///
 /// Generate a naked device IRQ stub for IDT vector `DEVICE_VECTOR_BASE + $gsi`.
 ///
 /// Each stub:
@@ -494,7 +498,7 @@ pub unsafe fn init()
     unsafe {
         core::arch::asm!(
             "lidt [{0}]",
-            in(reg) &idtr,
+            in(reg) core::ptr::addr_of!(idtr),
             options(readonly, nostack, preserves_flags),
         );
     }
@@ -522,7 +526,7 @@ pub unsafe fn load()
     unsafe {
         core::arch::asm!(
             "lidt [{0}]",
-            in(reg) &idtr,
+            in(reg) core::ptr::addr_of!(idtr),
             options(readonly, nostack, preserves_flags),
         );
     }

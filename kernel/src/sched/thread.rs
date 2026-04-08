@@ -105,7 +105,7 @@ pub struct ThreadControlBlock
     /// Remaining preemption timer ticks before this thread is descheduled.
     pub slice_remaining: u32,
 
-    /// Hard CPU affinity (AFFINITY_ANY = 0xFFFF_FFFF means no hard affinity).
+    /// Hard CPU affinity (`AFFINITY_ANY` = `0xFFFF_FFFF` means no hard affinity).
     /// TODO WSMP: enforce during thread migration / load balancing.
     pub cpu_affinity: u32,
 
@@ -141,7 +141,7 @@ pub struct ThreadControlBlock
     /// Stored in TSS RSP0 (x86-64) or sscratch (RISC-V) on every context switch.
     pub kernel_stack_top: u64,
 
-    /// Pointer to the TrapFrame on the kernel stack (null for kernel threads).
+    /// Pointer to the `TrapFrame` on the kernel stack (null for kernel threads).
     ///
     /// Populated by `syscall_entry` / trap handler on each kernel entry.
     /// Points into the kernel stack below `kernel_stack_top`.
@@ -151,7 +151,7 @@ pub struct ThreadControlBlock
     /// Address space this thread executes in (null for kernel threads).
     pub address_space: *mut crate::mm::address_space::AddressSpace,
 
-    /// CSpace bound to this thread.
+    /// `CSpace` bound to this thread.
     pub cspace: *mut crate::cap::cspace::CSpace,
 
     // === IPC buffer ===

@@ -106,11 +106,11 @@ macro_rules! run_integration_test {
 
 /// Context passed to all test functions.
 ///
-/// Carries the two resources that many tests need: the ktest AddressSpace cap
+/// Carries the two resources that many tests need: the ktest `AddressSpace` cap
 /// and the IPC buffer pointer. Pass by shared reference to test functions.
 pub struct TestContext
 {
-    /// ktest's own AddressSpace capability slot, provided by the kernel.
+    /// ktest's own `AddressSpace` capability slot, provided by the kernel.
     ///
     /// Used for memory management tests, thread creation (threads must be
     /// bound to an address space), and hardware access tests.
@@ -145,6 +145,7 @@ impl ChildStack
     /// Thread stacks grow downward; this is the value to pass as the initial
     /// stack pointer. Takes a raw pointer to avoid creating a reference to a
     /// `static mut` — pass `core::ptr::addr_of!(STACK)` as the argument.
+    #[must_use]
     pub fn top(ptr: *const Self) -> u64
     {
         ptr as u64 + 16384
@@ -169,7 +170,7 @@ static mut IPC_BUF: IpcBuf = IpcBuf([0u64; 512]);
 
 /// Kernel entry point for ktest.
 ///
-/// `aspace_cap` — slot index in ktest's CSpace pointing to its own AddressSpace.
+/// `aspace_cap` — slot index in ktest's `CSpace` pointing to its own `AddressSpace`.
 /// Provided by the kernel as the initial argument (same as for real init).
 #[no_mangle]
 pub extern "C" fn _start(aspace_cap: u32) -> !
@@ -184,7 +185,7 @@ fn run(aspace_cap: u32) -> !
     // Register the IPC buffer before any IPC syscall. All Tier 1 IPC tests
     // and integration tests that use ipc_recv or read_recv_caps depend on this.
     // SAFETY: IPC_BUF is a page-aligned static in ktest's BSS; single-threaded here.
-    let ipc_buf_ptr = core::ptr::addr_of!(IPC_BUF) as *const u64;
+    let ipc_buf_ptr = core::ptr::addr_of!(IPC_BUF).cast::<u64>();
     syscall::ipc_buffer_set(ipc_buf_ptr as u64).unwrap_or_else(|_| {
         klog("ktest: FATAL: ipc_buffer_set failed");
         halt()
@@ -265,7 +266,7 @@ pub fn log_u64(prefix: &str, value: u64)
     let pb = prefix.as_bytes();
     let plen = pb.len().min(msg.len());
     msg[..plen].copy_from_slice(&pb[..plen]);
-    let nlen = num_str.as_bytes().len().min(msg.len() - plen);
+    let nlen = num_str.len().min(msg.len() - plen);
     msg[plen..plen + nlen].copy_from_slice(&num_str.as_bytes()[..nlen]);
     let total = plen + nlen;
     if let Ok(s) = core::str::from_utf8(&msg[..total])
@@ -281,10 +282,6 @@ pub fn log_u64(prefix: &str, value: u64)
 /// `major = ver >> 32`, `minor = (ver >> 16) & 0xFFFF`, `patch = ver & 0xFFFF`.
 pub fn log_version(prefix: &str, ver: u64)
 {
-    let major = ver >> 32;
-    let minor = (ver >> 16) & 0xFFFF;
-    let patch = ver & 0xFFFF;
-
     // Write a u64 as decimal into buf starting at pos; returns new pos.
     fn write_num(buf: &mut [u8], pos: usize, mut n: u64) -> usize
     {
@@ -309,6 +306,9 @@ pub fn log_version(prefix: &str, ver: u64)
         end
     }
 
+    let major = ver >> 32;
+    let minor = (ver >> 16) & 0xFFFF;
+    let patch = ver & 0xFFFF;
     let mut buf = [0u8; 128];
     let pb = prefix.as_bytes();
     let plen = pb.len().min(buf.len());

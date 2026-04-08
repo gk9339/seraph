@@ -82,6 +82,9 @@ pub struct KernelObjectHeader
     pub ref_count: AtomicU32,
     /// Concrete type, for use during deallocation.
     pub obj_type: ObjectType,
+    // Padding to reach 8 bytes; field is intentionally public for repr(C)
+    // interop but unused by name — allow the underscore prefix convention.
+    #[allow(clippy::pub_underscore_fields)]
     pub _pad: [u8; 3],
 }
 
@@ -127,7 +130,7 @@ pub struct FrameObject
     pub size: u64,
 }
 
-/// Kernel object for a memory-mapped I/O region (MmioRegion capability).
+/// Kernel object for a memory-mapped I/O region (`MmioRegion` capability).
 #[repr(C)]
 pub struct MmioRegionObject
 {
@@ -138,6 +141,8 @@ pub struct MmioRegionObject
     pub size: u64,
     /// Flags from the platform resource entry (bit 0: write-combine).
     pub flags: u32,
+    // Explicit padding to preserve repr(C) layout.
+    #[allow(clippy::pub_underscore_fields)]
     pub _pad: u32,
 }
 
@@ -152,7 +157,7 @@ pub struct InterruptObject
     pub flags: u32,
 }
 
-/// Kernel object for an x86-64 I/O port range (IoPortRange capability).
+/// Kernel object for an x86-64 I/O port range (`IoPortRange` capability).
 #[repr(C)]
 pub struct IoPortRangeObject
 {
@@ -161,12 +166,14 @@ pub struct IoPortRangeObject
     pub base: u16,
     /// Number of consecutive ports.
     pub size: u16,
+    // Explicit padding to preserve repr(C) layout.
+    #[allow(clippy::pub_underscore_fields)]
     pub _pad: u32,
 }
 
-/// Kernel object for scheduling control authority (SchedControl capability).
+/// Kernel object for scheduling control authority (`SchedControl` capability).
 ///
-/// There is exactly one SchedControl object, created at boot.
+/// There is exactly one `SchedControl` object, created at boot.
 #[repr(C)]
 pub struct SchedControlObject
 {
@@ -186,12 +193,12 @@ pub struct ThreadObject
 unsafe impl Send for ThreadObject {}
 unsafe impl Sync for ThreadObject {}
 
-/// Kernel object for a user-mode address space (AddressSpace capability).
+/// Kernel object for a user-mode address space (`AddressSpace` capability).
 #[repr(C)]
 pub struct AddressSpaceObject
 {
     pub header: KernelObjectHeader,
-    /// Pointer to the AddressSpace (heap-allocated).
+    /// Pointer to the `AddressSpace` (heap-allocated).
     pub address_space: *mut crate::mm::address_space::AddressSpace,
 }
 
@@ -199,12 +206,12 @@ pub struct AddressSpaceObject
 unsafe impl Send for AddressSpaceObject {}
 unsafe impl Sync for AddressSpaceObject {}
 
-/// Kernel object for a capability space (CSpace capability).
+/// Kernel object for a capability space (`CSpace` capability).
 #[repr(C)]
 pub struct CSpaceKernelObject
 {
     pub header: KernelObjectHeader,
-    /// Pointer to the CSpace (heap-allocated).
+    /// Pointer to the `CSpace` (heap-allocated).
     pub cspace: *mut crate::cap::cspace::CSpace,
 }
 
@@ -238,7 +245,7 @@ pub struct SignalObject
 unsafe impl Send for SignalObject {}
 unsafe impl Sync for SignalObject {}
 
-/// Kernel object for an event queue (EventQueue capability).
+/// Kernel object for an event queue (`EventQueue` capability).
 ///
 /// The ring buffer body is a separate heap allocation stored in `EventQueueState`.
 #[repr(C)]
@@ -253,7 +260,7 @@ pub struct EventQueueObject
 unsafe impl Send for EventQueueObject {}
 unsafe impl Sync for EventQueueObject {}
 
-/// Kernel object for a wait set (WaitSet capability).
+/// Kernel object for a wait set (`WaitSet` capability).
 ///
 /// `WaitSetState` is a ~500-byte heap allocation; this object wrapper is 16 B.
 #[repr(C)]
@@ -282,7 +289,7 @@ unsafe impl Sync for WaitSetObject {}
 /// - The object's reference count must be 0; no other capability slot may
 ///   reference it.
 /// - Must NOT be called with `DERIVATION_LOCK` held, since freeing complex
-///   objects (Thread, AddressSpace) may acquire the frame-allocator lock.
+///   objects (Thread, `AddressSpace`) may acquire the frame-allocator lock.
 ///
 /// # Modification guide
 ///
@@ -293,6 +300,13 @@ unsafe impl Sync for WaitSetObject {}
 ///
 /// For objects with blocked threads (Endpoint, Signal), drain wait queues and
 /// re-enqueue threads so they are not permanently lost.
+// cast_ptr_alignment: every concrete object type is allocated as Box<ConcreteType>,
+// which guarantees alignment to align_of::<ConcreteType>(). The NonNull<KernelObjectHeader>
+// points to the first field (header at offset 0), so the pointer retains the concrete
+// type's alignment even when stored as KernelObjectHeader*.
+// too_many_lines: structural dispatch over all object types; splitting further
+// would obscure the type hierarchy without reducing complexity.
+#[allow(clippy::cast_ptr_alignment, clippy::too_many_lines)]
 #[cfg(not(test))]
 pub unsafe fn dealloc_object(ptr: core::ptr::NonNull<KernelObjectHeader>)
 {
@@ -304,15 +318,15 @@ pub unsafe fn dealloc_object(ptr: core::ptr::NonNull<KernelObjectHeader>)
         // ── Simple objects (no sub-resources) ─────────────────────────────
         ObjectType::Frame =>
         {
-            unsafe { drop(Box::from_raw(ptr.as_ptr() as *mut FrameObject)) };
+            unsafe { drop(Box::from_raw(ptr.as_ptr().cast::<FrameObject>())) };
         }
         ObjectType::MmioRegion =>
         {
-            unsafe { drop(Box::from_raw(ptr.as_ptr() as *mut MmioRegionObject)) };
+            unsafe { drop(Box::from_raw(ptr.as_ptr().cast::<MmioRegionObject>())) };
         }
         ObjectType::Interrupt =>
         {
-            let obj = unsafe { &*(ptr.as_ptr() as *const InterruptObject) };
+            let obj = unsafe { &*(ptr.as_ptr().cast::<InterruptObject>()) };
             let irq_id = obj.irq_id;
 
             // Clear the routing table entry and mask the IRQ line so no further
@@ -326,25 +340,28 @@ pub unsafe fn dealloc_object(ptr: core::ptr::NonNull<KernelObjectHeader>)
             }
             crate::arch::current::interrupts::mask(irq_id);
 
-            unsafe { drop(Box::from_raw(ptr.as_ptr() as *mut InterruptObject)) };
+            unsafe { drop(Box::from_raw(ptr.as_ptr().cast::<InterruptObject>())) };
         }
         ObjectType::IoPortRange =>
         {
-            unsafe { drop(Box::from_raw(ptr.as_ptr() as *mut IoPortRangeObject)) };
+            unsafe { drop(Box::from_raw(ptr.as_ptr().cast::<IoPortRangeObject>())) };
         }
         ObjectType::SchedControl =>
         {
-            unsafe { drop(Box::from_raw(ptr.as_ptr() as *mut SchedControlObject)) };
+            unsafe { drop(Box::from_raw(ptr.as_ptr().cast::<SchedControlObject>())) };
         }
 
         // ── Thread ────────────────────────────────────────────────────────
         ObjectType::Thread =>
         {
-            let obj = unsafe { &*(ptr.as_ptr() as *const ThreadObject) };
+            let obj = unsafe { &*(ptr.as_ptr().cast::<ThreadObject>()) };
             let tcb = obj.tcb;
 
             if !tcb.is_null()
             {
+                // 2^2 = 4 pages; must match KERNEL_STACK_PAGES (sys_cap_create_thread).
+                const STACK_ORDER: usize = 2;
+
                 // Remove the TCB from the scheduler's run queue before freeing.
                 // Without this, the scheduler could dequeue a freed TCB pointer
                 // after this cap_delete completes — a use-after-free that
@@ -362,12 +379,10 @@ pub unsafe fn dealloc_object(ptr: core::ptr::NonNull<KernelObjectHeader>)
                 }
 
                 // Free the kernel stack back to the buddy allocator.
-                // Stack order matches sys_cap_create_thread (KERNEL_STACK_PAGES = 4).
                 let kstack_top = unsafe { (*tcb).kernel_stack_top };
                 let kstack_virt =
                     kstack_top - (crate::sched::KERNEL_STACK_PAGES * crate::mm::PAGE_SIZE) as u64;
                 let kstack_phys = crate::mm::paging::virt_to_phys(kstack_virt);
-                const STACK_ORDER: usize = 2; // 2^2 = 4 pages
                 unsafe {
                     crate::mm::with_frame_allocator(|alloc| {
                         alloc.free(kstack_phys, STACK_ORDER);
@@ -378,13 +393,13 @@ pub unsafe fn dealloc_object(ptr: core::ptr::NonNull<KernelObjectHeader>)
                 unsafe { drop(Box::from_raw(tcb)) };
             }
 
-            unsafe { drop(Box::from_raw(ptr.as_ptr() as *mut ThreadObject)) };
+            unsafe { drop(Box::from_raw(ptr.as_ptr().cast::<ThreadObject>())) };
         }
 
         // ── AddressSpace ──────────────────────────────────────────────────
         ObjectType::AddressSpace =>
         {
-            let obj = unsafe { &*(ptr.as_ptr() as *const AddressSpaceObject) };
+            let obj = unsafe { &*(ptr.as_ptr().cast::<AddressSpaceObject>()) };
             let as_ptr = obj.address_space;
 
             if !as_ptr.is_null()
@@ -400,13 +415,13 @@ pub unsafe fn dealloc_object(ptr: core::ptr::NonNull<KernelObjectHeader>)
                 unsafe { drop(Box::from_raw(as_ptr)) };
             }
 
-            unsafe { drop(Box::from_raw(ptr.as_ptr() as *mut AddressSpaceObject)) };
+            unsafe { drop(Box::from_raw(ptr.as_ptr().cast::<AddressSpaceObject>())) };
         }
 
         // ── CSpaceObj ─────────────────────────────────────────────────────
         ObjectType::CSpaceObj =>
         {
-            let obj = unsafe { &*(ptr.as_ptr() as *const CSpaceKernelObject) };
+            let obj = unsafe { &*(ptr.as_ptr().cast::<CSpaceKernelObject>()) };
             let cs_ptr = obj.cspace;
 
             if !cs_ptr.is_null()
@@ -439,13 +454,13 @@ pub unsafe fn dealloc_object(ptr: core::ptr::NonNull<KernelObjectHeader>)
                 unsafe { drop(Box::from_raw(cs_ptr)) };
             }
 
-            unsafe { drop(Box::from_raw(ptr.as_ptr() as *mut CSpaceKernelObject)) };
+            unsafe { drop(Box::from_raw(ptr.as_ptr().cast::<CSpaceKernelObject>())) };
         }
 
         // ── Endpoint ──────────────────────────────────────────────────────
         ObjectType::Endpoint =>
         {
-            let obj = unsafe { &*(ptr.as_ptr() as *const EndpointObject) };
+            let obj = unsafe { &*(ptr.as_ptr().cast::<EndpointObject>()) };
             let state = obj.state;
 
             if !state.is_null()
@@ -455,8 +470,11 @@ pub unsafe fn dealloc_object(ptr: core::ptr::NonNull<KernelObjectHeader>)
                     let ep = &mut *state;
                     if !ep.wait_set.is_null()
                     {
-                        let ws = ep.wait_set as *mut crate::ipc::wait_set::WaitSetState;
-                        let _ = crate::ipc::wait_set::waitset_remove(ws, state as *mut u8);
+                        // cast_ptr_alignment: ep.wait_set stores a type-erased *mut WaitSetState;
+                        // the original Box<WaitSetState> allocation guarantees the alignment.
+                        #[allow(clippy::cast_ptr_alignment)]
+                        let ws = ep.wait_set.cast::<crate::ipc::wait_set::WaitSetState>();
+                        let _ = crate::ipc::wait_set::waitset_remove(ws, state.cast::<u8>());
                         ep.wait_set = core::ptr::null_mut();
                         ep.wait_set_member_idx = 0;
                     }
@@ -502,13 +520,13 @@ pub unsafe fn dealloc_object(ptr: core::ptr::NonNull<KernelObjectHeader>)
                 unsafe { drop(Box::from_raw(state)) };
             }
 
-            unsafe { drop(Box::from_raw(ptr.as_ptr() as *mut EndpointObject)) };
+            unsafe { drop(Box::from_raw(ptr.as_ptr().cast::<EndpointObject>())) };
         }
 
         // ── Signal ────────────────────────────────────────────────────────
         ObjectType::Signal =>
         {
-            let obj = unsafe { &*(ptr.as_ptr() as *const SignalObject) };
+            let obj = unsafe { &*(ptr.as_ptr().cast::<SignalObject>()) };
             let state = obj.state;
 
             if !state.is_null()
@@ -531,8 +549,10 @@ pub unsafe fn dealloc_object(ptr: core::ptr::NonNull<KernelObjectHeader>)
                     let sig = &mut *state;
                     if !sig.wait_set.is_null()
                     {
-                        let ws = sig.wait_set as *mut crate::ipc::wait_set::WaitSetState;
-                        let _ = crate::ipc::wait_set::waitset_remove(ws, state as *mut u8);
+                        // cast_ptr_alignment: sig.wait_set stores a type-erased *mut WaitSetState.
+                        #[allow(clippy::cast_ptr_alignment)]
+                        let ws = sig.wait_set.cast::<crate::ipc::wait_set::WaitSetState>();
+                        let _ = crate::ipc::wait_set::waitset_remove(ws, state.cast::<u8>());
                         sig.wait_set = core::ptr::null_mut();
                         sig.wait_set_member_idx = 0;
                     }
@@ -558,13 +578,13 @@ pub unsafe fn dealloc_object(ptr: core::ptr::NonNull<KernelObjectHeader>)
                 unsafe { drop(Box::from_raw(state)) };
             }
 
-            unsafe { drop(Box::from_raw(ptr.as_ptr() as *mut SignalObject)) };
+            unsafe { drop(Box::from_raw(ptr.as_ptr().cast::<SignalObject>())) };
         }
 
         // ── EventQueue ────────────────────────────────────────────────────
         ObjectType::EventQueue =>
         {
-            let obj = unsafe { &*(ptr.as_ptr() as *const EventQueueObject) };
+            let obj = unsafe { &*(ptr.as_ptr().cast::<EventQueueObject>()) };
             let state = obj.state;
 
             if !state.is_null()
@@ -574,8 +594,10 @@ pub unsafe fn dealloc_object(ptr: core::ptr::NonNull<KernelObjectHeader>)
                     let eq = &mut *state;
                     if !eq.wait_set.is_null()
                     {
-                        let ws = eq.wait_set as *mut crate::ipc::wait_set::WaitSetState;
-                        let _ = crate::ipc::wait_set::waitset_remove(ws, state as *mut u8);
+                        // cast_ptr_alignment: eq.wait_set stores a type-erased *mut WaitSetState.
+                        #[allow(clippy::cast_ptr_alignment)]
+                        let ws = eq.wait_set.cast::<crate::ipc::wait_set::WaitSetState>();
+                        let _ = crate::ipc::wait_set::waitset_remove(ws, state.cast::<u8>());
                         eq.wait_set = core::ptr::null_mut();
                         eq.wait_set_member_idx = 0;
                     }
@@ -586,13 +608,13 @@ pub unsafe fn dealloc_object(ptr: core::ptr::NonNull<KernelObjectHeader>)
                 unsafe { crate::ipc::event_queue::event_queue_drop(state) };
             }
 
-            unsafe { drop(Box::from_raw(ptr.as_ptr() as *mut EventQueueObject)) };
+            unsafe { drop(Box::from_raw(ptr.as_ptr().cast::<EventQueueObject>())) };
         }
 
         // ── WaitSet ───────────────────────────────────────────────────────
         ObjectType::WaitSet =>
         {
-            let obj = unsafe { &*(ptr.as_ptr() as *const WaitSetObject) };
+            let obj = unsafe { &*(ptr.as_ptr().cast::<WaitSetObject>()) };
             let state = obj.state;
 
             if !state.is_null()
@@ -602,7 +624,7 @@ pub unsafe fn dealloc_object(ptr: core::ptr::NonNull<KernelObjectHeader>)
                 unsafe { crate::ipc::wait_set::wait_set_drop(state) };
             }
 
-            unsafe { drop(Box::from_raw(ptr.as_ptr() as *mut WaitSetObject)) };
+            unsafe { drop(Box::from_raw(ptr.as_ptr().cast::<WaitSetObject>())) };
         }
     }
 }

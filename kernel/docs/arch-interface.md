@@ -1,15 +1,12 @@
 # Architecture Abstraction Layer
 
-## Overview
+All architecture-specific behaviour in the Seraph kernel is isolated behind Rust traits
+defined in this document. Code outside `kernel/src/arch/` MUST interact with hardware
+exclusively through these traits. No `#[cfg(target_arch)]` guards appear in
+architecture-neutral kernel code.
 
-All architecture-specific behaviour in the Seraph kernel is isolated behind a set of
-Rust traits defined in this document. Code outside `kernel/src/arch/` must interact
-with hardware exclusively through these traits. No `#[cfg(target_arch)]` guards appear
-in architecture-neutral kernel code.
-
-This boundary serves two purposes: it keeps the trusted computing base small by
-containing the blast radius of architecture-specific bugs, and it defines exactly what
-a new architecture port must implement — no more, no less.
+This boundary contains architecture-specific bugs within `kernel/src/arch/` and MUST
+be implemented in full by any architecture port.
 
 ---
 
@@ -536,7 +533,7 @@ impl TrapFrame
 
 ## Adding a New Architecture
 
-A new architecture port must:
+A new architecture port MUST:
 
 1. Create `kernel/src/arch/<arch>/` with the module files listed above
 2. Implement every trait in this document — the compiler enforces completeness
@@ -545,10 +542,16 @@ A new architecture port must:
 5. Add the `#[cfg]` branch in `arch/mod.rs`
 6. Add the target to the workspace build configuration
 
-No changes to shared kernel code are required or permitted. If implementing a trait
-requires a change to shared code, that change must be proposed as a modification to
-this document and the trait definitions.
+Changes to shared kernel code MUST NOT be made to satisfy an architecture port. If
+implementing a trait requires a shared-code change, that change MUST be proposed as
+a modification to this document and the trait definitions.
 
 The existing x86-64 implementation is the reference. Where RISC-V diverges in the
 current implementation, comments explain why. New ports should document deviations
 from the reference equally clearly.
+
+---
+
+## Summarized By
+
+None

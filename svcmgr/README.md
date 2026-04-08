@@ -44,3 +44,9 @@ short window, the service is marked degraded and not restarted automatically.
 | [docs/architecture.md](../docs/architecture.md) | System design, init/procmgr/svcmgr roles |
 | [docs/capability-model.md](../docs/capability-model.md) | Capability types and revocation |
 | [docs/coding-standards.md](../docs/coding-standards.md) | Formatting, naming, safety rules |
+
+---
+
+## Summarized By
+
+None

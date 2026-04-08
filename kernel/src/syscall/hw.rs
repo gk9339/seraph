@@ -6,12 +6,12 @@
 //! Hardware access syscall handlers.
 //!
 //! Implements:
-//! - `SYS_IRQ_ACK` (29)     — re-enable a masked interrupt line.
-//! - `SYS_IRQ_REGISTER` (30) — bind a Signal to an interrupt line.
-//! - `SYS_MMIO_MAP` (34)     — map an MMIO region into an address space.
-//! - `SYS_IOPORT_BIND` (35)  — bind an I/O port range to a thread (x86_64 only).
-//! - `SYS_DMA_GRANT` (36)    — return a frame's physical address for DMA use
-//!                             (no-IOMMU fallback; requires FLAG_DMA_UNSAFE).
+//! - `SYS_IRQ_ACK` (29): re-enable a masked interrupt line.
+//! - `SYS_IRQ_REGISTER` (30): bind a Signal to an interrupt line.
+//! - `SYS_MMIO_MAP` (34): map an MMIO region into an address space.
+//! - `SYS_IOPORT_BIND` (35): bind an I/O port range to a thread (`x86_64` only).
+//! - `SYS_DMA_GRANT` (36): return a frame's physical address for DMA use
+//!   (no-IOMMU fallback; requires `FLAG_DMA_UNSAFE`).
 //!
 //! # Adding new hardware syscalls
 //! 1. Add a new `pub fn sys_hw_*` in this file.
@@ -19,12 +19,16 @@
 //! 3. Add a dispatch arm in `syscall/mod.rs`.
 //! 4. Add a userspace wrapper in `shared/syscall/src/lib.rs`.
 
+// cast_possible_truncation: capability slot indices extracted from 64-bit trap frame
+// registers are always u32-range values. Seraph runs on 64-bit only; no truncation occurs.
+#![allow(clippy::cast_possible_truncation)]
+
 use crate::arch::current::trap_frame::TrapFrame;
 use syscall::SyscallError;
 
 // ── SYS_IRQ_ACK ───────────────────────────────────────────────────────────────
 
-/// SYS_IRQ_ACK (29): re-enable an interrupt line after the driver has handled
+/// `SYS_IRQ_ACK` (29): re-enable an interrupt line after the driver has handled
 /// the interrupt.
 ///
 /// arg0 = Interrupt cap index (must have SIGNAL right).
@@ -54,8 +58,9 @@ pub fn sys_irq_ack(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         unsafe { super::lookup_cap(cspace, irq_cap_idx, CapTag::Interrupt, Rights::SIGNAL) }?;
     let irq_id = {
         let obj = irq_slot.object.ok_or(SyscallError::InvalidCapability)?;
-        // SAFETY: tag confirmed Interrupt; pointer is valid.
-        unsafe { (*(obj.as_ptr() as *const InterruptObject)).irq_id }
+        // SAFETY: tag confirmed Interrupt; object was allocated as Box<InterruptObject>.
+        #[allow(clippy::cast_ptr_alignment)]
+        unsafe { (*obj.as_ptr().cast::<InterruptObject>()).irq_id }
     };
 
     // Unmask at the interrupt controller to re-enable delivery.
@@ -72,18 +77,18 @@ pub fn sys_irq_ack(_tf: &mut TrapFrame) -> Result<u64, SyscallError>
 
 // ── SYS_IRQ_REGISTER ─────────────────────────────────────────────────────────
 
-/// SYS_IRQ_REGISTER (30): bind a Signal to an interrupt line.
+/// `SYS_IRQ_REGISTER` (30): bind a Signal to an interrupt line.
 ///
 /// arg0 = Interrupt cap index (must have SIGNAL right).
 /// arg1 = Signal cap index (must have SIGNAL right).
 ///
 /// When the interrupt fires:
 /// 1. The IRQ is masked at the controller.
-/// 2. Bit 0 is ORed into the Signal.
+/// 2. Bit 0 is `ORed` into the Signal.
 /// 3. Any thread blocked on `SYS_SIGNAL_WAIT` for this signal is woken.
 /// 4. The driver must call `SYS_IRQ_ACK` to re-enable delivery.
 ///
-/// On x86_64: programs the IOAPIC redirection entry (masked until first ACK).
+/// On `x86_64`: programs the IOAPIC redirection entry (masked until first ACK).
 /// On RISC-V: enables the PLIC source (masked at controller until first ACK).
 ///
 /// Returns 0 on success.
@@ -109,8 +114,9 @@ pub fn sys_irq_register(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         unsafe { super::lookup_cap(cspace, irq_cap_idx, CapTag::Interrupt, Rights::SIGNAL) }?;
     let irq_id = {
         let obj = irq_slot.object.ok_or(SyscallError::InvalidCapability)?;
-        // SAFETY: tag confirmed Interrupt.
-        unsafe { (*(obj.as_ptr() as *const InterruptObject)).irq_id }
+        // SAFETY: tag confirmed Interrupt; object was allocated as Box<InterruptObject>.
+        #[allow(clippy::cast_ptr_alignment)]
+        unsafe { (*obj.as_ptr().cast::<InterruptObject>()).irq_id }
     };
 
     // Resolve Signal cap.
@@ -118,8 +124,9 @@ pub fn sys_irq_register(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         unsafe { super::lookup_cap(cspace, sig_cap_idx, CapTag::Signal, Rights::SIGNAL) }?;
     let sig_state = {
         let obj = sig_slot.object.ok_or(SyscallError::InvalidCapability)?;
-        // SAFETY: tag confirmed Signal.
-        unsafe { (*(obj.as_ptr() as *const SignalObject)).state }
+        // SAFETY: tag confirmed Signal; object was allocated as Box<SignalObject>.
+        #[allow(clippy::cast_ptr_alignment)]
+        unsafe { (*obj.as_ptr().cast::<SignalObject>()).state }
     };
 
     // Register the signal in the IRQ routing table.
@@ -164,14 +171,14 @@ pub fn sys_irq_register(_tf: &mut TrapFrame) -> Result<u64, SyscallError>
 
 // ── SYS_MMIO_MAP ─────────────────────────────────────────────────────────────
 
-/// SYS_MMIO_MAP (34): map an MMIO region into a user address space.
+/// `SYS_MMIO_MAP` (34): map an MMIO region into a user address space.
 ///
-/// arg0 = AddressSpace cap index (must have MAP right).
-/// arg1 = MmioRegion cap index (must have MAP right).
+/// arg0 = `AddressSpace` cap index (must have MAP right).
+/// arg1 = `MmioRegion` cap index (must have MAP right).
 /// arg2 = virtual base address (page-aligned, user half).
 /// arg3 = flags (bit 1 = WRITE; executable mappings are always rejected).
 ///
-/// All pages are mapped with `uncacheable = true` (PCD|PWT on x86_64,
+/// All pages are mapped with `uncacheable = true` (PCD|PWT on `x86_64`,
 /// no-op on RISC-V QEMU — see [`PageFlags`] comment).
 ///
 /// Returns 0 on success.
@@ -184,13 +191,13 @@ pub fn sys_mmio_map(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     use crate::mm::{with_frame_allocator, PAGE_SIZE};
     use crate::syscall::current_tcb;
 
-    let aspace_idx = tf.arg(0) as u32;
-    let mmio_idx = tf.arg(1) as u32;
-    let virt_base = tf.arg(2);
-    let flags = tf.arg(3);
-
     // Virtual address must be page-aligned and in user half.
     const USER_HALF_TOP: u64 = 0x0000_8000_0000_0000;
+    let aspace_idx = tf.arg(0) as u32;
+    let mmio_idx = tf.arg(1) as u32;
+
+    let virt_base = tf.arg(2);
+    let flags = tf.arg(3);
     if virt_base & 0xFFF != 0 || virt_base >= USER_HALF_TOP
     {
         return Err(SyscallError::InvalidAddress);
@@ -208,8 +215,9 @@ pub fn sys_mmio_map(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         unsafe { super::lookup_cap(cspace, mmio_idx, CapTag::MmioRegion, Rights::MAP) }?;
     let (mmio_phys, mmio_size) = {
         let obj = mmio_slot.object.ok_or(SyscallError::InvalidCapability)?;
-        // SAFETY: tag confirmed MmioRegion.
-        let mo = unsafe { &*(obj.as_ptr() as *const MmioRegionObject) };
+        // SAFETY: tag confirmed MmioRegion; object was allocated as Box<MmioRegionObject>.
+        #[allow(clippy::cast_ptr_alignment)]
+        let mo = unsafe { &*obj.as_ptr().cast::<MmioRegionObject>() };
         (mo.base, mo.size)
     };
 
@@ -234,8 +242,9 @@ pub fn sys_mmio_map(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         unsafe { super::lookup_cap(cspace, aspace_idx, CapTag::AddressSpace, Rights::MAP) }?;
     let as_ptr = {
         let obj = as_slot.object.ok_or(SyscallError::InvalidCapability)?;
-        // SAFETY: tag confirmed AddressSpace.
-        unsafe { (*(obj.as_ptr() as *const AddressSpaceObject)).address_space }
+        // SAFETY: tag confirmed AddressSpace; object was allocated as Box<AddressSpaceObject>.
+        #[allow(clippy::cast_ptr_alignment)]
+        unsafe { (*obj.as_ptr().cast::<AddressSpaceObject>()).address_space }
     };
 
     // MMIO mappings are never executable.
@@ -262,7 +271,7 @@ pub fn sys_mmio_map(tf: &mut TrapFrame) -> Result<u64, SyscallError>
             unsafe { (*as_ptr).map_page(virt, phys, page_flags, alloc) }
         });
 
-        result.map_err(|_| SyscallError::OutOfMemory)?;
+        result.map_err(|()| SyscallError::OutOfMemory)?;
     }
 
     Ok(0)
@@ -276,10 +285,10 @@ pub fn sys_mmio_map(_tf: &mut TrapFrame) -> Result<u64, SyscallError>
 
 // ── SYS_IOPORT_BIND ──────────────────────────────────────────────────────────
 
-/// SYS_IOPORT_BIND (35): grant a thread access to an I/O port range.
+/// `SYS_IOPORT_BIND` (35): grant a thread access to an I/O port range.
 ///
 /// arg0 = Thread cap index (must have CONTROL right).
-/// arg1 = IoPortRange cap index (must have USE right).
+/// arg1 = `IoPortRange` cap index (must have USE right).
 ///
 /// On first bind, a 8 KiB per-thread IOPB bitmap is heap-allocated and all
 /// ports are denied (0xFF). The requested range bits are then cleared (0 =
@@ -288,12 +297,20 @@ pub fn sys_mmio_map(_tf: &mut TrapFrame) -> Result<u64, SyscallError>
 /// On RISC-V: always returns `NotSupported` (no I/O port concept).
 ///
 /// Returns 0 on success.
+// needless_return: the cfg-gated early return is required to terminate the
+// riscv64 path; the x86_64 path follows in the same function body.
 #[cfg(not(test))]
-pub fn sys_ioport_bind(_tf: &mut TrapFrame) -> Result<u64, SyscallError>
+#[allow(clippy::needless_return)]
+pub fn sys_ioport_bind(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 {
     // RISC-V has no I/O port space.
     #[cfg(target_arch = "riscv64")]
-    return Err(SyscallError::NotSupported);
+    {
+        let _ = tf;
+        // unnecessary_wraps suppressed: sys_ioport_bind must match the dispatch
+        // table signature Result<u64, SyscallError> on all targets.
+        return Err(SyscallError::NotSupported);
+    }
 
     #[cfg(target_arch = "x86_64")]
     {
@@ -302,8 +319,8 @@ pub fn sys_ioport_bind(_tf: &mut TrapFrame) -> Result<u64, SyscallError>
         use crate::cap::slot::{CapTag, Rights};
         use crate::syscall::current_tcb;
 
-        let thread_idx = _tf.arg(0) as u32;
-        let ioport_idx = _tf.arg(1) as u32;
+        let thread_idx = tf.arg(0) as u32;
+        let ioport_idx = tf.arg(1) as u32;
 
         let caller_tcb = unsafe { current_tcb() };
         if caller_tcb.is_null()
@@ -317,8 +334,9 @@ pub fn sys_ioport_bind(_tf: &mut TrapFrame) -> Result<u64, SyscallError>
             unsafe { super::lookup_cap(cspace, thread_idx, CapTag::Thread, Rights::CONTROL) }?;
         let target_tcb = {
             let obj = th_slot.object.ok_or(SyscallError::InvalidCapability)?;
-            // SAFETY: tag confirmed Thread.
-            unsafe { (*(obj.as_ptr() as *const ThreadObject)).tcb }
+            // SAFETY: tag confirmed Thread; object was allocated as Box<ThreadObject>.
+            #[allow(clippy::cast_ptr_alignment)]
+            unsafe { (*obj.as_ptr().cast::<ThreadObject>()).tcb }
         };
         if target_tcb.is_null()
         {
@@ -330,8 +348,9 @@ pub fn sys_ioport_bind(_tf: &mut TrapFrame) -> Result<u64, SyscallError>
             unsafe { super::lookup_cap(cspace, ioport_idx, CapTag::IoPortRange, Rights::USE) }?;
         let (port_base, port_size) = {
             let obj = port_slot.object.ok_or(SyscallError::InvalidCapability)?;
-            // SAFETY: tag confirmed IoPortRange.
-            let po = unsafe { &*(obj.as_ptr() as *const IoPortRangeObject) };
+            // SAFETY: tag confirmed IoPortRange; object was allocated as Box<IoPortRangeObject>.
+            #[allow(clippy::cast_ptr_alignment)]
+            let po = unsafe { &*obj.as_ptr().cast::<IoPortRangeObject>() };
             (po.base, po.size)
         };
 
@@ -373,10 +392,10 @@ pub fn sys_ioport_bind(_tf: &mut TrapFrame) -> Result<u64, SyscallError>
 
 // ── SYS_DMA_GRANT ────────────────────────────────────────────────────────────
 
-/// SYS_DMA_GRANT (36): return the physical address of a frame for DMA use.
+/// `SYS_DMA_GRANT` (36): return the physical address of a frame for DMA use.
 ///
 /// arg0 = Frame cap index (must have MAP right).
-/// arg1 = device_id (reserved; unused in no-IOMMU path).
+/// arg1 = `device_id` (reserved; unused in no-IOMMU path).
 /// arg2 = flags (must include `FLAG_DMA_UNSAFE` when no IOMMU is present).
 ///
 /// Without an IOMMU, the DMA transfer is not hardware-isolated: the device
@@ -413,8 +432,9 @@ pub fn sys_dma_grant(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     let frame_slot = unsafe { super::lookup_cap(cspace, frame_idx, CapTag::Frame, Rights::MAP) }?;
     let frame_phys = {
         let obj = frame_slot.object.ok_or(SyscallError::InvalidCapability)?;
-        // SAFETY: tag confirmed Frame.
-        unsafe { (*(obj.as_ptr() as *const FrameObject)).base }
+        // SAFETY: tag confirmed Frame; object was allocated as Box<FrameObject>.
+        #[allow(clippy::cast_ptr_alignment)]
+        unsafe { (*obj.as_ptr().cast::<FrameObject>()).base }
     };
 
     // No IOMMU present: require explicit unsafe acknowledgment.

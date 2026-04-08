@@ -124,7 +124,7 @@ pub unsafe fn dispatch(tf: *mut TrapFrame)
 
     let ret_val = match ret
     {
-        Ok(v) => v as i64,
+        Ok(v) => v.cast_signed(),
         Err(e) => e as i64,
     };
 
@@ -133,8 +133,10 @@ pub unsafe fn dispatch(tf: *mut TrapFrame)
 
 // ── Thread syscall handlers ───────────────────────────────────────────────────
 
-/// SYS_THREAD_YIELD (21): voluntarily yield the CPU.
+/// `SYS_THREAD_YIELD` (21): voluntarily yield the CPU.
+// unnecessary_wraps: all dispatch arms must return Result<u64, SyscallError>; signature is fixed.
 #[cfg(not(test))]
+#[allow(clippy::unnecessary_wraps)]
 fn sys_yield(_tf: &mut TrapFrame) -> Result<u64, SyscallError>
 {
     // SAFETY: called from syscall handler on a valid kernel stack.
@@ -144,12 +146,12 @@ fn sys_yield(_tf: &mut TrapFrame) -> Result<u64, SyscallError>
     Ok(0)
 }
 
-/// SYS_THREAD_EXIT (22): terminate the calling thread.
+/// `SYS_THREAD_EXIT` (22): terminate the calling thread.
 ///
 /// Marks the current thread as `Exited` and calls `schedule()` to switch
 /// to the next runnable thread. The exited thread is never re-enqueued.
 ///
-/// Note: full resource cleanup (freeing kernel stack, TCB, CSpace entries)
+/// Note: full resource cleanup (freeing kernel stack, TCB, `CSpace` entries)
 /// requires a process-manager teardown path that does not yet exist. For now
 /// the TCB is abandoned in place — it will not be scheduled again.
 #[cfg(not(test))]
@@ -189,7 +191,7 @@ pub(crate) unsafe fn current_tcb() -> *mut crate::sched::thread::ThreadControlBl
     unsafe { crate::sched::scheduler_for(cpu).current }
 }
 
-/// Look up a capability slot in a CSpace by index.
+/// Look up a capability slot in a `CSpace` by index.
 ///
 /// Returns a reference to the slot, or an appropriate [`SyscallError`]:
 /// - Null cspace pointer or missing slot → [`SyscallError::InvalidCapability`].
@@ -220,12 +222,14 @@ pub(crate) unsafe fn lookup_cap(
     }
     // SAFETY: slot lives in the CSpace which is heap-allocated for the
     // lifetime of the process.
+    // ref_as_ptr: intentional — raw pointer cast to extend lifetime to 'static.
+    #[allow(clippy::ref_as_ptr)]
     Ok(unsafe { &*(slot as *const _) })
 }
 
 // ── IPC buffer ────────────────────────────────────────────────────────────────
 
-/// SYS_IPC_BUFFER_SET (42): register (or clear) the per-thread IPC buffer page.
+/// `SYS_IPC_BUFFER_SET` (42): register (or clear) the per-thread IPC buffer page.
 ///
 /// arg0 = virtual address of the IPC buffer page (0 = deregister; otherwise
 /// must be 4 KiB-aligned).
@@ -254,7 +258,7 @@ fn sys_ipc_buffer_set(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 
 // TODO: remove SYS_DEBUG_LOG once logd is running and init uses IPC logging.
 
-/// SYS_DEBUG_LOG (44): write a UTF-8 string to the kernel console.
+/// `SYS_DEBUG_LOG` (44): write a UTF-8 string to the kernel console.
 ///
 /// **TEMPORARY** — this syscall is a development scaffold for use before
 /// `logd` is available. It reads user memory directly and prints via the
@@ -266,7 +270,9 @@ fn sys_ipc_buffer_set(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 ///            arg1 = byte length (clamped to 1024).
 ///
 /// Removed once logd is running and init uses IPC logging (W11).
+// cast_possible_truncation: Seraph is 64-bit only; usize == u64 at runtime.
 #[cfg(not(test))]
+#[allow(clippy::cast_possible_truncation)]
 fn sys_debug_log(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 {
     let ptr = tf.arg(0) as *const u8;
@@ -286,10 +292,13 @@ fn sys_debug_log(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         crate::arch::current::cpu::user_access_end();
     }
 
-    match core::str::from_utf8(&buf[..len])
+    if let Ok(s) = core::str::from_utf8(&buf[..len])
     {
-        Ok(s) => crate::kprintln!("[init] {}", s),
-        Err(_) => crate::kprintln!("[init] <{} non-UTF-8 bytes>", len),
+        crate::kprintln!("[init] {}", s);
+    }
+    else
+    {
+        crate::kprintln!("[init] <{} non-UTF-8 bytes>", len);
     }
 
     Ok(0)

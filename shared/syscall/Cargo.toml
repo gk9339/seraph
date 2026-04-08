@@ -10,3 +10,6 @@ doctest = false
 
 [dependencies]
 syscall-abi = { path = "../../abi/syscall" }
+
+[lints]
+workspace = true

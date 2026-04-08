@@ -1,15 +1,12 @@
 # Memory Model
 
-## Overview
-
 Seraph uses a conventional higher-half kernel layout on both supported architectures.
 The kernel occupies the upper portion of the virtual address space; userspace processes
 occupy the lower portion. Each process has its own isolated address space. The kernel
-address space is shared across all processes — it is mapped into every address space
-but is inaccessible from userspace.
+address space is mapped into every address space but is inaccessible from userspace.
 
-Physical memory is managed by a buddy allocator. The kernel heap is built on top of
-it using a slab allocator with a general size-class path for variable-size allocations.
+Physical memory is managed by a buddy allocator. The kernel heap uses a slab allocator
+with a general size-class path for variable-size allocations.
 
 ---
 
@@ -42,10 +39,8 @@ Kernel space is divided into regions:
   0xFFFF800000000000 ┘  Physical memory direct map (all RAM, read/write)
 ```
 
-The physical memory direct map provides the kernel with a virtual address for every
-page of physical RAM. This allows the kernel to access any physical page without
-remapping. Large pages (2 MiB) are used for the direct map where alignment allows,
-reducing TLB pressure.
+The physical memory direct map gives the kernel a virtual address for every physical
+page. Large pages (2 MiB) are used where alignment allows.
 
 Exact region boundaries are an implementation detail and will be fixed at the time
 the kernel memory layout is initialised. They are not ABI.
@@ -67,9 +62,7 @@ memory layout across architectures.
   0x0000000000000000 ┘
 ```
 
-Sv48 is chosen over Sv39 for its alignment with x86-64's address space size.
-Sv39 (39-bit, 3-level) would impose tighter limits and require different layout
-reasoning per architecture.
+Sv48 is chosen to align with x86-64's address space size.
 
 ### Userspace Layout
 
@@ -165,8 +158,7 @@ maximum order.
 Properties:
 - O(log n) allocation and deallocation
 - Bounded external fragmentation
-- Efficient coalescing — no long-term accumulation of small free fragments
-- Internal fragmentation bounded at worst by 50% (a 5-page request gets an 8-page block)
+- Internal fragmentation bounded at 50%
 
 The allocator is organised into zones if the hardware requires it (e.g. DMA-accessible
 memory below a certain physical address). The common case is a single zone covering
@@ -194,9 +186,7 @@ object type has a dedicated slab cache:
 - The cache holds one or more slabs, each a physically contiguous set of pages
 - Each slab is divided into fixed-size slots for that object type
 - Allocation and deallocation within a slab are O(1)
-- Free slots are tracked with a free list embedded in the unused object memory
-- Objects of the same type are adjacent in memory, which is cache-friendly for
-  operations that iterate over collections of the same type
+- Free slots are tracked with a free list embedded in unused object memory
 
 ### General Size-Class Allocator
 
@@ -211,5 +201,10 @@ allocator.
 
 ### Kernel Heap Allocation is Fallible
 
-As with frame allocation, kernel heap allocation can fail and all call sites handle
-this explicitly. The kernel does not assume allocation will succeed.
+Kernel heap allocation MUST be handled as fallible at every call site.
+
+---
+
+## Summarized By
+
+[Architecture Overview](architecture.md)

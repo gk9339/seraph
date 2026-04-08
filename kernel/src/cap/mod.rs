@@ -5,24 +5,27 @@
 
 //! Capability subsystem (Phase 7).
 //!
-//! Initialised by [`init_capability_system`], which creates the root CSpace
+//! Initialised by [`init_capability_system`], which creates the root `CSpace`
 //! (id 0) populated with initial capabilities for all boot-provided hardware
 //! resources:
 //!
 //! - Usable physical memory → [`CapTag::Frame`] caps (MAP | WRITE)
-//! - MMIO ranges (MmioRange, PciEcam, IommuUnit) → [`CapTag::MmioRegion`] caps (MAP)
+//! - MMIO ranges (`MmioRange`, `PciEcam`, `IommuUnit`) → [`CapTag::MmioRegion`] caps (MAP)
 //! - Interrupt lines → [`CapTag::Interrupt`] caps
 //! - Firmware tables → [`CapTag::Frame`] caps (MAP only, no WRITE)
 //! - I/O port ranges (x86-64) → [`CapTag::IoPortRange`] caps (USE)
 //! - One [`CapTag::SchedControl`] cap (ELEVATE)
 //!
-//! The populated CSpace is stored in [`ROOT_CSPACE`] until Phase 9 hands it
+//! The populated `CSpace` is stored in [`ROOT_CSPACE`] until Phase 9 hands it
 //! to the init process.
+
+// cast_possible_truncation: u64→usize/u32/u16 capability field extractions bounded by capability space.
+#![allow(clippy::cast_possible_truncation)]
 
 extern crate alloc;
 
 use alloc::boxed::Box;
-use alloc::vec::Vec;
+
 
 pub mod cspace;
 pub mod derivation;
@@ -59,7 +62,7 @@ use crate::mm::paging::phys_to_virt;
 #[cfg(not(test))]
 pub static mut ROOT_CSPACE: Option<Box<CSpace>> = None;
 
-/// Take the root CSpace out of `ROOT_CSPACE`, leaving `None`.
+/// Take the root `CSpace` out of `ROOT_CSPACE`, leaving `None`.
 ///
 /// Uses raw pointer operations to avoid creating a mutable reference to a
 /// mutable static (which is undefined behaviour in concurrent contexts and
@@ -76,7 +79,7 @@ pub unsafe fn take_root_cspace() -> Option<Box<CSpace>>
     core::ptr::replace(ptr, None)
 }
 
-/// Borrow the root CSpace mutably.
+/// Borrow the root `CSpace` mutably.
 ///
 /// Uses raw pointer operations to avoid creating a mutable reference to a
 /// mutable static. Safe here because access is single-threaded during boot.
@@ -88,21 +91,21 @@ pub unsafe fn root_cspace_mut() -> Option<&'static mut CSpace>
 {
     // SAFETY: single-threaded boot; no concurrent access.
     let ptr = core::ptr::addr_of_mut!(ROOT_CSPACE);
-    unsafe { (*ptr).as_mut().map(|b| b.as_mut()) }
+    unsafe { (*ptr).as_mut().map(Box::as_mut) }
 }
 
-/// Monotonically increasing CSpace ID allocator. Root gets ID 0.
+/// Monotonically increasing `CSpace` ID allocator. Root gets ID 0.
 static NEXT_CSPACE_ID: AtomicU32 = AtomicU32::new(0);
 
-/// Maximum number of live CSpaces. Sized for practical OS use.
+/// Maximum number of live `CSpaces.` Sized for practical OS use.
 const MAX_CSPACES: usize = 4096;
 
-/// Global registry mapping CSpaceId → raw *mut CSpace.
+/// Global registry mapping `CSpaceId` → raw *mut `CSpace.`
 ///
-/// Populated by [`register_cspace`] when a CSpace is created, cleared by
+/// Populated by [`register_cspace`] when a `CSpace` is created, cleared by
 /// [`unregister_cspace`] when the backing object is freed. Required for
 /// derivation tree traversal: `SlotId` stores a `CSpaceId`, and we need
-/// O(1) resolution to the actual CSpace to read/write derivation pointers.
+/// O(1) resolution to the actual `CSpace` to read/write derivation pointers.
 ///
 /// # Safety invariant
 /// A non-null entry is valid as long as the corresponding `CSpaceKernelObject`
@@ -127,7 +130,7 @@ static CSPACE_REGISTRY: [AtomicPtr<CSpace>; MAX_CSPACES] = {
     }
 };
 
-/// Register a CSpace pointer under its ID.
+/// Register a `CSpace` pointer under its ID.
 ///
 /// Called immediately after a [`CSpace`] is heap-allocated. Panics (in debug)
 /// or silently drops (in release) if `id >= MAX_CSPACES`.
@@ -139,7 +142,7 @@ pub fn register_cspace(id: CSpaceId, ptr: *mut CSpace)
     }
 }
 
-/// Clear a CSpace registration.
+/// Clear a `CSpace` registration.
 ///
 /// Called from `dealloc_object` for `ObjectType::CSpaceObj` *before* freeing
 /// the backing allocation, so no dangling pointer is observable.
@@ -173,22 +176,22 @@ pub fn lookup_cspace(id: CSpaceId) -> Option<*mut CSpace>
     }
 }
 
-/// Allocate a unique CSpace ID.
+/// Allocate a unique `CSpace` ID.
 ///
-/// Called by `SYS_CAP_CREATE_CSPACE` when creating new CSpace objects at
-/// runtime. The root CSpace is assigned ID 0 at init time via this same
+/// Called by `SYS_CAP_CREATE_CSPACE` when creating new `CSpace` objects at
+/// runtime. The root `CSpace` is assigned ID 0 at init time via this same
 /// counter.
 pub fn alloc_cspace_id() -> CSpaceId
 {
     NEXT_CSPACE_ID.fetch_add(1, Ordering::Relaxed)
 }
 
-/// Maximum slots in the root CSpace (full two-level directory).
+/// Maximum slots in the root `CSpace` (full two-level directory).
 const ROOT_CSPACE_MAX_SLOTS: usize = 16384;
 
 // ── Phase 7 entry point ───────────────────────────────────────────────────────
 
-/// Initialise the capability system and populate the root CSpace.
+/// Initialise the capability system and populate the root `CSpace.`
 ///
 /// `platform_resources` is the validated list from Phase 6. `boot_info_phys`
 /// is the physical address of the [`BootInfo`] structure; re-derived here via
@@ -202,7 +205,7 @@ const ROOT_CSPACE_MAX_SLOTS: usize = 16384;
 /// Must be called exactly once, single-threaded, after Phase 4 (heap active)
 /// and Phase 3 (direct map active).
 pub fn init_capability_system(
-    platform_resources: Vec<PlatformResource>,
+    platform_resources: &[PlatformResource],
     boot_info_phys: u64,
 ) -> usize
 {
@@ -229,7 +232,7 @@ pub fn init_capability_system(
         }
     };
 
-    populate_cspace(&mut cspace, mmap, &platform_resources);
+    populate_cspace(&mut cspace, mmap, platform_resources);
 
     let count = cspace.populated_count();
 
@@ -237,7 +240,7 @@ pub fn init_capability_system(
     #[cfg(not(test))]
     // SAFETY: single-threaded boot; ROOT_CSPACE not yet accessed.
     unsafe {
-        let raw = &mut *cspace as *mut CSpace;
+        let raw = core::ptr::addr_of_mut!(*cspace);
         register_cspace(id, raw);
         ROOT_CSPACE = Some(cspace);
     }
@@ -250,10 +253,13 @@ pub fn init_capability_system(
     count
 }
 
-/// Core CSpace population logic, separated for testability.
+/// Core `CSpace` population logic, separated for testability.
 ///
 /// Creates one capability per usable memory region, per platform resource,
-/// and one SchedControl capability.
+/// and one `SchedControl` capability.
+// too_many_lines: one logical pass over all boot-time resource types; splitting
+// would require threading shared state (cspace) through multiple helper functions.
+#[allow(clippy::too_many_lines)]
 fn populate_cspace(
     cspace: &mut CSpace,
     mmap: &[MemoryMapEntry],
@@ -388,12 +394,12 @@ fn populate_cspace(
 /// original `Box<T>` based on `header.obj_type` (future phases).
 fn nonnull_from_box<T>(b: Box<T>) -> NonNull<KernelObjectHeader>
 {
-    let raw = Box::into_raw(b) as *mut KernelObjectHeader;
+    let raw = Box::into_raw(b).cast::<KernelObjectHeader>();
     // SAFETY: Box::into_raw never returns null.
     unsafe { NonNull::new_unchecked(raw) }
 }
 
-/// Move a capability between CSpaces, rewriting derivation tree pointers in place.
+/// Move a capability between `CSpaces`, rewriting derivation tree pointers in place.
 ///
 /// The moved slot takes the **same position** in the derivation tree as the source:
 /// parent, children, and siblings all have their pointers updated to the new
@@ -406,10 +412,10 @@ fn nonnull_from_box<T>(b: Box<T>) -> NonNull<KernelObjectHeader>
 /// - `dst_cspace` must have at least one free slot (call `pre_allocate` first).
 ///
 /// Returns the new slot index in `dst_cspace`, or an error if the source slot
-/// is null/invalid or the destination CSpace is full.
+/// is null/invalid or the destination `CSpace` is full.
 ///
 /// # Safety
-/// `src_cspace` and `dst_cspace` must be valid, live CSpace pointers.
+/// `src_cspace` and `dst_cspace` must be valid, live `CSpace` pointers.
 ///
 /// # To add support for explicit destination index
 /// Add a `dst_idx: Option<u32>` parameter and call `insert_cap_at` when `Some`.

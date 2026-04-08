@@ -6,12 +6,15 @@
 //! Physical memory initialization.
 //!
 //! Parses the boot-time memory map from [`BootInfo`], subtracts all reserved
-//! regions (kernel image, init segments, boot modules, BootInfo struct), and
+//! regions (kernel image, init segments, boot modules, `BootInfo` struct), and
 //! populates a caller-supplied [`BuddyAllocator`] with the surviving ranges.
 //!
 //! The allocator is passed by mutable reference rather than returned by value
 //! because it is ~41 KiB — too large for the kernel's boot stack. The caller
 //! should hold the allocator in static storage (BSS).
+
+// cast_possible_truncation: u64→usize physical address arithmetic; bounded by memory map sizes.
+#![allow(clippy::cast_possible_truncation)]
 
 use core::mem::size_of;
 
@@ -23,7 +26,7 @@ use super::buddy::{BuddyAllocator, PAGE_SIZE};
 /// typically small; 64 entries is generous for real hardware.
 const MAX_RANGES: usize = 64;
 
-/// Maximum exclusion regions. One per: kernel, BootInfo, each init segment
+/// Maximum exclusion regions. One per: kernel, `BootInfo`, each init segment
 /// (up to 8), plus up to 16 boot modules — 32 is comfortably sufficient.
 const MAX_EXCL: usize = 32;
 
@@ -161,7 +164,7 @@ fn collect_exclusions(info: &BootInfo) -> RangeList<MAX_EXCL>
     }
 
     // The BootInfo struct itself (pointed to by the kernel entry parameter).
-    let boot_info_addr = info as *const BootInfo as u64;
+    let boot_info_addr = core::ptr::addr_of!(*info) as u64;
     add(
         boot_info_addr,
         boot_info_addr + size_of::<BootInfo>() as u64,

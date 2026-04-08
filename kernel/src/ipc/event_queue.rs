@@ -24,7 +24,7 @@ use crate::sched::thread::{IpcThreadState, ThreadControlBlock, ThreadState};
 
 // ── EventQueueState ───────────────────────────────────────────────────────────
 
-/// Kernel state backing an EventQueue capability.
+/// Kernel state backing an `EventQueue` capability.
 ///
 /// The ring buffer body is a separate heap allocation (`ring: *mut u64`).
 /// `capacity` is the user-visible max entry count; the ring has `capacity + 1`
@@ -45,7 +45,7 @@ pub struct EventQueueState
     /// Single thread blocked waiting for an entry, or null.
     pub waiter: *mut ThreadControlBlock,
     /// Opaque pointer to the `WaitSetState` this queue is registered with,
-    /// or null. Type-erased to avoid a circular import; cast only in wait_set.rs.
+    /// or null. Type-erased to avoid a circular import; cast only in `wait_set.rs`.
     pub wait_set: *mut u8,
     /// Index of this queue's entry in `WaitSetState::members`.
     pub wait_set_member_idx: u8,
@@ -59,7 +59,7 @@ impl EventQueueState
 {
     /// Allocate a new empty event queue with the given capacity.
     ///
-    /// `capacity` must be in [1, EVENT_QUEUE_MAX_CAPACITY].
+    /// `capacity` must be in `[1, EVENT_QUEUE_MAX_CAPACITY]`.
     /// The ring buffer is allocated via `Box<[u64]>` with `capacity + 1` slots.
     pub fn new(capacity: u32) -> Self
     {
@@ -176,14 +176,14 @@ pub unsafe fn event_queue_recv(
     unsafe {
         (*caller).state = ThreadState::Blocked;
         (*caller).ipc_state = IpcThreadState::BlockedOnEventQueue;
-        (*caller).blocked_on_object = eq as *mut EventQueueState as *mut u8;
+        (*caller).blocked_on_object = core::ptr::addr_of_mut!(*eq).cast::<u8>();
     }
     Err(())
 }
 
 /// Free all resources held by `eq` and wake any blocked waiter.
 ///
-/// Called from `dealloc_object` when the EventQueue cap's ref count hits zero.
+/// Called from `dealloc_object` when the `EventQueue` cap's ref count hits zero.
 ///
 /// # Safety
 /// Must be called with the scheduler lock held. `eq` must be a valid pointer
@@ -215,9 +215,14 @@ pub unsafe fn event_queue_drop(eq: *mut EventQueueState)
     if !eq.ring.is_null()
     {
         let ring_len = (eq.capacity + 1) as usize;
-        // SAFETY: ring was allocated as a Vec<u64> of ring_len elements.
+        // SAFETY: ring was allocated as Vec<u64> of ring_len zeros via vec![]; len==cap,
+        // so Box::from_raw reconstructs the same allocation for drop.
+        // same_length_and_capacity: intentional — ring was allocated as vec![0; ring_len],
+        // so len == cap. Reconstructing with equal len/cap is the correct way to free it.
+        #[allow(clippy::same_length_and_capacity)]
         unsafe {
-            let _ = alloc::vec::Vec::from_raw_parts(eq.ring, ring_len, ring_len);
+            // Reconstruct the Vec that was forgotten in new() and drop it.
+            drop(alloc::vec::Vec::from_raw_parts(eq.ring, ring_len, ring_len));
         }
         eq.ring = core::ptr::null_mut();
     }

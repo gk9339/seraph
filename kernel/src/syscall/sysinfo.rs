@@ -5,7 +5,7 @@
 
 //! System info and address-space query syscall handlers.
 //!
-//! # Adding new SystemInfoType variants
+//! # Adding new `SystemInfoType` variants
 //! 1. Add the variant to `SystemInfoType` in `abi/syscall/src/lib.rs`.
 //! 2. Add a match arm in `sys_system_info` below.
 //! 3. Add a userspace wrapper in `shared/syscall/src/lib.rs` if needed.
@@ -13,7 +13,7 @@
 use crate::arch::current::trap_frame::TrapFrame;
 use syscall::SyscallError;
 
-/// SYS_SYSTEM_INFO (43): query kernel/system information.
+/// `SYS_SYSTEM_INFO` (43): query kernel/system information.
 ///
 /// arg0 = `SystemInfoType` discriminant (u64).
 ///
@@ -36,7 +36,7 @@ pub fn sys_system_info(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         // CpuCount
         {
             let n = crate::sched::CPU_COUNT.load(core::sync::atomic::Ordering::Relaxed);
-            Ok(n as u64)
+            Ok(u64::from(n))
         }
         2 =>
         // FreeFrames
@@ -58,21 +58,24 @@ pub fn sys_system_info(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         5 =>
         // BootProtocolVersion
         {
-            Ok(boot_protocol::BOOT_PROTOCOL_VERSION as u64)
+            Ok(u64::from(boot_protocol::BOOT_PROTOCOL_VERSION))
         }
         _ => Err(SyscallError::InvalidArgument),
     }
 }
 
-/// SYS_ASPACE_QUERY (41): translate a user virtual address in an address space.
+/// `SYS_ASPACE_QUERY` (41): translate a user virtual address in an address space.
 ///
-/// arg0 = AddressSpace cap slot index (must have READ right).
+/// arg0 = `AddressSpace` cap slot index (must have READ right).
 /// arg1 = virtual address to translate (must be 4 KiB-aligned, user range).
 ///
 /// Returns the mapped physical address on success.
 /// Returns `InvalidAddress` if the virtual address is not mapped or
 /// fails the alignment/range checks.
 #[cfg(not(test))]
+// cast_possible_truncation: capability slot indices are u32 by ABI contract;
+// tf.arg() returns u64 but the upper 32 bits are always zero for slot args.
+#[allow(clippy::cast_possible_truncation)]
 pub fn sys_aspace_query(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 {
     use crate::cap::object::AddressSpaceObject;
@@ -88,8 +91,7 @@ pub fn sys_aspace_query(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     }
 
     // Virtual address must be in the user half.
-    const USER_HALF_TOP: u64 = 0x0000_8000_0000_0000;
-    if virt >= USER_HALF_TOP
+    if virt >= 0x0000_8000_0000_0000
     {
         return Err(SyscallError::InvalidAddress);
     }
@@ -113,7 +115,10 @@ pub fn sys_aspace_query(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     let as_ptr = {
         let obj = aspace_slot.object.ok_or(SyscallError::InvalidCapability)?;
         // SAFETY: tag confirmed AddressSpace; pointer is valid.
-        let as_obj = unsafe { &*(obj.as_ptr() as *const AddressSpaceObject) };
+        // cast_ptr_alignment: AddressSpaceObject (8-byte) stored behind KernelObjectHeader
+        // (4-byte header); Box<AddressSpaceObject> guarantees 8-byte alignment at allocation.
+        #[allow(clippy::cast_ptr_alignment)]
+        let as_obj = unsafe { &*(obj.as_ptr().cast::<AddressSpaceObject>()) };
         as_obj.address_space
     };
     if as_ptr.is_null()

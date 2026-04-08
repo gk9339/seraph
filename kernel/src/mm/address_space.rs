@@ -28,6 +28,9 @@
 //!   other CPUs may have the same address space loaded.
 //! - For W^X: `map_segment` already enforces no simultaneous W+X.
 
+// cast_possible_truncation: u64→usize page count arithmetic; bounded by address space size.
+#![allow(clippy::cast_possible_truncation)]
+
 use boot_protocol::{InitSegment, SegmentFlags};
 
 use crate::mm::paging::phys_to_virt;
@@ -137,7 +140,7 @@ impl AddressSpace
     /// Allocates missing intermediate page table frames from `allocator`.
     ///
     /// # Safety
-    /// `virt` must be in the user half (< 0x8000_0000_0000). `phys` must be
+    /// `virt` must be in the user half (< `0x8000_0000_0000`). `phys` must be
     /// a valid 4 KiB-aligned physical address.
     #[cfg(not(test))]
     pub unsafe fn map_page(
@@ -165,7 +168,7 @@ impl AddressSpace
     /// in 4 KiB increments across `segment.size` bytes (rounded up to pages).
     ///
     /// # Safety
-    /// `segment` must be a valid, bootloader-provided InitSegment. `allocator`
+    /// `segment` must be a valid, bootloader-provided `InitSegment`. `allocator`
     /// must be the kernel's buddy allocator.
     #[cfg(not(test))]
     pub unsafe fn map_segment(
@@ -207,7 +210,7 @@ impl AddressSpace
         // page_count includes the in-page offset so a segment that crosses a
         // page boundary gets enough pages mapped.
         let in_page_off = (segment.virt_addr & 0xFFF) as usize;
-        let page_count = ((in_page_off + segment.size as usize + PAGE_SIZE - 1) / PAGE_SIZE).max(1);
+        let page_count = (in_page_off + segment.size as usize).div_ceil(PAGE_SIZE).max(1);
         let virt_base = segment.virt_addr & !0xFFF_u64; // page-aligned virtual
         let phys_base = segment.phys_addr & !0xFFF_u64; // page-aligned physical frame
         for i in 0..page_count

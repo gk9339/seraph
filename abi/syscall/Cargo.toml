@@ -10,3 +10,6 @@ publish = false
 name = "syscall_abi"
 test = false
 doctest = false
+
+[lints]
+workspace = true

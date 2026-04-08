@@ -1,15 +1,15 @@
 # abi
 
-ABI-defining crates. These crates define the binary interfaces that cross
-component or privilege boundaries and carry stability guarantees.
+Binary contract crates that cross component or privilege boundaries. Changes are
+ABI breaks. See [shared/README.md](../shared/README.md) for non-contract crates.
 
 | Crate | Purpose |
 |---|---|
-| `boot-protocol/` | `BootInfo` structure and associated types — boot ABI between bootloader and kernel |
-| `syscall/` | Syscall numbers, argument layout, return codes, calling convention constants |
+| `boot-protocol/` | `BootInfo` and associated types — boot ABI between bootloader and kernel |
+| `syscall/` | Syscall numbers, error codes, and constants — ABI between kernel and userspace |
 
-## Distinction from `shared/`
+---
 
-`abi/` crates define contracts: the kernel and its callers must agree on these
-definitions at the binary level. `shared/` crates are internal code reuse with
-no cross-boundary stability obligation.
+## Summarized By
+
+None

@@ -121,7 +121,7 @@ fn ascii_to_utf16(path: &[u8], out: &mut Utf16Path) -> bool
         {
             return false;
         }
-        out.buf[i] = b as u16;
+        out.buf[i] = u16::from(b);
     }
     out.buf[path.len()] = 0u16;
     out.len = path.len();
@@ -135,13 +135,13 @@ fn ascii_to_utf16(path: &[u8], out: &mut Utf16Path) -> bool
 fn resolve_path(base: &[u8], name: &[u8], out: &mut Utf16Path) -> bool
 {
     // Total length: base + backslash separator + name.
-    let total = match base
+    let Some(total) = base
         .len()
         .checked_add(1)
         .and_then(|n| n.checked_add(name.len()))
+    else
     {
-        Some(n) => n,
-        None => return false,
+        return false;
     };
     if total > MAX_PATH_LEN
     {
@@ -154,16 +154,16 @@ fn resolve_path(base: &[u8], name: &[u8], out: &mut Utf16Path) -> bool
         {
             return false;
         }
-        out.buf[i] = b as u16;
+        out.buf[i] = u16::from(b);
     }
-    out.buf[base.len()] = b'\\' as u16;
+    out.buf[base.len()] = u16::from(b'\\');
     for (i, &b) in name.iter().enumerate()
     {
         if b > 0x7F
         {
             return false;
         }
-        out.buf[base.len() + 1 + i] = b as u16;
+        out.buf[base.len() + 1 + i] = u16::from(b);
     }
     out.buf[total] = 0u16;
     out.len = total;
@@ -183,6 +183,9 @@ fn resolve_path(base: &[u8], name: &[u8], out: &mut Utf16Path) -> bool
 /// in `modules` are comma-separated; whitespace around each name is trimmed and
 /// empty tokens are skipped. Paths are resolved as `path\<name>`. The `cmdline`
 /// string is copied verbatim into a fixed-size buffer.
+// This parser handles five key types, inline comment/blank-line filtering, module
+// list tokenisation, and path resolution — necessarily longer than 100 lines.
+#[allow(clippy::too_many_lines)]
 pub fn parse_config(data: &[u8]) -> Result<BootConfig, crate::error::BootError>
 {
     // Collect raw byte-slice views into `data` for each key.
@@ -218,15 +221,12 @@ pub fn parse_config(data: &[u8]) -> Result<BootConfig, crate::error::BootError>
         }
 
         // Every non-blank, non-comment line must contain '='.
-        let eq = match line.iter().position(|&b| b == b'=')
+        let Some(eq) = line.iter().position(|&b| b == b'=')
+        else
         {
-            Some(pos) => pos,
-            None =>
-            {
-                return Err(crate::error::BootError::InvalidConfig(
-                    "missing '=' in line",
-                ))
-            }
+            return Err(crate::error::BootError::InvalidConfig(
+                "missing '=' in line",
+            ));
         };
 
         let key = trim_ascii(&line[..eq]);
@@ -289,8 +289,7 @@ pub fn parse_config(data: &[u8]) -> Result<BootConfig, crate::error::BootError>
 
     // Parse the comma-separated module list and resolve each name against path.
     // To add support for quoted names or semicolon separators, modify this loop.
-    const EMPTY_PATH: Utf16Path = Utf16Path::zeroed();
-    let mut module_paths = [EMPTY_PATH; MAX_MODULES];
+    let mut module_paths = [Utf16Path::zeroed(); MAX_MODULES];
     let mut module_count: usize = 0;
 
     if let Some(mod_list) = raw_modules
@@ -362,11 +361,7 @@ fn trim_ascii(s: &[u8]) -> &[u8]
 {
     let is_ws = |b: &u8| *b == b' ' || *b == b'\t' || *b == b'\r';
     let start = s.iter().position(|b| !is_ws(b)).unwrap_or(s.len());
-    let end = s
-        .iter()
-        .rposition(|b| !is_ws(b))
-        .map(|i| i + 1)
-        .unwrap_or(0);
+    let end = s.iter().rposition(|b| !is_ws(b)).map_or(0, |i| i + 1);
     if start >= end
     {
         &[]
@@ -422,6 +417,9 @@ pub unsafe fn load_boot_config(
         )?
     };
     // SAFETY: conf_file is a valid open file handle.
+    // cast_possible_truncation: file_size returns u64; on all UEFI targets
+    // (x86_64, riscv64) usize is 64-bit so no truncation occurs.
+    #[allow(clippy::cast_possible_truncation)]
     let conf_size = unsafe { crate::uefi::file_size(conf_file)? } as usize;
     if conf_size > MAX_CONFIG_SIZE
     {

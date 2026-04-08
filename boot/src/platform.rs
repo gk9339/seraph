@@ -58,6 +58,8 @@ pub unsafe fn parse_platform_resources(
         let n = unsafe { acpi::parse_acpi_resources(firmware.acpi_rsdp, &mut buf[count..]) };
         count += n;
         bprint!("[--------] boot: ACPI: ");
+        // cast_possible_truncation: n <= MAX_PLATFORM_RESOURCES (64), fits in u32.
+        #[allow(clippy::cast_possible_truncation)]
         unsafe { crate::console::console_write_dec32(n as u32) };
         bprintln!(" resources");
     }
@@ -69,6 +71,8 @@ pub unsafe fn parse_platform_resources(
         let n = unsafe { dtb::parse_dtb_resources(firmware.device_tree, &mut buf[count..]) };
         count += n;
         bprint!("[--------] boot: DTB: ");
+        // cast_possible_truncation: n <= MAX_PLATFORM_RESOURCES (64), fits in u32.
+        #[allow(clippy::cast_possible_truncation)]
         unsafe { crate::console::console_write_dec32(n as u32) };
         bprintln!(" resources");
     }
@@ -94,7 +98,7 @@ pub unsafe fn parse_platform_resources(
     // Allocate physical memory for the result array.
     let entry_size = core::mem::size_of::<PlatformResource>();
     let total_bytes = count * entry_size;
-    let pages = (total_bytes + 4095) / 4096;
+    let pages = total_bytes.div_ceil(4096);
     // SAFETY: bs is valid boot services.
     let phys = unsafe { allocate_pages(bs, pages)? };
 

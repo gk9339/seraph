@@ -83,7 +83,7 @@ pub fn configure_start(ctx: &TestContext) -> TestResult
         th,
         sender_entry as *const () as u64,
         stack_top,
-        child_sig as u64,
+        u64::from(child_sig),
     )
     .map_err(|_| "thread_configure failed")?;
     thread_start(th).map_err(|_| "thread_start failed")?;
@@ -115,9 +115,10 @@ pub fn r#yield(_ctx: &TestContext) -> TestResult
 /// returns the thread's register file.
 ///
 /// The child signals readiness (0x1) then blocks in `signal_wait` to provide a
-/// stable TrapFrame. The parent stops it and reads registers.
+/// stable `TrapFrame`. The parent stops it and reads registers.
 pub fn stop_read_regs(ctx: &TestContext) -> TestResult
 {
+    const BUF_SIZE: usize = 512; // Larger than any architecture's TrapFrame.
     let sync = cap_create_signal().map_err(|_| "create_signal for stop_read_regs failed")?;
     let cs = cap_create_cspace(16).map_err(|_| "create_cspace for stop_read_regs failed")?;
     // Child needs SIGNAL+WAIT so it can both send (readiness) and block (signal_wait).
@@ -131,7 +132,7 @@ pub fn stop_read_regs(ctx: &TestContext) -> TestResult
         th,
         blocker_entry as *const () as u64,
         stack_top,
-        child_sync as u64,
+        u64::from(child_sync),
     )
     .map_err(|_| "thread_configure for stop_read_regs failed")?;
     thread_start(th).map_err(|_| "thread_start for stop_read_regs failed")?;
@@ -147,7 +148,6 @@ pub fn stop_read_regs(ctx: &TestContext) -> TestResult
     thread_stop(th).map_err(|_| "thread_stop failed")?;
 
     // Read the register file.
-    const BUF_SIZE: usize = 512; // Larger than any architecture's TrapFrame.
     let mut reg_buf = [0u8; BUF_SIZE];
     let bytes = thread_read_regs(th, reg_buf.as_mut_ptr(), BUF_SIZE)
         .map_err(|_| "thread_read_regs failed")?;
@@ -193,7 +193,7 @@ pub fn stop_again_invalid_state(ctx: &TestContext) -> TestResult
         th,
         blocker_entry as *const () as u64,
         stack_top,
-        child_sig as u64,
+        u64::from(child_sig),
     )
     .map_err(|_| "thread_configure for double-stop test failed")?;
     thread_start(th).map_err(|_| "thread_start for double-stop test failed")?;
@@ -223,6 +223,7 @@ pub fn stop_again_invalid_state(ctx: &TestContext) -> TestResult
 /// `phase2_entry`. On resume, phase2 reads `PHASE2_SIG` and sends 0x2.
 pub fn write_regs_resume(ctx: &TestContext) -> TestResult
 {
+    const BUF_SIZE: usize = 512;
     let sync = cap_create_signal().map_err(|_| "create_signal for write_regs_resume failed")?;
     let cs = cap_create_cspace(16).map_err(|_| "create_cspace for write_regs_resume failed")?;
     let child_sync = cap_copy(sync, cs, RIGHTS_SIGNAL_WAIT)
@@ -235,7 +236,7 @@ pub fn write_regs_resume(ctx: &TestContext) -> TestResult
         th,
         blocker_entry as *const () as u64,
         stack_top,
-        child_sync as u64,
+        u64::from(child_sync),
     )
     .map_err(|_| "thread_configure for write_regs_resume failed")?;
     thread_start(th).map_err(|_| "thread_start for write_regs_resume failed")?;
@@ -247,7 +248,6 @@ pub fn write_regs_resume(ctx: &TestContext) -> TestResult
     // Publish the signal cap for phase2 before rewriting the IP.
     PHASE2_SIG.store(child_sync, Ordering::Release);
 
-    const BUF_SIZE: usize = 512;
     let mut reg_buf = [0u8; BUF_SIZE];
     thread_read_regs(th, reg_buf.as_mut_ptr(), BUF_SIZE)
         .map_err(|_| "thread_read_regs for write_regs_resume failed")?;
@@ -276,7 +276,7 @@ pub fn write_regs_resume(ctx: &TestContext) -> TestResult
 // ── SYS_THREAD_SET_PRIORITY ───────────────────────────────────────────────────
 
 /// `thread_set_priority` in the normal range (1–20) succeeds without a
-/// SchedControl capability.
+/// `SchedControl` capability.
 pub fn set_priority_normal(ctx: &TestContext) -> TestResult
 {
     let cs = cap_create_cspace(8).map_err(|_| "create_cspace for set_priority_normal failed")?;
@@ -292,7 +292,7 @@ pub fn set_priority_normal(ctx: &TestContext) -> TestResult
 }
 
 /// `thread_set_priority` with priority ≥ `SCHED_ELEVATED_MIN` (21) fails when
-/// no SchedControl capability is provided.
+/// no `SchedControl` capability is provided.
 pub fn set_priority_elevated_no_cap_err(ctx: &TestContext) -> TestResult
 {
     let cs = cap_create_cspace(8).map_err(|_| "create_cspace for elevated_no_cap test failed")?;
@@ -311,11 +311,11 @@ pub fn set_priority_elevated_no_cap_err(ctx: &TestContext) -> TestResult
     Ok(())
 }
 
-/// `thread_set_priority` with priority ≥ 21 succeeds when a valid SchedControl
+/// `thread_set_priority` with priority ≥ 21 succeeds when a valid `SchedControl`
 /// capability is provided.
 ///
 /// The test scans slots up to `aspace_cap + 20` for a slot that accepts
-/// elevated priority. If no SchedControl cap is found, the test is skipped
+/// elevated priority. If no `SchedControl` cap is found, the test is skipped
 /// (reports Ok — the test was not applicable, not a failure).
 pub fn set_priority_elevated_with_cap(ctx: &TestContext) -> TestResult
 {
@@ -403,7 +403,7 @@ pub fn configure_running_thread_err(ctx: &TestContext) -> TestResult
         th,
         blocker_entry as *const () as u64,
         stack_top,
-        child_sig as u64,
+        u64::from(child_sig),
     )
     .map_err(|_| "first thread_configure failed")?;
     thread_start(th).map_err(|_| "thread_start failed")?;
@@ -503,7 +503,7 @@ pub fn affinity_bind_cpu1(ctx: &TestContext) -> TestResult
         th,
         affinity_sender_entry as *const () as u64,
         stack_top,
-        child_sig as u64,
+        u64::from(child_sig),
     )
     .map_err(|_| "thread_configure for affinity_bind_cpu1 failed")?;
     thread_start(th).map_err(|_| "thread_start for affinity_bind_cpu1 failed")?;
@@ -526,6 +526,8 @@ pub fn affinity_bind_cpu1(ctx: &TestContext) -> TestResult
 ///
 /// Used by [`affinity_bind_cpu1`] — the child is bound to CPU 1 and confirms
 /// it ran by signalling back.
+// cast_possible_truncation: sig_slot is a kernel cap slot index, guaranteed < 2^32.
+#[allow(clippy::cast_possible_truncation)]
 fn affinity_sender_entry(sig_slot: u64) -> !
 {
     signal_send(sig_slot as u32, 0xC1A1).ok();
@@ -533,6 +535,8 @@ fn affinity_sender_entry(sig_slot: u64) -> !
 }
 
 /// Simple sender: sends 0xBEEF and exits.
+// cast_possible_truncation: sig_slot is a kernel cap slot index, guaranteed < 2^32.
+#[allow(clippy::cast_possible_truncation)]
 fn sender_entry(sig_slot: u64) -> !
 {
     signal_send(sig_slot as u32, 0xBEEF).ok();
@@ -542,9 +546,11 @@ fn sender_entry(sig_slot: u64) -> !
 /// Phase 1 blocker: signals readiness (0x1) then blocks in `signal_wait`.
 ///
 /// The parent stops this thread while it is blocked, giving a stable
-/// TrapFrame for `thread_read_regs` / `thread_write_regs`. If the parent
-/// later resumes it (via write_regs redirect), execution jumps to `phase2_entry`
-/// instead of returning from this signal_wait.
+/// `TrapFrame` for `thread_read_regs` / `thread_write_regs`. If the parent
+/// later resumes it (via `write_regs` redirect), execution jumps to `phase2_entry`
+/// instead of returning from this `signal_wait`.
+// cast_possible_truncation: sig_slot is a kernel cap slot index, guaranteed < 2^32.
+#[allow(clippy::cast_possible_truncation)]
 fn blocker_entry(sig_slot: u64) -> !
 {
     signal_send(sig_slot as u32, 0x1).ok();

@@ -206,7 +206,7 @@ impl FramebufferWriter
 
     /// Scroll up by one character row.
     ///
-    /// Copies rows 1..max_rows to rows 0..max_rows-1, then zeroes the last row.
+    /// Copies rows `1..max_rows` to rows `0..max_rows-1`, then zeroes the last row.
     /// Adjusts cursor to the last row.
     ///
     /// # Safety

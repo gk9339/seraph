@@ -40,14 +40,24 @@ use crate::sched::MAX_CPUS;
 // ── Field offsets (must match #[repr(C)] layout) ──────────────────────────────
 
 /// Byte offset of `PerCpuData::cpu_id`. GS-relative: `gs:[0]`.
+// Used by the syscall_entry naked-asm stub (assembly references by numeric offset).
+#[allow(dead_code)]
 pub const PERCPU_CPU_ID_OFFSET: usize = 0;
 /// Byte offset of `PerCpuData::kernel_rsp`. GS-relative: `gs:[8]`.
+// Used by the syscall_entry naked-asm stub (assembly references by numeric offset).
+#[allow(dead_code)]
 pub const PERCPU_KERNEL_RSP_OFFSET: usize = 8;
 /// Byte offset of `PerCpuData::user_rsp`. GS-relative: `gs:[16]`.
+// Used by the syscall_entry naked-asm stub (assembly references by numeric offset).
+#[allow(dead_code)]
 pub const PERCPU_USER_RSP_OFFSET: usize = 16;
 /// Byte offset of `PerCpuData::scratch`. GS-relative: `gs:[24]`.
+// Used by the syscall_entry naked-asm stub (assembly references by numeric offset).
+#[allow(dead_code)]
 pub const PERCPU_SCRATCH_OFFSET: usize = 24;
 /// Byte offset of `PerCpuData::tss_ptr`. GS-relative: `gs:[32]`.
+// Used by the syscall_entry naked-asm stub (assembly references by numeric offset).
+#[allow(dead_code)]
 pub const PERCPU_TSS_PTR_OFFSET: usize = 32;
 
 // ── PerCpuData ────────────────────────────────────────────────────────────────
@@ -68,7 +78,7 @@ pub struct PerCpuData
     /// `set_kernel_rsp` before every return to user mode.
     pub kernel_rsp: u64,
     /// x86-64: user RSP saved at SYSCALL entry. Populated by
-    /// the `syscall_entry` stub and used to rebuild the TrapFrame.
+    /// the `syscall_entry` stub and used to rebuild the `TrapFrame`.
     pub user_rsp: u64,
     /// x86-64: temporary save of R11 (user RFLAGS) during the stack
     /// switch in `syscall_entry`. Holds user RFLAGS while R11 is
@@ -147,7 +157,7 @@ pub unsafe fn init_bsp()
 ///
 /// # Safety
 /// Must execute at ring 0 / S-mode on the AP being initialised.
-/// `cpu_id` must be < MAX_CPUS and `PER_CPU[cpu_id]` must not yet be in use.
+/// `cpu_id` must be < `MAX_CPUS` and `PER_CPU[cpu_id]` must not yet be in use.
 #[cfg(not(test))]
 pub unsafe fn init_ap(cpu_id: u32)
 {

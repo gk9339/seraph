@@ -58,7 +58,7 @@ no `#[cfg(target_arch)]` guards appear in the shared modules (`uefi.rs`, `elf.rs
 ## Build
 
 The bootloader is built as part of the Seraph workspace. Refer to
-[scripts/README.md](../scripts/README.md) for the full build procedure. Key points:
+[xtask/README.md](../xtask/README.md) for the full build procedure. Key points:
 
 | Architecture | Target triple | Output |
 |---|---|---|
@@ -123,3 +123,9 @@ The CPU state established at the kernel entry point is specified in
 | [docs/capability-model.md](../docs/capability-model.md) | Initial capabilities minted from `PlatformResource` entries |
 | [docs/device-management.md](../docs/device-management.md) | How `devmgr` uses the resources the bootloader provides |
 | [docs/coding-standards.md](../docs/coding-standards.md) | Formatting, naming, safety rules |
+
+---
+
+## Summarized By
+
+None

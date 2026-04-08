@@ -74,5 +74,6 @@ Overall project design documents live in [`docs/`](docs/):
 - [Device Management](docs/device-management.md) — platform enumeration, devmgr, driver binding, DMA safety
 - [Build System](docs/build-system.md) — toolchain, workspace layout, sysroot, xtask commands
 - [Coding Standards](docs/coding-standards.md) — Rust conventions, safety contracts, documentation rules
+- [Documentation Standards](docs/documentation-standards.md) — document hierarchy, authority, backlinks, required structure
 
 Each module contains a `README.md` that references the design docs relevant to that module.

@@ -55,3 +55,9 @@ process is created without going through procmgr.
 | [docs/capability-model.md](../docs/capability-model.md) | CSpace, AddressSpace, Thread caps |
 | [docs/boot-protocol.md](../docs/boot-protocol.md) | Boot module format |
 | [docs/coding-standards.md](../docs/coding-standards.md) | Formatting, naming, safety rules |
+
+---
+
+## Summarized By
+
+None

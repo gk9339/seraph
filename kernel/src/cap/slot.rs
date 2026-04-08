@@ -5,7 +5,7 @@
 
 //! Capability slot foundation types.
 //!
-//! [`CapabilitySlot`] is the fixed-size record stored in CSpace pages.
+//! [`CapabilitySlot`] is the fixed-size record stored in `CSpace` pages.
 //! The layout is `#[repr(C)]` and exactly 48 bytes.
 //!
 //! ## Intrusive free list
@@ -31,7 +31,7 @@ use super::object::KernelObjectHeader;
 /// Unique identifier for a capability space.
 pub type CSpaceId = u32;
 
-/// A reference to a specific capability slot by CSpace ID and index.
+/// A reference to a specific capability slot by `CSpace` ID and index.
 ///
 /// `index` is [`NonZeroU32`] because slot 0 is permanently null and is never a
 /// valid derivation target. This gives `Option<SlotId>` the same 8-byte size as
@@ -39,9 +39,9 @@ pub type CSpaceId = u32;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SlotId
 {
-    /// The CSpace this slot belongs to.
+    /// The `CSpace` this slot belongs to.
     pub cspace_id: CSpaceId,
-    /// Slot index within that CSpace. Never zero.
+    /// Slot index within that `CSpace`. Never zero.
     pub index: NonZeroU32,
 }
 
@@ -65,7 +65,7 @@ impl SlotId
 /// kernel object type with its own rights and operations.
 ///
 /// To add a new type: append a variant here and handle it in `cspace.rs`
-/// (insert_cap) and the relevant object creation path.
+/// (`insert_cap`) and the relevant object creation path.
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CapTag
@@ -123,7 +123,7 @@ impl Rights
     pub const WRITE: Rights = Rights(1 << 1);
     /// Mapped region is executable. Mutually exclusive with WRITE (W^X).
     pub const EXECUTE: Rights = Rights(1 << 2);
-    /// May read/inspect mappings (AddressSpace).
+    /// May read/inspect mappings (`AddressSpace`).
     pub const READ: Rights = Rights(1 << 3);
 
     // ── IPC endpoint ──────────────────────────────────────────────────────────
@@ -218,9 +218,9 @@ pub fn violates_wx(rights: Rights) -> bool
 
 // ── CapabilitySlot ────────────────────────────────────────────────────────────
 
-/// A single capability slot in a CSpace page.
+/// A single capability slot in a `CSpace` page.
 ///
-/// Fixed at 48 bytes (`#[repr(C)]`). Slot 0 in every CSpace is permanently
+/// Fixed at 48 bytes (`#[repr(C)]`). Slot 0 in every `CSpace` is permanently
 /// null. Non-null slots hold a typed reference to a kernel object and an
 /// associated rights bitmask.
 ///
@@ -229,7 +229,7 @@ pub fn violates_wx(rights: Rights) -> bool
 /// ```text
 ///  offset  size  field
 ///       0     1  tag
-///       1     3  _pad   (aligns rights to offset 4)
+///       1     3  pad   (aligns rights to offset 4)
 ///       4     4  rights
 ///       8     8  object (naturally 8-byte aligned at offset 8)
 ///      16     8  deriv_parent   (next_free index when tag == Null)
@@ -239,7 +239,7 @@ pub fn violates_wx(rights: Rights) -> bool
 /// total: 48 bytes
 /// ```
 ///
-/// Without explicit `_pad`, `#[repr(C)]` would insert 2 bytes before `rights`
+/// Without explicit `pad`, `#[repr(C)]` would insert 2 bytes before `rights`
 /// (to satisfy 4-byte alignment) and 6 bytes before `object` (8-byte alignment),
 /// yielding 56 bytes. The 3-byte pad absorbs both gaps.
 #[repr(C)]
@@ -248,7 +248,7 @@ pub struct CapabilitySlot
     /// Capability type; `Null` means the slot is empty.
     pub tag: CapTag,
     /// Explicit padding: aligns `rights` to offset 4 and `object` to offset 8.
-    _pad: [u8; 3],
+    pad: [u8; 3],
     /// Rights bitmask (type-specific).
     pub rights: Rights,
     /// Pointer to the kernel object (None when tag == Null).
@@ -276,7 +276,7 @@ impl CapabilitySlot
     {
         Self {
             tag: CapTag::Null,
-            _pad: [0; 3],
+            pad: [0; 3],
             rights: Rights::NONE,
             object: None,
             deriv_parent: None,
@@ -312,7 +312,7 @@ impl CapabilitySlot
     pub fn set_next_free(&mut self, next: Option<u32>)
     {
         self.tag = CapTag::Null;
-        self._pad = [0; 3];
+        self.pad = [0; 3];
         self.rights = Rights::NONE;
         self.object = None;
         self.deriv_first_child = None;

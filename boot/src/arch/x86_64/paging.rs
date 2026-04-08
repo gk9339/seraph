@@ -47,6 +47,8 @@ impl PageTableBuilder for BootPageTable
         // SAFETY: root_phys points to one PAGE_SIZE region of allocated memory.
         // Zeroing ensures all entries have P=0 (not present); absent entries
         // are never walked by the hardware regardless of other bits.
+        // cast_possible_truncation: PAGE_SIZE is 4096, fits in usize on all targets.
+        #[allow(clippy::cast_possible_truncation)]
         unsafe {
             core::ptr::write_bytes(root_phys as *mut u8, 0, PAGE_SIZE as usize);
         }
@@ -171,6 +173,8 @@ impl BootPageTable
         let frame = unsafe { crate::uefi::allocate_pages(self.bs, 1).ok()? };
         // SAFETY: frame points to one PAGE_SIZE region of allocated memory.
         // Zeroing ensures all entries have P=0 (not present).
+        // cast_possible_truncation: PAGE_SIZE is 4096, fits in usize on all targets.
+        #[allow(clippy::cast_possible_truncation)]
         unsafe {
             core::ptr::write_bytes(frame as *mut u8, 0, PAGE_SIZE as usize);
         }

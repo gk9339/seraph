@@ -1,13 +1,15 @@
 # Syscall Interface Specification
 
-## Overview
-
 This document defines the complete syscall ABI for Seraph: calling convention,
-entry/exit mechanism, the full syscall table, per-call argument and return specifications,
-error codes, and atomicity guarantees.
+entry/exit mechanism, the full syscall table, per-call argument and return
+specifications, error codes, and atomicity guarantees.
 
-The syscall interface is the kernel's only public API. Every operation a userspace
-program can perform that touches a kernel-managed resource goes through this table.
+**Code counterparts:**
+- `abi/syscall/` — `SYS_*` constants, `SyscallError` enum, scheduling and message
+  constants. This is the binary contract: `#[repr(C)]`, `no_std`, no deps outside
+  `core`. Both the kernel and userspace depend on it. Changes here are ABI breaks.
+- `shared/syscall/` — Rust wrapper functions for userspace. Thin inline-asm wrappers
+  around the abi constants. No stability obligation; internal code reuse only.
 
 ---
 
@@ -600,6 +602,91 @@ initial mapping rights), `InvalidArgument` (address not mapped).
 
 ---
 
+### `SYS_FRAME_SPLIT` (33)
+
+Split a frame capability at a page boundary, producing two frame capabilities that
+together cover the same physical range as the original. The original capability is
+consumed.
+
+**Arguments:**
+
+| # | Name | Description |
+|---|---|---|
+| 0 | `frame_cap` | Frame capability to split |
+| 1 | `offset_pages` | Page offset within the frame at which to split |
+
+**Return:**
+
+- `rax`/`a0`: capability descriptor for the lower portion (pages 0..offset_pages)
+  on success; `SyscallError` on failure
+- `rdx`/`a1`: capability descriptor for the upper portion (pages offset_pages..end)
+  on success
+
+The original `frame_cap` is consumed by this call. Both halves inherit the same
+rights as the original. The derivation tree treats both halves as children of the
+original's position.
+
+`offset_pages` MUST be in the range [1, frame_size_pages − 1].
+
+**Errors:** `InvalidCapability`, `InvalidArgument` (offset out of range or frame
+is already a single page), `OutOfMemory` (no free CSpace slot for second cap).
+
+---
+
+### `SYS_MMIO_MAP` (34)
+
+Map an MMIO region capability into an address space. MMIO mappings use uncacheable
+page attributes (`PAT` write-combine or uncacheable on x86-64; device-ordered on
+RISC-V) rather than the default writeback caching.
+
+**Arguments:**
+
+| # | Name | Description |
+|---|---|---|
+| 0 | `aspace_cap` | Address space capability (Map rights) |
+| 1 | `mmio_cap` | MMIO region capability (Map rights) |
+| 2 | `virt` | Virtual address to map at (page-aligned) |
+| 3 | `flags` | Mapping flags: readable, writable (not executable; MMIO is never XP) |
+
+**Return:** `rax`/`a0`: 0 on success; `SyscallError` on failure.
+
+MMIO mappings are never executable. The kernel forces the uncacheable attribute
+regardless of the flags value; callers MUST NOT set both writable and executable.
+
+**Capability requirements:** `aspace_cap` (Map), `mmio_cap` (Map).
+
+**Errors:** `InvalidCapability`, `AccessDenied`, `InvalidArgument` (unaligned
+`virt`, W^X violation, or non-canonical address), `AlignmentError`,
+`AddressSpaceFull`.
+
+---
+
+### `SYS_DMA_GRANT` (36)
+
+Return the physical address of a frame for use as a DMA buffer. Currently implements
+the no-IOMMU fallback path only; full IOMMU support is deferred.
+
+**Arguments:**
+
+| # | Name | Description |
+|---|---|---|
+| 0 | `frame_cap` | Frame capability (Map rights) to grant DMA access to |
+| 1 | `device_id` | Reserved; pass 0. |
+| 2 | `flags` | MUST include `FLAG_DMA_UNSAFE` (bit 2) to acknowledge no hardware isolation. |
+
+**Return:** `rax`/`a0`: physical base address of the frame on success;
+`SyscallError` on failure.
+
+Without an IOMMU the granting device can access the entire physical frame without
+hardware-enforced isolation. The caller MUST set `FLAG_DMA_UNSAFE` (bit 2 of
+`flags`) to acknowledge this; if absent, `DmaUnsafe` is returned.
+
+**Capability requirements:** `frame_cap` (Map rights).
+
+**Errors:** `InvalidCapability`, `DmaUnsafe` (FLAG_DMA_UNSAFE not set).
+
+---
+
 ## Thread and Process Syscalls
 
 ### `SYS_THREAD_START` (19)
@@ -667,6 +754,113 @@ This is the correct way for any thread to terminate itself, including init.
 **Return:** Does not return.
 
 **Errors:** None (this syscall cannot fail).
+
+---
+
+### `SYS_THREAD_SET_PRIORITY` (37)
+
+Change a thread's scheduling priority after creation.
+
+**Arguments:**
+
+| # | Name | Description |
+|---|---|---|
+| 0 | `thread_cap` | Thread capability (Control rights) |
+| 1 | `priority` | New priority (1–`PRIORITY_MAX`) |
+| 2 | `sched_cap` | SchedControl capability (Elevate rights); use 0 if not needed |
+
+**Return:** `rax`/`a0`: 0 on success; `SyscallError` on failure.
+
+The priority range is divided into two tiers:
+
+- **Normal range (1–20):** `sched_cap` is ignored. Any holder of the thread's
+  Control capability may set priorities freely in this range.
+- **Elevated range (21–30):** `sched_cap` MUST be a valid SchedControl capability
+  with Elevate rights. Without it, the call returns `AccessDenied`.
+
+Priority 0 (idle) and priority 31 (reserved) cannot be requested. The change takes
+effect at the next scheduler invocation.
+
+**Capability requirements:** `thread_cap` (Control rights); `sched_cap` (Elevate
+rights) when `priority` ≥ `SCHED_ELEVATED_MIN`.
+
+**Errors:** `InvalidCapability`, `AccessDenied` (insufficient rights for the
+requested priority tier), `InvalidArgument` (priority 0, priority 31, or out
+of range).
+
+---
+
+### `SYS_THREAD_SET_AFFINITY` (38)
+
+Set or change a thread's CPU affinity.
+
+**Arguments:**
+
+| # | Name | Description |
+|---|---|---|
+| 0 | `thread_cap` | Thread capability (Control rights) |
+| 1 | `cpu_id` | Target CPU ID, or `AFFINITY_ANY` (u32::MAX) to clear affinity |
+
+**Return:** `rax`/`a0`: 0 on success; `SyscallError` on failure.
+
+Setting a hard affinity prevents future migration by the load balancer. The thread
+is migrated to the target CPU at the next scheduler invocation if not already there.
+If `cpu_id` names an offline CPU, the call fails with `InvalidArgument`.
+
+**Capability requirement:** `thread_cap` MUST have Control rights.
+
+**Errors:** `InvalidCapability`, `AccessDenied`, `InvalidArgument` (CPU offline or
+out of range).
+
+---
+
+### `SYS_THREAD_READ_REGS` (39)
+
+Read the full register state of a stopped thread into a caller-supplied buffer.
+
+**Arguments:**
+
+| # | Name | Description |
+|---|---|---|
+| 0 | `thread_cap` | Thread capability (Observe rights) |
+| 1 | `buf_ptr` | Pointer to buffer in caller's address space |
+| 2 | `buf_size` | Size of the buffer in bytes |
+
+**Return:** `rax`/`a0`: number of bytes written on success; `SyscallError` on failure.
+
+The thread MUST be in `Stopped` state. The buffer receives an architecture-defined
+register file structure (layout published in the kernel ABI headers). If `buf_size`
+is smaller than the required size, the call fails with `InvalidArgument`.
+
+**Capability requirement:** `thread_cap` MUST have Observe rights.
+
+**Errors:** `InvalidCapability`, `AccessDenied`, `InvalidState` (thread not stopped),
+`InvalidArgument` (buffer too small or invalid pointer).
+
+---
+
+### `SYS_THREAD_WRITE_REGS` (40)
+
+Write register state into a stopped thread from a caller-supplied buffer.
+
+**Arguments:**
+
+| # | Name | Description |
+|---|---|---|
+| 0 | `thread_cap` | Thread capability (Control rights) |
+| 1 | `buf_ptr` | Pointer to register file buffer in caller's address space |
+| 2 | `buf_size` | Size of the buffer in bytes |
+
+**Return:** `rax`/`a0`: 0 on success; `SyscallError` on failure.
+
+The thread MUST be in `Stopped` state. The kernel validates that the register values
+are safe (e.g. the instruction pointer is in a canonical range; privilege bits cannot
+be set).
+
+**Capability requirement:** `thread_cap` MUST have Control rights.
+
+**Errors:** `InvalidCapability`, `AccessDenied`, `InvalidState` (thread not stopped),
+`InvalidArgument` (buffer wrong size, invalid pointer, or illegal register values).
 
 ---
 
@@ -740,7 +934,7 @@ are ready simultaneously, subsequent calls return them without blocking.
 
 ---
 
-## Interrupt Syscall
+## Interrupt Syscalls
 
 ### `SYS_IRQ_ACK` (29)
 
@@ -760,16 +954,69 @@ The kernel masks the interrupt line before delivering the notification to the dr
 must call `SYS_IRQ_ACK` to re-enable the line. Calling `SYS_IRQ_ACK` without a
 prior interrupt delivery has no effect.
 
-**Capability requirement:** `irq_cap` must be a valid interrupt capability for the
+**Capability requirement:** `irq_cap` MUST be a valid interrupt capability for the
 specific line.
 
 **Errors:** `InvalidCapability`, `AccessDenied`.
 
 ---
 
+### `SYS_IRQ_REGISTER` (30)
+
+Register a signal to receive interrupt notifications for a hardware interrupt line.
+When the interrupt fires, the kernel delivers it by ORing a notification bit into
+the registered signal.
+
+**Arguments:**
+
+| # | Name | Description |
+|---|---|---|
+| 0 | `irq_cap` | Interrupt capability for the line to register |
+| 1 | `signal_cap` | Signal capability (Signal rights) to notify on interrupt |
+
+**Return:** `rax`/`a0`: 0 on success; `SyscallError` on failure.
+
+Only one signal may be registered per interrupt line at a time. A second call
+replaces the previous registration. The kernel masks the interrupt line before
+delivering the notification; the driver MUST call `SYS_IRQ_ACK` to re-enable it.
+
+**Capability requirements:** `irq_cap` (valid interrupt capability), `signal_cap`
+(Signal rights).
+
+**Errors:** `InvalidCapability`, `AccessDenied`.
+
+---
+
+### `SYS_IOPORT_BIND` (35)
+
+Bind an IoPortRange capability to a thread, granting that thread permission to
+execute `in`/`out` instructions for the capability's port range via the TSS I/O
+Permission Bitmap (IOPB).
+
+**x86-64 only.** On RISC-V this syscall returns `NotSupported`.
+
+**Arguments:**
+
+| # | Name | Description |
+|---|---|---|
+| 0 | `thread_cap` | Thread capability (Control rights) |
+| 1 | `ioport_cap` | IoPortRange capability (Use rights) |
+
+**Return:** `rax`/`a0`: 0 on success; `SyscallError` on failure.
+
+Multiple bindings may be made to the same thread, each authorising a different port
+range. When `ioport_cap` is revoked, port access is removed from all threads it has
+been bound to; access is always revocable.
+
+**Capability requirements:** `thread_cap` (Control rights), `ioport_cap` (Use rights).
+
+**Errors:** `InvalidCapability`, `AccessDenied`, `UnknownSyscall` (RISC-V).
+
+---
+
 ## Thread Configuration Syscalls
 
-### `SYS_THREAD_CONFIGURE` (24)
+### `SYS_THREAD_CONFIGURE` (23)
 
 Bind a thread to an AddressSpace, CSpace, and IPC buffer. Must be called before
 `SYS_THREAD_START`. Replaces the previous bindings if called on a stopped thread.
@@ -886,278 +1133,6 @@ Used by init to populate new service CSpaces before starting their threads.
 **Errors:** `InvalidCapability`, `AccessDenied` (requested rights exceed source rights,
 or dest_slot is already occupied), `InvalidArgument` (dest_slot out of range or
 exceeds CSpace ceiling), `OutOfMemory`.
-
----
-
-## Memory Syscalls (continued)
-
-### `SYS_FRAME_SPLIT` (30)
-
-Split a frame capability at a page boundary, producing two frame capabilities that
-together cover the same physical range as the original. The original capability is
-consumed.
-
-**Arguments:**
-
-| # | Name | Description |
-|---|---|---|
-| 0 | `frame_cap` | Frame capability to split |
-| 1 | `offset_pages` | Page offset within the frame at which to split |
-
-**Return:**
-
-- `rax`/`a0`: capability descriptor for the lower portion (pages 0..offset_pages)
-  on success; `SyscallError` on failure
-- `rdx`/`a1`: capability descriptor for the upper portion (pages offset_pages..end)
-  on success
-
-The original `frame_cap` is consumed by this call. Both halves inherit the same
-rights as the original. The derivation tree treats both halves as children of the
-original's position.
-
-`offset_pages` must be in the range [1, frame_size_pages − 1].
-
-**Errors:** `InvalidCapability`, `InvalidArgument` (offset out of range or frame
-is already a single page), `OutOfMemory` (no free CSpace slot for second cap).
-
----
-
-### `SYS_MMIO_MAP` (34)
-
-Map an MMIO region capability into an address space. MMIO mappings use uncacheable
-page attributes (`PAT` write-combine or uncacheable on x86-64; device-ordered on
-RISC-V) rather than the default writeback caching.
-
-**Arguments:**
-
-| # | Name | Description |
-|---|---|---|
-| 0 | `aspace_cap` | Address space capability (Map rights) |
-| 1 | `mmio_cap` | MMIO region capability (Map rights) |
-| 2 | `virt` | Virtual address to map at (page-aligned) |
-| 3 | `flags` | Mapping flags: readable, writable (not executable; MMIO is never XP) |
-
-**Return:** `rax`/`a0`: 0 on success; `SyscallError` on failure.
-
-MMIO mappings are never executable. W^X enforcement still applies — the flags may
-not set both writable and executable. The kernel forces the uncacheable attribute
-regardless of the flags value; callers may not override this.
-
-**Capability requirements:** `aspace_cap` (Map), `mmio_cap` (Map).
-
-**Errors:** `InvalidCapability`, `AccessDenied`, `InvalidArgument` (unaligned
-`virt`, W^X violation, or non-canonical address), `AlignmentError`,
-`AddressSpaceFull`.
-
----
-
-### `SYS_DMA_GRANT` (36)
-
-Return the physical address of a frame for use as a DMA buffer. Currently implements
-the no-IOMMU fallback path only; full IOMMU support is deferred to a later work item.
-
-**Arguments:**
-
-| # | Name | Description |
-|---|---|---|
-| 0 | `frame_cap` | Frame capability (Map rights) to grant DMA access to |
-| 1 | `device_id` | Reserved; pass 0. Will be used for IOMMU domain lookup when an IOMMU driver is present. |
-| 2 | `flags` | Must include `FLAG_DMA_UNSAFE` (bit 2) to acknowledge no hardware isolation. |
-
-**Return:** `rax`/`a0`: physical base address of the frame on success;
-`SyscallError` on failure.
-
-**DMA safety:** Without an IOMMU, the granting device can access the entire physical
-frame without hardware-enforced isolation. The caller must set `FLAG_DMA_UNSAFE`
-(bit 2 of `flags`) to explicitly acknowledge this. If the flag is absent,
-`DmaUnsafe` is returned and no physical address is disclosed. This is a security
-declaration, not a bypass — callers accept responsibility for limiting the device's
-DMA scope through other means (e.g. only sharing frames owned by the driver process).
-
-**Deferred:** Full IOMMU support (VT-d programming, device domain isolation, grant
-revocation) is deferred until a real hardware driver requires it. See
-`TODO(W6-deferred)` comments in `kernel/src/syscall/hw.rs`.
-
-**Capability requirements:** `frame_cap` (Map rights).
-
-**Errors:** `InvalidCapability`, `DmaUnsafe` (FLAG_DMA_UNSAFE not set).
-
----
-
-## Interrupt Syscalls (continued)
-
-### `SYS_IRQ_REGISTER` (30)
-
-Register a signal to receive interrupt notifications for a hardware interrupt line.
-When the interrupt fires, the kernel delivers it by ORing a notification bit into
-the registered signal.
-
-**Arguments:**
-
-| # | Name | Description |
-|---|---|---|
-| 0 | `irq_cap` | Interrupt capability for the line to register |
-| 1 | `signal_cap` | Signal capability (Signal rights) to notify on interrupt |
-
-**Return:** `rax`/`a0`: 0 on success; `SyscallError` on failure.
-
-Only one signal may be registered per interrupt line at a time. A second call
-replaces the previous registration. The kernel masks the interrupt line before
-delivering the notification; the driver must call `SYS_IRQ_ACK` to re-enable it.
-
-**Capability requirements:** `irq_cap` (valid interrupt capability), `signal_cap`
-(Signal rights).
-
-**Errors:** `InvalidCapability`, `AccessDenied`.
-
----
-
-### `SYS_IOPORT_BIND` (35)
-
-Bind an IoPortRange capability to a thread, granting that thread permission to
-execute `in`/`out` instructions for the capability's port range via the TSS I/O
-Permission Bitmap (IOPB). Ports not authorised by a bound IoPortRange remain
-inaccessible from userspace.
-
-**x86-64 only.** On RISC-V this syscall returns `NotSupported` immediately;
-there is no port I/O concept.
-
-**Arguments:**
-
-| # | Name | Description |
-|---|---|---|
-| 0 | `thread_cap` | Thread capability (Control rights) |
-| 1 | `ioport_cap` | IoPortRange capability (Use rights) |
-
-**Return:** `rax`/`a0`: 0 on success; `SyscallError` on failure.
-
-The kernel updates the thread's IOPB in the TSS to permit access to the port range
-described by `ioport_cap`. Multiple bindings may be made to the same thread, each
-authorising a different port range.
-
-**Revocation:** When `ioport_cap` is revoked (or any ancestor in its derivation
-tree is revoked), port access is removed from all threads it has been bound to.
-The kernel tracks bindings and updates each affected thread's IOPB on revocation.
-Access is always revocable; there is no persistent, irrevocable grant.
-
-**Capability requirements:** `thread_cap` (Control rights), `ioport_cap` (Use rights).
-
-**Errors:** `InvalidCapability`, `AccessDenied`, `UnknownSyscall` (RISC-V).
-
----
-
-## Thread Syscalls (continued)
-
-### `SYS_THREAD_SET_PRIORITY` (37)
-
-Change a thread's scheduling priority after creation.
-
-**Arguments:**
-
-| # | Name | Description |
-|---|---|---|
-| 0 | `thread_cap` | Thread capability (Control rights) |
-| 1 | `priority` | New priority (1–`PRIORITY_MAX`) |
-| 2 | `sched_cap` | SchedControl capability (Elevate rights); use 0 if not needed |
-
-**Return:** `rax`/`a0`: 0 on success; `SyscallError` on failure.
-
-The priority range is divided into two tiers:
-
-- **Normal range (1–`SCHED_ELEVATED_MIN` − 1, i.e. 1–20):** `sched_cap` is ignored.
-  Any holder of the thread's Control capability may set priorities freely in this
-  range. `PRIORITY_DEFAULT = 10` is the baseline for newly created threads; processes
-  may lower or raise their own threads within this range without any special authority.
-
-- **Elevated range (`SCHED_ELEVATED_MIN`–`PRIORITY_MAX`, i.e. 21–30):** `sched_cap`
-  must be a valid SchedControl capability with Elevate rights. Without it, the call
-  returns `AccessDenied`.
-
-Priority 0 (idle) and priority 31 (reserved) cannot be requested. The change takes
-effect at the next scheduler invocation. If the thread is currently running, it
-continues to run until preempted or blocked; no immediate preemption is forced.
-
-**Capability requirements:** `thread_cap` (Control rights); `sched_cap` (Elevate
-rights) when `priority` ≥ `SCHED_ELEVATED_MIN`.
-
-**Errors:** `InvalidCapability`, `AccessDenied` (insufficient rights for the
-requested priority tier), `InvalidArgument` (priority 0, priority 31, or out
-of range).
-
----
-
-### `SYS_THREAD_SET_AFFINITY` (38)
-
-Set or change a thread's CPU affinity.
-
-**Arguments:**
-
-| # | Name | Description |
-|---|---|---|
-| 0 | `thread_cap` | Thread capability (Control rights) |
-| 1 | `cpu_id` | Target CPU ID, or `AFFINITY_ANY` (u32::MAX) to clear affinity |
-
-**Return:** `rax`/`a0`: 0 on success; `SyscallError` on failure.
-
-Setting a hard affinity (`cpu_id != AFFINITY_ANY`) prevents future migration by
-the load balancer. The thread is migrated to the target CPU at the next scheduler
-invocation if it is not already there. If `cpu_id` names an offline CPU, the call
-fails with `InvalidArgument`.
-
-**Capability requirement:** `thread_cap` must have Control rights.
-
-**Errors:** `InvalidCapability`, `AccessDenied`, `InvalidArgument` (CPU offline or
-out of range).
-
----
-
-### `SYS_THREAD_READ_REGS` (39)
-
-Read the full register state of a stopped thread into a caller-supplied buffer.
-
-**Arguments:**
-
-| # | Name | Description |
-|---|---|---|
-| 0 | `thread_cap` | Thread capability (Observe rights) |
-| 1 | `buf_ptr` | Pointer to buffer in caller's address space |
-| 2 | `buf_size` | Size of the buffer in bytes |
-
-**Return:** `rax`/`a0`: number of bytes written on success; `SyscallError` on failure.
-
-The thread must be in `Stopped` state. The buffer receives an architecture-defined
-register file structure (layout published in the kernel ABI headers). If `buf_size`
-is smaller than the required size, the call fails with `InvalidArgument`.
-
-**Capability requirement:** `thread_cap` must have Observe rights.
-
-**Errors:** `InvalidCapability`, `AccessDenied`, `InvalidState` (thread not stopped),
-`InvalidArgument` (buffer too small or invalid pointer).
-
----
-
-### `SYS_THREAD_WRITE_REGS` (40)
-
-Write register state into a stopped thread from a caller-supplied buffer.
-
-**Arguments:**
-
-| # | Name | Description |
-|---|---|---|
-| 0 | `thread_cap` | Thread capability (Control rights) |
-| 1 | `buf_ptr` | Pointer to register file buffer in caller's address space |
-| 2 | `buf_size` | Size of the buffer in bytes |
-
-**Return:** `rax`/`a0`: 0 on success; `SyscallError` on failure.
-
-The thread must be in `Stopped` state. The kernel validates that the register values
-are safe (e.g. the instruction pointer is in a canonical range; privilege bits cannot
-be set). Writing a malformed register file returns `InvalidArgument`.
-
-**Capability requirement:** `thread_cap` must have Control rights.
-
-**Errors:** `InvalidCapability`, `AccessDenied`, `InvalidState` (thread not stopped),
-`InvalidArgument` (buffer wrong size, invalid pointer, or illegal register values).
 
 ---
 
@@ -1396,3 +1371,9 @@ all its descendants (including C2) but leaves C and any other children of C inta
 
 `MSG_DATA_WORDS_MAX` is fixed at implementation time. A value of 4–8 words balances
 message capacity against syscall overhead. The exact value becomes stable ABI.
+
+---
+
+## Summarized By
+
+None

@@ -113,9 +113,9 @@ pub unsafe fn unregister(irq: u32)
 
 /// Clear all routing entries that point to `signal` (called when a Signal
 /// object is being freed). Prevents use-after-free if a hardware IRQ fires
-/// after the SignalState has been deallocated.
+/// after the `SignalState` has been deallocated.
 ///
-/// O(MAX_IRQ) scan; acceptable since signal deallocation is infrequent.
+/// O(`MAX_IRQ`) scan; acceptable since signal deallocation is infrequent.
 ///
 /// # Safety
 /// - `signal` must be a valid (still live) `SignalState` pointer.
@@ -123,14 +123,18 @@ pub unsafe fn unregister(irq: u32)
 #[cfg(not(test))]
 pub unsafe fn unregister_signal(signal: *mut SignalState)
 {
-    for i in 0..MAX_IRQ
-    {
-        // SAFETY: interrupts are disabled; single-CPU; index is in bounds.
-        unsafe {
-            if core::ptr::eq(IRQ_TABLE[i].signal, signal)
+    // SAFETY: interrupts are disabled; single-CPU; index is in bounds.
+    // static_mut_refs: single-CPU, interrupts disabled — exclusive access is guaranteed.
+    #[allow(static_mut_refs)]
+    unsafe {
+        for (i, entry) in IRQ_TABLE.iter_mut().enumerate()
+        {
+            if core::ptr::eq(entry.signal, signal)
             {
-                IRQ_TABLE[i].signal = core::ptr::null_mut();
+                entry.signal = core::ptr::null_mut();
                 // Mask the IRQ line since there's no longer a handler.
+                // i is always < MAX_IRQ (= 22) which fits u32 with margin.
+                #[allow(clippy::cast_possible_truncation)]
                 crate::arch::current::interrupts::mask(i as u32);
             }
         }

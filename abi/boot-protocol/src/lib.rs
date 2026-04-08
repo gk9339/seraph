@@ -139,7 +139,7 @@ pub struct InitSegment
     pub phys_addr: u64,
     /// ELF virtual address this segment is mapped at.
     pub virt_addr: u64,
-    /// Size of the segment in memory (p_memsz; may exceed file data).
+    /// Size of the segment in memory (`p_memsz`; may exceed file data).
     pub size: u64,
     /// Page permissions for this segment.
     pub flags: SegmentFlags,
@@ -203,6 +203,7 @@ pub struct FramebufferInfo
 impl FramebufferInfo
 {
     /// Return a zeroed `FramebufferInfo` indicating no framebuffer is present.
+    #[must_use]
     pub const fn empty() -> Self
     {
         Self {
@@ -380,7 +381,7 @@ pub struct BootInfo
     /// Hardware identifier of the bootstrap processor (BSP).
     ///
     /// On x86-64: APIC ID of the BSP (read from CPUID.01H:EBX[31:24]).
-    /// On RISC-V: hart ID of the booting hart (from EFI_RISCV_BOOT_PROTOCOL).
+    /// On RISC-V: hart ID of the booting hart (from `EFI_RISCV_BOOT_PROTOCOL`).
     pub bsp_id: u32,
 
     /// Hardware identifiers for all CPUs, indexed by logical CPU index.
@@ -394,7 +395,7 @@ pub struct BootInfo
     /// Physical address of the AP startup trampoline page (x86-64 only).
     ///
     /// On x86-64: a 4 KiB frame below 1 MiB reserved by the bootloader before
-    /// ExitBootServices for use as the SIPI real-mode entry point. The kernel
+    /// `ExitBootServices` for use as the SIPI real-mode entry point. The kernel
     /// writes AP startup code here before sending INIT/SIPI IPIs.
     ///
     /// On RISC-V (or when no trampoline is needed): zero.

@@ -25,7 +25,11 @@
 //! - To handle a new device IRQ: call `register_handler(vec, handler)` and
 //!   call `unmask(vec)`. Full routing is deferred to a later phase.
 //! - To migrate to x2APIC: replace `apic_read`/`apic_write` with MSR accesses
-//!   (IA32_X2APIC_*) and update the SVR/LVT offsets.
+//!   (`IA32_X2APIC_`*) and update the SVR/LVT offsets.
+
+// cast_possible_truncation: u64→usize/u8 APIC address arithmetic; bounded by APIC layout.
+// cast_lossless: u8→u32 vector casts are always widening.
+#![allow(clippy::cast_possible_truncation, clippy::cast_lossless)]
 
 #[cfg(not(test))]
 extern crate alloc;
@@ -170,13 +174,14 @@ pub unsafe fn init() {}
 // ── APIC ID and ICR ───────────────────────────────────────────────────────────
 
 /// Local APIC ID register offset.
+#[allow(dead_code)] // Used by lapic_id(), which is part of the arch interface for future SMP use.
 const APIC_ID: usize = 0x20;
 /// Interrupt Command Register low word (bits 31:0).
 const APIC_ICR_LOW: usize = 0x300;
 /// Interrupt Command Register high word (bits 63:32).
 const APIC_ICR_HIGH: usize = 0x310;
 
-/// ICR delivery pending bit (bit 12 of ICR_LOW).
+/// ICR delivery pending bit (bit 12 of `ICR_LOW`).
 const ICR_PENDING: u32 = 1 << 12;
 /// ICR value for INIT IPI: level-assert, trigger=level, delivery=INIT.
 const ICR_INIT_ASSERT: u32 = 0x0000_C500;
@@ -186,6 +191,7 @@ const ICR_INIT_DEASSERT: u32 = 0x0000_8500;
 const ICR_SIPI_BASE: u32 = 0x0000_4600;
 
 /// Read this CPU's local APIC ID (bits [31:24] of the APIC ID register).
+#[allow(dead_code)] // Part of the arch interface; will be used by future SMP topology code.
 #[cfg(not(test))]
 pub fn lapic_id() -> u32
 {

@@ -65,3 +65,9 @@ Init derives and transfers these to services using the "derive twice" pattern
 | [docs/boot-protocol.md](../docs/boot-protocol.md) | InitImage, boot modules, initial CSpace |
 | [docs/capability-model.md](../docs/capability-model.md) | Initial capability distribution |
 | [docs/coding-standards.md](../docs/coding-standards.md) | Formatting, naming, safety rules |
+
+---
+
+## Summarized By
+
+None

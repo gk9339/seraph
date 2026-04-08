@@ -9,3 +9,6 @@ test = false
 doctest = false
 
 [dependencies]
+
+[lints]
+workspace = true

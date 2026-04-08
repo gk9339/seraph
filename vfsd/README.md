@@ -13,3 +13,9 @@ not touch hardware directly — all storage access is mediated through driver IP
 Per-filesystem implementations (FAT, ext4, tmpfs, etc.) live in `fs/` as separate
 binaries. vfsd launches and manages them, routing namespace operations to the
 correct driver. This keeps vfsd itself small and filesystem implementations isolated.
+
+---
+
+## Summarized By
+
+None

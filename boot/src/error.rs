@@ -52,10 +52,10 @@ impl BootError
     {
         match self
         {
-            BootError::ProtocolNotFound(s) => Some(s),
-            BootError::FileNotFound(s) => Some(s),
-            BootError::InvalidElf(s) => Some(s),
-            BootError::InvalidConfig(s) => Some(s),
+            BootError::ProtocolNotFound(s)
+            | BootError::FileNotFound(s)
+            | BootError::InvalidElf(s)
+            | BootError::InvalidConfig(s) => Some(s),
             _ => None,
         }
     }
@@ -189,7 +189,9 @@ pub fn fatal_error(err: &BootError) -> !
         crate::console::console_write_str("\r\n");
     }
     loop
-    {} // halt; no recovery from fatal boot error
+    {
+        core::hint::spin_loop(); // halt; no recovery from fatal boot error
+    }
 }
 
 #[cfg(not(test))]
@@ -216,5 +218,7 @@ fn panic(info: &PanicInfo) -> !
         crate::console::console_write_str("\r\n");
     }
     loop
-    {} // halt; panics are unrecoverable in the bootloader
+    {
+        core::hint::spin_loop(); // halt; panics are unrecoverable in the bootloader
+    }
 }

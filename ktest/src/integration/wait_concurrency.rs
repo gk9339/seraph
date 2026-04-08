@@ -9,7 +9,7 @@
 //! queue (token 2) — and verifies that the correct token is returned under
 //! three distinct conditions:
 //!
-//!   A. Queue has a pre-posted entry → wait_set_wait returns immediately with token 2.
+//!   A. Queue has a pre-posted entry → `wait_set_wait` returns immediately with token 2.
 //!   B. A child thread fires the signal while we block → returns token 1.
 //!   C. Signal removed; queue posted again → returns token 2 (only member remaining).
 //!
@@ -72,7 +72,7 @@ pub fn run(ctx: &TestContext) -> TestResult
         th,
         sender_entry as *const () as u64,
         stack_top,
-        child_sig as u64,
+        u64::from(child_sig),
     )
     .map_err(|_| "integration::wait_concurrency: thread_configure failed")?;
     thread_start(th).map_err(|_| "integration::wait_concurrency: thread_start failed")?;
@@ -120,6 +120,8 @@ pub fn run(ctx: &TestContext) -> TestResult
     Ok(())
 }
 
+// cast_possible_truncation: sig_slot is a kernel cap slot index, guaranteed < 2^32.
+#[allow(clippy::cast_possible_truncation)]
 fn sender_entry(sig_slot: u64) -> !
 {
     signal_send(sig_slot as u32, 0xBEEF).ok();

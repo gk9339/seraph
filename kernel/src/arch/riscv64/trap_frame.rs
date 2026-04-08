@@ -68,7 +68,7 @@ pub struct TrapFrame
 
     // ── Control/status registers ─────────────────────────────────────────────
     /// Supervisor exception PC — user-mode program counter at trap entry.
-    /// Set to entry_point before `return_to_user`; advanced past ecall on return.
+    /// Set to `entry_point` before `return_to_user`; advanced past ecall on return.
     pub sepc: u64,
     /// Supervisor cause register (scause at trap entry).
     pub scause: u64,
@@ -89,7 +89,9 @@ impl TrapFrame
     /// Write the primary syscall return value (a0).
     pub fn set_return(&mut self, val: i64)
     {
-        self.a0 = val as u64;
+        // cast_sign_loss: intentional — negative error codes are sign-extended
+        // in the i64 return value and must be reinterpreted as u64 by the caller.
+        self.a0 = val.cast_unsigned();
     }
 
     /// Read syscall argument `n` (0-indexed).

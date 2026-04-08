@@ -15,6 +15,10 @@
 //! - Bits \[29:21\] → PD index    (512 entries × 2 MiB each)
 //! - Bits \[20:12\] → PT index    (512 entries × 4 KiB each)
 
+// similar_names: pml4/pdpt/pd/pt and repeated e shadowing are intentional page-table idioms.
+// cast_possible_truncation: u64→u32 EFER register splits; values are bounded by shift width.
+#![allow(clippy::similar_names, clippy::cast_possible_truncation)]
+
 use crate::mm::paging::{PageFlags, PagingError, PoolState};
 
 // ── PTE bit constants ─────────────────────────────────────────────────────────
@@ -30,7 +34,7 @@ const PWT: u64 = 1 << 3;
 const PCD: u64 = 1 << 4;
 /// Page Size (PS) — set in a PDE/PDPTE to make it a large-page leaf.
 const LARGE_PAGE: u64 = 1 << 7;
-/// No-Execute — blocks instruction fetch; requires IA32_EFER.NXE = 1.
+/// No-Execute — blocks instruction fetch; requires `IA32_EFER.NXE` = 1.
 const NO_EXECUTE: u64 = 1 << 63;
 /// Mask extracting the physical page number from bits \[51:12\].
 const PHYS_MASK: u64 = 0x000F_FFFF_FFFF_F000;
@@ -45,6 +49,9 @@ const PHYS_MASK: u64 = 0x000F_FFFF_FFFF_F000;
 #[repr(transparent)]
 pub struct PageTableEntry(pub u64);
 
+// verbose_bit_mask: `phys & 0xFFF == 0` is the idiomatic alignment assertion form;
+// the trailing_zeros() alternative is less readable for power-of-2 alignment checks.
+#[allow(clippy::verbose_bit_mask)]
 impl PageTableEntry
 {
     /// Construct a non-leaf (table pointer) entry pointing to `phys`.
@@ -266,7 +273,7 @@ pub unsafe fn activate(root_phys: u64)
     }
 }
 
-/// Enable No-Execute by setting IA32_EFER.NXE (bit 11) via RDMSR/WRMSR.
+/// Enable No-Execute by setting `IA32_EFER.NXE` (bit 11) via RDMSR/WRMSR.
 ///
 /// Must be called before activating page tables that use the NX bit,
 /// because bit 63 of a PTE is "reserved" when NXE = 0.
@@ -277,7 +284,7 @@ pub unsafe fn activate(root_phys: u64)
 #[cfg(not(test))]
 pub unsafe fn enable_nx()
 {
-    /// IA32_EFER MSR address.
+    /// `IA32_EFER` MSR address.
     const IA32_EFER: u32 = 0xC000_0080;
     /// No-Execute Enable bit.
     const NXE: u64 = 1 << 11;
@@ -293,7 +300,7 @@ pub unsafe fn enable_nx()
             out("edx") hi,
             options(nostack, nomem),
         );
-        let efer = (((hi as u64) << 32) | lo as u64) | NXE;
+        let efer = (u64::from(hi) << 32 | u64::from(lo)) | NXE;
         core::arch::asm!(
             "wrmsr",
             in("ecx") IA32_EFER,
@@ -361,6 +368,9 @@ pub unsafe fn map_user_page(
 {
     use crate::mm::paging::phys_to_virt;
 
+    // Set USER bit (bit 2) so ring-3 code can access the page.
+    const USER: u64 = 1 << 2;
+
     // SAFETY: root_virt is a valid 4 KiB page table frame.
     let pml4 = unsafe { table_at(root_virt) };
 
@@ -373,8 +383,6 @@ pub unsafe fn map_user_page(
     let pt_pa = user_walk_or_alloc(&mut pd[pd_index(virt)], allocator)?;
     let pt = unsafe { table_at(phys_to_virt(pt_pa)) };
 
-    // Set USER bit (bit 2) so ring-3 code can access the page.
-    const USER: u64 = 1 << 2;
     let mut pte = PageTableEntry::new_page(phys, flags);
     pte.0 |= USER;
     pt[pt_index(virt)] = pte;
@@ -385,7 +393,7 @@ pub unsafe fn map_user_page(
 /// Walk an existing page table entry or allocate a new child frame from the
 /// buddy allocator.
 ///
-/// Used by `map_user_page` in place of `walk_or_alloc` (which uses PoolState).
+/// Used by `map_user_page` in place of `walk_or_alloc` (which uses `PoolState`).
 #[cfg(not(test))]
 fn user_walk_or_alloc(
     entry: &mut PageTableEntry,
@@ -394,6 +402,9 @@ fn user_walk_or_alloc(
 {
     use crate::mm::paging::phys_to_virt;
     use crate::mm::PAGE_SIZE;
+
+    // Set USER bit so lower-level tables are accessible from ring 3.
+    const USER: u64 = 1 << 2;
 
     if entry.is_present()
     {
@@ -409,8 +420,6 @@ fn user_walk_or_alloc(
         core::ptr::write_bytes(frame_va as *mut u8, 0, PAGE_SIZE);
     }
 
-    // Set USER bit so lower-level tables are accessible from ring 3.
-    const USER: u64 = 1 << 2;
     let mut table_pte = PageTableEntry::new_table(frame_pa);
     table_pte.0 |= USER;
     *entry = table_pte;
@@ -505,6 +514,9 @@ pub unsafe fn protect_user_page(
 {
     use crate::mm::paging::{phys_to_virt, PagingError};
 
+    // Set USER bit (bit 2) to preserve user accessibility.
+    const USER: u64 = 1 << 2;
+
     let pml4 = unsafe { table_at(root_virt) };
     let e = pml4[pml4_index(virt)];
     if !e.is_present()
@@ -534,8 +546,6 @@ pub unsafe fn protect_user_page(
     }
 
     let phys = leaf.phys_addr();
-    // Set USER bit (bit 2) to preserve user accessibility.
-    const USER: u64 = 1 << 2;
     let mut new_pte = PageTableEntry::new_page(phys, flags);
     new_pte.0 |= USER;
     *leaf = new_pte;

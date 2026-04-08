@@ -45,7 +45,7 @@ pub struct SignalState
     pub waiter: *mut ThreadControlBlock,
     /// Opaque pointer to the `WaitSetState` this signal is registered with,
     /// or null if not in any wait set. Type-erased to avoid a circular import.
-    /// Cast to `*mut WaitSetState` only inside wait_set.rs.
+    /// Cast to `*mut WaitSetState` only inside `wait_set.rs`.
     pub wait_set: *mut u8,
     /// Index of this signal's entry in `WaitSetState::members`.
     pub wait_set_member_idx: u8,
@@ -88,7 +88,19 @@ pub unsafe fn signal_send(sig: *mut SignalState, bits: u64) -> Option<*mut Threa
     let sig = unsafe { &mut *sig };
     // If a waiter is present, atomically swap the bits out so we can deliver
     // the exact value to the waiter rather than leaving it to read-and-clear.
-    if !sig.waiter.is_null()
+    if sig.waiter.is_null()
+    {
+        sig.bits.fetch_or(bits, Ordering::Release);
+        // Notify any registered wait set that this signal now has bits pending.
+        if !sig.wait_set.is_null()
+        {
+            // SAFETY: wait_set is a valid *mut WaitSetState registered by
+            // sys_wait_set_add and cleared on removal or wait_set_drop.
+            unsafe { crate::ipc::wait_set::waitset_notify(sig.wait_set, sig.wait_set_member_idx) };
+        }
+        None
+    }
+    else
     {
         // OR our bits in, then swap the whole bitmask to zero so the waiter
         // gets exactly what was pending (including bits set before this call).
@@ -105,18 +117,6 @@ pub unsafe fn signal_send(sig: *mut SignalState, bits: u64) -> Option<*mut Threa
             (*waiter).blocked_on_object = core::ptr::null_mut();
         }
         Some(waiter)
-    }
-    else
-    {
-        sig.bits.fetch_or(bits, Ordering::Release);
-        // Notify any registered wait set that this signal now has bits pending.
-        if !sig.wait_set.is_null()
-        {
-            // SAFETY: wait_set is a valid *mut WaitSetState registered by
-            // sys_wait_set_add and cleared on removal or wait_set_drop.
-            unsafe { crate::ipc::wait_set::waitset_notify(sig.wait_set, sig.wait_set_member_idx) };
-        }
-        None
     }
 }
 
@@ -147,7 +147,7 @@ pub unsafe fn signal_wait(sig: *mut SignalState, caller: *mut ThreadControlBlock
     unsafe {
         (*caller).state = crate::sched::thread::ThreadState::Blocked;
         (*caller).ipc_state = IpcThreadState::BlockedOnSignal;
-        (*caller).blocked_on_object = sig as *mut SignalState as *mut u8;
+        (*caller).blocked_on_object = core::ptr::addr_of_mut!(*sig).cast::<u8>();
     }
     Err(())
 }

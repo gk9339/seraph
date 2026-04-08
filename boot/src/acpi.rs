@@ -118,18 +118,21 @@ pub(crate) unsafe fn phys_slice<'a>(phys: u64, len: usize) -> &'a [u8]
 /// Non-fatal: malformed tables log a warning and yield partial results.
 ///
 /// Resources extracted:
-/// - MADT: local APIC MMIO base, I/O APIC MmioRanges, interrupt ISOs (IrqLine)
-/// - MCFG: PCI ECAM windows (PciEcam)
-/// - RSDP region: PlatformTable
-/// - x86-64 legacy PCI I/O ports 0xCF8–0xCFF (IoPortRange, only on x86_64)
+/// - MADT: local APIC MMIO base, I/O APIC [`MmioRanges`], interrupt ISOs ([`IrqLine`])
+/// - MCFG: PCI ECAM windows ([`PciEcam`])
+/// - RSDP region: [`PlatformTable`]
+/// - `x86_64` legacy PCI I/O ports 0xCF8–0xCFF ([`IoPortRange`], only on `x86_64`)
 ///
 /// # Safety
 /// `rsdp_addr` must be a physical address of a valid, identity-mapped ACPI RSDP.
+// The function walks RSDP → XSDT → subtables and dispatches to per-table helpers;
+// splitting it further would scatter context across many small private functions.
+#[allow(clippy::too_many_lines)]
 pub unsafe fn parse_acpi_resources(rsdp_addr: u64, out: &mut [PlatformResource]) -> usize
 {
     let mut count = 0;
 
-    /// Push a PlatformResource into `out` if space remains.
+    /// Push a [`PlatformResource`] into `out` if space remains.
     macro_rules! push {
         ($res:expr) => {
             if count < out.len()
@@ -340,7 +343,7 @@ pub unsafe fn parse_cpu_topology(rsdp_addr: u64, bsp_id: u32) -> (u32, u32, [u32
 /// Walk MADT entries to collect CPU hardware IDs (LAPIC or RINTC).
 ///
 /// Returns `(cpu_count, bsp_id, cpu_ids)`. The BSP is placed at index 0,
-/// APs fill indices 1..cpu_count in MADT order.
+/// APs fill indices `1..cpu_count` in MADT order.
 fn parse_madt_topology(table: &[u8], bsp_id: u32, mut cpu_ids: [u32; 64]) -> (u32, u32, [u32; 64])
 {
     // cpu_count starts at 0; BSP is inserted at index 0, APs appended after.
@@ -360,43 +363,33 @@ fn parse_madt_topology(table: &[u8], bsp_id: u32, mut cpu_ids: [u32; 64]) -> (u3
 
         match entry_type
         {
-            MADT_TYPE_LAPIC =>
+            MADT_TYPE_LAPIC if entry_len >= 8 =>
             {
                 // Type 0 (Processor Local APIC), length 8:
                 //   off+0: type  off+1: length  off+2: acpi_proc_id  off+3: apic_id
                 //   off+4: flags(u32)  bit0=enabled  bit1=online-capable
-                if entry_len >= 8
+                let apic_id = u32::from(read_u8(table, off + 3));
+                let flags = read_u32(table, off + 4);
+                if ((flags & 0x1 != 0) || (flags & 0x2 != 0)) && all_count < 64
                 {
-                    let apic_id = read_u8(table, off + 3) as u32;
-                    let flags = read_u32(table, off + 4);
-                    if (flags & 0x1 != 0) || (flags & 0x2 != 0)
-                    {
-                        if all_count < 64
-                        {
-                            all_ids[all_count] = apic_id;
-                            all_count += 1;
-                        }
-                    }
+                    all_ids[all_count] = apic_id;
+                    all_count += 1;
                 }
             }
-            MADT_TYPE_RINTC =>
+            MADT_TYPE_RINTC if entry_len >= 20 =>
             {
                 // Type 0x18 (RISC-V INTC / RINTC), length 36:
                 //   off+0: type  off+1: length  off+2: version  off+3: reserved
                 //   off+4: flags(u32)  bit0=enabled
                 //   off+8: hart_id(u64)  off+16: acpi_proc_uid(u32)  …
-                if entry_len >= 20
+                let flags = read_u32(table, off + 4);
+                // hart_id from MADT RINTC is u64 but only the lower 32 bits are used.
+                #[allow(clippy::cast_possible_truncation)]
+                let hart_id = read_u64(table, off + 8) as u32;
+                if flags & 0x1 != 0 && all_count < 64
                 {
-                    let flags = read_u32(table, off + 4);
-                    let hart_id = read_u64(table, off + 8) as u32;
-                    if flags & 0x1 != 0
-                    {
-                        if all_count < 64
-                        {
-                            all_ids[all_count] = hart_id;
-                            all_count += 1;
-                        }
-                    }
+                    all_ids[all_count] = hart_id;
+                    all_count += 1;
                 }
             }
             _ =>
@@ -415,16 +408,18 @@ fn parse_madt_topology(table: &[u8], bsp_id: u32, mut cpu_ids: [u32; 64]) -> (u3
     // Place BSP at index 0, APs at subsequent indices.
     let mut logical_idx: usize = 1;
     cpu_ids[0] = bsp_id;
-    for i in 0..all_count
+    for &id in &all_ids[..all_count]
     {
-        if all_ids[i] != bsp_id && logical_idx < 64
+        if id != bsp_id && logical_idx < 64
         {
-            cpu_ids[logical_idx] = all_ids[i];
+            cpu_ids[logical_idx] = id;
             logical_idx += 1;
         }
     }
 
     // If BSP was not found in the MADT, count still includes it at [0].
+    // all_count is at most 64, so the cast to u32 is always exact.
+    #[allow(clippy::cast_possible_truncation)]
     let cpu_count = (all_count as u32).min(64);
     (cpu_count, bsp_id, cpu_ids)
 }
@@ -434,9 +429,9 @@ fn parse_madt_topology(table: &[u8], bsp_id: u32, mut cpu_ids: [u32; 64]) -> (u3
 /// Parse a MADT table and append resources to `out[*count..]`.
 ///
 /// Adds:
-/// - Local APIC MmioRange (base from MADT header, size=4096)
-/// - I/O APIC MmioRanges (one per type-1 entry)
-/// - IRQ source overrides as IrqLine entries (one per type-2 entry)
+/// - Local APIC `MmioRange` (base from MADT header, size=4096)
+/// - I/O APIC `MmioRanges` (one per type-1 entry)
+/// - IRQ source overrides as `IrqLine` entries (one per type-2 entry)
 fn parse_madt(table: &[u8], _table_addr: u64, count: &mut usize, out: &mut [PlatformResource])
 {
     macro_rules! push {
@@ -450,7 +445,7 @@ fn parse_madt(table: &[u8], _table_addr: u64, count: &mut usize, out: &mut [Plat
     }
 
     // Local APIC base address (u32 at offset 36).
-    let lapic_base = read_u32(table, MADT_OFF_LAPIC_BASE) as u64;
+    let lapic_base = u64::from(read_u32(table, MADT_OFF_LAPIC_BASE));
     if lapic_base != 0
     {
         push!(PlatformResource {
@@ -475,51 +470,44 @@ fn parse_madt(table: &[u8], _table_addr: u64, count: &mut usize, out: &mut [Plat
 
         match entry_type
         {
-            MADT_TYPE_IOAPIC =>
+            MADT_TYPE_IOAPIC if entry_len >= 12 =>
             {
                 // Type 1 (I/O APIC), total length = 12:
                 //   off+0: type  off+1: length  off+2: io_apic_id  off+3: reserved
                 //   off+4: io_apic_address(u32)  off+8: global_system_interrupt_base(u32)
-                if entry_len >= 12
+                let io_apic_id = u64::from(read_u8(table, off + 2));
+                let io_apic_addr = u64::from(read_u32(table, off + 4));
+                if io_apic_addr != 0
                 {
-                    let io_apic_id = read_u8(table, off + 2) as u64;
-                    let io_apic_addr = read_u32(table, off + 4) as u64;
-                    if io_apic_addr != 0
-                    {
-                        push!(PlatformResource {
-                            resource_type: ResourceType::MmioRange,
-                            flags: 0,
-                            base: io_apic_addr,
-                            size: 4096,
-                            id: io_apic_id,
-                        });
-                    }
+                    push!(PlatformResource {
+                        resource_type: ResourceType::MmioRange,
+                        flags: 0,
+                        base: io_apic_addr,
+                        size: 4096,
+                        id: io_apic_id,
+                    });
                 }
             }
-            MADT_TYPE_ISO =>
+            MADT_TYPE_ISO if entry_len >= 10 =>
             {
                 // Type 2 (Interrupt Source Override), total length = 10:
                 //   off+0: type  off+1: length  off+2: bus  off+3: source
                 //   off+4: global_system_interrupt(u32)  off+8: flags(u16)
-                if entry_len >= 10
-                {
-                    let gsi = read_u32(table, off + 4) as u64;
-                    let iso_flags = read_u16(table, off + 8);
-                    // Map ACPI trigger/polarity flags to boot-protocol IrqLine flags:
-                    //   trigger bits [3:2]: 3=level→bit0=0, else edge→bit0=1
-                    //   polarity bits [1:0]: 3=active-low→bit1=1, else active-high→bit1=0
-                    let trigger = (iso_flags >> 2) & 3;
-                    let polarity = iso_flags & 3;
-                    let resource_flags = if trigger == 3 { 0u32 } else { 1u32 }
-                        | if polarity == 3 { 2u32 } else { 0u32 };
-                    push!(PlatformResource {
-                        resource_type: ResourceType::IrqLine,
-                        flags: resource_flags,
-                        base: 0,
-                        size: 0,
-                        id: gsi,
-                    });
-                }
+                let gsi = u64::from(read_u32(table, off + 4));
+                let iso_flags = read_u16(table, off + 8);
+                // Map ACPI trigger/polarity flags to boot-protocol IrqLine flags:
+                //   trigger bits [3:2]: 3=level→bit0=0, else edge→bit0=1
+                //   polarity bits [1:0]: 3=active-low→bit1=1, else active-high→bit1=0
+                let trigger = (iso_flags >> 2) & 3;
+                let polarity = iso_flags & 3;
+                let resource_flags = u32::from(trigger != 3) | (u32::from(polarity == 3) << 1);
+                push!(PlatformResource {
+                    resource_type: ResourceType::IrqLine,
+                    flags: resource_flags,
+                    base: 0,
+                    size: 0,
+                    id: gsi,
+                });
             }
             _ =>
             {} // Skip unknown MADT entry types.
@@ -529,7 +517,7 @@ fn parse_madt(table: &[u8], _table_addr: u64, count: &mut usize, out: &mut [Plat
     }
 }
 
-/// Parse a MCFG table and append PciEcam entries to `out[*count..]`.
+/// Parse a MCFG table and append `PciEcam` entries to `out[*count..]`.
 ///
 /// Each 16-byte MCFG entry maps a PCI segment group to an ECAM window.
 fn parse_mcfg(table: &[u8], count: &mut usize, out: &mut [PlatformResource])
@@ -551,16 +539,16 @@ fn parse_mcfg(table: &[u8], count: &mut usize, out: &mut [PlatformResource])
         //   0: base_address(u64)  8: pci_segment_group(u16)
         //  10: start_bus(u8)     11: end_bus(u8)    12-15: reserved
         let base = read_u64(table, off);
-        let segment = read_u16(table, off + 8) as u64;
+        let segment = u64::from(read_u16(table, off + 8));
         let start_bus = read_u8(table, off + 10);
         let end_bus = read_u8(table, off + 11);
 
         if base != 0
         {
-            let num_buses = (end_bus as u64).saturating_sub(start_bus as u64) + 1;
+            let num_buses = u64::from(end_bus).saturating_sub(u64::from(start_bus)) + 1;
             // Each bus has 256 devices × 4096 bytes = 1 MiB per bus.
             let size = num_buses * 256 * 4096;
-            let flags = (start_bus as u32) | ((end_bus as u32) << 8);
+            let flags = u32::from(start_bus) | (u32::from(end_bus) << 8);
             push!(PlatformResource {
                 resource_type: ResourceType::PciEcam,
                 flags,

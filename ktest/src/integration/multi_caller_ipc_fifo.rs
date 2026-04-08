@@ -50,7 +50,7 @@ pub fn run(ctx: &TestContext) -> TestResult
     let done_a =
         cap_copy(done, cs_a, 1 << 7).map_err(|_| "multi_caller_ipc_fifo: done_a failed")?;
     // arg: ep_slot | (done_slot << 16) | (label << 32)
-    let arg_a = (ep_a as u64) | ((done_a as u64) << 16) | (1u64 << 32);
+    let arg_a = u64::from(ep_a) | (u64::from(done_a) << 16) | (1u64 << 32);
     let th_a = cap_create_thread(ctx.aspace_cap, cs_a)
         .map_err(|_| "multi_caller_ipc_fifo: th_a failed")?;
     let stack_a = ChildStack::top(core::ptr::addr_of!(STACK_A));
@@ -66,7 +66,7 @@ pub fn run(ctx: &TestContext) -> TestResult
         cap_copy(ep, cs_b, RIGHTS_SEND_GRANT).map_err(|_| "multi_caller_ipc_fifo: ep_b failed")?;
     let done_b =
         cap_copy(done, cs_b, 1 << 7).map_err(|_| "multi_caller_ipc_fifo: done_b failed")?;
-    let arg_b = (ep_b as u64) | ((done_b as u64) << 16) | (2u64 << 32);
+    let arg_b = u64::from(ep_b) | (u64::from(done_b) << 16) | (2u64 << 32);
     let th_b = cap_create_thread(ctx.aspace_cap, cs_b)
         .map_err(|_| "multi_caller_ipc_fifo: th_b failed")?;
     let stack_b = ChildStack::top(core::ptr::addr_of!(STACK_B));
@@ -81,7 +81,7 @@ pub fn run(ctx: &TestContext) -> TestResult
         cap_copy(ep, cs_c, RIGHTS_SEND_GRANT).map_err(|_| "multi_caller_ipc_fifo: ep_c failed")?;
     let done_c =
         cap_copy(done, cs_c, 1 << 7).map_err(|_| "multi_caller_ipc_fifo: done_c failed")?;
-    let arg_c = (ep_c as u64) | ((done_c as u64) << 16) | (3u64 << 32);
+    let arg_c = u64::from(ep_c) | (u64::from(done_c) << 16) | (3u64 << 32);
     let th_c = cap_create_thread(ctx.aspace_cap, cs_c)
         .map_err(|_| "multi_caller_ipc_fifo: th_c failed")?;
     let stack_c = ChildStack::top(core::ptr::addr_of!(STACK_C));
@@ -145,24 +145,20 @@ pub fn run(ctx: &TestContext) -> TestResult
 /// Caller entry: calls the endpoint immediately with its label, then ORs its
 /// bit into the `done` signal when the reply arrives.
 ///
-/// `arg`: bits[15:0] = ep_slot, bits[31:16] = done_slot, bits[47:32] = label
-/// (all in the child's own CSpace).
+/// `arg`: bits[15:0] = `ep_slot`, bits[31:16] = `done_slot`, bits[47:32] = label
+/// (all in the child's own `CSpace`).
 fn caller_entry(arg: u64) -> !
 {
     let ep_slot = (arg & 0xFFFF) as u32;
     let done_slot = ((arg >> 16) & 0xFFFF) as u32;
     let label = (arg >> 32) & 0xFFFF;
 
-    match ipc_call(ep_slot, label, 0, &[])
+    if ipc_call(ep_slot, label, 0, &[]).is_ok()
     {
-        Ok(_) =>
-        {
-            // OR the bit for this caller's label (label 1→bit0, 2→bit1, 3→bit2).
-            let bit = 1u64 << (label - 1);
-            signal_send(done_slot, bit).ok();
-        }
-        Err(_) =>
-        { /* no bit set — server detects the missing bit */ }
+        // OR the bit for this caller's label (label 1→bit0, 2→bit1, 3→bit2).
+        let bit = 1u64 << (label - 1);
+        signal_send(done_slot, bit).ok();
     }
+    /* else: no bit set — server detects the missing bit */
     thread_exit()
 }

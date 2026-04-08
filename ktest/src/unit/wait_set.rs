@@ -108,7 +108,7 @@ pub fn blocking_wait(ctx: &TestContext) -> TestResult
         th,
         sender_entry as *const () as u64,
         stack_top,
-        child_sig as u64,
+        u64::from(child_sig),
     )
     .map_err(|_| "thread_configure for blocking test failed")?;
     thread_start(th).map_err(|_| "thread_start for blocking test failed")?;
@@ -171,6 +171,8 @@ pub fn remove(_ctx: &TestContext) -> TestResult
 
 // ── Child thread entry ────────────────────────────────────────────────────────
 
+// cast_possible_truncation: sig_slot is a kernel cap slot index, guaranteed < 2^32.
+#[allow(clippy::cast_possible_truncation)]
 fn sender_entry(sig_slot: u64) -> !
 {
     signal_send(sig_slot as u32, 0xBEEF).ok();

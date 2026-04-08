@@ -3,7 +3,7 @@
 
 // kernel/src/arch/riscv64/ap_trampoline.rs
 
-//! RISC-V AP startup trampoline (SBI HSM hart_start).
+//! RISC-V AP startup trampoline (SBI HSM `hart_start`).
 //!
 //! On RISC-V, secondary harts are started via the SBI HSM extension
 //! (EID = 0x48534D, FID = 0: `hart_start`). The BSP calls `hart_start` with:
@@ -11,7 +11,7 @@
 //!   - `start_pa`  = physical address of the trampoline page (paging off)
 //!   - `opaque`    = physical address of per-AP startup parameters
 //!
-//! The AP starts in S-mode with paging disabled, a0 = hart_id, a1 = opaque.
+//! The AP starts in S-mode with paging disabled, a0 = `hart_id`, a1 = opaque.
 //!
 //! ## Trampoline page layout (4 KiB page at `trampoline_pa`)
 //!
@@ -73,15 +73,15 @@ const PARAM_CPU_ID: usize = 24; // u64: logical CPU index
 /// SBI HSM extension ID: ASCII "HSM" = 0x0048534D.
 const SBI_EXT_HSM: u64 = 0x0048_534D;
 
-/// SBI HSM hart_start function ID (FID 0).
+/// SBI HSM `hart_start` function ID (FID 0).
 const SBI_FID_HART_START: u64 = 0;
 
 /// Start a secondary hart via SBI HSM `hart_start`.
 ///
 /// The AP will start at `start_pa` (physical address, paging off) in S-mode
-/// with a0 = hart_id and a1 = `opaque`.
+/// with a0 = `hart_id` and a1 = `opaque`.
 ///
-/// Returns `true` if SBI accepted the request (error code == SBI_SUCCESS = 0).
+/// Returns `true` if SBI accepted the request (error code == `SBI_SUCCESS` = 0).
 ///
 /// # Safety
 /// - `start_pa` must be the physical address of a valid, executable trampoline
@@ -202,10 +202,10 @@ pub unsafe fn start_ap(
 
     let params_pa = trampoline_pa
         + PARAMS_OFFSET as u64
-        + (cpu_idx as u64 - 1) * PARAM_SLOT_SIZE as u64;
+        + (u64::from(cpu_idx) - 1) * PARAM_SLOT_SIZE as u64;
 
     // SAFETY: trampoline_pa is identity-mapped RWX; params_pa is in the same page.
-    unsafe { sbi_hart_start(hart_id as u64, trampoline_pa, params_pa) }
+    unsafe { sbi_hart_start(u64::from(hart_id), trampoline_pa, params_pa) }
 }
 
 /// No-op test stub.
@@ -248,6 +248,6 @@ pub unsafe fn setup_ap_params(
         base.add(PARAM_SATP / 8).write_volatile(satp);
         base.add(PARAM_ENTRY / 8).write_volatile(entry_virt);
         base.add(PARAM_STACK / 8).write_volatile(stack_top);
-        base.add(PARAM_CPU_ID / 8).write_volatile(cpu_idx as u64);
+        base.add(PARAM_CPU_ID / 8).write_volatile(u64::from(cpu_idx));
     }
 }

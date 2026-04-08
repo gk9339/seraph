@@ -13,7 +13,7 @@
 //! # Readiness model
 //! - **Endpoint**: has at least one pending sender.
 //! - **Signal**: has non-zero bits.
-//! - **EventQueue**: has at least one entry.
+//! - **`EventQueue`**: has at least one entry.
 //!
 //! # Ready ring
 //! `ready_ring` is a circular buffer of member indices. Notifications push to
@@ -28,13 +28,17 @@
 //! All operations must be called with the scheduler lock held.
 //!
 //! # Extending member capacity
-//! Increase `WAIT_SET_MAX_MEMBERS` and the fixed-size arrays. WAIT_SET_MAX_MEMBERS
+//! Increase `WAIT_SET_MAX_MEMBERS` and the fixed-size arrays. `WAIT_SET_MAX_MEMBERS`
 //! must fit in a u8 index.
+
+// cast_possible_truncation: member indices are bounded by WAIT_SET_MAX_MEMBERS (16),
+// which fits in u8. WAIT_SET_MAX_MEMBERS itself (usize) fits in u8. All truncations safe.
+#![allow(clippy::cast_possible_truncation)]
 
 use crate::sched::thread::{IpcThreadState, ThreadControlBlock, ThreadState};
 
 /// Maximum number of sources a wait set can monitor simultaneously.
-/// Must be ≤ 255 (member_idx is u8).
+/// Must be ≤ 255 (`member_idx` is u8).
 pub const WAIT_SET_MAX_MEMBERS: usize = 16;
 
 // ── Member tag ────────────────────────────────────────────────────────────────
@@ -54,8 +58,8 @@ pub enum WaitSetSourceTag
 /// A single registered source within a wait set.
 pub struct WaitSetMember
 {
-    /// Raw pointer to the source's state struct (EndpointState / SignalState /
-    /// EventQueueState). Used as a key for removal and for ready-at-add-time
+    /// Raw pointer to the source's state struct (`EndpointState` / `SignalState` /
+    /// `EventQueueState`). Used as a key for removal and for ready-at-add-time
     /// checks. Cast to the concrete type via `source_tag`.
     pub source_ptr: *mut u8,
     /// Kind of source, determines how `source_ptr` is interpreted.
@@ -66,7 +70,7 @@ pub struct WaitSetMember
 
 // ── WaitSetState ─────────────────────────────────────────────────────────────
 
-/// Kernel state backing a WaitSet capability.
+/// Kernel state backing a `WaitSet` capability.
 ///
 /// `WaitSetState` is ~480 bytes; it is heap-allocated via `Box`.
 /// The `WaitSetObject` wrapper (16 B) holds a pointer to it.
@@ -78,7 +82,7 @@ pub struct WaitSetState
     pub member_count: u8,
     /// Circular buffer of pending member indices.
     ///
-    /// Entries are member indices [0, WAIT_SET_MAX_MEMBERS). Stale entries
+    /// Entries are member indices `[0, WAIT_SET_MAX_MEMBERS)`. Stale entries
     /// (after removal) are silently skipped during pop.
     pub ready_ring: [u8; WAIT_SET_MAX_MEMBERS],
     /// Read pointer into `ready_ring` (next index to pop).
@@ -107,12 +111,17 @@ impl WaitSetState
         let members = {
             let mut arr: [MaybeUninit<Option<WaitSetMember>>; WAIT_SET_MAX_MEMBERS] =
                 unsafe { MaybeUninit::uninit().assume_init() };
-            for slot in arr.iter_mut()
+            for slot in &mut arr
             {
                 slot.write(None);
             }
             // SAFETY: all slots initialised above.
-            unsafe { core::mem::transmute::<_, [Option<WaitSetMember>; WAIT_SET_MAX_MEMBERS]>(arr) }
+            unsafe {
+                core::mem::transmute::<
+                    [MaybeUninit<Option<WaitSetMember>>; WAIT_SET_MAX_MEMBERS],
+                    [Option<WaitSetMember>; WAIT_SET_MAX_MEMBERS],
+                >(arr)
+            }
         };
         Self {
             members,
@@ -173,7 +182,7 @@ impl WaitSetState
 
 /// Notify the wait set that member `member_idx` is ready.
 ///
-/// Called from source objects (signal_send, endpoint_call, event_queue_post)
+/// Called from source objects (`signal_send`, `endpoint_call`, `event_queue_post`)
 /// when they transition from not-ready to ready.
 ///
 /// If a thread is blocked in `waitset_wait`, it is woken immediately.
@@ -186,9 +195,16 @@ impl WaitSetState
 pub unsafe fn waitset_notify(ws_opaque: *mut u8, member_idx: u8)
 {
     // SAFETY: caller guarantees ws_opaque is a valid *mut WaitSetState.
-    let ws = unsafe { &mut *(ws_opaque as *mut WaitSetState) };
+    // cast_ptr_alignment: WaitSetState is heap-allocated via Box, which guarantees
+    // alignment to align_of::<WaitSetState>().
+    #[allow(clippy::cast_ptr_alignment)]
+    let ws = unsafe { &mut *ws_opaque.cast::<WaitSetState>() };
 
-    if !ws.waiter.is_null()
+    if ws.waiter.is_null()
+    {
+        ws.push_ready(member_idx);
+    }
+    else
     {
         // Wake the blocked thread; deliver the token via wakeup_value.
         let waiter = ws.waiter;
@@ -196,8 +212,7 @@ pub unsafe fn waitset_notify(ws_opaque: *mut u8, member_idx: u8)
 
         let token = ws.members[member_idx as usize]
             .as_ref()
-            .map(|m| m.token)
-            .unwrap_or(0);
+            .map_or(0, |m| m.token);
 
         // SAFETY: waiter is a valid TCB placed by waitset_wait.
         unsafe {
@@ -208,10 +223,6 @@ pub unsafe fn waitset_notify(ws_opaque: *mut u8, member_idx: u8)
             let prio = (*waiter).priority;
             crate::sched::scheduler_for(0).enqueue(waiter, prio);
         }
-    }
-    else
-    {
-        ws.push_ready(member_idx);
     }
 }
 
@@ -243,7 +254,7 @@ pub unsafe fn waitset_wait(
     unsafe {
         (*caller).state = ThreadState::Blocked;
         (*caller).ipc_state = IpcThreadState::BlockedOnWaitSet;
-        (*caller).blocked_on_object = ws as *mut WaitSetState as *mut u8;
+        (*caller).blocked_on_object = core::ptr::addr_of_mut!(*ws).cast::<u8>();
     }
     Err(())
 }
@@ -271,7 +282,7 @@ pub unsafe fn waitset_add(
     let ws = unsafe { &mut *ws };
 
     // Find a free slot.
-    let idx = ws.members.iter().position(|m| m.is_none()).ok_or(())?;
+    let idx = ws.members.iter().position(Option::is_none).ok_or(())?;
     ws.members[idx] = Some(WaitSetMember {
         source_ptr,
         source_tag,
@@ -305,7 +316,7 @@ pub unsafe fn waitset_add(
 
 /// Remove a source from the wait set by its raw state pointer.
 ///
-/// Clears the member slot; stale ready_ring entries for this slot are skipped
+/// Clears the member slot; stale `ready_ring` entries for this slot are skipped
 /// automatically during pop. Does NOT clear the source's back-pointer —
 /// the caller (syscall handler) must do that.
 ///
@@ -322,11 +333,7 @@ pub unsafe fn waitset_remove(ws: *mut WaitSetState, source_ptr: *mut u8) -> Resu
     let idx = ws
         .members
         .iter()
-        .position(|m| {
-            m.as_ref()
-                .map(|m| m.source_ptr == source_ptr)
-                .unwrap_or(false)
-        })
+        .position(|m| m.as_ref().is_some_and(|m| m.source_ptr == source_ptr))
         .ok_or(())?;
 
     ws.members[idx] = None;
@@ -337,7 +344,7 @@ pub unsafe fn waitset_remove(ws: *mut WaitSetState, source_ptr: *mut u8) -> Resu
 /// Free all resources of `ws` and wake any blocked waiter.
 ///
 /// Clears back-pointers on all registered sources so they stop notifying.
-/// Called from `dealloc_object` when the WaitSet cap's ref count reaches zero.
+/// Called from `dealloc_object` when the `WaitSet` cap's ref count reaches zero.
 ///
 /// # Safety
 /// Must be called with the scheduler lock held. `ws` must be a valid pointer.
@@ -365,7 +372,7 @@ pub unsafe fn wait_set_drop(ws: *mut WaitSetState)
     }
 
     // Clear back-pointers on all registered sources.
-    for slot in ws.members.iter_mut()
+    for slot in &mut ws.members
     {
         if let Some(ref m) = slot
         {
@@ -386,23 +393,26 @@ pub unsafe fn wait_set_drop(ws: *mut WaitSetState)
 unsafe fn source_is_ready(source_ptr: *mut u8, tag: WaitSetSourceTag) -> bool
 {
     use core::sync::atomic::Ordering;
+    // cast_ptr_alignment: each source_ptr was created from a Box<ConcreteType>, so it
+    // is aligned to align_of::<ConcreteType>(). The casts below restore that type.
+    #[allow(clippy::cast_ptr_alignment)]
     match tag
     {
         WaitSetSourceTag::Endpoint =>
         {
-            let ep = source_ptr as *const crate::ipc::endpoint::EndpointState;
+            let ep = source_ptr.cast::<crate::ipc::endpoint::EndpointState>();
             // SAFETY: ep is a valid EndpointState.
             !unsafe { (*ep).send_head.is_null() }
         }
         WaitSetSourceTag::Signal =>
         {
-            let sig = source_ptr as *const crate::ipc::signal::SignalState;
+            let sig = source_ptr.cast::<crate::ipc::signal::SignalState>();
             // SAFETY: sig is a valid SignalState.
             unsafe { (*sig).bits.load(Ordering::Acquire) != 0 }
         }
         WaitSetSourceTag::EventQueue =>
         {
-            let eq = source_ptr as *const crate::ipc::event_queue::EventQueueState;
+            let eq = source_ptr.cast::<crate::ipc::event_queue::EventQueueState>();
             // SAFETY: eq is a valid EventQueueState.
             unsafe { (*eq).count > 0 }
         }
@@ -415,11 +425,14 @@ unsafe fn source_is_ready(source_ptr: *mut u8, tag: WaitSetSourceTag) -> bool
 /// `source_ptr` must be a valid pointer to the appropriate state struct.
 unsafe fn clear_source_backpointer(source_ptr: *mut u8, tag: WaitSetSourceTag)
 {
+    // cast_ptr_alignment: each source_ptr was created from a Box<ConcreteType>, so it
+    // is aligned to align_of::<ConcreteType>(). The casts below restore that type.
+    #[allow(clippy::cast_ptr_alignment)]
     match tag
     {
         WaitSetSourceTag::Endpoint =>
         {
-            let ep = source_ptr as *mut crate::ipc::endpoint::EndpointState;
+            let ep = source_ptr.cast::<crate::ipc::endpoint::EndpointState>();
             // SAFETY: ep is valid.
             unsafe {
                 (*ep).wait_set = core::ptr::null_mut();
@@ -428,7 +441,7 @@ unsafe fn clear_source_backpointer(source_ptr: *mut u8, tag: WaitSetSourceTag)
         }
         WaitSetSourceTag::Signal =>
         {
-            let sig = source_ptr as *mut crate::ipc::signal::SignalState;
+            let sig = source_ptr.cast::<crate::ipc::signal::SignalState>();
             // SAFETY: sig is valid.
             unsafe {
                 (*sig).wait_set = core::ptr::null_mut();
@@ -437,7 +450,7 @@ unsafe fn clear_source_backpointer(source_ptr: *mut u8, tag: WaitSetSourceTag)
         }
         WaitSetSourceTag::EventQueue =>
         {
-            let eq = source_ptr as *mut crate::ipc::event_queue::EventQueueState;
+            let eq = source_ptr.cast::<crate::ipc::event_queue::EventQueueState>();
             // SAFETY: eq is valid.
             unsafe {
                 (*eq).wait_set = core::ptr::null_mut();

@@ -38,7 +38,7 @@ pub unsafe fn serial_init()
     unsafe {
         outb(COM1 + 1, 0x00); // disable all interrupts
         outb(COM1 + 3, 0x80); // DLAB = 1 (access divisor latch)
-        outb(COM1 + 0, 0x01); // divisor low  byte = 1 → 115200 baud
+        outb(COM1, 0x01); // divisor low  byte = 1 → 115200 baud
         outb(COM1 + 1, 0x00); // divisor high byte = 0
         outb(COM1 + 3, 0x03); // DLAB = 0, 8 bits, no parity, 1 stop (8N1)
         outb(COM1 + 2, 0xC7); // enable FIFO, clear, 14-byte threshold

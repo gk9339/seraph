@@ -1,15 +1,13 @@
 # Capability Model
 
-## Overview
-
 Capabilities are the sole access control mechanism in Seraph.
 
 - Every kernel-managed resource is represented by a capability.
-- A process must not operate on a resource without a valid capability authorising
+- A process MUST NOT operate on a resource without a valid capability authorising
   that operation.
-- The kernel must enforce capability checks on every resource operation.
-- The system must not provide ambient authority or identity-based privilege.
-- A resource must not be accessible by naming or guessing an identifier without
+- The kernel MUST enforce capability checks on every resource operation.
+- The system MUST NOT provide ambient authority or identity-based privilege.
+- A resource MUST NOT be accessible by naming or guessing an identifier without
   holding the corresponding capability.
 
 ---
@@ -22,14 +20,12 @@ empty (the null capability) or holds one capability referencing a kernel object 
 its associated rights.
 
 The CSpace has the following properties:
-- **Grows on demand** — starts small and expands as slots are needed, without
-  requiring the process to predict its capability requirements upfront
+- **Grows on demand** — starts small and expands as slots are needed
 - **Stable indices** — a capability descriptor remains valid for the lifetime of
   the capability; the kernel never moves or renumbers existing slots
-- **O(1) lookup** — descriptor-to-capability resolution must be fast, as it occurs
-  on every IPC call and resource operation
+- **O(1) lookup** — descriptor-to-capability resolution MUST be O(1)
 - **Per-process ceiling** — each process has a maximum CSpace size enforced by the
-  kernel, preventing any process from exhausting kernel memory by accumulating slots
+  kernel
 
 Slot 0 is permanently null and cannot be written — using index 0 always means "no
 capability".
@@ -171,14 +167,8 @@ Capabilities may be derived: a new capability slot is created referencing the sa
 underlying object, with equal or fewer rights. The original is retained. Both slots
 now reference the object independently.
 
-The kernel maintains a **derivation tree** tracking the parent/child relationships
-between capability slots across all processes. This tree is what makes revocation
-work correctly.
-
-Derivation is the mechanism by which authority is delegated. Init holds broad
-capabilities at boot and derives narrower ones to pass to services. A service derives
-narrower ones still to pass to its clients. Each derivation is a deliberate,
-attenuated grant of access.
+The kernel maintains a **derivation tree** tracking parent/child relationships between
+capability slots across all processes, enabling correct revocation.
 
 ---
 
@@ -189,8 +179,6 @@ moves the capability from the sender's CSpace to the receiver's CSpace — the s
 slot becomes null. This is not derivation; no new entry appears in the derivation tree.
 The receiver inherits the sender's position in the existing tree.
 
-Transfer is how resources change hands without duplication. A server that grants a
-file handle to a client has genuinely given it up.
 
 ---
 
@@ -205,12 +193,6 @@ After revocation, any process that held a derived capability can no longer use i
 The underlying kernel object is not destroyed — only the authority to access it is
 withdrawn. If the revoker still holds the parent capability, it retains access.
 
-Revocation is the mechanism by which a resource can be safely reclaimed or
-reassigned. A server that lends a shared memory region to a client can revoke
-the client's capability when the session ends, without the client's cooperation.
-
-The kernel must be able to find and invalidate all derived capabilities efficiently.
-This is the primary reason the derivation tree is maintained.
 
 ---
 
@@ -266,9 +248,6 @@ its AddressSpace capability. The kernel tracks which threads are bound to each
 AddressSpace; on revocation, all bound threads are stopped and removed from run queues.
 The process's resources are reclaimed as their capability reference counts reach zero.
 
-This is the only point at which capabilities are created from nothing. All subsequent
-authority in the system is derived from this initial grant.
-
 ---
 
 ## What the Kernel Does Not Do
@@ -281,3 +260,9 @@ The kernel does not provide:
 - **Policy** — the kernel enforces that operations are authorised by capability.
   What the capabilities represent and how they should be distributed is entirely
   a userspace concern, managed by init and the services it supervises.
+
+---
+
+## Summarized By
+
+[Architecture Overview](architecture.md)

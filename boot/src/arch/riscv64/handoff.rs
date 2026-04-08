@@ -84,7 +84,7 @@ pub unsafe fn perform_handoff(
     }
 }
 
-/// Return the physical address range (first_page, last_page) of the handoff
+/// Return the physical address range (`first_page`, `last_page`) of the handoff
 /// trampoline stub, page-aligned. Used by the bootloader to identity-map the
 /// trampoline in the initial page tables.
 pub fn trampoline_page_range() -> (u64, u64)

@@ -1,7 +1,5 @@
 # Capability Subsystem Internals
 
-## Overview
-
 This document covers the implementation of the capability subsystem. The design —
 capability types, rights, derivation, revocation, and transfer semantics — is
 specified in [docs/capability-model.md](../../docs/capability-model.md). This document
@@ -397,3 +395,9 @@ Reply capabilities (`CapTag::Reply`) are not part of the derivation tree — the
 single-use, cannot be derived, and are not tracked for revocation. They are created
 by the kernel at `SYS_IPC_RECV` time and stored in a per-thread slot, outside the
 process CSpace. The kernel clears the per-thread reply slot after `SYS_IPC_REPLY`.
+
+---
+
+## Summarized By
+
+None

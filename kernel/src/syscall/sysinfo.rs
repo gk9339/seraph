@@ -97,13 +97,16 @@ pub fn sys_aspace_query(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     }
 
     // Resolve AddressSpace cap. READ right is required to inspect mappings.
+    // SAFETY: current_tcb() returns current thread; syscall context ensures it is set.
     let tcb = unsafe { super::current_tcb() };
     if tcb.is_null()
     {
         return Err(SyscallError::InvalidCapability);
     }
+    // SAFETY: tcb validated non-null above; cspace field set at thread creation.
     let caller_cspace = unsafe { (*tcb).cspace };
 
+    // SAFETY: caller_cspace is a valid CSpace pointer; lookup_cap validates slot bounds and rights.
     let aspace_slot = unsafe {
         super::lookup_cap(
             caller_cspace,

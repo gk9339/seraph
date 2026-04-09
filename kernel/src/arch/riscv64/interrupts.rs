@@ -59,12 +59,16 @@ const PLIC_NUM_SOURCES: u32 = 127;
 fn plic_read(offset: u64) -> u32
 {
     let vaddr = DIRECT_MAP_BASE + PLIC_BASE_PHYS + offset;
+    // SAFETY: PLIC_BASE_PHYS mapped via direct map; offset within PLIC MMIO range;
+    // volatile read ensures ordering and prevents compiler reordering.
     unsafe { core::ptr::read_volatile(vaddr as *const u32) }
 }
 
 unsafe fn plic_write(offset: u64, val: u32)
 {
     let vaddr = DIRECT_MAP_BASE + PLIC_BASE_PHYS + offset;
+    // SAFETY: PLIC_BASE_PHYS mapped via direct map; offset within PLIC MMIO range;
+    // volatile write ensures ordering and prevents compiler reordering.
     unsafe { core::ptr::write_volatile(vaddr as *mut u32, val) };
 }
 
@@ -302,8 +306,9 @@ extern "C" fn trap_dispatch(frame: &mut TrapFrame)
     else if cause_code == 8
     {
         // U-mode ecall: dispatch via the kernel syscall table.
-        // SAFETY: frame is a valid TrapFrame on the kernel stack.
         let sepc_before = frame.sepc;
+        // SAFETY: frame is a valid TrapFrame on the kernel stack; trap_entry constructed
+        // it with correct layout; pointer passed to syscall dispatcher.
         unsafe {
             crate::syscall::dispatch(core::ptr::from_mut(frame));
         }
@@ -399,7 +404,8 @@ pub fn unmask(irq: u32)
 #[cfg(not(test))]
 fn dispatch_external(irq: u32)
 {
-    // SAFETY: called from interrupt context with interrupts disabled.
+    // SAFETY: called from trap_dispatch in interrupt context with sstatus.SIE clear;
+    // irq claimed from PLIC; dispatcher will mask source and perform EOI via acknowledge().
     unsafe { crate::irq::dispatch_device_irq(irq) };
 }
 
@@ -416,7 +422,8 @@ pub unsafe fn install_trap_vector()
 {
     // Install trap vector (direct mode: bit [1:0] = 00).
     // stvec is a per-hart CSR; called from both init() (BSP) and init_ap() (each AP).
-    // SAFETY: trap_entry is a valid naked function at a known address.
+    // SAFETY: trap_entry is a valid naked function at a known address; csrw stvec is
+    // a privileged S-mode instruction; caller ensures execution in S-mode.
     unsafe {
         core::arch::asm!(
             "csrw stvec, {0}",
@@ -437,7 +444,7 @@ pub unsafe fn install_trap_vector() {}
 pub unsafe fn init()
 {
     // Install trap vector (stvec is a per-hart CSR; also called from init_ap).
-    // SAFETY: in S-mode; trap_entry is valid.
+    // SAFETY: caller ensures execution in S-mode; trap_entry is valid.
     unsafe {
         install_trap_vector();
     }
@@ -448,6 +455,7 @@ pub unsafe fn init()
     // occurred during the firmware phase). A stale non-zero sscratch causes
     // trap_entry to take the U-mode path for an S-mode trap, writing the
     // TrapFrame to a bogus address and faulting.
+    // SAFETY: csrw sscratch is a privileged S-mode instruction; caller ensures S-mode.
     unsafe {
         core::arch::asm!("csrw sscratch, zero", options(nostack, nomem));
     }
@@ -456,6 +464,7 @@ pub unsafe fn init()
     // SIE: global interrupt enable — starts disabled, timer::init() enables it.
     // SPP: previous privilege (0 = U-mode return target).
     // SUM: permit S-mode to access U-mode pages (not needed; keep disabled).
+    // SAFETY: csrc sstatus is a privileged S-mode instruction; caller ensures S-mode.
     unsafe {
         core::arch::asm!(
             "csrc sstatus, {mask}",
@@ -465,6 +474,7 @@ pub unsafe fn init()
     }
 
     // Enable SEIP (bit 9) and STIP (bit 5) in sie.
+    // SAFETY: csrs sie is a privileged S-mode instruction; caller ensures S-mode.
     unsafe {
         core::arch::asm!(
             "csrs sie, {mask}",
@@ -478,6 +488,7 @@ pub unsafe fn init()
     // (equivalent to rdtsc on x86-64). OpenSBI sets mcounteren.CY on QEMU
     // virt so S-mode access is already granted; this propagates it to U-mode.
     // Also enables the VDSO-style clock_gettime fast path in the future libc.
+    // SAFETY: csrs scounteren is a privileged S-mode instruction; caller ensures S-mode.
     unsafe {
         core::arch::asm!(
             "csrs scounteren, {cy}",
@@ -489,7 +500,8 @@ pub unsafe fn init()
     // Initialise PLIC:
     // - Set priority 1 for all sources (0 = disabled, 1 = lowest priority).
     // - Set threshold to 0 for hart 0 S-mode context (accept all sources ≥ 1).
-    // SAFETY: direct map active; PLIC MMIO region is accessible.
+    // SAFETY: direct map active; PLIC MMIO region accessible; plic_write performs
+    // volatile stores to valid PLIC register offsets.
     unsafe {
         for src in 1..=PLIC_NUM_SOURCES
         {
@@ -509,6 +521,9 @@ pub unsafe fn init()
 #[cfg(not(test))]
 pub unsafe fn init_ap()
 {
+    // SAFETY: caller (kernel_entry_ap) ensures execution in S-mode on the AP hart;
+    // all CSR operations (stvec, sscratch, sstatus, sie, scounteren) are S-mode
+    // privileged instructions; per-hart registers; no shared state.
     unsafe {
         // Install stvec — per-hart CSR, must be written on every hart.
         install_trap_vector();
@@ -546,6 +561,8 @@ pub unsafe fn init_ap() {}
 pub fn disable() -> bool
 {
     let prev: u64;
+    // SAFETY: csrrci sstatus is a privileged S-mode instruction that atomically
+    // reads sstatus and clears bit 1 (SIE); kernel always runs in S-mode.
     unsafe {
         core::arch::asm!(
             "csrrci {0}, sstatus, 0x2",
@@ -562,6 +579,8 @@ pub fn disable() -> bool
 /// Trap vector must be installed before calling.
 pub unsafe fn enable()
 {
+    // SAFETY: csrsi sstatus is a privileged S-mode instruction that sets bit 1 (SIE);
+    // caller ensures trap vector installed; kernel runs in S-mode.
     unsafe {
         core::arch::asm!("csrsi sstatus, 0x2", options(nostack, nomem));
     }
@@ -572,6 +591,8 @@ pub unsafe fn enable()
 pub fn are_enabled() -> bool
 {
     let sstatus: u64;
+    // SAFETY: csrr sstatus is a privileged S-mode read-only instruction;
+    // kernel always runs in S-mode.
     unsafe {
         core::arch::asm!(
             "csrr {0}, sstatus",
@@ -588,6 +609,8 @@ pub fn are_enabled() -> bool
 /// trap dispatcher after `dispatch_external`.
 pub fn acknowledge(irq: u32)
 {
+    // SAFETY: plic_write performs volatile store to PLIC claim/complete register;
+    // irq value claimed from PLIC; EOI protocol requires writing back the IRQ number.
     unsafe {
         plic_write(PLIC_CLAIM_COMPLETE, irq);
     }

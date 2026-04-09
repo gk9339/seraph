@@ -231,8 +231,9 @@ pub fn tss_desc(tss_addr: u64) -> (u64, u64)
 #[cfg(not(test))]
 pub unsafe fn init(kernel_stack_top: u64, ist1_top: u64, ist2_top: u64)
 {
-    // SAFETY: single-threaded boot — exclusive access guaranteed.
+    // SAFETY: single-threaded boot phase; no concurrent access to static mut GDT.
     let gdt = unsafe { &mut *core::ptr::addr_of_mut!(GDT) };
+    // SAFETY: single-threaded boot phase; no concurrent access to static mut TSS.
     let tss_with_iopb = unsafe { &mut *core::ptr::addr_of_mut!(TSS) };
     let tss = &mut tss_with_iopb.tss;
 
@@ -262,7 +263,8 @@ pub unsafe fn init(kernel_stack_top: u64, ist1_top: u64, ist2_top: u64)
         limit: (core::mem::size_of_val(gdt) - 1) as u16,
         base: gdt.as_ptr() as u64,
     };
-    // SAFETY: gdtr is live on this stack frame.
+    // SAFETY: lgdt is a privileged x86 instruction; GDT pointer is valid and
+    // GDT table is static and properly aligned; executed at ring 0.
     unsafe {
         core::arch::asm!(
             "lgdt [{0}]",
@@ -273,6 +275,8 @@ pub unsafe fn init(kernel_stack_top: u64, ist1_top: u64, ist2_top: u64)
 
     // Reload CS by performing a far return into the kernel code segment.
     // This flushes the CPU's segment cache for CS.
+    // SAFETY: KERNEL_CS references a valid GDT entry just loaded; far return
+    // executed at ring 0 with valid stack and return address.
     unsafe {
         core::arch::asm!(
             "push {cs}",
@@ -287,6 +291,8 @@ pub unsafe fn init(kernel_stack_top: u64, ist1_top: u64, ist2_top: u64)
     }
 
     // Reload data/stack segment registers.
+    // SAFETY: KERNEL_DS references a valid GDT entry; segment selector loads
+    // executed at ring 0; zeroing FS/GS is safe (GS-base is in MSR).
     unsafe {
         core::arch::asm!(
             "mov ds, {ds:x}",
@@ -302,6 +308,8 @@ pub unsafe fn init(kernel_stack_top: u64, ist1_top: u64, ist2_top: u64)
     }
 
     // Load the TSS selector.
+    // SAFETY: ltr is a privileged x86 instruction; TSS_SEL references a valid
+    // 128-bit TSS descriptor in the GDT just loaded; executed at ring 0.
     unsafe {
         core::arch::asm!(
             "ltr {0:x}",
@@ -338,7 +346,9 @@ pub unsafe fn set_rsp0(stack_top: u64)
 {
     let tss_ptr: u64;
     // SAFETY: gs:[32] == PerCpuData::tss_ptr (PERCPU_TSS_PTR_OFFSET=32); valid
-    // after percpu::init_bsp() / init_ap() sets GS-base and tss_ptr.
+    // after percpu::init_bsp() / init_ap() sets GS-base and tss_ptr. TSS pointer
+    // is valid and aligned; accessed at ring 0 with interrupts disabled during
+    // context switch or from single-threaded boot context.
     unsafe {
         core::arch::asm!(
             "mov {}, gs:[32]",
@@ -412,6 +422,8 @@ pub unsafe fn init_ap(cpu_id: u32, rsp0: u64, ist1_top: u64, ist2_top: u64)
         limit: (7 * 8 - 1) as u16,
         base: gdt_ptr as u64,
     };
+    // SAFETY: lgdt is a privileged x86 instruction; GDT pointer is valid and
+    // references heap-allocated GDT properly aligned; executed at ring 0.
     unsafe {
         core::arch::asm!(
             "lgdt [{0}]",
@@ -421,6 +433,8 @@ pub unsafe fn init_ap(cpu_id: u32, rsp0: u64, ist1_top: u64, ist2_top: u64)
     }
 
     // Reload CS via a far return into the kernel code segment.
+    // SAFETY: KERNEL_CS references a valid GDT entry just loaded; far return
+    // executed at ring 0 with valid stack and return address.
     unsafe {
         core::arch::asm!(
             "push {cs}",
@@ -435,6 +449,8 @@ pub unsafe fn init_ap(cpu_id: u32, rsp0: u64, ist1_top: u64, ist2_top: u64)
     }
 
     // Reload data/stack segment registers and zero FS/GS (GS-base is in MSR).
+    // SAFETY: KERNEL_DS references a valid GDT entry; segment selector loads
+    // executed at ring 0; zeroing FS/GS is safe (GS-base is in MSR).
     unsafe {
         core::arch::asm!(
             "mov ds, {ds:x}",
@@ -450,6 +466,8 @@ pub unsafe fn init_ap(cpu_id: u32, rsp0: u64, ist1_top: u64, ist2_top: u64)
     }
 
     // Load the TSS selector.
+    // SAFETY: ltr is a privileged x86 instruction; TSS_SEL references a valid
+    // 128-bit TSS descriptor in the GDT just loaded; executed at ring 0.
     unsafe {
         core::arch::asm!(
             "ltr {0:x}",
@@ -462,7 +480,7 @@ pub unsafe fn init_ap(cpu_id: u32, rsp0: u64, ist1_top: u64, ist2_top: u64)
     // available here because the segment reload above (`mov gs, 0`) reset the
     // GS shadow-register base to 0; percpu::init_ap() reinstalls it afterward.
     // SAFETY: cpu_id < MAX_CPUS (caller guarantee); PER_CPU[cpu_id] is not yet
-    // in use by any other CPU.
+    // in use by any other CPU; single-CPU access during AP bringup.
     unsafe {
         let ptr = core::ptr::addr_of_mut!(crate::percpu::PER_CPU[cpu_id as usize]);
         (*ptr).tss_ptr = tss_addr;
@@ -481,7 +499,8 @@ pub unsafe fn init_ap(cpu_id: u32, rsp0: u64, ist1_top: u64, ist2_top: u64)
 #[cfg(not(test))]
 pub unsafe fn load_iopb(iopb: Option<&[u8; IOPB_SIZE]>)
 {
-    // SAFETY: single-CPU; interrupts disabled by caller.
+    // SAFETY: interrupts disabled by caller; TSS is a static structure accessed
+    // at ring 0 during context switch; no concurrent access from other CPUs.
     let tss_iopb = unsafe { &mut (*core::ptr::addr_of_mut!(TSS)).iopb };
     match iopb
     {

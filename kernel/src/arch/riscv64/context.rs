@@ -139,6 +139,7 @@ pub fn new_state(entry: u64, stack_top: u64, arg: u64, _is_user: bool) -> SavedS
 pub unsafe extern "C" fn switch(current: *mut SavedState, next: *const SavedState)
 {
     // a0 = current (*mut SavedState), a1 = next (*const SavedState)
+    // SAFETY: switch_context preserves ABI; both pointers valid; stack/frame pointers valid.
     core::arch::naked_asm!(
         // ── Save current thread to *a0 ────────────────────────────────────
         // `ra` holds the return address from the `call switch` instruction;
@@ -201,6 +202,7 @@ pub unsafe extern "C" fn switch(current: *mut SavedState, next: *const SavedStat
 #[cfg(not(test))]
 pub unsafe fn first_entry_to_user(root_phys: u64, tf: *const super::trap_frame::TrapFrame) -> !
 {
+    // SAFETY: root_phys is valid page-table root; tf is valid; direct map present in new space.
     unsafe {
         crate::arch::current::paging::activate(root_phys);
         return_to_user(tf)

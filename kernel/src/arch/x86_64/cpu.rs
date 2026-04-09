@@ -28,7 +28,7 @@ pub fn cpuid(leaf: u32) -> (u32, u32, u32, u32)
     let ebx: u32;
     let ecx: u32;
     let edx: u32;
-    // SAFETY: CPUID is always available on x86-64; read-only.
+    // SAFETY: CPUID is a valid unprivileged instruction on all x86-64 CPUs; rbx preserved.
     unsafe {
         core::arch::asm!(
             "push rbx",
@@ -197,8 +197,8 @@ pub unsafe fn enable_smep_smap()
         crate::fatal("SMAP not supported by CPU — required");
     }
     // Bit 20 = SMEP, bit 21 = SMAP.
-    // SAFETY: CPUID confirmed both features.
     let cr4 = read_cr4();
+    // SAFETY: CPUID confirmed both features are present; new CR4 value is valid.
     unsafe {
         write_cr4(cr4 | (1 << 20) | (1 << 21));
     }
@@ -269,7 +269,7 @@ pub fn current_cpu() -> u32
     #[cfg(not(test))]
     {
         let id: u32;
-        // SAFETY: gs:[0] == PerCpuData::cpu_id; valid after install_percpu.
+        // SAFETY: gs:[0] is PerCpuData::cpu_id; GS-base installed by kernel before scheduler runs.
         unsafe {
             core::arch::asm!(
                 "mov {:e}, gs:[0]",
@@ -299,6 +299,7 @@ pub fn current_cpu() -> u32
 #[inline]
 pub unsafe fn set_kernel_trap_stack(stack_top: u64)
 {
+    // SAFETY: caller guarantees stack_top is a valid kernel stack pointer.
     unsafe {
         super::gdt::set_rsp0(stack_top);
         super::syscall::set_kernel_rsp(stack_top);

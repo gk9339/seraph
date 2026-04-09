@@ -69,6 +69,7 @@ pub unsafe fn serial_init()
 {
     // SAFETY: UART_BASE is valid (identity-mapped by bootloader at init time).
     let base = unsafe { UART_BASE } as *mut u8;
+    // SAFETY: UART MMIO region is valid at base; volatile writes configure the 16550.
     unsafe {
         // IER = 0: disable all interrupts.
         core::ptr::write_volatile(base.add(1), 0x00);
@@ -94,9 +95,11 @@ pub unsafe fn serial_write_byte(byte: u8)
     let base = unsafe { UART_BASE } as *mut u8;
 
     // Spin on LSR bit 5 (THRE — Transmit Holding Register Empty).
+    // SAFETY: UART MMIO region is valid; LSR is a status register at offset 5.
     while unsafe { core::ptr::read_volatile(base.add(UART_LSR)) } & 0x20 == 0
     {}
 
+    // SAFETY: UART MMIO region is valid; writing to TX register transmits the byte.
     unsafe {
         core::ptr::write_volatile(base.add(UART_TX), byte);
     }

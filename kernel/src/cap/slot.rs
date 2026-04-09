@@ -267,6 +267,7 @@ pub struct CapabilitySlot
 // the kernel is single-threaded; after SMP, CSpace access is protected by the
 // CSpace lock. Marking Send+Sync enables use in statics.
 unsafe impl Send for CapabilitySlot {}
+// SAFETY: CapabilitySlot is accessed only under CSpace lock; no Sync violation.
 unsafe impl Sync for CapabilitySlot {}
 
 impl CapabilitySlot

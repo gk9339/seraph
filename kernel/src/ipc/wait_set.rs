@@ -95,6 +95,7 @@ pub struct WaitSetState
 
 // SAFETY: WaitSetState is accessed only under the scheduler lock.
 unsafe impl Send for WaitSetState {}
+// SAFETY: WaitSetState is accessed only under the scheduler lock; no Sync violation.
 unsafe impl Sync for WaitSetState {}
 
 impl WaitSetState
@@ -109,6 +110,7 @@ impl WaitSetState
         // Use MaybeUninit to satisfy the compiler.
         use core::mem::MaybeUninit;
         let members = {
+            // SAFETY: MaybeUninit<T> has no validity invariants; assume_init is valid for uninitialized memory.
             let mut arr: [MaybeUninit<Option<WaitSetMember>>; WAIT_SET_MAX_MEMBERS] =
                 unsafe { MaybeUninit::uninit().assume_init() };
             for slot in &mut arr
@@ -291,6 +293,7 @@ pub unsafe fn waitset_add(
     ws.member_count += 1;
 
     // Check ready-at-add-time so notifications are not missed.
+    // SAFETY: source_ptr is a valid pointer to the source's state struct; tag determines concrete type.
     let already_ready = unsafe { source_is_ready(source_ptr, source_tag) };
     if already_ready
     {
@@ -376,7 +379,7 @@ pub unsafe fn wait_set_drop(ws: *mut WaitSetState)
     {
         if let Some(ref m) = slot
         {
-            // SAFETY: source_ptr is a valid pointer to the source's state.
+            // SAFETY: source_ptr is a valid pointer to the source's state struct; tag determines concrete type.
             unsafe { clear_source_backpointer(m.source_ptr, m.source_tag) };
         }
         *slot = None;

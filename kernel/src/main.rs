@@ -105,7 +105,8 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
 
     // ── Phase 1: early console ──────────────────────────────────────────────
     // SAFETY: called exactly once, from the single kernel boot thread, after
-    // Phase 0 confirmed boot_info is valid.
+    // Phase 0 confirmed boot_info is valid; boot_info pointer from bootloader
+    // validated at kernel entry.
     unsafe {
         console::init(info);
     }
@@ -128,7 +129,8 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
     // Parse the memory map, subtract reserved regions, populate the buddy
     // allocator. Halts with a FATAL message if no usable memory is found.
     //
-    // SAFETY: single-threaded boot; FRAME_ALLOCATOR is not accessed elsewhere.
+    // SAFETY: single-threaded boot phase; FRAME_ALLOCATOR static mut not
+    // accessed elsewhere; mutable borrow is exclusive.
     let allocator = unsafe { &mut *core::ptr::addr_of_mut!(mm::FRAME_ALLOCATOR) };
     kprintln!("Phase 2: Memory Map Parsing and Buddy Allocator");
     mm::init::init_physical_memory(info, allocator);
@@ -153,8 +155,8 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
     // Rebase MMIO-based console devices to the direct physical map.
     // On RISC-V the UART is MMIO and must be accessed via the direct map after
     // the page table switch; on x86-64 the UART is I/O-mapped (no-op).
-    // SAFETY: page tables are now active; direct map covers all physical RAM
-    // and the UART MMIO region.
+    // SAFETY: kernel page tables active with direct physical map covering all
+    // RAM and UART MMIO region; framebuffer physical base from validated BootInfo.
     unsafe {
         let uart_phys = arch::current::console::UART_PHYS_BASE;
         if uart_phys != 0
@@ -186,17 +188,22 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
 
     // ── Phase 5: architecture hardware initialization ─────────────────────────
     kprintln!("Phase 5: Architecture Hardware Initialisation");
-    // SAFETY: single-threaded boot; heap active; direct map active.
+    // SAFETY: single-threaded boot phase; heap and direct map active; called
+    // once during initialization; dependencies (Phases 2-4) completed.
     unsafe {
         arch::current::interrupts::init();
     }
     kprintln!("interrupts ok");
     // Enable preemption timer at 10 ms period.
     // timer::init() enables interrupts as its final step.
+    // SAFETY: IDT/GDT/interrupts initialized above; timer IRQ handler registered;
+    // called once during boot with all prerequisites met.
     unsafe {
         arch::current::timer::init(10_000);
     }
     kprintln!("timer ok");
+    // SAFETY: IDT installed and interrupts initialized above; syscall entry
+    // point registered during arch init; single-threaded boot phase.
     unsafe {
         arch::current::syscall::init();
     }
@@ -204,6 +211,8 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
     // Install per-CPU GS-base (x86-64) / tp (RISC-V) for the BSP.
     // Must be after arch init (GDT/TSS loaded) and before any current_cpu() call.
     #[cfg(not(test))]
+    // SAFETY: GDT/TSS loaded by interrupt init above; current_cpu() not yet
+    // called; BSP per-CPU initialization happens once during boot.
     unsafe {
         percpu::init_bsp();
     }
@@ -230,8 +239,6 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
     // cpu_count from BootInfo (populated by bootloader from ACPI MADT / DTB).
     // APs are not yet started; sched::init allocates idle threads for all CPUs
     // so AP startup can call sched::ap_enter without re-allocating.
-    //
-    // SAFETY: single-threaded boot; heap and page tables are active.
     kprintln!("Phase 8: Scheduler");
     let cpu_count = sched::init(boot_cpu_count, allocator);
     kprintln!(
@@ -260,7 +267,8 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
         );
 
         // Create init's user address space (PML4 / Sv48 root + kernel entries).
-        // SAFETY: Phase 3 active, Phase 4 heap active; single-threaded boot.
+        // SAFETY: page tables installed (Phase 3), heap active (Phase 4);
+        // frame allocator validated; single-threaded boot.
         let init_as = unsafe { mm::address_space::AddressSpace::new_user(allocator) };
         let init_as_ptr = alloc::boxed::Box::into_raw(alloc::boxed::Box::new(init_as));
 
@@ -268,7 +276,8 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
         for i in 0..init_image.segment_count as usize
         {
             let seg = &init_image.segments[i];
-            // SAFETY: segment data is in Loaded memory reachable via the direct map.
+            // SAFETY: init_as_ptr valid (just allocated above); segment data in
+            // Loaded memory region accessible via direct physical map (Phase 3).
             unsafe { (*init_as_ptr).map_segment(seg, allocator) }
                 .unwrap_or_else(|()|  fatal("Phase 9: failed to map init segment"));
         }
@@ -288,8 +297,8 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
             use cap::slot::{CapTag, Rights};
             use core::ptr::NonNull;
 
-            // SAFETY: ROOT_CSPACE is still owned by the kernel (not yet taken
-            // for init); single-threaded boot.
+            // SAFETY: ROOT_CSPACE initialized in Phase 7, still owned by kernel
+            // (not yet transferred to init); single-threaded boot phase.
             let cs = unsafe { cap::root_cspace_mut() }
                 .unwrap_or_else(|| fatal("Phase 9: ROOT_CSPACE missing"));
 
@@ -298,6 +307,7 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
                 header: KernelObjectHeader::new(ObjectType::AddressSpace),
                 address_space: init_as_ptr,
             });
+            // SAFETY: Box::into_raw returns non-null pointer; cast preserves validity.
             let as_nn =
                 unsafe { NonNull::new_unchecked(Box::into_raw(as_obj).cast::<KernelObjectHeader>()) };
             let slot = cs
@@ -321,6 +331,7 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
                     base: seg.phys_addr,
                     size: seg.size,
                 });
+                // SAFETY: Box::into_raw returns non-null pointer; cast preserves validity.
                 let fo_nn =
                     unsafe { NonNull::new_unchecked(Box::into_raw(fo).cast::<KernelObjectHeader>()) };
                 cs.insert_cap(CapTag::Frame, rights, fo_nn)
@@ -331,7 +342,8 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
         };
 
         // Map init's user stack (INIT_STACK_PAGES pages below INIT_STACK_TOP).
-        // SAFETY: stack_top is page-aligned and within the user address range.
+        // SAFETY: init_as_ptr valid (allocated above); stack_top is page-aligned
+        // constant within user address range; frame allocator validated in Phase 2.
         unsafe {
             (*init_as_ptr).map_stack(
                 mm::address_space::INIT_STACK_TOP,
@@ -382,7 +394,8 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
                     // Transfer root CSpace ownership to init. ROOT_CSPACE is
                     // an Option<Box<CSpace>> set in Phase 7; take it here so
                     // the raw pointer is valid for the lifetime of the process.
-                    // SAFETY: single-threaded boot; ROOT_CSPACE not yet accessed.
+                    // SAFETY: ROOT_CSPACE initialized in Phase 7; single-threaded
+                    // boot; ownership transferred once to init process.
                     let cs = unsafe { cap::take_root_cspace() }
                         .unwrap_or_else(|| fatal("Phase 9: ROOT_CSPACE missing"));
                     alloc::boxed::Box::into_raw(cs)
@@ -392,7 +405,8 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
         ));
 
         // Enqueue init on the BSP scheduler at INIT_PRIORITY.
-        // SAFETY: single-threaded boot; SCHEDULERS[0] is exclusively owned.
+        // SAFETY: scheduler initialized in Phase 8; single-threaded boot phase;
+        // BSP scheduler (index 0) exclusively accessed by boot thread.
         unsafe {
             let sched = sched::scheduler_for(0);
             sched.enqueue(init_tcb, sched::INIT_PRIORITY);
@@ -422,7 +436,8 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
                     kprintln!("smp: starting {} AP(s)", ap_count);
 
                     // Copy/patch the trampoline code into the physical page.
-                    // SAFETY: direct map active; trampoline_pa is identity-mapped RWX.
+                    // SAFETY: direct physical map active (Phase 3); trampoline_pa
+                    // from BootInfo points to bootloader-allocated RWX page <1 MiB.
                     unsafe {
                         arch::current::ap_trampoline::setup_trampoline(trampoline_pa);
                     }
@@ -432,10 +447,13 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
                     for cpu_idx in 1..=ap_count
                     {
                         let hw_id = boot_cpu_ids[cpu_idx];
+                        // SAFETY: idle threads allocated in Phase 8 for all CPUs;
+                        // cpu_idx < boot_cpu_count validated by loop bound.
                         let stack_top = unsafe { sched::idle_stack_top_for(cpu_idx) };
 
                         // Arch-specific: write params + send SIPI / SBI hart_start.
-                        // SAFETY: trampoline ready; Phase 3–8 active.
+                        // SAFETY: trampoline setup complete above; all boot phases
+                        // (2-8) initialized; AP will use shared kernel state.
                         let ok = unsafe {
                             arch::current::ap_trampoline::start_ap(
                                 trampoline_pa,
@@ -495,8 +513,10 @@ pub extern "C" fn kernel_entry_ap(cpu_id: u32, ist1_top: u64, ist2_top: u64) -> 
     //    Must come before percpu::init_ap because lgdt reloads all segment
     //    registers (including GS ← null selector), which resets the GS
     //    shadow-register base to 0. percpu::init_ap reinstalls it afterward.
-    //    SAFETY: heap is active (Phase 4); init_ap box-allocates GDT+TSS.
+    // SAFETY: idle threads allocated in Phase 8 (BSP); cpu_id in valid range.
     let idle_stack_top = unsafe { sched::idle_stack_top_for(cpu_id as usize) };
+    // SAFETY: heap active (Phase 4, BSP); init_ap box-allocates per-CPU GDT+TSS;
+    // called once per AP during startup; idle_stack_top from allocated idle thread.
     unsafe {
         arch::current::gdt::init_ap(cpu_id, idle_stack_top, ist1_top, ist2_top);
     }
@@ -504,26 +524,30 @@ pub extern "C" fn kernel_entry_ap(cpu_id: u32, ist1_top: u64, ist2_top: u64) -> 
     // 2. Install per-CPU GS-base (IA32_GS_BASE → &PER_CPU[cpu_id]).
     //    After gdt::init_ap reloaded GS with selector 0, the GS shadow-register
     //    base is 0. Write the MSR here to restore GS-relative addressing.
-    //    SAFETY: PER_CPU[cpu_id] is not yet accessed by any other CPU.
+    // SAFETY: PER_CPU[cpu_id] allocated during Phase 8 (BSP); not yet accessed
+    // by this AP or any other CPU; called once per AP during startup.
     unsafe {
         percpu::init_ap(cpu_id);
     }
 
     // 3. Load the BSP's shared IDT on this AP.
-    //    SAFETY: IDT was populated by idt::init() on the BSP.
+    // SAFETY: IDT initialized and populated in Phase 5 (BSP); all interrupt
+    // handlers registered; IDT is shared across all CPUs (x86-64 arch).
     unsafe {
         arch::current::idt::load();
     }
 
     // 4. Software-enable local APIC and mask all LVT entries.
-    //    SAFETY: direct map active; APIC MMIO is accessible.
+    // SAFETY: direct physical map active (Phase 3, BSP); APIC MMIO region
+    // accessible; local APIC per-CPU configuration; called once per AP.
     unsafe {
         arch::current::interrupts::init_ap();
     }
 
     // 5. Configure SYSCALL/SYSRET MSRs (IA32_EFER.SCE, STAR, LSTAR, SFMASK).
     //    MSR writes are per-CPU; each AP must execute this.
-    //    SAFETY: ring 0; GDT is loaded.
+    // SAFETY: running at ring 0; GDT loaded above; MSR configuration is
+    // per-CPU; syscall entry handler already registered (Phase 5, BSP).
     unsafe {
         arch::current::syscall::init();
     }
@@ -531,7 +555,8 @@ pub extern "C" fn kernel_entry_ap(cpu_id: u32, ist1_top: u64, ist2_top: u64) -> 
     // 6. Start the per-CPU preemption timer.
     //    x86-64: programs the local APIC timer using the BSP's calibrated rate.
     //    RISC-V: arms the SBI timer using the BSP's stored tick period.
-    //    SAFETY: interrupts::init_ap() has prepared the interrupt delivery path.
+    // SAFETY: local APIC/interrupt delivery initialized above; timer IRQ
+    // handler registered (Phase 5, BSP); per-CPU timer configuration.
     unsafe {
         arch::current::timer::init_ap(10_000);
     }
@@ -566,6 +591,8 @@ fn panic(info: &PanicInfo) -> !
     // directly to serial, which is always safe.
     if let Some(loc) = info.location()
     {
+        // SAFETY: panic handler runs once per panic; panic_write_fmt bypasses
+        // CONSOLE_LOCK to avoid deadlock; writes directly to serial port.
         unsafe {
             console::panic_write_fmt(format_args!(
                 "\nPANIC at {}:{}: {}\n",
@@ -577,6 +604,8 @@ fn panic(info: &PanicInfo) -> !
     }
     else
     {
+        // SAFETY: panic handler runs once per panic; panic_write_fmt bypasses
+        // CONSOLE_LOCK to avoid deadlock; writes directly to serial port.
         unsafe {
             console::panic_write_fmt(format_args!("\nPANIC: {}\n", info.message()));
         }

@@ -144,13 +144,14 @@ pub unsafe fn init()
 
     // 5. Software-enable the local APIC.
     // Set SVR bit 8 (APIC Software Enable) and program spurious vector 255.
-    // SAFETY: direct map is active; APIC MMIO is accessible.
+    // SAFETY: direct map is active; APIC MMIO base is valid kernel mapping; SVR write is architecture-defined.
     unsafe {
         apic_write(APIC_SVR, apic_read(APIC_SVR) | 0x100 | 0xFF);
     }
 
     // 6. Mask all LVT entries to prevent unexpected interrupts before the
     //    timer is configured.
+    // SAFETY: Local APIC MMIO base is valid kernel mapping; LVT mask writes are architecture-defined.
     unsafe {
         apic_write(APIC_LVT_TIMER, LVT_MASK);
         apic_write(APIC_LVT_LINT0, LVT_MASK);
@@ -230,6 +231,7 @@ unsafe fn wait_icr_idle() -> bool
 #[cfg(not(test))]
 unsafe fn send_init_ipi(target_apic_id: u32)
 {
+    // SAFETY: Local APIC MMIO base is valid kernel mapping; ICR writes follow Intel SDM INIT sequence.
     unsafe {
         apic_write(APIC_ICR_HIGH, target_apic_id << 24);
         apic_write(APIC_ICR_LOW, ICR_INIT_ASSERT);
@@ -247,6 +249,7 @@ unsafe fn send_init_ipi(target_apic_id: u32)
 #[cfg(not(test))]
 unsafe fn send_sipi(target_apic_id: u32, vector: u8)
 {
+    // SAFETY: Local APIC MMIO base is valid kernel mapping; ICR SIPI write follows Intel SDM STARTUP sequence.
     unsafe {
         apic_write(APIC_ICR_HIGH, target_apic_id << 24);
         apic_write(APIC_ICR_LOW, ICR_SIPI_BASE | vector as u32);
@@ -268,6 +271,7 @@ unsafe fn send_sipi(target_apic_id: u32, vector: u8)
 pub unsafe fn start_ap(target_apic_id: u32, trampoline_phys: u64)
 {
     let vector = (trampoline_phys >> 12) as u8;
+    // SAFETY: caller guarantees APIC is initialized, trampoline set up, and timer calibrated; INIT+SIPI sequence follows Intel SDM.
     unsafe {
         send_init_ipi(target_apic_id);
         super::timer::delay_us(10_000); // 10 ms after INIT (Intel SDM §8.4.4.1)
@@ -288,6 +292,7 @@ pub unsafe fn start_ap(target_apic_id: u32, trampoline_phys: u64)
 #[cfg(not(test))]
 pub unsafe fn init_ap()
 {
+    // SAFETY: AP has loaded GDT/IDT; Local APIC MMIO base is valid kernel mapping; SVR and LVT writes are architecture-defined.
     unsafe {
         apic_write(APIC_SVR, apic_read(APIC_SVR) | 0x100 | 0xFF);
         apic_write(APIC_LVT_TIMER, LVT_MASK);
@@ -310,7 +315,7 @@ pub unsafe fn init_ap() {}
 pub fn disable() -> bool
 {
     let rflags: u64;
-    // SAFETY: reads RFLAGS, then cli.
+    // SAFETY: pushfq/cli are always safe at ring 0; disables interrupts via x86 primitives.
     unsafe {
         core::arch::asm!(
             "pushfq",
@@ -340,6 +345,7 @@ pub unsafe fn enable()
 pub fn are_enabled() -> bool
 {
     let rflags: u64;
+    // SAFETY: pushfq is always safe at ring 0; reads RFLAGS non-destructively.
     unsafe {
         core::arch::asm!(
             "pushfq",

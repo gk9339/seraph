@@ -45,13 +45,16 @@ pub fn sys_thread_configure(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     let stack_ptr = tf.arg(2);
     let arg = tf.arg(3);
 
+    // SAFETY: current_tcb() returns current thread; interrupt context ensures it is set.
     let caller_tcb = unsafe { current_tcb() };
     if caller_tcb.is_null()
     {
         return Err(SyscallError::InvalidCapability);
     }
+    // SAFETY: caller_tcb validated non-null; cspace set at thread creation.
     let caller_cspace = unsafe { (*caller_tcb).cspace };
 
+    // SAFETY: caller_cspace validated; lookup_cap checks tag and rights.
     let thread_slot =
         unsafe { super::lookup_cap(caller_cspace, thread_idx, CapTag::Thread, Rights::CONTROL) }?;
 
@@ -70,12 +73,13 @@ pub fn sys_thread_configure(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     }
 
     // Thread must be in Created state to configure.
-    // SAFETY: target_tcb is valid (lives for the duration of the ThreadObject).
+    // SAFETY: target_tcb validated non-null; state field always valid.
     if unsafe { (*target_tcb).state } != ThreadState::Created
     {
         return Err(SyscallError::InvalidArgument);
     }
 
+    // SAFETY: target_tcb validated non-null; kernel_stack_top set at creation.
     let kstack_top = unsafe { (*target_tcb).kernel_stack_top };
 
     // Build the initial TrapFrame on the thread's kernel stack, just below
@@ -84,7 +88,8 @@ pub fn sys_thread_configure(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     let tf_ptr = (kstack_top - tf_size) as *mut ArchTrapFrame;
 
     // Zero then populate user-mode entry fields.
-    // SAFETY: kstack_top - tf_size is within the allocated kernel stack (4 pages).
+    // SAFETY: kstack_top - tf_size is within the allocated kernel stack (4 pages);
+    //         write_bytes, init_user, and set_arg0 all operate on valid memory.
     unsafe {
         core::ptr::write_bytes(tf_ptr.cast::<u8>(), 0, tf_size as usize);
         (*tf_ptr).init_user(entry, stack_ptr);
@@ -93,7 +98,7 @@ pub fn sys_thread_configure(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     }
 
     // Store the trap frame pointer so sched::schedule() can find it.
-    // SAFETY: target_tcb is valid.
+    // SAFETY: target_tcb validated non-null; trap_frame field assignment is valid.
     unsafe {
         (*target_tcb).trap_frame = tf_ptr;
     }
@@ -119,19 +124,23 @@ pub fn sys_thread_start(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 
     let thread_idx = tf.arg(0) as u32;
 
+    // SAFETY: current_tcb() returns current thread; interrupt context ensures it is set.
     let caller_tcb = unsafe { current_tcb() };
     if caller_tcb.is_null()
     {
         return Err(SyscallError::InvalidCapability);
     }
+    // SAFETY: caller_tcb validated non-null; cspace set at thread creation.
     let caller_cspace = unsafe { (*caller_tcb).cspace };
 
+    // SAFETY: caller_cspace validated; lookup_cap checks tag and rights.
     let thread_slot =
         unsafe { super::lookup_cap(caller_cspace, thread_idx, CapTag::Thread, Rights::CONTROL) }?;
 
     let target_tcb = {
         let obj = thread_slot.object.ok_or(SyscallError::InvalidCapability)?;
         // cast_ptr_alignment: header at offset 0 of ThreadObject; allocator guarantees alignment.
+        // SAFETY: tag confirmed Thread; pointer is valid ThreadObject.
         #[allow(clippy::cast_ptr_alignment)]
         let to = unsafe { &*(obj.as_ptr().cast::<ThreadObject>()) };
         to.tcb
@@ -144,7 +153,7 @@ pub fn sys_thread_start(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 
     // Thread must be in Created or Stopped state with a configured trap_frame.
     // Stopped → Ready acts as a resume operation (no new trap_frame needed).
-    // SAFETY: target_tcb is valid.
+    // SAFETY: target_tcb validated non-null; state/trap_frame fields always valid.
     unsafe {
         let state = (*target_tcb).state;
         if state != ThreadState::Created && state != ThreadState::Stopped
@@ -194,19 +203,23 @@ pub fn sys_thread_stop(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 
     let thread_idx = tf.arg(0) as u32;
 
+    // SAFETY: current_tcb() returns current thread; interrupt context ensures it is set.
     let caller_tcb = unsafe { current_tcb() };
     if caller_tcb.is_null()
     {
         return Err(SyscallError::InvalidCapability);
     }
+    // SAFETY: caller_tcb validated non-null; cspace set at thread creation.
     let caller_cspace = unsafe { (*caller_tcb).cspace };
 
+    // SAFETY: caller_cspace validated; lookup_cap checks tag and rights.
     let thread_slot =
         unsafe { super::lookup_cap(caller_cspace, thread_idx, CapTag::Thread, Rights::CONTROL) }?;
 
     let target_tcb = {
         let obj = thread_slot.object.ok_or(SyscallError::InvalidCapability)?;
         // cast_ptr_alignment: header at offset 0 of ThreadObject; allocator guarantees alignment.
+        // SAFETY: tag confirmed Thread; pointer is valid ThreadObject.
         #[allow(clippy::cast_ptr_alignment)]
         let to = unsafe { &*(obj.as_ptr().cast::<ThreadObject>()) };
         to.tcb
@@ -217,7 +230,7 @@ pub fn sys_thread_stop(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         return Err(SyscallError::InvalidCapability);
     }
 
-    // SAFETY: target_tcb is valid for the duration of the ThreadObject.
+    // SAFETY: target_tcb validated non-null; state field always valid.
     unsafe {
         let state = (*target_tcb).state;
 
@@ -273,8 +286,9 @@ unsafe fn cancel_ipc_block(tcb: *mut crate::sched::thread::ThreadControlBlock)
     use crate::sched::thread::IpcThreadState;
     use syscall::SyscallError;
 
-    // SAFETY: tcb is a valid Blocked TCB.
+    // SAFETY: tcb validated by caller; ipc_state field always valid.
     let ipc_state = unsafe { (*tcb).ipc_state };
+    // SAFETY: tcb validated by caller; blocked_on_object field always valid.
     let blocked_on = unsafe { (*tcb).blocked_on_object };
 
     match ipc_state
@@ -427,16 +441,19 @@ pub fn sys_thread_set_priority(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         return Err(SyscallError::InvalidArgument);
     }
 
+    // SAFETY: current_tcb() returns current thread; interrupt context ensures it is set.
     let caller_tcb = unsafe { current_tcb() };
     if caller_tcb.is_null()
     {
         return Err(SyscallError::InvalidCapability);
     }
+    // SAFETY: caller_tcb validated non-null; cspace set at thread creation.
     let caller_cspace = unsafe { (*caller_tcb).cspace };
 
     // Elevated priorities require a SchedControl cap with ELEVATE rights.
     if priority >= SCHED_ELEVATED_MIN
     {
+        // SAFETY: caller_cspace validated; lookup_cap checks tag and rights.
         unsafe {
             super::lookup_cap(
                 caller_cspace,
@@ -447,12 +464,14 @@ pub fn sys_thread_set_priority(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         }?;
     }
 
+    // SAFETY: caller_cspace validated; lookup_cap checks tag and rights.
     let thread_slot =
         unsafe { super::lookup_cap(caller_cspace, thread_idx, CapTag::Thread, Rights::CONTROL) }?;
 
     let target_tcb = {
         let obj = thread_slot.object.ok_or(SyscallError::InvalidCapability)?;
         // cast_ptr_alignment: header at offset 0 of ThreadObject; allocator guarantees alignment.
+        // SAFETY: tag confirmed Thread; pointer is valid ThreadObject.
         #[allow(clippy::cast_ptr_alignment)]
         let to = unsafe { &*(obj.as_ptr().cast::<ThreadObject>()) };
         to.tcb
@@ -463,7 +482,7 @@ pub fn sys_thread_set_priority(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         return Err(SyscallError::InvalidCapability);
     }
 
-    // SAFETY: target_tcb is valid.
+    // SAFETY: target_tcb validated non-null; priority/state fields always valid.
     unsafe {
         let old_prio = (*target_tcb).priority;
         (*target_tcb).priority = priority;
@@ -500,19 +519,23 @@ pub fn sys_thread_set_affinity(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     let thread_idx = tf.arg(0) as u32;
     let cpu_id = tf.arg(1) as u32;
 
+    // SAFETY: current_tcb() returns current thread; interrupt context ensures it is set.
     let caller_tcb = unsafe { current_tcb() };
     if caller_tcb.is_null()
     {
         return Err(SyscallError::InvalidCapability);
     }
+    // SAFETY: caller_tcb validated non-null; cspace set at thread creation.
     let caller_cspace = unsafe { (*caller_tcb).cspace };
 
+    // SAFETY: caller_cspace validated; lookup_cap checks tag and rights.
     let thread_slot =
         unsafe { super::lookup_cap(caller_cspace, thread_idx, CapTag::Thread, Rights::CONTROL) }?;
 
     let target_tcb = {
         let obj = thread_slot.object.ok_or(SyscallError::InvalidCapability)?;
         // cast_ptr_alignment: header at offset 0 of ThreadObject; allocator guarantees alignment.
+        // SAFETY: tag confirmed Thread; pointer is valid ThreadObject.
         #[allow(clippy::cast_ptr_alignment)]
         let to = unsafe { &*(obj.as_ptr().cast::<ThreadObject>()) };
         to.tcb
@@ -533,7 +556,7 @@ pub fn sys_thread_set_affinity(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         }
     }
 
-    // SAFETY: target_tcb is valid.
+    // SAFETY: target_tcb validated non-null; cpu_affinity field assignment is valid.
     unsafe {
         (*target_tcb).cpu_affinity = cpu_id;
     }
@@ -563,20 +586,24 @@ pub fn sys_thread_read_regs(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     let buf_ptr = tf.arg(1);
     let buf_size = tf.arg(2) as usize;
 
+    // SAFETY: current_tcb() returns current thread; interrupt context ensures it is set.
     let caller_tcb = unsafe { current_tcb() };
     if caller_tcb.is_null()
     {
         return Err(SyscallError::InvalidCapability);
     }
+    // SAFETY: caller_tcb validated non-null; cspace set at thread creation.
     let caller_cspace = unsafe { (*caller_tcb).cspace };
 
     // OBSERVE right is sufficient for reading registers.
+    // SAFETY: caller_cspace validated; lookup_cap checks tag and rights.
     let thread_slot =
         unsafe { super::lookup_cap(caller_cspace, thread_idx, CapTag::Thread, Rights::OBSERVE) }?;
 
     let target_tcb = {
         let obj = thread_slot.object.ok_or(SyscallError::InvalidCapability)?;
         // cast_ptr_alignment: header at offset 0 of ThreadObject; allocator guarantees alignment.
+        // SAFETY: tag confirmed Thread; pointer is valid ThreadObject.
         #[allow(clippy::cast_ptr_alignment)]
         let to = unsafe { &*(obj.as_ptr().cast::<ThreadObject>()) };
         to.tcb
@@ -587,7 +614,7 @@ pub fn sys_thread_read_regs(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         return Err(SyscallError::InvalidCapability);
     }
 
-    // SAFETY: target_tcb is valid.
+    // SAFETY: target_tcb validated non-null; state/trap_frame fields always valid.
     unsafe {
         if (*target_tcb).state != ThreadState::Stopped
         {
@@ -606,7 +633,8 @@ pub fn sys_thread_read_regs(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     }
 
     // Copy TrapFrame to user buffer under SMAP/SUM bracket.
-    // SAFETY: trap_frame is valid; buf_ptr is a user VA checked to be non-null.
+    // SAFETY: trap_frame validated non-null; buf_ptr user VA; copy_size bounded;
+    //         user_access_begin/end bracket enables SMAP bypass.
     unsafe {
         let src = (*target_tcb).trap_frame as *const u8;
         let dst = buf_ptr as *mut u8;
@@ -640,19 +668,23 @@ pub fn sys_thread_write_regs(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     let buf_ptr = tf.arg(1);
     let buf_size = tf.arg(2) as usize;
 
+    // SAFETY: current_tcb() returns current thread; interrupt context ensures it is set.
     let caller_tcb = unsafe { current_tcb() };
     if caller_tcb.is_null()
     {
         return Err(SyscallError::InvalidCapability);
     }
+    // SAFETY: caller_tcb validated non-null; cspace set at thread creation.
     let caller_cspace = unsafe { (*caller_tcb).cspace };
 
+    // SAFETY: caller_cspace validated; lookup_cap checks tag and rights.
     let thread_slot =
         unsafe { super::lookup_cap(caller_cspace, thread_idx, CapTag::Thread, Rights::CONTROL) }?;
 
     let target_tcb = {
         let obj = thread_slot.object.ok_or(SyscallError::InvalidCapability)?;
         // cast_ptr_alignment: header at offset 0 of ThreadObject; allocator guarantees alignment.
+        // SAFETY: tag confirmed Thread; pointer is valid ThreadObject.
         #[allow(clippy::cast_ptr_alignment)]
         let to = unsafe { &*(obj.as_ptr().cast::<ThreadObject>()) };
         to.tcb

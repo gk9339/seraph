@@ -62,6 +62,7 @@ pub struct AddressSpace
 
 // SAFETY: AddressSpace is accessed only from the single boot thread in Phase 9.
 unsafe impl Send for AddressSpace {}
+// SAFETY: AddressSpace is accessed only from the single boot thread; no Sync violation.
 unsafe impl Sync for AddressSpace {}
 
 impl AddressSpace
@@ -90,7 +91,8 @@ impl AddressSpace
         let root_virt = phys_to_virt(root_phys);
 
         // Zero the frame (page table entries are 0 = not-present by default).
-        // SAFETY: root_virt is a valid, exclusively-owned kernel virtual address.
+        // SAFETY: root_virt is a valid, exclusively-owned kernel virtual address
+        // mapped RW in the direct physical map; write_bytes stays within PAGE_SIZE bounds.
         unsafe {
             core::ptr::write_bytes(root_virt as *mut u8, 0, PAGE_SIZE);
         }
@@ -100,6 +102,8 @@ impl AddressSpace
         //
         // On x86-64: read CR3 for the current PML4 physical address.
         // On RISC-V: read satp for the current Sv48 root physical address.
+        // SAFETY: root_virt is valid and page-aligned; copy_kernel_entries
+        // reads the current root and copies 256 u64 entries within bounds.
         unsafe {
             Self::copy_kernel_entries(root_virt);
         }
@@ -121,6 +125,7 @@ impl AddressSpace
     {
         use crate::arch::current::paging::read_root_phys;
 
+        // SAFETY: read_root_phys reads CR3/satp; caller contract ensures paging is active.
         let current_root_phys = unsafe { read_root_phys() };
         let current_root_virt = phys_to_virt(current_root_phys);
 

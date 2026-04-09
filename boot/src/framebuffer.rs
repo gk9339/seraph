@@ -85,6 +85,7 @@ impl FramebufferWriter
                 // SAFETY: framebuffer pointer is valid per struct invariant.
                 if self.row >= self.max_rows
                 {
+                    // SAFETY: framebuffer base/pitch validated during init; scroll writes within bounds.
                     unsafe {
                         self.scroll();
                     }
@@ -108,6 +109,7 @@ impl FramebufferWriter
                     // SAFETY: framebuffer pointer is valid.
                     if self.row >= self.max_rows
                     {
+                        // SAFETY: framebuffer base/pitch validated during init; scroll writes within bounds.
                         unsafe {
                             self.scroll();
                         }

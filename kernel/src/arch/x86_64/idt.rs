@@ -148,6 +148,7 @@ unsafe extern "C" fn common_exception_handler(frame: *const ExceptionFrame) -> !
     let cr2: u64 = if f.vector == 14
     {
         let v: u64;
+        // SAFETY: CR2 is a valid read-only register at ring 0; page fault context.
         unsafe {
             core::arch::asm!("mov {}, cr2", out(reg) v, options(nostack, nomem));
         }
@@ -494,7 +495,7 @@ pub unsafe fn init()
         limit: (core::mem::size_of_val(idt) - 1) as u16,
         base: idt.as_ptr() as u64,
     };
-    // SAFETY: idtr is live on the stack; idt is valid for the lifetime of the kernel.
+    // SAFETY: lidt is a valid ring-0 instruction; idtr is live on stack; IDT in BSS valid forever.
     unsafe {
         core::arch::asm!(
             "lidt [{0}]",
@@ -523,6 +524,7 @@ pub unsafe fn load()
         limit: (core::mem::size_of_val(idt) - 1) as u16,
         base: idt.as_ptr() as u64,
     };
+    // SAFETY: lidt is valid at ring 0; idtr is live on stack; IDT in BSS is valid forever.
     unsafe {
         core::arch::asm!(
             "lidt [{0}]",

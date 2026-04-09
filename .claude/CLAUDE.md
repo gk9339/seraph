@@ -25,7 +25,7 @@ See [docs/documentation-standards.md](docs/documentation-standards.md) — non-n
 - Additional documentation MUST NOT be loaded unless required by the task.
 
 ## Tooling constraints
-- All build, run, clean, lint, and test actions MUST be performed via `cargo xtask` commands.
+- All build, run, clean, and test actions MUST be performed via `cargo xtask` commands.
 - Direct invocation of `cargo build`, `cargo run`, `cargo test`, or `cargo clippy` is forbidden.
 - When switching architectures or targets, `cargo xtask clean` MUST be run first.
 

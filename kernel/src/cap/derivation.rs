@@ -137,6 +137,7 @@ impl DerivationLock
 unsafe fn resolve_slot_mut(id: SlotId) -> Option<&'static mut super::slot::CapabilitySlot>
 {
     let cs_ptr = crate::cap::lookup_cspace(id.cspace_id)?;
+    // SAFETY: cspace registry lookup validated; CSpace pointer lives as long as the registry entry.
     let cs = unsafe { &mut *cs_ptr };
     cs.slot_mut(id.index.get())
 }
@@ -154,12 +155,14 @@ unsafe fn resolve_slot_mut(id: SlotId) -> Option<&'static mut super::slot::Capab
 pub unsafe fn link_child(parent: SlotId, child: SlotId)
 {
     // Update child's parent pointer.
+    // SAFETY: DERIVATION_LOCK held; ensures exclusive access to derivation tree.
     if let Some(child_slot) = unsafe { resolve_slot_mut(child) }
     {
         child_slot.deriv_parent = Some(parent);
         child_slot.deriv_prev_sibling = None;
 
         // child.next = old first_child
+        // SAFETY: DERIVATION_LOCK held; ensures exclusive access to derivation tree.
         let old_first = if let Some(parent_slot) = unsafe { resolve_slot_mut(parent) }
         {
             let old = parent_slot.deriv_first_child;
@@ -174,6 +177,7 @@ pub unsafe fn link_child(parent: SlotId, child: SlotId)
         // Wire the former first_child's prev pointer to the new child.
         if let Some(old_first_id) = old_first
         {
+            // SAFETY: DERIVATION_LOCK held; old_first_id retrieved from parent's child list.
             if let Some(old_first_slot) = unsafe { resolve_slot_mut(old_first_id) }
             {
                 old_first_slot.deriv_prev_sibling = Some(child);
@@ -181,6 +185,7 @@ pub unsafe fn link_child(parent: SlotId, child: SlotId)
         }
 
         // Wire child's next sibling to the former first child.
+        // SAFETY: DERIVATION_LOCK held; ensures exclusive access to derivation tree.
         if let Some(child_slot2) = unsafe { resolve_slot_mut(child) }
         {
             child_slot2.deriv_next_sibling = old_first;
@@ -203,6 +208,7 @@ pub unsafe fn link_child(parent: SlotId, child: SlotId)
 pub unsafe fn unlink_node(node: SlotId)
 {
     // Read node's current pointers.
+    // SAFETY: DERIVATION_LOCK held; ensures exclusive access to derivation tree.
     let (parent, prev, next) = if let Some(slot) = unsafe { resolve_slot_mut(node) }
     {
         let p = slot.deriv_parent;
@@ -222,6 +228,7 @@ pub unsafe fn unlink_node(node: SlotId)
     // Splice node out of the sibling chain.
     if let Some(prev_id) = prev
     {
+        // SAFETY: DERIVATION_LOCK held; prev_id retrieved from node's sibling pointer.
         if let Some(prev_slot) = unsafe { resolve_slot_mut(prev_id) }
         {
             prev_slot.deriv_next_sibling = next;
@@ -230,6 +237,7 @@ pub unsafe fn unlink_node(node: SlotId)
     else if let Some(parent_id) = parent
     {
         // node was the first child; update parent's first_child.
+        // SAFETY: DERIVATION_LOCK held; parent_id retrieved from node's parent pointer.
         if let Some(parent_slot) = unsafe { resolve_slot_mut(parent_id) }
         {
             parent_slot.deriv_first_child = next;
@@ -238,6 +246,7 @@ pub unsafe fn unlink_node(node: SlotId)
 
     if let Some(next_id) = next
     {
+        // SAFETY: DERIVATION_LOCK held; next_id retrieved from node's sibling pointer.
         if let Some(next_slot) = unsafe { resolve_slot_mut(next_id) }
         {
             next_slot.deriv_prev_sibling = prev;
@@ -257,6 +266,7 @@ pub unsafe fn unlink_node(node: SlotId)
 pub unsafe fn reparent_children(node: SlotId, new_parent: Option<SlotId>)
 {
     // Collect node's first_child.
+    // SAFETY: DERIVATION_LOCK held; ensures exclusive access to derivation tree.
     let first_child = if let Some(slot) = unsafe { resolve_slot_mut(node) }
     {
         let fc = slot.deriv_first_child;
@@ -272,6 +282,7 @@ pub unsafe fn reparent_children(node: SlotId, new_parent: Option<SlotId>)
     let mut cur = first_child;
     while let Some(child_id) = cur
     {
+        // SAFETY: DERIVATION_LOCK held; child_id retrieved from node's child list.
         let next = if let Some(slot) = unsafe { resolve_slot_mut(child_id) }
         {
             slot.deriv_parent = new_parent;
@@ -285,6 +296,7 @@ pub unsafe fn reparent_children(node: SlotId, new_parent: Option<SlotId>)
         if let Some(np) = new_parent
         {
             // Prepend child to new_parent's child list.
+            // SAFETY: DERIVATION_LOCK held; parent/child/sibling pointers maintained by link/unlink operations.
             unsafe { link_child(np, child_id) };
 
             // link_child sets deriv_parent again (idempotent) and wires the
@@ -296,6 +308,7 @@ pub unsafe fn reparent_children(node: SlotId, new_parent: Option<SlotId>)
         else
         {
             // Make child a root (no parent).
+            // SAFETY: DERIVATION_LOCK held; child_id retrieved from node's child list.
             if let Some(slot) = unsafe { resolve_slot_mut(child_id) }
             {
                 slot.deriv_parent = None;
@@ -336,6 +349,7 @@ pub unsafe fn revoke_subtree(root: SlotId) -> Vec<NonNull<KernelObjectHeader>>
     //
     // To avoid following stale pointers after clearing, we collect children
     // of the root into a work stack first, then process each subtree.
+    // SAFETY: DERIVATION_LOCK held; ensures exclusive access to derivation tree.
     let root_first_child = if let Some(slot) = unsafe { resolve_slot_mut(root) }
     {
         let fc = slot.deriv_first_child;
@@ -354,6 +368,7 @@ pub unsafe fn revoke_subtree(root: SlotId) -> Vec<NonNull<KernelObjectHeader>>
     let mut cur = root_first_child;
     while let Some(id) = cur
     {
+        // SAFETY: DERIVATION_LOCK held; id retrieved from root's child list.
         let next = unsafe { resolve_slot_mut(id) }.and_then(|s| s.deriv_next_sibling);
         stack.push(id);
         cur = next;
@@ -364,6 +379,7 @@ pub unsafe fn revoke_subtree(root: SlotId) -> Vec<NonNull<KernelObjectHeader>>
     while let Some(node_id) = stack.pop()
     {
         let Some(cs_ptr) = crate::cap::lookup_cspace(node_id.cspace_id) else { continue };
+        // SAFETY: cspace registry lookup validated; CSpace pointer lives as long as the registry entry.
         let cs = unsafe { &mut *cs_ptr };
 
         // Snapshot derivation fields and object pointer, then clear.
@@ -389,6 +405,7 @@ pub unsafe fn revoke_subtree(root: SlotId) -> Vec<NonNull<KernelObjectHeader>>
         let mut child = first_child;
         while let Some(child_id) = child
         {
+            // SAFETY: DERIVATION_LOCK held; child_id retrieved from node's child list.
             let next = unsafe { resolve_slot_mut(child_id) }.and_then(|s| s.deriv_next_sibling);
             stack.push(child_id);
             child = next;

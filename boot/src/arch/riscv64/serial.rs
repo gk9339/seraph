@@ -48,6 +48,7 @@ const SPCR_GAS_ADDRESS: usize = SPCR_OFF_GAS + 4; // u64
 /// `rsdp_addr` must be a physical address of a valid, identity-mapped RSDP.
 unsafe fn find_spcr_uart_base(rsdp_addr: u64) -> Option<u64>
 {
+    // SAFETY: rsdp_addr is a valid identity-mapped RSDP physical address; caller guarantees validity and accessibility.
     let rsdp = unsafe { phys_slice(rsdp_addr, 36) };
     if &rsdp[..8] != RSDP_SIG || read_u8(rsdp, RSDP_OFF_REVISION) < 2
     {
@@ -59,6 +60,7 @@ unsafe fn find_spcr_uart_base(rsdp_addr: u64) -> Option<u64>
         return None;
     }
 
+    // SAFETY: xsdt_addr read from validated RSDP; identity-mapped and accessible during boot.
     let xsdt_hdr = unsafe { phys_slice(xsdt_addr, SDT_HDR_LEN) };
     if &xsdt_hdr[SDT_OFF_SIGNATURE..SDT_OFF_SIGNATURE + 4] != b"XSDT"
     {
@@ -69,6 +71,7 @@ unsafe fn find_spcr_uart_base(rsdp_addr: u64) -> Option<u64>
     {
         return None;
     }
+    // SAFETY: xsdt_addr and xsdt_len validated from XSDT header; identity-mapped and accessible.
     let xsdt = unsafe { phys_slice(xsdt_addr, xsdt_len) };
     let entries_bytes = &xsdt[SDT_HDR_LEN..];
     let entry_count = entries_bytes.len() / 8;
@@ -80,6 +83,7 @@ unsafe fn find_spcr_uart_base(rsdp_addr: u64) -> Option<u64>
         {
             continue;
         }
+        // SAFETY: table_addr read from validated XSDT entry; identity-mapped and accessible during boot.
         let hdr = unsafe { phys_slice(table_addr, SDT_HDR_LEN) };
         let sig = &hdr[SDT_OFF_SIGNATURE..SDT_OFF_SIGNATURE + 4];
         if sig != b"SPCR"
@@ -91,6 +95,7 @@ unsafe fn find_spcr_uart_base(rsdp_addr: u64) -> Option<u64>
         {
             return None;
         }
+        // SAFETY: table_addr and table_len validated from SPCR header; identity-mapped and accessible.
         let table = unsafe { phys_slice(table_addr, table_len) };
         let addr_space = read_u8(table, SPCR_GAS_ADDR_SPACE_ID);
         if addr_space != 0
@@ -117,6 +122,7 @@ unsafe fn find_spcr_uart_base(rsdp_addr: u64) -> Option<u64>
 /// `dtb_addr` must be a physical address of a valid, identity-mapped FDT blob.
 unsafe fn find_dtb_uart_base(dtb_addr: u64) -> Option<u64>
 {
+    // SAFETY: dtb_addr is a valid identity-mapped FDT blob physical address; caller guarantees validity.
     let fdt = unsafe { crate::dtb::Fdt::from_raw(dtb_addr) }?;
     let mut base: Option<u64> = None;
     fdt.for_each_compatible(b"ns16550a", |node| {
@@ -140,12 +146,14 @@ unsafe fn find_dtb_uart_base(dtb_addr: u64) -> Option<u64>
 pub unsafe fn discover_uart(st: *mut EfiSystemTable)
 {
     // Try ACPI SPCR first (EDK2 on QEMU virt provides ACPI, not DTB).
+    // SAFETY: st is a valid UEFI system table pointer; caller guarantees validity.
     if let Some(rsdp_ptr) = unsafe { crate::uefi::find_config_table(st, &EFI_ACPI_20_TABLE_GUID) }
     {
         let rsdp_addr = rsdp_ptr as u64;
+        // SAFETY: rsdp_addr obtained from UEFI config table; identity-mapped and accessible during boot.
         if let Some(base) = unsafe { find_spcr_uart_base(rsdp_addr) }
         {
-            // SAFETY: usize is 64-bit on all supported UEFI targets; no truncation.
+            // SAFETY: single-threaded boot phase; no concurrent access to static mut; usize is 64-bit on all supported UEFI targets; no truncation.
             #[allow(clippy::cast_possible_truncation)]
             unsafe {
                 UART_BASE_ADDR = base as usize;
@@ -155,12 +163,14 @@ pub unsafe fn discover_uart(st: *mut EfiSystemTable)
     }
 
     // Try Device Tree (bare-metal RISC-V or non-EDK2 firmware with DTB).
+    // SAFETY: st is a valid UEFI system table pointer; caller guarantees validity.
     if let Some(dtb_ptr) = unsafe { crate::uefi::find_config_table(st, &EFI_DTB_TABLE_GUID) }
     {
         let dtb_addr = dtb_ptr as u64;
+        // SAFETY: dtb_addr obtained from UEFI config table; identity-mapped and accessible during boot.
         if let Some(base) = unsafe { find_dtb_uart_base(dtb_addr) }
         {
-            // SAFETY: usize is 64-bit on all supported UEFI targets; no truncation.
+            // SAFETY: single-threaded boot phase; no concurrent access to static mut; usize is 64-bit on all supported UEFI targets; no truncation.
             #[allow(clippy::cast_possible_truncation)]
             unsafe {
                 UART_BASE_ADDR = base as usize;
@@ -176,7 +186,7 @@ pub unsafe fn discover_uart(st: *mut EfiSystemTable)
 /// default 0x10000000.
 pub fn uart_base() -> usize
 {
-    // SAFETY: single-threaded bootloader; written only in discover_uart.
+    // SAFETY: single-threaded boot phase; no concurrent access to static mut.
     unsafe { UART_BASE_ADDR }
 }
 
@@ -190,7 +200,9 @@ pub fn uart_base() -> usize
 /// `UART_BASE_ADDR` must be accessible and not MMU-protected.
 pub unsafe fn serial_init()
 {
+    // SAFETY: single-threaded boot phase; no concurrent access to static mut.
     let base = unsafe { UART_BASE_ADDR } as *mut u8;
+    // SAFETY: UART_BASE_ADDR is a valid MMIO mapping; register offsets within 16550 UART range; volatile ensures ordering.
     unsafe {
         // IER = 0: disable all interrupts.
         core::ptr::write_volatile(base.add(1), 0x00);
@@ -212,14 +224,15 @@ pub unsafe fn serial_init()
 /// `serial_init` must have been called before this function.
 pub unsafe fn serial_write_byte(byte: u8)
 {
+    // SAFETY: single-threaded boot phase; no concurrent access to static mut.
     let base = unsafe { UART_BASE_ADDR } as *mut u8;
 
     // Spin on LSR bit 5 (THRE — Transmit Holding Register Empty).
-    // SAFETY: MMIO read from LSR; UART_BASE_ADDR is valid after serial_init.
+    // SAFETY: UART_BASE_ADDR is a valid MMIO mapping; LSR offset within 16550 UART range; volatile ensures ordering.
     while unsafe { core::ptr::read_volatile(base.add(UART_LSR)) } & 0x20 == 0
     {}
 
-    // SAFETY: THRE is set; writing the byte to TX is safe.
+    // SAFETY: UART_BASE_ADDR is a valid MMIO mapping; TX offset within 16550 UART range; THRE bit set; volatile ensures ordering.
     unsafe {
         core::ptr::write_volatile(base.add(UART_TX), byte);
     }

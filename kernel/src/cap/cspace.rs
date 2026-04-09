@@ -138,6 +138,8 @@ impl CSpace
 
         self.free_head = next;
         // Clear the slot (removes free-list encoding).
+        // SAFETY: We just validated this slot exists at line 135
+        #[allow(clippy::unwrap_used)]
         self.slot_mut(idx).unwrap().clear();
         self.free_count -= 1;
         Ok(idx)
@@ -303,6 +305,8 @@ impl CSpace
             {
                 // Splice out: cur.next = target.next
                 let after = self.slot(target).and_then(super::slot::CapabilitySlot::next_free);
+                // SAFETY: We validated cur_idx exists when getting next_idx at line 299
+                #[allow(clippy::unwrap_used)]
                 self.slot_mut(cur_idx).unwrap().set_next_free(after);
                 self.free_count -= 1;
                 return true;

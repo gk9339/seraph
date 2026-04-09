@@ -7,7 +7,10 @@
 
 fn main()
 {
+    // SAFETY: Cargo guarantees these environment variables exist during build
+    #[allow(clippy::unwrap_used)]
     let target = std::env::var("TARGET").unwrap();
+    #[allow(clippy::unwrap_used)]
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
 
     // Only apply the kernel linker script for bare-metal targets. The host

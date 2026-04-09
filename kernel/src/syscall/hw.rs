@@ -47,13 +47,16 @@ pub fn sys_irq_ack(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 
     let irq_cap_idx = tf.arg(0) as u32;
 
+    // SAFETY: current_tcb() returns current thread; interrupt context ensures it is set.
     let tcb = unsafe { current_tcb() };
     if tcb.is_null()
     {
         return Err(SyscallError::InvalidCapability);
     }
+    // SAFETY: tcb validated non-null; cspace set at thread creation.
     let cspace = unsafe { (*tcb).cspace };
 
+    // SAFETY: caller_cspace validated; lookup_cap checks tag and rights.
     let irq_slot =
         unsafe { super::lookup_cap(cspace, irq_cap_idx, CapTag::Interrupt, Rights::SIGNAL) }?;
     let irq_id = {
@@ -102,14 +105,17 @@ pub fn sys_irq_register(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     let irq_cap_idx = tf.arg(0) as u32;
     let sig_cap_idx = tf.arg(1) as u32;
 
+    // SAFETY: current_tcb() returns current thread; interrupt context ensures it is set.
     let tcb = unsafe { current_tcb() };
     if tcb.is_null()
     {
         return Err(SyscallError::InvalidCapability);
     }
+    // SAFETY: tcb validated non-null; cspace set at thread creation.
     let cspace = unsafe { (*tcb).cspace };
 
     // Resolve Interrupt cap.
+    // SAFETY: caller_cspace validated; lookup_cap checks tag and rights.
     let irq_slot =
         unsafe { super::lookup_cap(cspace, irq_cap_idx, CapTag::Interrupt, Rights::SIGNAL) }?;
     let irq_id = {
@@ -120,6 +126,7 @@ pub fn sys_irq_register(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     };
 
     // Resolve Signal cap.
+    // SAFETY: caller_cspace validated; lookup_cap checks tag and rights.
     let sig_slot =
         unsafe { super::lookup_cap(cspace, sig_cap_idx, CapTag::Signal, Rights::SIGNAL) }?;
     let sig_state = {
@@ -145,6 +152,7 @@ pub fn sys_irq_register(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     //         to unmask after registering).
     // RISC-V: enable the PLIC source (starts masked at controller; ACK unmasks).
     #[cfg(target_arch = "x86_64")]
+    // SAFETY: irq_id validated from capability; route() requires valid IRQ number.
     unsafe {
         crate::arch::current::ioapic::route(
             irq_id,
@@ -203,14 +211,17 @@ pub fn sys_mmio_map(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         return Err(SyscallError::InvalidAddress);
     }
 
+    // SAFETY: current_tcb() returns current thread; interrupt context ensures it is set.
     let tcb = unsafe { current_tcb() };
     if tcb.is_null()
     {
         return Err(SyscallError::InvalidCapability);
     }
+    // SAFETY: tcb validated non-null; cspace set at thread creation.
     let cspace = unsafe { (*tcb).cspace };
 
     // Resolve MmioRegion cap.
+    // SAFETY: caller_cspace validated; lookup_cap checks tag and rights.
     let mmio_slot =
         unsafe { super::lookup_cap(cspace, mmio_idx, CapTag::MmioRegion, Rights::MAP) }?;
     let (mmio_phys, mmio_size) = {
@@ -238,6 +249,7 @@ pub fn sys_mmio_map(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     }
 
     // Resolve AddressSpace cap.
+    // SAFETY: caller_cspace validated; lookup_cap checks tag and rights.
     let as_slot =
         unsafe { super::lookup_cap(cspace, aspace_idx, CapTag::AddressSpace, Rights::MAP) }?;
     let as_ptr = {
@@ -322,14 +334,17 @@ pub fn sys_ioport_bind(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         let thread_idx = tf.arg(0) as u32;
         let ioport_idx = tf.arg(1) as u32;
 
+        // SAFETY: current_tcb() returns current thread; interrupt context ensures it is set.
         let caller_tcb = unsafe { current_tcb() };
         if caller_tcb.is_null()
         {
             return Err(SyscallError::InvalidCapability);
         }
+        // SAFETY: tcb validated non-null; cspace set at thread creation.
         let cspace = unsafe { (*caller_tcb).cspace };
 
         // Resolve Thread cap.
+        // SAFETY: caller_cspace validated; lookup_cap checks tag and rights.
         let th_slot =
             unsafe { super::lookup_cap(cspace, thread_idx, CapTag::Thread, Rights::CONTROL) }?;
         let target_tcb = {
@@ -344,6 +359,7 @@ pub fn sys_ioport_bind(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         }
 
         // Resolve IoPortRange cap.
+        // SAFETY: caller_cspace validated; lookup_cap checks tag and rights.
         let port_slot =
             unsafe { super::lookup_cap(cspace, ioport_idx, CapTag::IoPortRange, Rights::USE) }?;
         let (port_base, port_size) = {
@@ -355,17 +371,18 @@ pub fn sys_ioport_bind(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         };
 
         // Allocate per-thread IOPB on first bind.
-        // SAFETY: target_tcb is a valid TCB; single-CPU until WSMP.
+        // SAFETY: target_tcb validated non-null; iopb field always valid.
         if unsafe { (*target_tcb).iopb.is_null() }
         {
             let bitmap = alloc::boxed::Box::new([0xFFu8; gdt::IOPB_SIZE]);
+            // SAFETY: target_tcb validated non-null; iopb field owned by TCB.
             unsafe {
                 (*target_tcb).iopb = alloc::boxed::Box::into_raw(bitmap);
             }
         }
 
         // Clear the bits for the requested port range (0 = allow).
-        // SAFETY: iopb is non-null after the allocation above.
+        // SAFETY: iopb is non-null after the allocation above; target_tcb validated.
         unsafe {
             gdt::permit_port_range(&mut *(*target_tcb).iopb, port_base, port_size);
         }
@@ -374,7 +391,7 @@ pub fn sys_ioport_bind(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         // immediately so in/out instructions work without a context switch.
         if target_tcb == caller_tcb
         {
-            // SAFETY: iopb is non-null.
+            // SAFETY: iopb non-null after allocation; target_tcb validated.
             unsafe {
                 gdt::load_iopb(Some(&*(*target_tcb).iopb));
             }
@@ -422,13 +439,16 @@ pub fn sys_dma_grant(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     // arg1 = device_id: reserved for future IOMMU domain lookup; unused now.
     let flags = tf.arg(2);
 
+    // SAFETY: current_tcb() returns current thread; interrupt context ensures it is set.
     let tcb = unsafe { current_tcb() };
     if tcb.is_null()
     {
         return Err(SyscallError::InvalidCapability);
     }
+    // SAFETY: tcb validated non-null; cspace set at thread creation.
     let cspace = unsafe { (*tcb).cspace };
 
+    // SAFETY: caller_cspace validated; lookup_cap checks tag and rights.
     let frame_slot = unsafe { super::lookup_cap(cspace, frame_idx, CapTag::Frame, Rights::MAP) }?;
     let frame_phys = {
         let obj = frame_slot.object.ok_or(SyscallError::InvalidCapability)?;

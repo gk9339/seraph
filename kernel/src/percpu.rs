@@ -138,6 +138,7 @@ pub unsafe fn init_bsp()
 {
     // SAFETY: single-threaded Phase 5 boot; PER_CPU[0] is not accessed elsewhere.
     let ptr = unsafe { core::ptr::addr_of_mut!(PER_CPU[0]) };
+    // SAFETY: single-threaded boot phase; no concurrent access to PER_CPU[0].
     unsafe {
         (*ptr).cpu_id = 0;
         // Store BSP TSS pointer so set_rsp0() can find the TSS via GS-relative
@@ -162,10 +163,13 @@ pub unsafe fn init_bsp()
 pub unsafe fn init_ap(cpu_id: u32)
 {
     debug_assert!((cpu_id as usize) < MAX_CPUS);
+    // SAFETY: cpu_id validated < MAX_CPUS; PER_CPU[cpu_id] not yet in use.
     let ptr = unsafe { core::ptr::addr_of_mut!(PER_CPU[cpu_id as usize]) };
+    // SAFETY: AP init; no concurrent access to PER_CPU[cpu_id] during AP startup.
     unsafe {
         (*ptr).cpu_id = cpu_id;
     }
+    // SAFETY: ptr is valid; arch init sets GS-base / tp to this address.
     unsafe {
         crate::arch::current::cpu::install_percpu(ptr as u64);
     }

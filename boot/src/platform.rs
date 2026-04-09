@@ -60,6 +60,7 @@ pub unsafe fn parse_platform_resources(
         bprint!("[--------] boot: ACPI: ");
         // cast_possible_truncation: n <= MAX_PLATFORM_RESOURCES (64), fits in u32.
         #[allow(clippy::cast_possible_truncation)]
+        // SAFETY: console initialized.
         unsafe { crate::console::console_write_dec32(n as u32) };
         bprintln!(" resources");
     }
@@ -73,6 +74,7 @@ pub unsafe fn parse_platform_resources(
         bprint!("[--------] boot: DTB: ");
         // cast_possible_truncation: n <= MAX_PLATFORM_RESOURCES (64), fits in u32.
         #[allow(clippy::cast_possible_truncation)]
+        // SAFETY: console initialized.
         unsafe { crate::console::console_write_dec32(n as u32) };
         bprintln!(" resources");
     }
@@ -107,6 +109,7 @@ pub unsafe fn parse_platform_resources(
     let ptr = phys as *mut PlatformResource;
     for (i, &r) in resources.iter().enumerate()
     {
+        // SAFETY: i < count; allocation sized for count entries.
         unsafe { core::ptr::write(ptr.add(i), r) };
     }
 

@@ -40,6 +40,7 @@ pub struct Spinlock
 // SAFETY: The spinlock serialises access and disables interrupts while held,
 // so it can safely be sent across thread/CPU boundaries.
 unsafe impl Send for Spinlock {}
+// SAFETY: Spinlock serializes access and disables interrupts; no Sync violation.
 unsafe impl Sync for Spinlock {}
 
 impl Spinlock
@@ -103,7 +104,8 @@ fn save_and_disable_interrupts() -> u64
 #[cfg(not(test))]
 fn restore_interrupts(saved: u64)
 {
-    // SAFETY: `saved` came from a matching `save_and_disable_interrupts` call.
+    // SAFETY: `saved` came from a matching `save_and_disable_interrupts` call;
+    // value is opaque and consumed by the architecture-specific restore primitive.
     unsafe {
         crate::arch::current::cpu::restore_interrupts(saved);
     }

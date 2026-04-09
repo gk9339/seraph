@@ -88,7 +88,9 @@ const REDIR_FIXED: u32 = 0x0000_0000;
 unsafe fn ioapic_write(reg: u32, val: u32)
 {
     let base = (DIRECT_MAP_BASE + IOAPIC_BASE_PHYS) as usize;
-    // SAFETY: direct map covers IOAPIC; IOREGSEL/IOWIN are always accessible.
+    // SAFETY: IOAPIC_BASE_PHYS is a valid kernel mapping via direct map at
+    // DIRECT_MAP_BASE; IOREGSEL/IOWIN offsets are within IOAPIC register range;
+    // volatile ensures proper ordering of register select and data writes.
     unsafe {
         core::ptr::write_volatile((base + IOREGSEL) as *mut u32, reg);
         core::ptr::write_volatile((base + IOWIN) as *mut u32, val);
@@ -102,7 +104,9 @@ unsafe fn ioapic_write(reg: u32, val: u32)
 unsafe fn ioapic_read(reg: u32) -> u32
 {
     let base = (DIRECT_MAP_BASE + IOAPIC_BASE_PHYS) as usize;
-    // SAFETY: direct map covers IOAPIC.
+    // SAFETY: IOAPIC_BASE_PHYS is a valid kernel mapping via direct map at
+    // DIRECT_MAP_BASE; IOREGSEL/IOWIN offsets are within IOAPIC register range;
+    // volatile ensures proper ordering of register select and data read.
     unsafe {
         core::ptr::write_volatile((base + IOREGSEL) as *mut u32, reg);
         core::ptr::read_volatile((base + IOWIN) as *const u32)
@@ -122,19 +126,24 @@ pub unsafe fn init()
 {
     // Read the version register to determine the number of redirection entries.
     // Bits [23:16] hold (max_entry_index), so num_entries = max_index + 1.
+    // SAFETY: single-threaded init phase after Phase 3; direct map is active.
     let ver = unsafe { ioapic_read(IOAPICVER) };
     let max_entry = (ver >> 16) & 0xFF;
 
+    // SAFETY: single-threaded init phase; reading IOAPICID register.
+    let ioapic_id = unsafe { ioapic_read(IOAPICID) };
     crate::kprintln!(
         "ioapic: base={:#x} id={:#x} max_redir={}",
         IOAPIC_BASE_PHYS,
-        ioapic_read(IOAPICID),
+        ioapic_id,
         max_entry
     );
 
     // Mask all entries (bit 16 = interrupt mask = 1).
     for gsi in 0..=max_entry
     {
+        // SAFETY: single-threaded init phase; programming redirection entries
+        // to masked state; no concurrent access or IRQ delivery possible.
         unsafe {
             ioapic_write(0x10 + 2 * gsi, REDIR_MASK);
             ioapic_write(0x11 + 2 * gsi, 0);
@@ -157,6 +166,8 @@ pub unsafe fn route(gsi: u32, vector: u8)
     let low = REDIR_MASK | REDIR_FIXED | (vector as u32);
     let high: u32 = 0; // dest LAPIC ID 0
 
+    // SAFETY: caller ensures init() has completed; programming redirection entry
+    // for specified GSI with masked delivery; entry remains masked until unmask().
     unsafe {
         ioapic_write(0x10 + 2 * gsi, low);
         ioapic_write(0x11 + 2 * gsi, high);
@@ -171,7 +182,9 @@ pub unsafe fn route(gsi: u32, vector: u8)
 pub unsafe fn mask(gsi: u32)
 {
     let reg = 0x10 + 2 * gsi;
+    // SAFETY: caller ensures init() has completed; reading current redirection entry.
     let current = unsafe { ioapic_read(reg) };
+    // SAFETY: setting mask bit in redirection entry; serializes with IRQ dispatch.
     unsafe {
         ioapic_write(reg, current | REDIR_MASK);
     }
@@ -185,7 +198,9 @@ pub unsafe fn mask(gsi: u32)
 pub unsafe fn unmask(gsi: u32)
 {
     let reg = 0x10 + 2 * gsi;
+    // SAFETY: caller ensures init() and route() have completed; reading current entry.
     let current = unsafe { ioapic_read(reg) };
+    // SAFETY: clearing mask bit enables IRQ delivery; caller must have registered handler.
     unsafe {
         ioapic_write(reg, current & !REDIR_MASK);
     }

@@ -60,7 +60,7 @@ impl FramebufferWriter
             row: 0,
         };
 
-        // SAFETY: caller guarantees the framebuffer is a valid, writable region.
+        // SAFETY: framebuffer pointer validated non-zero; region writable per caller contract.
         unsafe {
             writer.clear();
         }
@@ -96,9 +96,9 @@ impl FramebufferWriter
             {
                 self.col = 0;
                 self.row += 1;
-                // SAFETY: framebuffer pointer is valid per struct invariant.
                 if self.row >= self.max_rows
                 {
+                    // SAFETY: framebuffer pointer is valid per struct invariant.
                     unsafe {
                         self.scroll();
                     }
@@ -119,9 +119,9 @@ impl FramebufferWriter
                 {
                     self.col = 0;
                     self.row += 1;
-                    // SAFETY: framebuffer pointer is valid.
                     if self.row >= self.max_rows
                     {
+                        // SAFETY: framebuffer pointer is valid.
                         unsafe {
                             self.scroll();
                         }
@@ -143,11 +143,11 @@ impl FramebufferWriter
         let mut p = self.base;
         for _ in 0..total
         {
-            // SAFETY: p is within the framebuffer allocation.
+            // SAFETY: p is within the framebuffer allocation; stride * height bounds total bytes.
             unsafe {
                 core::ptr::write_volatile(p, 0);
             }
-            // SAFETY: stride * height is within the framebuffer.
+            // SAFETY: p remains within framebuffer bounds throughout loop.
             p = unsafe { p.add(1) };
         }
     }

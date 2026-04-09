@@ -71,13 +71,14 @@ fn validate_resources_inner(info: &BootInfo) -> Vec<PlatformResource>
     }
 
     // Build a slice view of the physical memory map for range verification.
-    // SAFETY: Phase 0 confirmed the memory map pointer is valid and non-null.
     let mmap: &[MemoryMapEntry] = if info.memory_map.count == 0 || info.memory_map.entries.is_null()
     {
         &[]
     }
     else
     {
+        // SAFETY: Phase 0 confirmed memory_map pointer is valid and non-null;
+        // direct map is active; count bounds the slice.
         unsafe {
             core::slice::from_raw_parts(
                 phys_to_virt(info.memory_map.entries as u64) as *const MemoryMapEntry,

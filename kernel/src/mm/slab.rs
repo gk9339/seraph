@@ -172,6 +172,8 @@ impl SlabCache
             i
         };
 
+        // SAFETY: idx is either from find_free_slab_idx (guaranteed Some) or newly allocated
+        #[allow(clippy::unwrap_used)]
         let slab = self.slabs[idx].as_mut().unwrap();
         let ptr = slab.free_head as *mut u8;
         // Read the embedded next-pointer from the free slot.
@@ -213,6 +215,8 @@ impl SlabCache
             // cast_ptr_alignment: intentional unaligned write; slot alignment unconstrained.
             #[allow(clippy::cast_ptr_alignment)]
             unsafe { core::ptr::write_unaligned(ptr.cast::<u64>(), old_head) };
+            // SAFETY: We checked self.slabs[i] is Some at line 206
+            #[allow(clippy::unwrap_used)]
             let slab = self.slabs[i].as_mut().unwrap();
             slab.free_head = addr;
             slab.used -= 1;

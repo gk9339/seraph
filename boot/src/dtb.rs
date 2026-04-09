@@ -112,15 +112,21 @@ impl Fdt
         //  16: off_mem_rsvmap  20: version  24: last_comp_version
         //  28: boot_cpuid_phys  32: size_dt_strings  36: size_dt_struct
         let hdr = base as *const u32;
+        // SAFETY: base is identity-mapped by UEFI; reads within firmware-provided DTB blob.
         let magic = u32::from_be(unsafe { core::ptr::read_unaligned(hdr) });
         if magic != FDT_MAGIC
         {
             return None;
         }
+        // SAFETY: magic validated; remaining header fields within blob.
         let total_size = u32::from_be(unsafe { core::ptr::read_unaligned(hdr.add(1)) });
+        // SAFETY: header fields within validated blob.
         let off_struct = u32::from_be(unsafe { core::ptr::read_unaligned(hdr.add(2)) });
+        // SAFETY: header fields within validated blob.
         let off_strings = u32::from_be(unsafe { core::ptr::read_unaligned(hdr.add(3)) });
+        // SAFETY: header fields within validated blob.
         let size_strings = u32::from_be(unsafe { core::ptr::read_unaligned(hdr.add(8)) });
+        // SAFETY: header fields within validated blob.
         let size_struct = u32::from_be(unsafe { core::ptr::read_unaligned(hdr.add(9)) });
 
         // Bounds: struct and strings blocks must fit inside total_size.
@@ -155,6 +161,7 @@ impl Fdt
             return None;
         }
         let addr = self.base + u64::from(self.off_struct) + u64::from(off);
+        // SAFETY: offset validated above; read within struct block bounds.
         Some(u32::from_be(unsafe {
             core::ptr::read_unaligned(addr as *const u32)
         }))
@@ -171,6 +178,7 @@ impl Fdt
         };
         let _ = end;
         let addr = self.base + u64::from(self.off_struct) + u64::from(off);
+        // SAFETY: bounds validated above; slice within struct block.
         unsafe { core::slice::from_raw_parts(addr as *const u8, len as usize) }
     }
 
@@ -186,10 +194,12 @@ impl Fdt
         let max_len = (self.size_strings - nameoff) as usize;
         let start = addr as *const u8;
         let mut len = 0;
+        // SAFETY: nameoff validated above; pointer arithmetic within strings block.
         while len < max_len && unsafe { *start.add(len) } != 0
         {
             len += 1;
         }
+        // SAFETY: len ≤ max_len; slice within strings block.
         unsafe { core::slice::from_raw_parts(start, len) }
     }
 
@@ -439,6 +449,7 @@ fn skip_node_name(fdt: &Fdt, start: u32) -> u32
     let mut len = 0;
     while len < max
     {
+        // SAFETY: base_addr + len is within struct block bounds (len < max ≤ size_struct).
         let b = unsafe { core::ptr::read((base_addr + len as u64) as *const u8) };
         len += 1;
         if b == 0
@@ -495,6 +506,7 @@ fn read_be64(buf: &[u8]) -> u64
 /// `dtb_addr` must be the physical address of a valid, identity-mapped FDT.
 pub unsafe fn parse_cpu_count(dtb_addr: u64) -> (u32, [u32; 64])
 {
+    // SAFETY: caller guarantees dtb_addr is identity-mapped DTB.
     let Some(fdt) = (unsafe { Fdt::from_raw(dtb_addr) }) else {
         return (0, [0u32; 64]);
     };
@@ -534,6 +546,7 @@ pub unsafe fn parse_cpu_count(dtb_addr: u64) -> (u32, [u32; 64])
 /// `dtb_addr` must be the physical address of a valid, identity-mapped FDT.
 pub unsafe fn parse_dtb_resources(dtb_addr: u64, out: &mut [PlatformResource]) -> usize
 {
+    // SAFETY: caller guarantees dtb_addr is identity-mapped DTB.
     let Some(fdt) = (unsafe { Fdt::from_raw(dtb_addr) }) else {
         bprintln!("[--------] boot:     DTB: invalid magic, skipping");
         return 0;

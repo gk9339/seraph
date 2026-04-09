@@ -191,6 +191,7 @@ pub struct ThreadObject
 
 // SAFETY: ThreadObject is accessed only under the scheduler lock.
 unsafe impl Send for ThreadObject {}
+// SAFETY: ThreadObject is accessed only under the scheduler lock.
 unsafe impl Sync for ThreadObject {}
 
 /// Kernel object for a user-mode address space (`AddressSpace` capability).
@@ -204,6 +205,7 @@ pub struct AddressSpaceObject
 
 // SAFETY: AddressSpaceObject is accessed only with proper locks.
 unsafe impl Send for AddressSpaceObject {}
+// SAFETY: AddressSpaceObject is accessed only with proper locks.
 unsafe impl Sync for AddressSpaceObject {}
 
 /// Kernel object for a capability space (`CSpace` capability).
@@ -217,6 +219,7 @@ pub struct CSpaceKernelObject
 
 // SAFETY: CSpaceKernelObject is accessed only with proper locks.
 unsafe impl Send for CSpaceKernelObject {}
+// SAFETY: CSpaceKernelObject is accessed only with proper locks.
 unsafe impl Sync for CSpaceKernelObject {}
 
 /// Kernel object for an IPC endpoint (Endpoint capability).
@@ -230,6 +233,7 @@ pub struct EndpointObject
 
 // SAFETY: EndpointObject is accessed only under the scheduler lock.
 unsafe impl Send for EndpointObject {}
+// SAFETY: EndpointObject is accessed only under the scheduler lock.
 unsafe impl Sync for EndpointObject {}
 
 /// Kernel object for a signal (Signal capability).
@@ -243,6 +247,7 @@ pub struct SignalObject
 
 // SAFETY: SignalObject is accessed only under the scheduler lock.
 unsafe impl Send for SignalObject {}
+// SAFETY: SignalObject is accessed only under the scheduler lock.
 unsafe impl Sync for SignalObject {}
 
 /// Kernel object for an event queue (`EventQueue` capability).
@@ -258,6 +263,7 @@ pub struct EventQueueObject
 
 // SAFETY: EventQueueObject is accessed only under the scheduler lock.
 unsafe impl Send for EventQueueObject {}
+// SAFETY: EventQueueObject is accessed only under the scheduler lock.
 unsafe impl Sync for EventQueueObject {}
 
 /// Kernel object for a wait set (`WaitSet` capability).
@@ -273,6 +279,7 @@ pub struct WaitSetObject
 
 // SAFETY: WaitSetObject is accessed only under the scheduler lock.
 unsafe impl Send for WaitSetObject {}
+// SAFETY: WaitSetObject is accessed only under the scheduler lock.
 unsafe impl Sync for WaitSetObject {}
 
 // ── Object deallocation ───────────────────────────────────────────────────────
@@ -312,20 +319,24 @@ pub unsafe fn dealloc_object(ptr: core::ptr::NonNull<KernelObjectHeader>)
 {
     use alloc::boxed::Box;
 
+    // SAFETY: ptr is NonNull<KernelObjectHeader>, validated at call site.
     let header = unsafe { ptr.as_ref() };
     match header.obj_type
     {
         // ── Simple objects (no sub-resources) ─────────────────────────────
         ObjectType::Frame =>
         {
+            // SAFETY: ptr originally from Box<FrameObject>::into_raw; header at offset 0.
             unsafe { drop(Box::from_raw(ptr.as_ptr().cast::<FrameObject>())) };
         }
         ObjectType::MmioRegion =>
         {
+            // SAFETY: ptr originally from Box<MmioRegionObject>::into_raw; header at offset 0.
             unsafe { drop(Box::from_raw(ptr.as_ptr().cast::<MmioRegionObject>())) };
         }
         ObjectType::Interrupt =>
         {
+            // SAFETY: ptr originally from Box<InterruptObject>::into_raw; header at offset 0.
             let obj = unsafe { &*(ptr.as_ptr().cast::<InterruptObject>()) };
             let irq_id = obj.irq_id;
 
@@ -340,20 +351,24 @@ pub unsafe fn dealloc_object(ptr: core::ptr::NonNull<KernelObjectHeader>)
             }
             crate::arch::current::interrupts::mask(irq_id);
 
+            // SAFETY: ptr originally from Box<InterruptObject>::into_raw.
             unsafe { drop(Box::from_raw(ptr.as_ptr().cast::<InterruptObject>())) };
         }
         ObjectType::IoPortRange =>
         {
+            // SAFETY: ptr originally from Box<IoPortRangeObject>::into_raw; header at offset 0.
             unsafe { drop(Box::from_raw(ptr.as_ptr().cast::<IoPortRangeObject>())) };
         }
         ObjectType::SchedControl =>
         {
+            // SAFETY: ptr originally from Box<SchedControlObject>::into_raw; header at offset 0.
             unsafe { drop(Box::from_raw(ptr.as_ptr().cast::<SchedControlObject>())) };
         }
 
         // ── Thread ────────────────────────────────────────────────────────
         ObjectType::Thread =>
         {
+            // SAFETY: ptr originally from Box<ThreadObject>::into_raw; header at offset 0.
             let obj = unsafe { &*(ptr.as_ptr().cast::<ThreadObject>()) };
             let tcb = obj.tcb;
 
@@ -367,6 +382,7 @@ pub unsafe fn dealloc_object(ptr: core::ptr::NonNull<KernelObjectHeader>)
                 // after this cap_delete completes — a use-after-free that
                 // corrupts the slab and/or causes a hang when the scheduler
                 // tries to context-switch to garbage state.
+                // SAFETY: tcb validated non-null; sched lock protects queue access.
                 unsafe {
                     use crate::sched::thread::ThreadState;
                     let prio = (*tcb).priority;
@@ -379,10 +395,12 @@ pub unsafe fn dealloc_object(ptr: core::ptr::NonNull<KernelObjectHeader>)
                 }
 
                 // Free the kernel stack back to the buddy allocator.
+                // SAFETY: tcb validated non-null; kernel_stack_top set at creation.
                 let kstack_top = unsafe { (*tcb).kernel_stack_top };
                 let kstack_virt =
                     kstack_top - (crate::sched::KERNEL_STACK_PAGES * crate::mm::PAGE_SIZE) as u64;
                 let kstack_phys = crate::mm::paging::virt_to_phys(kstack_virt);
+                // SAFETY: kstack_phys from buddy allocator; order matches allocation.
                 unsafe {
                     crate::mm::with_frame_allocator(|alloc| {
                         alloc.free(kstack_phys, STACK_ORDER);
@@ -390,15 +408,18 @@ pub unsafe fn dealloc_object(ptr: core::ptr::NonNull<KernelObjectHeader>)
                 }
 
                 // Drop the TCB allocation.
+                // SAFETY: tcb originally from Box::into_raw at thread creation.
                 unsafe { drop(Box::from_raw(tcb)) };
             }
 
+            // SAFETY: ptr originally from Box<ThreadObject>::into_raw.
             unsafe { drop(Box::from_raw(ptr.as_ptr().cast::<ThreadObject>())) };
         }
 
         // ── AddressSpace ──────────────────────────────────────────────────
         ObjectType::AddressSpace =>
         {
+            // SAFETY: ptr originally from Box<AddressSpaceObject>::into_raw; header at offset 0.
             let obj = unsafe { &*(ptr.as_ptr().cast::<AddressSpaceObject>()) };
             let as_ptr = obj.address_space;
 
@@ -407,25 +428,31 @@ pub unsafe fn dealloc_object(ptr: core::ptr::NonNull<KernelObjectHeader>)
                 // Free the root page-table frame (one 4 KiB page, order 0).
                 // TODO: walk and free intermediate page-table frames to avoid
                 // leaking them. Requires arch-specific paging teardown logic.
+                // SAFETY: as_ptr validated non-null; root_phys allocated at creation.
                 let root_phys = unsafe { (*as_ptr).root_phys };
+                // SAFETY: root_phys from buddy allocator; order 0 matches allocation.
                 unsafe {
                     crate::mm::with_frame_allocator(|alloc| alloc.free(root_phys, 0));
                 }
 
+                // SAFETY: as_ptr originally from Box::into_raw.
                 unsafe { drop(Box::from_raw(as_ptr)) };
             }
 
+            // SAFETY: ptr originally from Box<AddressSpaceObject>::into_raw.
             unsafe { drop(Box::from_raw(ptr.as_ptr().cast::<AddressSpaceObject>())) };
         }
 
         // ── CSpaceObj ─────────────────────────────────────────────────────
         ObjectType::CSpaceObj =>
         {
+            // SAFETY: ptr originally from Box<CSpaceKernelObject>::into_raw; header at offset 0.
             let obj = unsafe { &*(ptr.as_ptr().cast::<CSpaceKernelObject>()) };
             let cs_ptr = obj.cspace;
 
             if !cs_ptr.is_null()
             {
+                // SAFETY: cs_ptr validated non-null; allocated at creation.
                 let id = unsafe { (*cs_ptr).id() };
                 // Unregister before freeing so no window exists where the
                 // registry contains a dangling pointer.
@@ -440,6 +467,7 @@ pub unsafe fn dealloc_object(ptr: core::ptr::NonNull<KernelObjectHeader>)
                 // that reference slots in this dying CSpace. Currently
                 // those SlotId references become stale, which is harmless
                 // unless cap_revoke traverses them.
+                // SAFETY: cs_ptr validated non-null; for_each_object handles iteration.
                 unsafe {
                     (*cs_ptr).for_each_object(|obj_ptr| {
                         let hdr = obj_ptr.as_ref();
@@ -451,21 +479,25 @@ pub unsafe fn dealloc_object(ptr: core::ptr::NonNull<KernelObjectHeader>)
                     });
                 }
 
+                // SAFETY: cs_ptr originally from Box::into_raw.
                 unsafe { drop(Box::from_raw(cs_ptr)) };
             }
 
+            // SAFETY: ptr originally from Box<CSpaceKernelObject>::into_raw.
             unsafe { drop(Box::from_raw(ptr.as_ptr().cast::<CSpaceKernelObject>())) };
         }
 
         // ── Endpoint ──────────────────────────────────────────────────────
         ObjectType::Endpoint =>
         {
+            // SAFETY: ptr originally from Box<EndpointObject>::into_raw; header at offset 0.
             let obj = unsafe { &*(ptr.as_ptr().cast::<EndpointObject>()) };
             let state = obj.state;
 
             if !state.is_null()
             {
                 // Unregister from wait set before freeing state.
+                // SAFETY: state validated non-null; EndpointState allocated at creation.
                 unsafe {
                     let ep = &mut *state;
                     if !ep.wait_set.is_null()
@@ -485,6 +517,7 @@ pub unsafe fn dealloc_object(ptr: core::ptr::NonNull<KernelObjectHeader>)
                 // reading a zero-length message (effectively an ObjectGone hint).
                 // TODO: set TrapFrame return to SyscallError::ObjectGone when
                 // a proper per-thread wakeup error path is added.
+                // SAFETY: state validated non-null; wake queue traversal under sched lock.
                 unsafe {
                     let ep = &mut *state;
                     // Wake senders.
@@ -517,15 +550,18 @@ pub unsafe fn dealloc_object(ptr: core::ptr::NonNull<KernelObjectHeader>)
                     ep.recv_tail = core::ptr::null_mut();
                 }
 
+                // SAFETY: state originally from Box::into_raw at endpoint creation.
                 unsafe { drop(Box::from_raw(state)) };
             }
 
+            // SAFETY: ptr originally from Box<EndpointObject>::into_raw.
             unsafe { drop(Box::from_raw(ptr.as_ptr().cast::<EndpointObject>())) };
         }
 
         // ── Signal ────────────────────────────────────────────────────────
         ObjectType::Signal =>
         {
+            // SAFETY: ptr originally from Box<SignalObject>::into_raw; header at offset 0.
             let obj = unsafe { &*(ptr.as_ptr().cast::<SignalObject>()) };
             let state = obj.state;
 
@@ -535,6 +571,7 @@ pub unsafe fn dealloc_object(ptr: core::ptr::NonNull<KernelObjectHeader>)
                 // SignalState. Without this, a hardware interrupt firing after
                 // the signal is freed would call signal_send on a dead slot,
                 // corrupting the slab-32 free list via fetch_or on offset 0.
+                // SAFETY: interrupts disabled to serialize with IRQ delivery.
                 unsafe {
                     let saved = crate::arch::current::cpu::save_and_disable_interrupts();
                     crate::irq::unregister_signal(state);
@@ -545,6 +582,7 @@ pub unsafe fn dealloc_object(ptr: core::ptr::NonNull<KernelObjectHeader>)
                 // is registered with a wait set, the wait set's member array
                 // still holds a source_ptr to this SignalState. Failing to
                 // remove it causes wait_set_drop to write to freed memory.
+                // SAFETY: state validated non-null; SignalState allocated at creation.
                 unsafe {
                     let sig = &mut *state;
                     if !sig.wait_set.is_null()
@@ -561,6 +599,7 @@ pub unsafe fn dealloc_object(ptr: core::ptr::NonNull<KernelObjectHeader>)
                 // Wake a blocked waiter with wakeup_value = 0.
                 // TODO: return SyscallError::ObjectGone when a proper wakeup
                 // error path is available in sys_signal_wait.
+                // SAFETY: state validated non-null; waiter TCB still valid.
                 unsafe {
                     let sig = &mut *state;
                     let waiter = sig.waiter;
@@ -575,21 +614,25 @@ pub unsafe fn dealloc_object(ptr: core::ptr::NonNull<KernelObjectHeader>)
                     }
                 }
 
+                // SAFETY: state originally from Box::into_raw at signal creation.
                 unsafe { drop(Box::from_raw(state)) };
             }
 
+            // SAFETY: ptr originally from Box<SignalObject>::into_raw.
             unsafe { drop(Box::from_raw(ptr.as_ptr().cast::<SignalObject>())) };
         }
 
         // ── EventQueue ────────────────────────────────────────────────────
         ObjectType::EventQueue =>
         {
+            // SAFETY: ptr originally from Box<EventQueueObject>::into_raw; header at offset 0.
             let obj = unsafe { &*(ptr.as_ptr().cast::<EventQueueObject>()) };
             let state = obj.state;
 
             if !state.is_null()
             {
                 // Unregister from wait set before freeing state.
+                // SAFETY: state validated non-null; EventQueueState allocated at creation.
                 unsafe {
                     let eq = &mut *state;
                     if !eq.wait_set.is_null()
@@ -608,12 +651,14 @@ pub unsafe fn dealloc_object(ptr: core::ptr::NonNull<KernelObjectHeader>)
                 unsafe { crate::ipc::event_queue::event_queue_drop(state) };
             }
 
+            // SAFETY: ptr originally from Box<EventQueueObject>::into_raw.
             unsafe { drop(Box::from_raw(ptr.as_ptr().cast::<EventQueueObject>())) };
         }
 
         // ── WaitSet ───────────────────────────────────────────────────────
         ObjectType::WaitSet =>
         {
+            // SAFETY: ptr originally from Box<WaitSetObject>::into_raw; header at offset 0.
             let obj = unsafe { &*(ptr.as_ptr().cast::<WaitSetObject>()) };
             let state = obj.state;
 
@@ -624,6 +669,7 @@ pub unsafe fn dealloc_object(ptr: core::ptr::NonNull<KernelObjectHeader>)
                 unsafe { crate::ipc::wait_set::wait_set_drop(state) };
             }
 
+            // SAFETY: ptr originally from Box<WaitSetObject>::into_raw.
             unsafe { drop(Box::from_raw(ptr.as_ptr().cast::<WaitSetObject>())) };
         }
     }

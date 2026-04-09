@@ -53,6 +53,7 @@ pub struct EventQueueState
 
 // SAFETY: EventQueueState is accessed only under the scheduler lock.
 unsafe impl Send for EventQueueState {}
+// SAFETY: EventQueueState is accessed only under the scheduler lock; no Sync violation.
 unsafe impl Sync for EventQueueState {}
 
 impl EventQueueState
@@ -126,7 +127,8 @@ pub unsafe fn event_queue_post(
 
     // Enqueue into ring.
     let ring_len = eq.capacity + 1;
-    // SAFETY: write_idx < ring_len (invariant); ring is a valid allocation.
+    // SAFETY: write_idx < ring_len (invariant maintained by modulo arithmetic);
+    // ring is a valid heap allocation of ring_len u64 slots.
     unsafe {
         *eq.ring.add(eq.write_idx as usize) = payload;
     }

@@ -59,7 +59,7 @@ impl RunQueue
             }
             Some(tail) =>
             {
-                // SAFETY: tail is a valid TCB.
+                // SAFETY: tail is a valid heap-allocated TCB pointer.
                 unsafe { (*tail).run_queue_next = Some(tcb) };
                 self.tail = Some(tcb);
             }
@@ -103,9 +103,11 @@ impl RunQueue
                 match prev
                 {
                     None => self.head = next,
-                    // SAFETY: prev is a valid TCB.
                     Some(p) =>
-                    unsafe { (*p).run_queue_next = next },
+                    {
+                        // SAFETY: prev is a valid heap-allocated TCB pointer.
+                        unsafe { (*p).run_queue_next = next }
+                    }
                 }
                 if self.tail == Some(c)
                 {
@@ -152,6 +154,7 @@ pub struct PerCpuScheduler
 // SAFETY: scheduler is protected by `lock` (Phase 9+) and only accessed
 // from the owning CPU in Phase 8 (single-threaded boot).
 unsafe impl Send for PerCpuScheduler {}
+// SAFETY: PerCpuScheduler is protected by lock and per-CPU isolation; no Sync violation.
 unsafe impl Sync for PerCpuScheduler {}
 
 // RunQueue does not implement Copy/Clone, so we cannot derive Default or use

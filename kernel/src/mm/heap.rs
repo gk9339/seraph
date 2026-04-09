@@ -83,7 +83,7 @@ pub struct KernelHeap
     lock: AtomicBool,
 }
 
-// SAFETY: access to `inner` is serialised through the spin-lock in `with_lock`.
+// SAFETY: Access to `inner` is serialised through the spin-lock in `with_lock`; no Sync violation.
 unsafe impl Sync for KernelHeap {}
 
 impl KernelHeap
@@ -136,8 +136,8 @@ impl KernelHeap
         let result = {
             // SAFETY: we hold the lock; no other thread can be in this block.
             let inner = unsafe { &mut *self.inner.get() };
-            // SAFETY: single-threaded boot; SMP not active; lock prevents
-            // re-entrant access if an allocator is called from an interrupt.
+            // SAFETY: FRAME_ALLOCATOR is a static mutable; lock prevents concurrent
+            // access; single-threaded during boot, serialized by lock after SMP.
             let buddy = unsafe { &mut *core::ptr::addr_of_mut!(crate::mm::FRAME_ALLOCATOR) };
             f(inner, buddy)
         };
@@ -171,6 +171,7 @@ pub fn init() {}
 #[global_allocator]
 static KERNEL_HEAP: KernelHeap = KernelHeap::new();
 
+// SAFETY: KernelHeap serializes all access through a spin-lock and AtomicBool ready flag.
 #[cfg(not(test))]
 unsafe impl core::alloc::GlobalAlloc for KernelHeap
 {

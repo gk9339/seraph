@@ -93,6 +93,7 @@ pub extern "efiapi" fn efi_main(image: EfiHandle, st: *mut EfiSystemTable) -> us
         crate::console::init_serial();
     }
 
+    // SAFETY: image and st are valid UEFI handles passed from firmware; boot_sequence called once.
     match unsafe { boot_sequence(image, st) }
     {
         Ok(never) => match never {},
@@ -190,10 +191,12 @@ unsafe fn boot_sequence(image: EfiHandle, st: *mut EfiSystemTable) -> Result<!, 
     // firmware does not patch vtable entries when relocating the image;
     // core::fmt::write's write_str call through a fat pointer faults.
     bprint!("[--------] boot: kernel entry=");
+    // SAFETY: console initialized; function writes to UART MMIO or framebuffer.
     unsafe {
         crate::console::console_write_hex64(kernel_info.entry_virtual);
     }
     bprint!("  size=");
+    // SAFETY: console initialized.
     unsafe {
         crate::console::console_write_hex64(kernel_info.size as u64);
     }
@@ -229,10 +232,12 @@ unsafe fn boot_sequence(image: EfiHandle, st: *mut EfiSystemTable) -> Result<!, 
     // vtable dispatch. On RISC-V the PE .reloc section is empty so the firmware does
     // not patch vtable entries; core::fmt::write's fat-pointer write_str call faults.
     bprint!("[--------] boot: init entry=");
+    // SAFETY: console initialized.
     unsafe {
         crate::console::console_write_hex64(init_image.entry_point);
     }
     bprint!("  size=");
+    // SAFETY: console initialized.
     unsafe {
         crate::console::console_write_hex64(init_file_sz as u64);
     }
@@ -333,18 +338,22 @@ unsafe fn boot_sequence(image: EfiHandle, st: *mut EfiSystemTable) -> Result<!, 
     // SAFETY: firmware.acpi_rsdp / firmware.device_tree are identity-mapped.
     let (cpu_count, boot_cpu_id, boot_cpu_ids) = if firmware.acpi_rsdp != 0
     {
+        // SAFETY: firmware.acpi_rsdp is identity-mapped by UEFI; parse_cpu_topology validates table.
         let (n, b, ids) = unsafe { acpi::parse_cpu_topology(firmware.acpi_rsdp, bsp_hw_id) };
         bprint!("[--------] boot: ACPI: ");
+        // SAFETY: console initialized.
         unsafe { crate::console::console_write_dec32(n) };
         bprintln!(" CPU(s) found via MADT");
         (n, b, ids)
     }
     else if firmware.device_tree != 0
     {
+        // SAFETY: firmware.device_tree is identity-mapped by UEFI; parse_cpu_count validates FDT.
         let (n, hart_ids) = unsafe { dtb::parse_cpu_count(firmware.device_tree) };
         if n > 0
         {
             bprint!("[--------] boot: DTB: ");
+            // SAFETY: console initialized.
             unsafe { crate::console::console_write_dec32(n) };
             bprintln!(" hart(s) found");
             // BSP is first; re-order so bsp_hw_id is at index 0.
@@ -384,6 +393,7 @@ unsafe fn boot_sequence(image: EfiHandle, st: *mut EfiSystemTable) -> Result<!, 
     bprint!("[--------] boot: platform resources: ");
     // resource_count is bounded by the platform_resources array size (≤ 256), fits in u32.
     #[allow(clippy::cast_possible_truncation)]
+    // SAFETY: console initialized.
     unsafe { crate::console::console_write_dec32(resource_count as u32) };
     bprintln!(" parsed");
 
@@ -521,9 +531,11 @@ unsafe fn boot_sequence(image: EfiHandle, st: *mut EfiSystemTable) -> Result<!, 
     let ap_trampoline_phys: u64 = {
         // Reserve just below 1 MiB. AllocateMaxAddress places the page anywhere
         // below the supplied upper bound (= 0xFFFFF = last byte of first MiB).
+        // SAFETY: bs is valid; requesting low-memory page for x86-64 real-mode trampoline.
         if let Ok(phys) = unsafe { allocate_pages_max_addr(bs, 0xFFFFF, 1) }
         {
             bprint!("[--------] boot: AP trampoline page: 0x");
+            // SAFETY: console initialized.
             unsafe { crate::console::console_write_hex64(phys) };
             bprintln!("");
             phys
@@ -538,9 +550,11 @@ unsafe fn boot_sequence(image: EfiHandle, st: *mut EfiSystemTable) -> Result<!, 
     // constraint — SBI HSM accepts any physical start address. The kernel
     // identity-maps this page (Phase 3) before copying trampoline code there.
     #[cfg(target_arch = "riscv64")]
+    // SAFETY: bs is valid boot services.
     let ap_trampoline_phys: u64 = if let Ok(phys) = unsafe { allocate_pages(bs, 1) }
     {
         bprint!("[--------] boot: AP trampoline page: 0x");
+        // SAFETY: console initialized.
         unsafe { crate::console::console_write_hex64(phys) };
         bprintln!("");
         phys
@@ -631,6 +645,8 @@ unsafe fn boot_sequence(image: EfiHandle, st: *mut EfiSystemTable) -> Result<!, 
     let modules_ptr = modules_phys as *mut BootModule;
     for (i, &module) in boot_modules.iter().enumerate().take(boot_module_count)
     {
+        // SAFETY: modules_phys is a 4096-byte allocation; i < boot_module_count ≤ 16;
+        // BootModule is 48 bytes so 16 entries fit comfortably within 4096 bytes.
         unsafe { core::ptr::write(modules_ptr.add(i), module) };
     }
 

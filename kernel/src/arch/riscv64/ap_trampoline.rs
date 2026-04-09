@@ -160,6 +160,7 @@ pub unsafe fn setup_trampoline(trampoline_pa: u64)
 
     // SAFETY: direct map active; dst is valid writable memory for the page.
     let dst = (DIRECT_MAP_BASE + trampoline_pa) as *mut u8;
+    // SAFETY: code_start is valid linker symbol; dst is direct-mapped trampoline page; len fits.
     unsafe {
         core::ptr::copy_nonoverlapping(code_start as *const u8, dst, code_len);
     }

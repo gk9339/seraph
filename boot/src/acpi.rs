@@ -107,6 +107,7 @@ fn read_u16(buf: &[u8], off: usize) -> u16
 /// `len` accessible bytes. The caller must ensure the region lives long enough.
 pub(crate) unsafe fn phys_slice<'a>(phys: u64, len: usize) -> &'a [u8]
 {
+    // SAFETY: caller guarantees phys is valid identity-mapped address with ≥len bytes.
     unsafe { core::slice::from_raw_parts(phys as *const u8, len) }
 }
 
@@ -146,6 +147,7 @@ pub unsafe fn parse_acpi_resources(rsdp_addr: u64, out: &mut [PlatformResource])
     // ── Validate RSDP ─────────────────────────────────────────────────────────
 
     // RSDP v2.0 is 36 bytes; read enough for all needed fields.
+    // SAFETY: caller guarantees rsdp_addr is valid, identity-mapped ACPI RSDP.
     let rsdp = unsafe { phys_slice(rsdp_addr, 36) };
     if &rsdp[..8] != RSDP_SIG
     {
@@ -175,6 +177,7 @@ pub unsafe fn parse_acpi_resources(rsdp_addr: u64, out: &mut [PlatformResource])
 
     // ── Validate XSDT ─────────────────────────────────────────────────────────
 
+    // SAFETY: xsdt_addr read from validated RSDP; firmware guarantees physical mapping.
     let xsdt_hdr = unsafe { phys_slice(xsdt_addr, SDT_HDR_LEN) };
     if &xsdt_hdr[SDT_OFF_SIGNATURE..SDT_OFF_SIGNATURE + 4] != b"XSDT"
     {
@@ -187,6 +190,7 @@ pub unsafe fn parse_acpi_resources(rsdp_addr: u64, out: &mut [PlatformResource])
         bprintln!("[--------] boot:     ACPI: XSDT length too small, skipping subtables");
         return count;
     }
+    // SAFETY: xsdt_len validated >= SDT_HDR_LEN above; firmware guarantees mapping.
     let xsdt = unsafe { phys_slice(xsdt_addr, xsdt_len) };
 
     // XSDT entries: array of u64 physical addresses starting after the header.
@@ -205,6 +209,7 @@ pub unsafe fn parse_acpi_resources(rsdp_addr: u64, out: &mut [PlatformResource])
         }
 
         // Read just the SDT header to get signature and length.
+        // SAFETY: table_addr from XSDT entry; firmware guarantees physical mapping.
         let hdr = unsafe { phys_slice(table_addr, SDT_HDR_LEN) };
         let sig = &hdr[SDT_OFF_SIGNATURE..SDT_OFF_SIGNATURE + 4];
         let table_len = read_u32(hdr, SDT_OFF_LENGTH) as usize;
@@ -212,6 +217,7 @@ pub unsafe fn parse_acpi_resources(rsdp_addr: u64, out: &mut [PlatformResource])
         {
             continue;
         }
+        // SAFETY: table_len validated >= SDT_HDR_LEN above; firmware guarantees mapping.
         let table = unsafe { phys_slice(table_addr, table_len) };
 
         match sig
@@ -292,6 +298,7 @@ pub unsafe fn parse_cpu_topology(rsdp_addr: u64, bsp_id: u32) -> (u32, u32, [u32
     }
 
     // Validate RSDP.
+    // SAFETY: caller guarantees rsdp_addr is valid, identity-mapped ACPI RSDP.
     let rsdp = unsafe { phys_slice(rsdp_addr, 36) };
     if &rsdp[..8] != RSDP_SIG || read_u8(rsdp, RSDP_OFF_REVISION) < 2
     {
@@ -304,6 +311,7 @@ pub unsafe fn parse_cpu_topology(rsdp_addr: u64, bsp_id: u32) -> (u32, u32, [u32
     }
 
     // Validate XSDT.
+    // SAFETY: xsdt_addr from validated RSDP; firmware guarantees physical mapping.
     let xsdt_hdr = unsafe { phys_slice(xsdt_addr, SDT_HDR_LEN) };
     if &xsdt_hdr[SDT_OFF_SIGNATURE..SDT_OFF_SIGNATURE + 4] != b"XSDT"
     {
@@ -314,6 +322,7 @@ pub unsafe fn parse_cpu_topology(rsdp_addr: u64, bsp_id: u32) -> (u32, u32, [u32
     {
         return (1, bsp_id, cpu_ids);
     }
+    // SAFETY: xsdt_len validated >= SDT_HDR_LEN above; firmware guarantees mapping.
     let xsdt = unsafe { phys_slice(xsdt_addr, xsdt_len) };
     let entries_bytes = &xsdt[SDT_HDR_LEN..];
     let entry_count = entries_bytes.len() / 8;
@@ -325,12 +334,14 @@ pub unsafe fn parse_cpu_topology(rsdp_addr: u64, bsp_id: u32) -> (u32, u32, [u32
         {
             continue;
         }
+        // SAFETY: table_addr from XSDT entry; firmware guarantees physical mapping.
         let hdr = unsafe { phys_slice(table_addr, SDT_HDR_LEN) };
         if &hdr[SDT_OFF_SIGNATURE..SDT_OFF_SIGNATURE + 4] == b"APIC"
         {
             let table_len = read_u32(hdr, SDT_OFF_LENGTH) as usize;
             if table_len >= SDT_HDR_LEN
             {
+                // SAFETY: table_len validated; firmware guarantees mapping.
                 let table = unsafe { phys_slice(table_addr, table_len) };
                 return parse_madt_topology(table, bsp_id, cpu_ids);
             }

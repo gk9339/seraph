@@ -18,6 +18,7 @@ const COM1: u16 = 0x3F8;
 /// call, and that I/O port access is permitted in the current privilege level.
 pub unsafe fn serial_init()
 {
+    // SAFETY: caller guarantees ring 0 and at-most-once serial_init invocation.
     unsafe {
         outb(COM1 + 1, 0x00); // disable all interrupts
         outb(COM1 + 3, 0x80); // DLAB = 1 (access divisor latch)

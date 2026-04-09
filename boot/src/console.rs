@@ -124,6 +124,7 @@ pub unsafe fn console_write_hex64(n: u64)
     }
     // SAFETY: buf contains only ASCII hex characters; valid UTF-8.
     let s = unsafe { core::str::from_utf8_unchecked(&buf) };
+    // SAFETY: caller ensures serial initialized.
     unsafe {
         console_write_str(s);
     }
@@ -139,6 +140,7 @@ pub unsafe fn console_write_dec32(n: u32)
 {
     if n == 0
     {
+        // SAFETY: caller ensures serial initialized.
         unsafe {
             console_write_str("0");
         }
@@ -155,6 +157,7 @@ pub unsafe fn console_write_dec32(n: u32)
     }
     // SAFETY: buf[pos..] contains only ASCII digit characters; valid UTF-8.
     let s = unsafe { core::str::from_utf8_unchecked(&buf[pos..]) };
+    // SAFETY: caller ensures serial initialized.
     unsafe {
         console_write_str(s);
     }

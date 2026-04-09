@@ -71,6 +71,7 @@ pub fn uart_mmio_region() -> u64
 /// services (before `ExitBootServices`).
 pub unsafe fn discover_boot_hart_id(st: *mut EfiSystemTable) -> u64
 {
+    // SAFETY: st is a valid UEFI system table pointer; caller guarantees validity.
     let bs = unsafe { (*st).boot_services };
     let mut iface: *mut core::ffi::c_void = core::ptr::null_mut();
     // SAFETY: bs is valid; locate_protocol fills iface on success.

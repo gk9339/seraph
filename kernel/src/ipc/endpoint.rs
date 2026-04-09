@@ -54,6 +54,7 @@ pub struct EndpointState
 
 // SAFETY: EndpointState is accessed only under the relevant scheduler lock.
 unsafe impl Send for EndpointState {}
+// SAFETY: EndpointState is accessed only under the relevant scheduler lock.
 unsafe impl Sync for EndpointState {}
 
 impl EndpointState
@@ -84,7 +85,7 @@ unsafe fn enqueue(
     tcb: *mut ThreadControlBlock,
 )
 {
-    // SAFETY: tcb is a valid TCB.
+    // SAFETY: tcb validated by caller; ipc_wait_next field always valid in TCB.
     unsafe {
         (*tcb).ipc_wait_next = None;
     }
@@ -95,7 +96,7 @@ unsafe fn enqueue(
     }
     else
     {
-        // SAFETY: *tail is a valid TCB.
+        // SAFETY: tail validated non-null; ipc_wait_next field always valid in TCB.
         unsafe {
             (**tail).ipc_wait_next = Some(tcb);
         }
@@ -117,14 +118,14 @@ unsafe fn dequeue(
         return core::ptr::null_mut();
     }
     let tcb = *head;
-    // SAFETY: tcb is a valid TCB.
+    // SAFETY: tcb validated non-null; ipc_wait_next field always valid in TCB.
     let next = unsafe { (*tcb).ipc_wait_next };
     *head = next.unwrap_or_default();
     if head.is_null()
     {
         *tail = core::ptr::null_mut();
     }
-    // SAFETY: tcb is valid.
+    // SAFETY: tcb validated non-null; ipc_wait_next field always valid in TCB.
     unsafe {
         (*tcb).ipc_wait_next = None;
     }
@@ -148,15 +149,17 @@ pub unsafe fn endpoint_call(
     msg: &Message,
 ) -> Result<*mut ThreadControlBlock, ()>
 {
-    // SAFETY: caller guarantees ep is valid and lock is held.
+    // SAFETY: ep validated by caller; endpoint state pointer allocated at endpoint creation.
     let ep = unsafe { &mut *ep };
 
     // Is a server waiting?
+    // SAFETY: recv_head/recv_tail maintained by enqueue/dequeue operations.
     let server = unsafe { dequeue(&mut ep.recv_head, &mut ep.recv_tail) };
     if !server.is_null()
     {
         // Transfer message to server.
-        // SAFETY: server is a valid TCB.
+        // SAFETY: server dequeued from recv_head; scheduler lock held; ensures exclusive
+        // access to thread state and IPC fields.
         unsafe {
             (*server).ipc_msg = *msg;
             // Store caller as the reply target in the server's TCB.
@@ -167,7 +170,8 @@ pub unsafe fn endpoint_call(
         }
         // Block caller on reply; record the server as the blocking object so
         // SYS_THREAD_STOP can cancel by clearing server.reply_tcb.
-        // SAFETY: caller is a valid TCB.
+        // SAFETY: caller validated by syscall layer; scheduler lock held; ensures exclusive
+        // access to thread state.
         unsafe {
             (*caller).state = ThreadState::Blocked;
             (*caller).ipc_state = IpcThreadState::BlockedOnReply;
@@ -177,8 +181,9 @@ pub unsafe fn endpoint_call(
     }
 
     // No server available — block caller on send queue.
-    // SAFETY: caller is valid.
     let was_empty = ep.send_head.is_null();
+    // SAFETY: caller validated by syscall layer; scheduler lock held; ensures exclusive
+    // access to thread state and send queue.
     unsafe {
         (*caller).ipc_msg = *msg;
         (*caller).state = ThreadState::Blocked;
@@ -195,8 +200,8 @@ pub unsafe fn endpoint_call(
     // Only fire on the first pending sender to avoid duplicate wakes.
     if was_empty && !ep.wait_set.is_null()
     {
-        // SAFETY: wait_set is a valid *mut WaitSetState registered by
-        // sys_wait_set_add and cleared on removal or wait_set_drop.
+        // SAFETY: wait_set validated non-null; registered by sys_wait_set_add and cleared
+        // on removal or wait_set_drop; scheduler lock held.
         unsafe { crate::ipc::wait_set::waitset_notify(ep.wait_set, ep.wait_set_member_idx) };
     }
     Err(())
@@ -216,21 +221,26 @@ pub unsafe fn endpoint_recv(
     server: *mut ThreadControlBlock,
 ) -> Result<(*mut ThreadControlBlock, Message), ()>
 {
+    // SAFETY: ep validated by caller; endpoint state pointer allocated at endpoint creation.
     let ep = unsafe { &mut *ep };
 
+    // SAFETY: send_head/send_tail maintained by enqueue/dequeue operations.
     let caller = unsafe { dequeue(&mut ep.send_head, &mut ep.send_tail) };
     if !caller.is_null()
     {
         // Dequeue the pending call and deliver to server.
+        // SAFETY: caller dequeued from send_head; ipc_msg field always valid in TCB.
         let msg = unsafe { (*caller).ipc_msg };
         // Record who the server should reply to.
+        // SAFETY: server validated by syscall layer; reply_tcb field always valid in TCB.
         unsafe {
             (*server).reply_tcb = caller;
         }
         // Update caller's blocking state: it is now waiting for this server's
         // reply, not in the send queue. SYS_THREAD_STOP will use blocked_on_object
         // (the server TCB) to cancel the reply if needed.
-        // SAFETY: caller is a valid TCB.
+        // SAFETY: caller dequeued from send_head; scheduler lock held; ensures exclusive
+        // access to thread state.
         unsafe {
             (*caller).ipc_state = IpcThreadState::BlockedOnReply;
             (*caller).blocked_on_object = server.cast::<u8>();
@@ -239,6 +249,8 @@ pub unsafe fn endpoint_recv(
     }
 
     // No sender — block server on recv queue.
+    // SAFETY: server validated by syscall layer; scheduler lock held; ensures exclusive
+    // access to thread state and recv queue.
     unsafe {
         (*server).state = ThreadState::Blocked;
         (*server).ipc_state = IpcThreadState::BlockedOnRecv;
@@ -267,17 +279,21 @@ pub unsafe fn endpoint_reply(
     msg: &Message,
 ) -> Option<*mut ThreadControlBlock>
 {
+    // SAFETY: server validated by syscall layer; reply_tcb field always valid in TCB.
     let caller = unsafe { (*server).reply_tcb };
     if caller.is_null()
     {
         return None;
     }
     // Clear the reply target.
+    // SAFETY: server validated by syscall layer; reply_tcb field always valid in TCB.
     unsafe {
         (*server).reply_tcb = core::ptr::null_mut();
     }
 
     // Deliver reply to caller.
+    // SAFETY: caller stored by endpoint_call/recv; scheduler lock held; ensures exclusive
+    // access to thread state.
     unsafe {
         (*caller).ipc_msg = *msg;
         (*caller).state = ThreadState::Ready;
@@ -311,7 +327,7 @@ pub unsafe fn unlink_from_wait_queue(
     {
         if core::ptr::eq(cur, tcb)
         {
-            // SAFETY: cur is a valid TCB.
+            // SAFETY: cur validated non-null; ipc_wait_next field always valid in TCB.
             let next = unsafe { (*cur).ipc_wait_next.unwrap_or_default() };
 
             if prev.is_null()
@@ -320,7 +336,7 @@ pub unsafe fn unlink_from_wait_queue(
             }
             else
             {
-                // SAFETY: prev is a valid TCB.
+                // SAFETY: prev validated non-null; ipc_wait_next field always valid in TCB.
                 unsafe {
                     (*prev).ipc_wait_next = if next.is_null() { None } else { Some(next) };
                 }
@@ -331,7 +347,7 @@ pub unsafe fn unlink_from_wait_queue(
                 *tail = prev;
             }
 
-            // SAFETY: cur is a valid TCB.
+            // SAFETY: cur validated non-null; ipc_wait_next field always valid in TCB.
             unsafe {
                 (*cur).ipc_wait_next = None;
             }
@@ -339,7 +355,7 @@ pub unsafe fn unlink_from_wait_queue(
         }
 
         prev = cur;
-        // SAFETY: cur is a valid TCB.
+        // SAFETY: cur validated non-null; ipc_wait_next field always valid in TCB.
         cur = unsafe { (*cur).ipc_wait_next.unwrap_or_default() };
     }
 

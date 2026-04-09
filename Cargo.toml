@@ -29,6 +29,9 @@ all      = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
 cargo    = { level = "warn", priority = -1 }
 
+undocumented_unsafe_blocks       = "warn"
+cast_ptr_alignment               = "warn"
+
 [workspace.dependencies]
 boot-protocol = { path = "abi/boot-protocol" }
 font = { path = "shared/font" }

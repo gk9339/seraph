@@ -246,6 +246,8 @@ pub unsafe extern "C" fn return_to_user(tf: *const super::trap_frame::TrapFrame)
 #[cfg(not(test))]
 pub unsafe fn first_entry_to_user(root_phys: u64, tf: *const super::trap_frame::TrapFrame) -> !
 {
+    // SAFETY: caller guarantees root_phys and tf satisfy switch_and_enter_user contract;
+    // TSS RSP0 and SYSCALL_KERNEL_RSP already set.
     unsafe { switch_and_enter_user(root_phys, tf) }
 }
 

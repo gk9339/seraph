@@ -158,9 +158,11 @@ fn sys_yield(_tf: &mut TrapFrame) -> Result<u64, SyscallError>
 fn sys_exit(_tf: &mut TrapFrame) -> Result<u64, SyscallError>
 {
     use crate::sched::thread::ThreadState;
+    // SAFETY: current_tcb() returns current thread; interrupt context ensures it is set.
     let tcb = unsafe { current_tcb() };
     if !tcb.is_null()
     {
+        // SAFETY: tcb validated non-null; state field always valid for initialized TCB.
         unsafe {
             (*tcb).state = ThreadState::Exited;
         }
@@ -186,8 +188,8 @@ fn sys_exit(_tf: &mut TrapFrame) -> Result<u64, SyscallError>
 #[cfg(not(test))]
 pub(crate) unsafe fn current_tcb() -> *mut crate::sched::thread::ThreadControlBlock
 {
-    // SAFETY: SCHEDULERS[cpu] is initialised for all online CPUs.
     let cpu = crate::arch::current::cpu::current_cpu() as usize;
+    // SAFETY: SCHEDULERS[cpu] is initialised for all online CPUs; per-CPU data indexed by CPU ID.
     unsafe { crate::sched::scheduler_for(cpu).current }
 }
 
@@ -220,10 +222,9 @@ pub(crate) unsafe fn lookup_cap(
     {
         return Err(SyscallError::InsufficientRights);
     }
-    // SAFETY: slot lives in the CSpace which is heap-allocated for the
-    // lifetime of the process.
     // ref_as_ptr: intentional — raw pointer cast to extend lifetime to 'static.
     #[allow(clippy::ref_as_ptr)]
+    // SAFETY: slot lives in the CSpace which is heap-allocated for the lifetime of the process.
     Ok(unsafe { &*(slot as *const _) })
 }
 
@@ -286,6 +287,7 @@ fn sys_debug_log(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     // Copy user bytes into a kernel stack buffer before inspecting them.
     // Bracket with user_access_begin/end to satisfy SMAP (x86-64) / SUM (RISC-V).
     let mut buf = [0u8; 1024];
+    // SAFETY: user_access_begin/end bracket user memory copy; ptr validated non-null; len clamped to buf size.
     unsafe {
         crate::arch::current::cpu::user_access_begin();
         core::ptr::copy_nonoverlapping(ptr, buf.as_mut_ptr(), len);

@@ -47,6 +47,7 @@ pub unsafe fn validate_boot_info(boot_info: *const BootInfo) -> bool
     // 3. Protocol version.
     // Use a volatile read to prevent the compiler from optimising away the
     // access — the pointer comes from an external caller.
+    // SAFETY: info validated non-null and aligned; version field at offset 0.
     let version = unsafe { core::ptr::read_volatile(core::ptr::addr_of!(info.version)) };
     if version != BOOT_PROTOCOL_VERSION
     {

@@ -132,6 +132,8 @@ fn idle_thread_entry(_cpu_id: u64) -> !
     // sscratch=0 at this point (idle is !is_user) so any S-mode interrupt
     // correctly takes the S-mode trap path.
     #[cfg(not(test))]
+    // SAFETY: idle thread runs in supervisor mode with sscratch=0; enabling
+    // interrupts allows wfi wakeup without corrupting user-mode state.
     unsafe {
         crate::arch::current::interrupts::enable();
     }
@@ -145,6 +147,8 @@ fn idle_thread_entry(_cpu_id: u64) -> !
         #[cfg(not(test))]
         {
             let cpu = crate::arch::current::cpu::current_cpu() as usize;
+            // SAFETY: single-CPU system (Phase 8); CPU 0 scheduler is always valid.
+            // WSMP Phase D will fix this for per-CPU AP schedulers.
             let has_work = unsafe { SCHEDULERS[cpu].has_runnable() };
             if has_work
             {
@@ -243,7 +247,7 @@ pub fn init(cpu_count: u32, allocator: &mut BuddyAllocator) -> u32
         }));
 
         // 4. Register in per-CPU scheduler.
-        // SAFETY: single-threaded boot; SCHEDULERS[cpu] is not accessed elsewhere.
+        // SAFETY: single-threaded boot; SCHEDULERS[cpu] is exclusively owned during init.
         unsafe {
             SCHEDULERS[cpu].set_idle(tcb);
             SCHEDULERS[cpu].set_current(tcb);
@@ -301,7 +305,8 @@ pub fn ap_enter(cpu_id: u32) -> !
 #[cfg(not(test))]
 pub unsafe fn idle_stack_top_for(cpu_id: usize) -> u64
 {
-    // SAFETY: caller guarantees cpu_id is valid and sched::init was called.
+    // SAFETY: caller guarantees cpu_id is valid and sched::init was called;
+    // idle TCB pointer is non-null; kernel_stack_top field is always valid.
     unsafe { (*SCHEDULERS[cpu_id].idle).kernel_stack_top }
 }
 
@@ -318,7 +323,7 @@ pub unsafe fn idle_stack_top_for(cpu_id: usize) -> u64
 pub unsafe fn scheduler_for(id: usize) -> &'static mut PerCpuScheduler
 {
     debug_assert!(id < MAX_CPUS);
-    // SAFETY: caller's responsibility.
+    // SAFETY: caller guarantees id < MAX_CPUS and exclusive access to this CPU's scheduler.
     unsafe { &mut SCHEDULERS[id] }
 }
 
@@ -347,6 +352,7 @@ pub unsafe fn schedule()
     use crate::arch::current::context::switch;
     use thread::ThreadState;
 
+    // SAFETY: single-CPU system; CPU 0 scheduler is always valid.
     let sched =
         unsafe { &mut SCHEDULERS[crate::arch::current::cpu::current_cpu() as usize] };
 
@@ -361,9 +367,10 @@ pub unsafe fn schedule()
 
     // If the current thread is still actively running, put it back in the
     // run queue so it can be rescheduled.
-    // SAFETY: current is a valid TCB set by enter() or a previous schedule().
     if !current.is_null()
     {
+        // SAFETY: current is a valid TCB set by enter() or a previous schedule();
+        // state, priority fields are always valid.
         unsafe {
             if (*current).state == ThreadState::Running
             {
@@ -381,7 +388,7 @@ pub unsafe fn schedule()
     let mut next = sched.dequeue_highest();
     while !core::ptr::eq(next, sched.idle)
         && matches!(
-            // SAFETY: next is a valid TCB from the run queue.
+            // SAFETY: next is a valid TCB from the run queue; state field is always valid.
             unsafe { (*next).state },
             ThreadState::Stopped | ThreadState::Exited
         )
@@ -395,10 +402,12 @@ pub unsafe fn schedule()
         // Re-mark as running, release lock, and return.
         if !current.is_null()
         {
+            // SAFETY: current is a valid TCB; state field is always valid.
             unsafe {
                 (*current).state = ThreadState::Running;
             }
         }
+        // SAFETY: saved_flags was returned by the matching lock_raw above.
         unsafe {
             sched.lock.unlock_raw(saved_flags);
         }
@@ -406,7 +415,7 @@ pub unsafe fn schedule()
     }
 
     // Activate next thread.
-    // SAFETY: next is a valid TCB from the run queue or idle.
+    // SAFETY: next is a valid TCB from the run queue or idle; state field is always valid.
     unsafe {
         (*next).state = ThreadState::Running;
     }
@@ -424,22 +433,25 @@ pub unsafe fn schedule()
     //   sscratch is already 0 (S-mode invariant) so trap_entry takes the
     //   S-mode path correctly.
     //
-    // SAFETY: next is a valid TCB; called with interrupts disabled.
+    // SAFETY: next is a valid TCB; is_user and kernel_stack_top fields are always valid.
     let trap_stack = if unsafe { (*next).is_user }
     {
+        // SAFETY: next is a valid TCB; kernel_stack_top field is always valid.
         unsafe { (*next).kernel_stack_top }
     }
     else
     {
         0
     };
+    // SAFETY: trap_stack is valid (0 for kernel threads, kernel_stack_top for user threads);
+    // interrupts are disabled by the scheduler lock.
     unsafe {
         crate::arch::current::cpu::set_kernel_trap_stack(trap_stack);
     }
 
     // Switch address space if different (both non-null).
-    // SAFETY: address_space pointers were set up by Phase 9 init or future
-    // thread creation; null means kernel thread (shares kernel mappings).
+    // SAFETY: current and next are valid TCBs; address_space pointers were set up
+    // by Phase 9 init or thread creation; null means kernel thread (shares kernel mappings).
     unsafe {
         let cur_as = if current.is_null()
         {
@@ -458,8 +470,8 @@ pub unsafe fn schedule()
 
     // Load the per-thread IOPB into the TSS (x86_64 only).
     // If the thread has no port bindings, fill the TSS IOPB with 0xFF (deny all).
-    // SAFETY: iopb pointer is null or a valid heap-allocated [u8; IOPB_SIZE].
     #[cfg(all(not(test), target_arch = "x86_64"))]
+    // SAFETY: next is a valid TCB; iopb pointer is null or a valid heap-allocated [u8; IOPB_SIZE].
     unsafe {
         let iopb_ptr = (*next).iopb;
         if iopb_ptr.is_null()
@@ -479,24 +491,25 @@ pub unsafe fn schedule()
     }
     else
     {
-        // SAFETY: current is a valid TCB.
+        // SAFETY: current is a valid TCB; saved_state field is always valid.
         unsafe { core::ptr::addr_of_mut!((*current).saved_state) }
     };
-    // SAFETY: next is a valid TCB.
+    // SAFETY: next is a valid TCB; saved_state field is always valid.
     let next_state = unsafe { core::ptr::addr_of!((*next).saved_state) };
 
     // Release the lock before calling switch. The context switch changes RSP
     // to the next thread's kernel stack; the unlock_raw call must complete on
     // the current stack before that happens.
-    // SAFETY: saved_flags was returned by the matching lock_raw above.
+    // SAFETY: saved_flags was returned by the matching lock_raw above;
+    // restores interrupt state and unlocks scheduler.
     unsafe {
         sched.lock.unlock_raw(saved_flags);
     }
 
     if !current_state.is_null()
     {
-        // SAFETY: both pointers are valid SavedState values on heap-allocated
-        // TCBs; interrupts are now re-enabled.
+        // SAFETY: both current_state and next_state are valid SavedState pointers
+        // on heap-allocated TCBs; kernel stacks are valid; interrupts are re-enabled.
         unsafe {
             switch(current_state, next_state);
         }
@@ -514,6 +527,7 @@ pub unsafe fn schedule()
 #[cfg(not(test))]
 pub unsafe fn timer_tick()
 {
+    // SAFETY: single-CPU system; CPU 0 scheduler is always valid.
     let sched =
         unsafe { &mut SCHEDULERS[crate::arch::current::cpu::current_cpu() as usize] };
     let current = sched.current;
@@ -521,7 +535,7 @@ pub unsafe fn timer_tick()
     {
         return;
     }
-    // SAFETY: current is a valid TCB.
+    // SAFETY: current is a valid TCB; slice_remaining field is always valid.
     let remaining = unsafe { (*current).slice_remaining };
     if remaining == 0
     {
@@ -529,16 +543,18 @@ pub unsafe fn timer_tick()
         return;
     }
     let new_remaining = remaining - 1;
+    // SAFETY: current is a valid TCB; slice_remaining field is always valid.
     unsafe {
         (*current).slice_remaining = new_remaining;
     }
     if new_remaining == 0
     {
         // Reset slice for next run.
+        // SAFETY: current is a valid TCB; slice_remaining field is always valid.
         unsafe {
             (*current).slice_remaining = TIME_SLICE_TICKS;
         }
-        // SAFETY: called from interrupt handler.
+        // SAFETY: called from interrupt handler; valid kernel stack.
         unsafe {
             schedule();
         }
@@ -567,11 +583,11 @@ pub unsafe fn timer_tick()
 #[cfg(not(test))]
 pub(crate) unsafe extern "C" fn user_thread_trampoline() -> !
 {
-    // SAFETY: current_tcb is set by schedule() before switch() is called.
+    // SAFETY: current_tcb is set by schedule() before switch() is called; returns valid TCB pointer.
     let tcb = unsafe { crate::syscall::current_tcb() };
-    // SAFETY: trap_frame was set by sys_thread_configure and is valid.
-    // The initial RSP for this function is set below the TrapFrame
-    // (see sys_cap_create_thread: trampoline_rsp = kstack_top - tf_size - TRAMPOLINE_FRAME)
+    // SAFETY: tcb is a valid TCB pointer; trap_frame was set by sys_thread_configure and points
+    // to a valid, initialized TrapFrame. The initial RSP for this function is set below the
+    // TrapFrame (see sys_cap_create_thread: trampoline_rsp = kstack_top - tf_size - TRAMPOLINE_FRAME)
     // so this C function's stack frame does not overlap the TrapFrame.
     unsafe { crate::arch::current::context::return_to_user((*tcb).trap_frame) }
 }
@@ -601,7 +617,8 @@ pub fn enter() -> !
     use crate::mm::address_space::INIT_STACK_TOP;
 
     // Dequeue the highest-priority ready thread (init, at INIT_PRIORITY=15).
-    // SAFETY: single-threaded boot; SCHEDULERS[0] is exclusively owned here.
+    // SAFETY: single-threaded boot; SCHEDULERS[0] is exclusively owned; tcb is validated
+    // non-null before dereference; state field is always valid.
     let init_tcb = unsafe {
         let sched = &mut SCHEDULERS[0];
         let tcb = sched.dequeue_highest();
@@ -626,7 +643,7 @@ pub fn enter() -> !
     // On RISC-V: return_to_user sets sstatus to SPP=0/SPIE=1/SIE=0 before
     // sret; SIE is re-enabled atomically by sret. Disabling here prevents any
     // stray interrupt from arriving before return_to_user arms sscratch.
-    // SAFETY: single-boot-thread; disable before entering user context.
+    // SAFETY: single-boot-thread; prevents race before user mode entry.
     unsafe {
         crate::arch::current::cpu::disable_interrupts();
     }
@@ -637,7 +654,7 @@ pub fn enter() -> !
     // On RISC-V: writes PerCpuData::kernel_rsp (offset 8 from tp); trap_entry
     //   loads this to locate the kernel stack on U-mode entry.  sscratch is set
     //   to &PER_CPU by return_to_user just before sret.
-    // SAFETY: single-boot-thread; kernel_stack_top is valid.
+    // SAFETY: single-boot-thread; kernel_stack_top is valid from init TCB.
     unsafe {
         crate::arch::current::cpu::set_kernel_trap_stack(kernel_stack_top);
     }
@@ -649,7 +666,8 @@ pub fn enter() -> !
 
     // Zero the frame then populate the user-mode entry fields via TrapFrame
     // methods (arch-specific field names are hidden inside trap_frame.rs).
-    // SAFETY: kernel_stack_top - tf_size is within the allocated kernel stack.
+    // SAFETY: tf_ptr is within the allocated kernel stack (kernel_stack_top - tf_size);
+    // init_tcb is a valid TCB; saved_state and TrapFrame methods ensure correct field access.
     unsafe {
         core::ptr::write_bytes(tf_ptr.cast::<u8>(), 0, tf_size as usize);
         (*tf_ptr).init_user(entry_point, INIT_STACK_TOP);
@@ -667,7 +685,8 @@ pub fn enter() -> !
     init_tcb.trap_frame = tf_ptr;
 
     // Read init's page table root before entering the switch function.
-    // SAFETY: init_tcb.address_space was set up in main.rs Phase 9 init.
+    // SAFETY: init_tcb.address_space is non-null and valid, set up in main.rs Phase 9 init;
+    // root_phys field is always valid.
     let root_phys = unsafe { (*init_tcb.address_space).root_phys };
 
     crate::kprintln!("sched: enter - handing control to init");
@@ -676,7 +695,8 @@ pub fn enter() -> !
     // `first_entry_to_user` handles the arch-specific sequence:
     //   x86-64: atomically switches CR3 and executes iretq from init's kernel stack.
     //   RISC-V: writes satp (sfence serializes), then executes sret.
-    // SAFETY: root_phys is init's valid page-table root; tf_ptr is on init's kernel stack.
+    // SAFETY: root_phys is init's valid page-table root (from Phase 9 init address space);
+    // tf_ptr points to a valid, initialized TrapFrame on init's kernel stack.
     unsafe {
         crate::arch::current::context::first_entry_to_user(root_phys, tf_ptr);
     }

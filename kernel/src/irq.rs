@@ -43,6 +43,7 @@ struct IrqRoute
 
 // SAFETY: IrqRoute is only accessed with interrupts disabled (single-CPU).
 unsafe impl Send for IrqRoute {}
+// SAFETY: IrqRoute is only accessed with interrupts disabled; no Sync violation.
 unsafe impl Sync for IrqRoute {}
 
 impl IrqRoute
@@ -90,7 +91,7 @@ static mut IRQ_TABLE: [IrqRoute; MAX_IRQ] = {
 pub unsafe fn register(irq: u32, signal: *mut SignalState)
 {
     debug_assert!((irq as usize) < MAX_IRQ, "irq out of range");
-    // SAFETY: interrupts are disabled; single-CPU; index is in bounds.
+    // SAFETY: IRQ_TABLE sized for MAX_IRQ; interrupts disabled; index bounds-checked by caller.
     unsafe {
         IRQ_TABLE[irq as usize].signal = signal;
     }
@@ -105,7 +106,7 @@ pub unsafe fn register(irq: u32, signal: *mut SignalState)
 pub unsafe fn unregister(irq: u32)
 {
     debug_assert!((irq as usize) < MAX_IRQ, "irq out of range");
-    // SAFETY: interrupts are disabled; single-CPU; index is in bounds.
+    // SAFETY: IRQ_TABLE sized for MAX_IRQ; interrupts disabled; index bounds-checked by caller.
     unsafe {
         IRQ_TABLE[irq as usize].signal = core::ptr::null_mut();
     }
@@ -192,6 +193,7 @@ pub unsafe fn dispatch_device_irq(irq: u32)
     // If signal_send woke a waiter, enqueue it so the scheduler picks it up.
     if let Some(tcb) = woken
     {
+        // SAFETY: tcb is a valid ThreadControlBlock pointer returned by signal_send.
         let prio = unsafe { (*tcb).priority };
         crate::sched::scheduler_for(0).enqueue(tcb, prio);
     }

@@ -84,6 +84,7 @@ fn sbi_set_timer(val: u64)
 fn read_time() -> u64
 {
     let t: u64;
+    // SAFETY: time CSR is always readable in S-mode; read-only, no side effects.
     unsafe {
         core::arch::asm!("csrr {0}, time", out(reg) t, options(nostack, nomem));
     }

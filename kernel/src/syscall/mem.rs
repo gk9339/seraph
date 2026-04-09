@@ -83,11 +83,13 @@ pub fn sys_mem_map(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 
     // ── Capability lookup ─────────────────────────────────────────────────────
 
+    // SAFETY: current_tcb() returns current thread; interrupt context ensures it is set.
     let tcb = unsafe { current_tcb() };
     if tcb.is_null()
     {
         return Err(SyscallError::InvalidCapability);
     }
+    // SAFETY: tcb validated non-null; cspace set at thread creation.
     let caller_cspace = unsafe { (*tcb).cspace };
     if caller_cspace.is_null()
     {
@@ -95,6 +97,7 @@ pub fn sys_mem_map(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     }
 
     // Resolve Frame cap.
+    // SAFETY: caller_cspace validated; lookup_cap checks tag and rights.
     let frame_slot =
         unsafe { super::lookup_cap(caller_cspace, frame_idx, CapTag::Frame, Rights::MAP) }?;
     let (frame_phys, frame_size) = {
@@ -135,6 +138,7 @@ pub fn sys_mem_map(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     };
 
     // Resolve AddressSpace cap.
+    // SAFETY: caller_cspace validated; lookup_cap checks tag and rights.
     let aspace_slot =
         unsafe { super::lookup_cap(caller_cspace, aspace_idx, CapTag::AddressSpace, Rights::MAP) }?;
     let as_ptr = {
@@ -156,6 +160,7 @@ pub fn sys_mem_map(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         let result = with_frame_allocator(|alloc| {
             // SAFETY: virt is in user range (validated above); phys is from a
             // Frame cap confirmed by the kernel at capability creation.
+            // as_ptr validated non-null; map_page is an AddressSpace method.
             unsafe { (*as_ptr).map_page(virt, phys, page_flags, alloc) }
         });
 
@@ -225,17 +230,20 @@ pub fn sys_mem_unmap(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 
     // ── Capability lookup ─────────────────────────────────────────────────────
 
+    // SAFETY: current_tcb() returns current thread; interrupt context ensures it is set.
     let tcb = unsafe { current_tcb() };
     if tcb.is_null()
     {
         return Err(SyscallError::InvalidCapability);
     }
+    // SAFETY: tcb validated non-null; cspace set at thread creation.
     let caller_cspace = unsafe { (*tcb).cspace };
     if caller_cspace.is_null()
     {
         return Err(SyscallError::InvalidCapability);
     }
 
+    // SAFETY: caller_cspace validated; lookup_cap checks tag and rights.
     let aspace_slot =
         unsafe { super::lookup_cap(caller_cspace, aspace_idx, CapTag::AddressSpace, Rights::MAP) }?;
     let as_ptr = {
@@ -334,11 +342,13 @@ pub fn sys_mem_protect(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 
     // ── Capability lookup ─────────────────────────────────────────────────────
 
+    // SAFETY: current_tcb() returns current thread; interrupt context ensures it is set.
     let tcb = unsafe { current_tcb() };
     if tcb.is_null()
     {
         return Err(SyscallError::InvalidCapability);
     }
+    // SAFETY: tcb validated non-null; cspace set at thread creation.
     let caller_cspace = unsafe { (*tcb).cspace };
     if caller_cspace.is_null()
     {
@@ -346,6 +356,7 @@ pub fn sys_mem_protect(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     }
 
     // Frame cap authorises the permission level.
+    // SAFETY: caller_cspace validated; lookup_cap checks tag and rights.
     let frame_slot =
         unsafe { super::lookup_cap(caller_cspace, frame_idx, CapTag::Frame, Rights::MAP) }?;
     // Verify object pointer is valid; rights are read from the slot directly.
@@ -369,6 +380,7 @@ pub fn sys_mem_protect(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         uncacheable: false,
     };
 
+    // SAFETY: caller_cspace validated; lookup_cap checks tag and rights.
     let aspace_slot =
         unsafe { super::lookup_cap(caller_cspace, aspace_idx, CapTag::AddressSpace, Rights::MAP) }?;
     let as_ptr = {
@@ -447,11 +459,13 @@ pub fn sys_frame_split(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 
     // ── Capability lookup ─────────────────────────────────────────────────────
 
+    // SAFETY: current_tcb() returns current thread; interrupt context ensures it is set.
     let tcb = unsafe { current_tcb() };
     if tcb.is_null()
     {
         return Err(SyscallError::InvalidCapability);
     }
+    // SAFETY: tcb validated non-null; cspace set at thread creation.
     let caller_cspace = unsafe { (*tcb).cspace };
     if caller_cspace.is_null()
     {
@@ -459,13 +473,16 @@ pub fn sys_frame_split(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     }
 
     let (frame_phys, frame_size, frame_rights, cspace_id, orig_obj_ptr) = {
+        // SAFETY: caller_cspace validated; lookup_cap checks tag and rights.
         let slot =
             unsafe { super::lookup_cap(caller_cspace, frame_idx, CapTag::Frame, Rights::MAP) }?;
         let obj_ptr = slot.object.ok_or(SyscallError::InvalidCapability)?;
         // cast_ptr_alignment: FrameObject (8-byte) behind KernelObjectHeader (4-byte header);
         // Box<FrameObject> allocation guarantees 8-byte alignment.
+        // SAFETY: tag confirmed Frame; pointer is valid FrameObject.
         #[allow(clippy::cast_ptr_alignment)]
         let fo = unsafe { &*(obj_ptr.as_ptr().cast::<FrameObject>()) };
+        // SAFETY: caller_cspace validated non-null; id() reads discriminator.
         let cspace_id = unsafe { (*caller_cspace).id() };
         (fo.base, fo.size, slot.rights, cspace_id, obj_ptr)
     };
@@ -491,7 +508,8 @@ pub fn sys_frame_split(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     });
     let child1_ptr: NonNull<KernelObjectHeader> = {
         let raw = Box::into_raw(child1_obj).cast::<KernelObjectHeader>();
-        // SAFETY: Box::into_raw is non-null.
+        // SAFETY: Box::into_raw returns non-null; FrameObject.header is at offset 0;
+        // cast preserves alignment and validity.
         unsafe { NonNull::new_unchecked(raw) }
     };
 
@@ -503,10 +521,12 @@ pub fn sys_frame_split(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     });
     let child2_ptr: NonNull<KernelObjectHeader> = {
         let raw = Box::into_raw(child2_obj).cast::<KernelObjectHeader>();
+        // SAFETY: Box::into_raw is non-null; header at offset 0.
         unsafe { NonNull::new_unchecked(raw) }
     };
 
     // Insert both children into the caller's CSpace (auto-allocate slots).
+    // SAFETY: caller_cspace validated non-null; CSpace methods handle slot allocation.
     let cs = unsafe { &mut *caller_cspace };
     let slot1 = cs
         .insert_cap(CapTag::Frame, frame_rights, child1_ptr)
@@ -516,6 +536,7 @@ pub fn sys_frame_split(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         .map_err(|_| {
             // Undo slot1 insertion on failure.
             cs.free_slot(slot1);
+            // SAFETY: child1_ptr just allocated above; ref count is 1.
             unsafe { crate::cap::object::dealloc_object(child1_ptr) };
             SyscallError::OutOfMemory
         })?;
@@ -532,6 +553,7 @@ pub fn sys_frame_split(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     let child2_id = SlotId::new(cspace_id, slot2);
 
     // Read the original's parent before we modify anything.
+    // SAFETY: caller_cspace validated; frame_idx within CSpace bounds.
     let orig_parent = unsafe {
         (*caller_cspace)
             .slot(frame_idx)
@@ -539,14 +561,18 @@ pub fn sys_frame_split(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     };
 
     // Reparent original's existing children (if any) to its parent.
+    // SAFETY: DERIVATION_LOCK held; orig_node/orig_parent valid.
     unsafe { reparent_children(orig_node, orig_parent) };
     // Unlink the original node from the tree.
+    // SAFETY: DERIVATION_LOCK held; orig_node valid.
     unsafe { unlink_node(orig_node) };
 
     // Link both new caps to the original's parent (if any).
     if let Some(parent_id) = orig_parent
     {
+        // SAFETY: DERIVATION_LOCK held; parent_id/child1_id/child2_id valid.
         unsafe { link_child(parent_id, child1_id) };
+        // SAFETY: DERIVATION_LOCK held; parent_id/child2_id valid.
         unsafe { link_child(parent_id, child2_id) };
     }
 
@@ -555,12 +581,15 @@ pub fn sys_frame_split(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     // ── Consume the original cap ──────────────────────────────────────────────
 
     // Return original slot to free list (tag becomes Null).
+    // SAFETY: caller_cspace validated; frame_idx within CSpace bounds.
     unsafe { (*caller_cspace).free_slot(frame_idx) };
 
     // Dec-ref original object; free if no references remain.
+    // SAFETY: orig_obj_ptr from lookup_cap; object still valid (ref > 0 at lookup).
     let remaining = unsafe { (*orig_obj_ptr.as_ptr()).dec_ref() };
     if remaining == 0
     {
+        // SAFETY: ref count reached zero; no other references exist.
         unsafe { dealloc_object(orig_obj_ptr) };
     }
 

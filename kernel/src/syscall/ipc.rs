@@ -58,6 +58,7 @@ unsafe fn read_ipc_buf(
     // cast_possible_truncation: Seraph targets 64-bit only; usize == u64 on all supported targets.
     #[allow(clippy::cast_possible_truncation)]
     let ptr = buf as *const u64;
+    // SAFETY: buf validated non-zero and user-mapped by caller; SMAP/SUM enabled.
     unsafe {
         crate::arch::current::cpu::user_access_begin();
         for (i, item) in dst.iter_mut().enumerate().take(count)
@@ -65,6 +66,7 @@ unsafe fn read_ipc_buf(
             // SAFETY: buf is page-aligned and user-mapped; count <= MSG_DATA_WORDS_MAX.
             *item = core::ptr::read_volatile(ptr.add(i));
         }
+        // SAFETY: paired with user_access_begin above; clears AC flag.
         crate::arch::current::cpu::user_access_end();
     }
     Ok(())
@@ -87,6 +89,7 @@ unsafe fn write_ipc_buf(buf: u64, count: usize, src: &[u64; MSG_DATA_WORDS_MAX])
     // cast_possible_truncation: Seraph targets 64-bit only; usize == u64 on all supported targets.
     #[allow(clippy::cast_possible_truncation)]
     let ptr = buf as *mut u64;
+    // SAFETY: buf validated non-zero and user-mapped by caller; SMAP/SUM enabled.
     unsafe {
         crate::arch::current::cpu::user_access_begin();
         for (i, item) in src.iter().enumerate().take(count)
@@ -94,6 +97,7 @@ unsafe fn write_ipc_buf(buf: u64, count: usize, src: &[u64; MSG_DATA_WORDS_MAX])
             // SAFETY: buf is page-aligned and user-mapped; count <= MSG_DATA_WORDS_MAX.
             core::ptr::write_volatile(ptr.add(i), *item);
         }
+        // SAFETY: paired with user_access_begin above; clears AC flag.
         crate::arch::current::cpu::user_access_end();
     }
 }
@@ -183,6 +187,7 @@ unsafe fn transfer_caps(
     if cap_count == 0
     {
         // Write zero cap_count to the IPC buffer so receivers see no caps.
+        // SAFETY: dst_ipc_buf validated by caller as user-mapped buffer.
         unsafe {
             write_cap_results(dst_ipc_buf, 0, &[0u32; MSG_CAP_SLOTS_MAX]);
         }
@@ -191,6 +196,7 @@ unsafe fn transfer_caps(
 
     // Pre-validate: all source slots must be non-null.
     {
+        // SAFETY: src_cspace validated by caller.
         let cs = unsafe { &*src_cspace };
         for &idx in &src_slots[..cap_count]
         {
@@ -203,6 +209,7 @@ unsafe fn transfer_caps(
     }
 
     // Pre-allocate destination slots to avoid OOM mid-transfer.
+    // SAFETY: dst_cspace validated by caller.
     unsafe { (*dst_cspace).pre_allocate(cap_count) }.map_err(|_| SyscallError::OutOfMemory)?;
 
     // Acquire derivation lock for the batch move.
@@ -228,6 +235,7 @@ unsafe fn transfer_caps(
     crate::cap::DERIVATION_LOCK.write_unlock();
 
     // Write results to receiver's IPC buffer.
+    // SAFETY: dst_ipc_buf validated by caller as user-mapped buffer.
     unsafe {
         write_cap_results(dst_ipc_buf, cap_count, &dst_indices);
     }
@@ -284,6 +292,7 @@ pub fn sys_ipc_call(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         Rights::SEND
     };
 
+    // SAFETY: cspace_ptr validated above.
     let slot = unsafe { lookup_cap(cspace_ptr, ep_idx, CapTag::Endpoint, required_rights) }?;
 
     // Extract EndpointState pointer from the slot's object.
@@ -301,7 +310,9 @@ pub fn sys_ipc_call(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     msg.data_count = data_count;
     if data_count > 0
     {
+        // SAFETY: tcb validated above; ipc_buffer is user-mapped or 0.
         let buf = unsafe { (*tcb).ipc_buffer };
+        // SAFETY: buf validated by read_ipc_buf.
         unsafe { read_ipc_buf(buf, data_count, &mut msg.data) }?;
     }
 
@@ -312,6 +323,7 @@ pub fn sys_ipc_call(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         let indices = unpack_cap_slots(cap_packed, cap_count);
         // Pre-validate source slots before blocking (all-or-nothing).
         {
+            // SAFETY: cspace_ptr validated above.
             let cs = unsafe { &*cspace_ptr };
             for &idx in indices.iter().take(cap_count)
             {
@@ -332,7 +344,7 @@ pub fn sys_ipc_call(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     if let Ok(woken_server) = result
     {
         // A server was waiting; enqueue it and yield so it can run.
-        // SAFETY: woken_server is a valid TCB.
+        // SAFETY: woken_server returned by endpoint_call; is valid TCB.
         unsafe {
             let prio = (*woken_server).priority;
             crate::sched::scheduler_for(0).enqueue(woken_server, prio);
@@ -341,21 +353,25 @@ pub fn sys_ipc_call(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     // else: No server; caller is blocked on send queue. Yield to another thread.
 
     // Yield CPU — the current thread is now Blocked.
-    // SAFETY: called from syscall handler.
+    // SAFETY: scheduler initialized; called from syscall context.
     unsafe {
         crate::sched::schedule();
     }
 
     // On resume (after reply): write reply data to caller's IPC buffer.
     // Reply-direction caps were already written to our IPC buffer by sys_ipc_reply.
-    // SAFETY: tcb is still valid after resume.
+    // SAFETY: tcb still valid after resume; ipc_msg populated by replier.
     let reply_label = unsafe { (*tcb).ipc_msg.label };
+    // SAFETY: tcb still valid; ipc_msg.data_count set by replier.
     let reply_count = unsafe { (*tcb).ipc_msg.data_count };
+    // SAFETY: tcb still valid; ipc_buffer is immutable after thread creation.
     let reply_buf = unsafe { (*tcb).ipc_buffer };
 
     if reply_count > 0
     {
+        // SAFETY: tcb validated; data field populated by replier.
         let data = unsafe { (*tcb).ipc_msg.data };
+        // SAFETY: reply_buf is user-mapped or 0.
         unsafe {
             write_ipc_buf(reply_buf, reply_count, &data);
         }
@@ -380,14 +396,18 @@ pub fn sys_ipc_recv(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     #[allow(clippy::cast_possible_truncation)]
     let ep_idx = tf.arg(0) as u32;
 
+    // SAFETY: syscall entry ensures current_tcb() returns active thread's TCB.
     let tcb = unsafe { current_tcb() };
     if tcb.is_null()
     {
         return Err(SyscallError::InvalidCapability);
     }
+    // SAFETY: tcb validated non-null above.
     let cspace_ptr = unsafe { (*tcb).cspace };
+    // SAFETY: cspace_ptr validated above.
     let slot = unsafe { lookup_cap(cspace_ptr, ep_idx, CapTag::Endpoint, Rights::RECEIVE) }?;
 
+    // SAFETY: slot validated; object pointer is valid Endpoint.
     let ep_state = unsafe {
         let obj_ptr = slot.object.ok_or(SyscallError::InvalidCapability)?.as_ptr();
         // cast_ptr_alignment: kernel allocator guarantees object alignment; header is at the start of the allocation.
@@ -396,12 +416,13 @@ pub fn sys_ipc_recv(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         (*ep_obj).state
     };
 
-    // SAFETY: ep_state valid; scheduler lock not held.
+    // SAFETY: ep_state extracted from validated Endpoint object; scheduler lock not held.
     let result = unsafe { crate::ipc::endpoint::endpoint_recv(ep_state, tcb) };
 
     if let Ok((caller, msg)) = result
     {
         // A caller was waiting; deliver message immediately.
+        // SAFETY: tcb validated above.
         let server_buf = unsafe { (*tcb).ipc_buffer };
 
         // Transfer caps from caller to server (if any).
@@ -409,8 +430,11 @@ pub fn sys_ipc_recv(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         // on reply (TODO: for robustness, re-enqueue caller on send queue).
         if msg.cap_count > 0
         {
+            // SAFETY: caller returned by endpoint_recv; is valid TCB.
             let caller_cspace = unsafe { (*caller).cspace };
+            // SAFETY: tcb validated above.
             let server_cspace = unsafe { (*tcb).cspace };
+            // SAFETY: CSpace pointers extracted from valid TCBs; server_buf is user-mapped or 0.
             unsafe {
                 transfer_caps(
                     caller_cspace,
@@ -423,6 +447,7 @@ pub fn sys_ipc_recv(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 
         if msg.data_count > 0
         {
+            // SAFETY: server_buf is user-mapped or 0.
             unsafe {
                 write_ipc_buf(server_buf, msg.data_count, &msg.data);
             }
@@ -432,24 +457,29 @@ pub fn sys_ipc_recv(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     }
     // else: No caller; server is now Blocked on recv queue. Yield.
 
-    // SAFETY: called from syscall handler.
+    // SAFETY: scheduler initialized; called from syscall context.
     unsafe {
         crate::sched::schedule();
     }
 
     // On resume (caller arrived), deliver message from ipc_msg.
-    // SAFETY: tcb valid; reply_tcb points to the caller that woke us.
+    // SAFETY: tcb validated above; ipc_msg populated by endpoint_recv on wakeup.
     let msg = unsafe { (*tcb).ipc_msg };
+    // SAFETY: tcb validated above; ipc_buffer is immutable.
     let server_buf = unsafe { (*tcb).ipc_buffer };
 
     if msg.cap_count > 0
     {
+        // SAFETY: tcb validated; reply_tcb set by endpoint_recv to caller's TCB.
         let caller = unsafe { (*tcb).reply_tcb };
+        // SAFETY: caller is valid TCB from reply_tcb.
         let caller_cspace = unsafe { (*caller).cspace };
+        // SAFETY: tcb validated above.
         let server_cspace = unsafe { (*tcb).cspace };
         // On failure: deliver message data without caps (cap_count=0 in buf).
         // The caller stays blocked awaiting a reply; the server receives an
         // incomplete message but is not crashed.
+        // SAFETY: CSpace pointers extracted from valid TCBs; server_buf is user-mapped or 0.
         let _ = unsafe {
             transfer_caps(
                 caller_cspace,
@@ -462,6 +492,7 @@ pub fn sys_ipc_recv(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 
     if msg.data_count > 0
     {
+        // SAFETY: server_buf is user-mapped or 0.
         unsafe {
             write_ipc_buf(server_buf, msg.data_count, &msg.data);
         }
@@ -490,6 +521,7 @@ pub fn sys_ipc_reply(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     let cap_count = (tf.arg(2) as usize).min(MSG_CAP_SLOTS_MAX);
     let cap_packed = tf.arg(3);
 
+    // SAFETY: syscall entry ensures current_tcb() returns active thread's TCB.
     let tcb = unsafe { current_tcb() };
     if tcb.is_null()
     {
@@ -500,16 +532,20 @@ pub fn sys_ipc_reply(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     msg.data_count = data_count;
     if data_count > 0
     {
+        // SAFETY: tcb validated above; ipc_buffer is user-mapped or 0.
         let buf = unsafe { (*tcb).ipc_buffer };
+        // SAFETY: buf validated by read_ipc_buf.
         unsafe { read_ipc_buf(buf, data_count, &mut msg.data) }?;
     }
 
     // Populate cap_slots (indices in server's CSpace). Pre-validate before reply.
     if cap_count > 0
     {
+        // SAFETY: tcb validated above.
         let server_cspace = unsafe { (*tcb).cspace };
         let indices = unpack_cap_slots(cap_packed, cap_count);
         {
+            // SAFETY: server_cspace extracted from validated TCB.
             let cs = unsafe { &*server_cspace };
             for &idx in indices.iter().take(cap_count)
             {
@@ -524,20 +560,24 @@ pub fn sys_ipc_reply(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         msg.cap_count = cap_count;
     }
 
-    // SAFETY: ep_state valid; scheduler lock not held.
+    // SAFETY: tcb validated above; endpoint_reply operates on reply_tcb field.
     let result = unsafe { crate::ipc::endpoint::endpoint_reply(tcb, &msg) };
 
     match result
     {
         Some(caller) =>
         {
+            // SAFETY: caller returned by endpoint_reply; is valid TCB.
             let caller_buf = unsafe { (*caller).ipc_buffer };
 
             // Transfer caps from server to caller (if any).
             if cap_count > 0
             {
+                // SAFETY: tcb validated above.
                 let server_cspace = unsafe { (*tcb).cspace };
+                // SAFETY: caller returned by endpoint_reply; is valid TCB.
                 let caller_cspace = unsafe { (*caller).cspace };
+                // SAFETY: CSpace pointers extracted from valid TCBs; caller_buf is user-mapped or 0.
                 unsafe {
                     transfer_caps(
                         server_cspace,
@@ -552,6 +592,7 @@ pub fn sys_ipc_reply(tf: &mut TrapFrame) -> Result<u64, SyscallError>
             else
             {
                 // Write zero cap_count so caller can read consistently.
+                // SAFETY: caller_buf is user-mapped or 0.
                 unsafe {
                     write_cap_results(caller_buf, 0, &[0u32; MSG_CAP_SLOTS_MAX]);
                 }
@@ -560,13 +601,14 @@ pub fn sys_ipc_reply(tf: &mut TrapFrame) -> Result<u64, SyscallError>
             // Write reply data to caller's IPC buffer.
             if data_count > 0
             {
+                // SAFETY: caller_buf is user-mapped or 0.
                 unsafe {
                     write_ipc_buf(caller_buf, data_count, &msg.data);
                 }
             }
 
             // Re-enqueue caller (it is now Ready).
-            // SAFETY: caller is a valid TCB.
+            // SAFETY: caller returned by endpoint_reply; is valid TCB.
             unsafe {
                 let prio = (*caller).priority;
                 crate::sched::scheduler_for(0).enqueue(caller, prio);
@@ -593,14 +635,18 @@ pub fn sys_signal_send(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         return Err(SyscallError::InvalidArgument);
     }
 
+    // SAFETY: syscall entry ensures current_tcb() returns active thread's TCB.
     let tcb = unsafe { current_tcb() };
     if tcb.is_null()
     {
         return Err(SyscallError::InvalidCapability);
     }
+    // SAFETY: tcb validated non-null above.
     let cspace_ptr = unsafe { (*tcb).cspace };
+    // SAFETY: cspace_ptr validated above.
     let slot = unsafe { lookup_cap(cspace_ptr, sig_idx, CapTag::Signal, Rights::SIGNAL) }?;
 
+    // SAFETY: slot validated; object pointer is valid Signal.
     let sig_state = unsafe {
         let obj_ptr = slot.object.ok_or(SyscallError::InvalidCapability)?.as_ptr();
         // cast_ptr_alignment: kernel allocator guarantees object alignment; header is at the start of the allocation.
@@ -609,12 +655,12 @@ pub fn sys_signal_send(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         (*sig_obj).state
     };
 
-    // SAFETY: sig_state valid; scheduler lock not held.
+    // SAFETY: sig_state extracted from validated Signal object.
     let woken = unsafe { crate::ipc::signal::signal_send(sig_state, bits) };
 
     if let Some(waiter) = woken
     {
-        // SAFETY: waiter is a valid TCB.
+        // SAFETY: waiter returned by signal_send; is valid TCB.
         unsafe {
             let prio = (*waiter).priority;
             crate::sched::scheduler_for(0).enqueue(waiter, prio);
@@ -636,14 +682,18 @@ pub fn sys_signal_wait(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     #[allow(clippy::cast_possible_truncation)]
     let sig_idx = tf.arg(0) as u32;
 
+    // SAFETY: syscall entry ensures current_tcb() returns active thread's TCB.
     let tcb = unsafe { current_tcb() };
     if tcb.is_null()
     {
         return Err(SyscallError::InvalidCapability);
     }
+    // SAFETY: tcb validated non-null above.
     let cspace_ptr = unsafe { (*tcb).cspace };
+    // SAFETY: cspace_ptr validated above.
     let slot = unsafe { lookup_cap(cspace_ptr, sig_idx, CapTag::Signal, Rights::WAIT) }?;
 
+    // SAFETY: slot validated; object pointer is valid Signal.
     let sig_state = unsafe {
         let obj_ptr = slot.object.ok_or(SyscallError::InvalidCapability)?.as_ptr();
         // cast_ptr_alignment: kernel allocator guarantees object alignment; header is at the start of the allocation.
@@ -652,7 +702,7 @@ pub fn sys_signal_wait(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         (*sig_obj).state
     };
 
-    // SAFETY: sig_state valid; scheduler lock not held.
+    // SAFETY: sig_state extracted from validated Signal object.
     let result = unsafe { crate::ipc::signal::signal_wait(sig_state, tcb) };
 
     if let Ok(bits) = result
@@ -662,13 +712,15 @@ pub fn sys_signal_wait(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     }
 
     // No bits; thread is Blocked. Yield CPU.
-    // SAFETY: called from syscall handler.
+    // SAFETY: scheduler initialized; called from syscall context.
     unsafe {
         crate::sched::schedule();
     }
 
     // On resume, `signal_send` stored the delivered bits in wakeup_value.
+    // SAFETY: tcb still valid after resume; wakeup_value set by signal_send.
     let bits = unsafe { (*tcb).wakeup_value };
+    // SAFETY: tcb validated above.
     unsafe {
         (*tcb).wakeup_value = 0;
     }
@@ -693,14 +745,18 @@ pub fn sys_event_post(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     let eq_idx = tf.arg(0) as u32;
     let payload = tf.arg(1);
 
+    // SAFETY: syscall entry ensures current_tcb() returns active thread's TCB.
     let tcb = unsafe { current_tcb() };
     if tcb.is_null()
     {
         return Err(SyscallError::InvalidCapability);
     }
+    // SAFETY: tcb validated non-null above.
     let cspace_ptr = unsafe { (*tcb).cspace };
+    // SAFETY: cspace_ptr validated above.
     let slot = unsafe { lookup_cap(cspace_ptr, eq_idx, CapTag::EventQueue, Rights::POST) }?;
 
+    // SAFETY: slot validated; object pointer is valid EventQueue.
     let eq_state = unsafe {
         let obj_ptr = slot.object.ok_or(SyscallError::InvalidCapability)?.as_ptr();
         // cast_ptr_alignment: kernel allocator guarantees object alignment; header is at the start of the allocation.
@@ -709,7 +765,7 @@ pub fn sys_event_post(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         (*eq_obj).state
     };
 
-    // SAFETY: eq_state valid; scheduler lock not held.
+    // SAFETY: eq_state extracted from validated EventQueue object.
     let result = unsafe { crate::ipc::event_queue::event_queue_post(eq_state, payload) };
 
     match result
@@ -717,7 +773,7 @@ pub fn sys_event_post(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         Ok(Some(woken)) =>
         {
             // A waiter was woken; enqueue it.
-            // SAFETY: woken is a valid TCB.
+            // SAFETY: woken returned by event_queue_post; is valid TCB.
             unsafe {
                 let prio = (*woken).priority;
                 crate::sched::scheduler_for(0).enqueue(woken, prio);
@@ -742,14 +798,18 @@ pub fn sys_event_recv(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     #[allow(clippy::cast_possible_truncation)]
     let eq_idx = tf.arg(0) as u32;
 
+    // SAFETY: syscall entry ensures current_tcb() returns active thread's TCB.
     let tcb = unsafe { current_tcb() };
     if tcb.is_null()
     {
         return Err(SyscallError::InvalidCapability);
     }
+    // SAFETY: tcb validated non-null above.
     let cspace_ptr = unsafe { (*tcb).cspace };
+    // SAFETY: cspace_ptr validated above.
     let slot = unsafe { lookup_cap(cspace_ptr, eq_idx, CapTag::EventQueue, Rights::RECV) }?;
 
+    // SAFETY: slot validated; object pointer is valid EventQueue.
     let eq_state = unsafe {
         let obj_ptr = slot.object.ok_or(SyscallError::InvalidCapability)?.as_ptr();
         // cast_ptr_alignment: kernel allocator guarantees object alignment; header is at the start of the allocation.
@@ -758,7 +818,7 @@ pub fn sys_event_recv(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         (*eq_obj).state
     };
 
-    // SAFETY: eq_state valid; scheduler lock not held.
+    // SAFETY: eq_state extracted from validated EventQueue object.
     let result = unsafe { crate::ipc::event_queue::event_queue_recv(eq_state, tcb) };
 
     if let Ok(payload) = result
@@ -769,13 +829,15 @@ pub fn sys_event_recv(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     }
     // else: Queue empty; thread is Blocked. Yield CPU.
 
-    // SAFETY: called from syscall handler.
+    // SAFETY: scheduler initialized; called from syscall context.
     unsafe {
         crate::sched::schedule();
     }
 
     // On resume, event_queue_post stored the payload in wakeup_value.
+    // SAFETY: tcb still valid after resume; wakeup_value set by event_queue_post.
     let payload = unsafe { (*tcb).wakeup_value };
+    // SAFETY: tcb validated above.
     unsafe {
         (*tcb).wakeup_value = 0;
     }
@@ -812,15 +874,19 @@ pub fn sys_wait_set_add(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     let src_idx = tf.arg(1) as u32;
     let token = tf.arg(2);
 
+    // SAFETY: syscall entry ensures current_tcb() returns active thread's TCB.
     let tcb = unsafe { current_tcb() };
     if tcb.is_null()
     {
         return Err(SyscallError::InvalidCapability);
     }
+    // SAFETY: tcb validated non-null above.
     let cspace_ptr = unsafe { (*tcb).cspace };
 
     // Look up wait set cap.
+    // SAFETY: cspace_ptr validated above.
     let ws_slot = unsafe { lookup_cap(cspace_ptr, ws_idx, CapTag::WaitSet, Rights::MODIFY) }?;
+    // SAFETY: ws_slot validated; object pointer is valid WaitSet.
     let ws_state = unsafe {
         let obj_ptr = ws_slot
             .object
@@ -835,6 +901,7 @@ pub fn sys_wait_set_add(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     // Look up source cap — accept Endpoint, Signal, or EventQueue.
     // We must accept any of the three tags, so we read the slot directly
     // instead of calling lookup_cap (which checks a single expected tag).
+    // SAFETY: cspace_ptr validated above.
     let (source_ptr, source_tag) = unsafe {
         let cs = &*cspace_ptr;
         let src_slot = cs.slot(src_idx).ok_or(SyscallError::InvalidCapability)?;
@@ -895,6 +962,7 @@ pub fn sys_wait_set_add(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     // Check the source is not already in a wait set (single wait set invariant).
     // The `wait_set` field is at the same offset for all three source types.
     // We check it by reading the field directly based on the tag.
+    // SAFETY: source_ptr extracted from validated cap; tag determines object layout.
     let already_registered = unsafe {
         match source_tag
         {
@@ -933,6 +1001,7 @@ pub fn sys_wait_set_add(tf: &mut TrapFrame) -> Result<u64, SyscallError>
             .map_err(|()| SyscallError::InvalidArgument)?;
 
     // Write back-pointer on the source.
+    // SAFETY: source_ptr extracted from validated cap; member_idx from waitset_add.
     unsafe {
         match source_tag
         {
@@ -985,15 +1054,19 @@ pub fn sys_wait_set_remove(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     #[allow(clippy::cast_possible_truncation)]
     let src_idx = tf.arg(1) as u32;
 
+    // SAFETY: syscall entry ensures current_tcb() returns active thread's TCB.
     let tcb = unsafe { current_tcb() };
     if tcb.is_null()
     {
         return Err(SyscallError::InvalidCapability);
     }
+    // SAFETY: tcb validated non-null above.
     let cspace_ptr = unsafe { (*tcb).cspace };
 
     // Look up wait set.
+    // SAFETY: cspace_ptr validated above.
     let ws_slot = unsafe { lookup_cap(cspace_ptr, ws_idx, CapTag::WaitSet, Rights::MODIFY) }?;
+    // SAFETY: ws_slot validated; object pointer is valid WaitSet.
     let ws_state = unsafe {
         let obj_ptr = ws_slot
             .object
@@ -1006,6 +1079,7 @@ pub fn sys_wait_set_remove(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     };
 
     // Look up source to get its raw state pointer.
+    // SAFETY: cspace_ptr validated above.
     let (source_ptr, source_tag) = unsafe {
         let cs = &*cspace_ptr;
         let src_slot = cs.slot(src_idx).ok_or(SyscallError::InvalidCapability)?;
@@ -1049,11 +1123,12 @@ pub fn sys_wait_set_remove(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     };
 
     // Remove from wait set.
-    // SAFETY: ws_state, source_ptr valid.
+    // SAFETY: ws_state, source_ptr validated above.
     unsafe { crate::ipc::wait_set::waitset_remove(ws_state, source_ptr) }
         .map_err(|()| SyscallError::InvalidCapability)?;
 
     // Clear source back-pointer.
+    // SAFETY: source_ptr extracted from validated cap.
     unsafe {
         match source_tag
         {
@@ -1103,14 +1178,18 @@ pub fn sys_wait_set_wait(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     #[allow(clippy::cast_possible_truncation)]
     let ws_idx = tf.arg(0) as u32;
 
+    // SAFETY: syscall entry ensures current_tcb() returns active thread's TCB.
     let tcb = unsafe { current_tcb() };
     if tcb.is_null()
     {
         return Err(SyscallError::InvalidCapability);
     }
+    // SAFETY: tcb validated non-null above.
     let cspace_ptr = unsafe { (*tcb).cspace };
+    // SAFETY: cspace_ptr validated above.
     let ws_slot = unsafe { lookup_cap(cspace_ptr, ws_idx, CapTag::WaitSet, Rights::WAIT) }?;
 
+    // SAFETY: ws_slot validated; object pointer is valid WaitSet.
     let ws_state = unsafe {
         let obj_ptr = ws_slot
             .object
@@ -1133,13 +1212,15 @@ pub fn sys_wait_set_wait(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     }
     // else: No source ready; thread is Blocked. Yield CPU.
 
-    // SAFETY: called from syscall handler.
+    // SAFETY: scheduler initialized; called from syscall context.
     unsafe {
         crate::sched::schedule();
     }
 
     // On resume, waitset_notify stored the token in wakeup_value.
+    // SAFETY: tcb still valid after resume; wakeup_value set by waitset_notify.
     let token = unsafe { (*tcb).wakeup_value };
+    // SAFETY: tcb validated above; clearing wakeup_value for next wait.
     unsafe {
         (*tcb).wakeup_value = 0;
     }

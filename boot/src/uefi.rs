@@ -1014,6 +1014,7 @@ pub unsafe fn find_config_table(
     // SAFETY: st is valid; configuration_table points to a valid array of
     // number_of_table_entries entries.
     let count = unsafe { (*st).number_of_table_entries };
+    // SAFETY: st is valid.
     let table = unsafe { (*st).configuration_table };
     for i in 0..count
     {

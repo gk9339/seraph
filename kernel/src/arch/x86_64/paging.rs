@@ -162,7 +162,7 @@ pub fn pt_index(va: u64) -> usize
 /// pool frame. No other mutable reference to the same frame may exist.
 unsafe fn table_at(frame_va: u64) -> &'static mut [PageTableEntry; 512]
 {
-    // SAFETY: contract stated in doc comment.
+    // SAFETY: frame_va is a valid direct-map VA; page table frame allocated and aligned.
     unsafe { &mut *(frame_va as *mut [PageTableEntry; 512]) }
 }
 
@@ -183,16 +183,19 @@ pub fn map_page(
     pool: &mut PoolState,
 ) -> Result<(), PagingError>
 {
-    // SAFETY: root_va is a valid pool frame VA supplied by the orchestration layer.
+    // SAFETY: root_va is direct-map VA of valid user PML4; table entries validated before dereference.
     let pml4 = unsafe { table_at(root_va) };
     let pdpt_pa = walk_or_alloc(&mut pml4[pml4_index(virt)], pool)?;
 
+    // SAFETY: direct map active; phys + DIRECT_MAP_BASE yields valid kernel VA.
     let pdpt = unsafe { table_at(pool.phys_to_virt(pdpt_pa)) };
     let pd_pa = walk_or_alloc(&mut pdpt[pdpt_index(virt)], pool)?;
 
+    // SAFETY: direct map active; phys + DIRECT_MAP_BASE yields valid kernel VA.
     let pd = unsafe { table_at(pool.phys_to_virt(pd_pa)) };
     let pt_pa = walk_or_alloc(&mut pd[pd_index(virt)], pool)?;
 
+    // SAFETY: direct map active; phys + DIRECT_MAP_BASE yields valid kernel VA.
     let pt = unsafe { table_at(pool.phys_to_virt(pt_pa)) };
     pt[pt_index(virt)] = PageTableEntry::new_page(phys, flags);
     Ok(())
@@ -213,12 +216,15 @@ pub fn map_large_page(
     pool: &mut PoolState,
 ) -> Result<(), PagingError>
 {
+    // SAFETY: root_va is direct-map VA of valid user PML4; table entries validated before dereference.
     let pml4 = unsafe { table_at(root_va) };
     let pdpt_pa = walk_or_alloc(&mut pml4[pml4_index(virt)], pool)?;
 
+    // SAFETY: direct map active; phys + DIRECT_MAP_BASE yields valid kernel VA.
     let pdpt = unsafe { table_at(pool.phys_to_virt(pdpt_pa)) };
     let pd_pa = walk_or_alloc(&mut pdpt[pdpt_index(virt)], pool)?;
 
+    // SAFETY: direct map active; phys + DIRECT_MAP_BASE yields valid kernel VA.
     let pd = unsafe { table_at(pool.phys_to_virt(pd_pa)) };
     pd[pd_index(virt)] = PageTableEntry::new_large_page(phys, flags);
     Ok(())
@@ -235,8 +241,7 @@ fn walk_or_alloc(entry: &mut PageTableEntry, pool: &mut PoolState) -> Result<u64
     else
     {
         let (frame_va, frame_pa) = pool.alloc_frame()?;
-        // Zero the new table (BSS frames start zeroed; explicit for safety).
-        // SAFETY: frame_va is a freshly allocated, exclusively-owned pool frame.
+        // SAFETY: frame_va is a freshly allocated, exclusively-owned pool frame; write_bytes initializes valid memory.
         unsafe {
             core::ptr::write_bytes(frame_va as *mut u8, 0, 4096);
         }
@@ -263,7 +268,7 @@ fn walk_or_alloc(entry: &mut PageTableEntry, pool: &mut PoolState) -> Result<u64
 #[cfg(not(test))]
 pub unsafe fn activate(root_phys: u64)
 {
-    // SAFETY: caller guarantees completeness of the new tables (see doc comment).
+    // SAFETY: cr3 write changes active page table; root_phys is a valid PML4 frame.
     unsafe {
         core::arch::asm!(
             "mov cr3, {}",
@@ -289,7 +294,7 @@ pub unsafe fn enable_nx()
     /// No-Execute Enable bit.
     const NXE: u64 = 1 << 11;
 
-    // SAFETY: ring-0 MSR read/write; caller guarantees privilege level.
+    // SAFETY: rdmsr/wrmsr execute at ring 0; IA32_EFER read/write is architecture-defined MSR operation.
     unsafe {
         let lo: u32;
         let hi: u32;
@@ -318,7 +323,7 @@ pub unsafe fn enable_nx()
 pub fn read_stack_pointer() -> u64
 {
     let sp: u64;
-    // SAFETY: RSP is always readable at ring 0.
+    // SAFETY: reading RSP is architecture primitive; safe at ring 0.
     unsafe {
         core::arch::asm!("mov {}, rsp", out(reg) sp, options(nostack, nomem));
     }
@@ -336,7 +341,7 @@ pub fn read_stack_pointer() -> u64
 pub unsafe fn read_root_phys() -> u64
 {
     let cr3: u64;
-    // SAFETY: reading CR3 is safe at ring 0.
+    // SAFETY: reading cr3 is architecture primitive; safe at ring 0.
     unsafe {
         core::arch::asm!("mov {}, cr3", out(reg) cr3, options(nostack, nomem));
     }
@@ -371,16 +376,19 @@ pub unsafe fn map_user_page(
     // Set USER bit (bit 2) so ring-3 code can access the page.
     const USER: u64 = 1 << 2;
 
-    // SAFETY: root_virt is a valid 4 KiB page table frame.
+    // SAFETY: root_virt is direct-map VA of valid user PML4; table entries validated before dereference.
     let pml4 = unsafe { table_at(root_virt) };
 
     let pdpt_pa = user_walk_or_alloc(&mut pml4[pml4_index(virt)], allocator)?;
+    // SAFETY: direct map active; phys + DIRECT_MAP_BASE yields valid kernel VA.
     let pdpt = unsafe { table_at(phys_to_virt(pdpt_pa)) };
 
     let pd_pa = user_walk_or_alloc(&mut pdpt[pdpt_index(virt)], allocator)?;
+    // SAFETY: direct map active; phys + DIRECT_MAP_BASE yields valid kernel VA.
     let pd = unsafe { table_at(phys_to_virt(pd_pa)) };
 
     let pt_pa = user_walk_or_alloc(&mut pd[pd_index(virt)], allocator)?;
+    // SAFETY: direct map active; phys + DIRECT_MAP_BASE yields valid kernel VA.
     let pt = unsafe { table_at(phys_to_virt(pt_pa)) };
 
     let mut pte = PageTableEntry::new_page(phys, flags);
@@ -414,8 +422,7 @@ fn user_walk_or_alloc(
     let frame_pa = allocator.alloc(0).ok_or(())?;
     let frame_va = phys_to_virt(frame_pa);
 
-    // Zero the new table.
-    // SAFETY: frame_va is an exclusively-owned direct-map kernel address.
+    // SAFETY: frame_va is exclusively-owned direct-map kernel address; write_bytes initializes valid memory.
     unsafe {
         core::ptr::write_bytes(frame_va as *mut u8, 0, PAGE_SIZE);
     }
@@ -438,7 +445,7 @@ fn user_walk_or_alloc(
 #[cfg(not(test))]
 pub unsafe fn flush_page(virt: u64)
 {
-    // SAFETY: invlpg is safe at ring 0 for any virtual address.
+    // SAFETY: invlpg flushes TLB entry for specified VA; architecture primitive.
     unsafe {
         core::arch::asm!(
             "invlpg [{}]",
@@ -468,6 +475,7 @@ pub unsafe fn unmap_user_page(root_virt: u64, virt: u64)
     use crate::mm::paging::phys_to_virt;
 
     // Walk PML4 → PDPT → PD → PT, bailing silently at any absent level.
+    // SAFETY: root_virt is direct-map VA of valid user PML4; table entries validated before dereference.
     let pml4 = unsafe { table_at(root_virt) };
     let e = pml4[pml4_index(virt)];
     if !e.is_present()
@@ -475,6 +483,7 @@ pub unsafe fn unmap_user_page(root_virt: u64, virt: u64)
         return;
     }
 
+    // SAFETY: direct map active; phys + DIRECT_MAP_BASE yields valid kernel VA.
     let pdpt = unsafe { table_at(phys_to_virt(e.phys_addr())) };
     let e = pdpt[pdpt_index(virt)];
     if !e.is_present()
@@ -482,6 +491,7 @@ pub unsafe fn unmap_user_page(root_virt: u64, virt: u64)
         return;
     }
 
+    // SAFETY: direct map active; phys + DIRECT_MAP_BASE yields valid kernel VA.
     let pd = unsafe { table_at(phys_to_virt(e.phys_addr())) };
     let e = pd[pd_index(virt)];
     if !e.is_present()
@@ -489,9 +499,11 @@ pub unsafe fn unmap_user_page(root_virt: u64, virt: u64)
         return;
     }
 
+    // SAFETY: direct map active; phys + DIRECT_MAP_BASE yields valid kernel VA.
     let pt = unsafe { table_at(phys_to_virt(e.phys_addr())) };
     pt[pt_index(virt)] = PageTableEntry(0);
 
+    // SAFETY: invlpg flushes TLB entry for specified VA; architecture primitive.
     unsafe { flush_page(virt) };
 }
 
@@ -517,6 +529,7 @@ pub unsafe fn protect_user_page(
     // Set USER bit (bit 2) to preserve user accessibility.
     const USER: u64 = 1 << 2;
 
+    // SAFETY: root_virt is direct-map VA of valid user PML4; table entries validated before dereference.
     let pml4 = unsafe { table_at(root_virt) };
     let e = pml4[pml4_index(virt)];
     if !e.is_present()
@@ -524,6 +537,7 @@ pub unsafe fn protect_user_page(
         return Err(PagingError::NotMapped);
     }
 
+    // SAFETY: direct map active; phys + DIRECT_MAP_BASE yields valid kernel VA.
     let pdpt = unsafe { table_at(phys_to_virt(e.phys_addr())) };
     let e = pdpt[pdpt_index(virt)];
     if !e.is_present()
@@ -531,6 +545,7 @@ pub unsafe fn protect_user_page(
         return Err(PagingError::NotMapped);
     }
 
+    // SAFETY: direct map active; phys + DIRECT_MAP_BASE yields valid kernel VA.
     let pd = unsafe { table_at(phys_to_virt(e.phys_addr())) };
     let e = pd[pd_index(virt)];
     if !e.is_present()
@@ -538,6 +553,7 @@ pub unsafe fn protect_user_page(
         return Err(PagingError::NotMapped);
     }
 
+    // SAFETY: direct map active; phys + DIRECT_MAP_BASE yields valid kernel VA.
     let pt = unsafe { table_at(phys_to_virt(e.phys_addr())) };
     let leaf = &mut pt[pt_index(virt)];
     if !leaf.is_present()
@@ -550,6 +566,7 @@ pub unsafe fn protect_user_page(
     new_pte.0 |= USER;
     *leaf = new_pte;
 
+    // SAFETY: invlpg flushes TLB entry for specified VA; architecture primitive.
     unsafe { flush_page(virt) };
     Ok(())
 }
@@ -568,6 +585,7 @@ pub unsafe fn translate_user_page(root_virt: u64, virt: u64) -> Option<(u64, u64
 {
     use crate::mm::paging::phys_to_virt;
 
+    // SAFETY: root_virt is direct-map VA of valid user PML4; table entries validated before dereference.
     let pml4 = unsafe { table_at(root_virt) };
     let e = pml4[pml4_index(virt)];
     if !e.is_present()
@@ -575,6 +593,7 @@ pub unsafe fn translate_user_page(root_virt: u64, virt: u64) -> Option<(u64, u64
         return None;
     }
 
+    // SAFETY: direct map active; phys + DIRECT_MAP_BASE yields valid kernel VA.
     let pdpt = unsafe { table_at(phys_to_virt(e.phys_addr())) };
     let e = pdpt[pdpt_index(virt)];
     if !e.is_present()
@@ -582,6 +601,7 @@ pub unsafe fn translate_user_page(root_virt: u64, virt: u64) -> Option<(u64, u64
         return None;
     }
 
+    // SAFETY: direct map active; phys + DIRECT_MAP_BASE yields valid kernel VA.
     let pd = unsafe { table_at(phys_to_virt(e.phys_addr())) };
     let e = pd[pd_index(virt)];
     if !e.is_present()
@@ -589,6 +609,7 @@ pub unsafe fn translate_user_page(root_virt: u64, virt: u64) -> Option<(u64, u64
         return None;
     }
 
+    // SAFETY: direct map active; phys + DIRECT_MAP_BASE yields valid kernel VA.
     let pt = unsafe { table_at(phys_to_virt(e.phys_addr())) };
     let leaf = pt[pt_index(virt)];
     if !leaf.is_present()

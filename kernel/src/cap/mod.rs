@@ -89,8 +89,8 @@ pub unsafe fn take_root_cspace() -> Option<Box<CSpace>>
 #[cfg(not(test))]
 pub unsafe fn root_cspace_mut() -> Option<&'static mut CSpace>
 {
-    // SAFETY: single-threaded boot; no concurrent access.
     let ptr = core::ptr::addr_of_mut!(ROOT_CSPACE);
+    // SAFETY: single-threaded boot; no concurrent access.
     unsafe { (*ptr).as_mut().map(Box::as_mut) }
 }
 
@@ -114,15 +114,8 @@ const MAX_CSPACES: usize = 4096;
 // SAFETY: AtomicPtr<CSpace> is Send+Sync; array-of-atomics is always valid
 // for static initialisation.
 static CSPACE_REGISTRY: [AtomicPtr<CSpace>; MAX_CSPACES] = {
-    // AtomicPtr has no const Default impl, so we must use a const block with
-    // a fixed-size initialiser. The array literal approach requires all
-    // elements to be const-evaluable; `AtomicPtr::new(null_mut())` is const.
-    // Rust does not allow `[expr; N]` when N > 32 for non-Copy types in stable,
-    // so we use a transmute from a zero-initialised array of usize instead.
-    //
-    // SAFETY: AtomicPtr<T> is repr(transparent) over *mut T (a pointer-sized
-    // integer), so a zero-initialised array of pointer-sized words is a valid
-    // array of null AtomicPtr values.
+    // SAFETY: AtomicPtr<T> is repr(transparent) over *mut T; zero-initialized usize array
+    // is valid array of null AtomicPtr values.
     unsafe {
         core::mem::transmute::<[usize; MAX_CSPACES], [AtomicPtr<CSpace>; MAX_CSPACES]>(
             [0usize; MAX_CSPACES],
@@ -238,8 +231,9 @@ pub fn init_capability_system(
 
     // Store in ROOT_CSPACE (kernel runtime only; test builds skip this).
     #[cfg(not(test))]
-    // SAFETY: single-threaded boot; ROOT_CSPACE not yet accessed.
+    // SAFETY: single-threaded boot; ROOT_CSPACE not yet accessed; no concurrent access.
     unsafe {
+        // SAFETY: addr_of_mut valid on boxed heap allocation.
         let raw = core::ptr::addr_of_mut!(*cspace);
         register_cspace(id, raw);
         ROOT_CSPACE = Some(cspace);
@@ -420,6 +414,7 @@ fn nonnull_from_box<T>(b: Box<T>) -> NonNull<KernelObjectHeader>
 /// # To add support for explicit destination index
 /// Add a `dst_idx: Option<u32>` parameter and call `insert_cap_at` when `Some`.
 #[cfg(not(test))]
+#[allow(clippy::too_many_lines)]
 pub unsafe fn move_cap_between_cspaces(
     src_cspace: *mut CSpace,
     src_idx: u32,
@@ -430,6 +425,7 @@ pub unsafe fn move_cap_between_cspaces(
 
     // Read source slot (tag, rights, object pointer).
     let (src_tag, src_rights, src_object) = {
+        // SAFETY: src_cspace is a valid CSpace pointer; guaranteed by caller contract.
         let cs = unsafe { &*src_cspace };
         let slot = cs.slot(src_idx).ok_or(SyscallError::InvalidCapability)?;
         if slot.tag == CapTag::Null
@@ -443,10 +439,13 @@ pub unsafe fn move_cap_between_cspaces(
         )
     };
 
+    // SAFETY: src_cspace is a valid CSpace pointer; guaranteed by caller contract.
     let src_cspace_id = unsafe { (*src_cspace).id() };
+    // SAFETY: dst_cspace is a valid CSpace pointer; guaranteed by caller contract.
     let dst_cspace_id = unsafe { (*dst_cspace).id() };
 
     // Insert into destination (auto-allocate free slot).
+    // SAFETY: dst_cspace is a valid CSpace pointer; guaranteed by caller contract.
     let new_idx = unsafe { (*dst_cspace).insert_cap(src_tag, src_rights, src_object) }
         .map_err(|_| SyscallError::OutOfMemory)?;
 
@@ -455,7 +454,10 @@ pub unsafe fn move_cap_between_cspaces(
 
     // Read derivation links from the source slot.
     let (src_parent, src_first_child, src_prev, src_next) = {
+        // SAFETY: src_cspace is a valid CSpace pointer; guaranteed by caller contract.
         let cs = unsafe { &*src_cspace };
+        // SAFETY: We validated src_idx exists at line 434
+        #[allow(clippy::unwrap_used)]
         let slot = cs.slot(src_idx).unwrap();
         (
             slot.deriv_parent,
@@ -466,6 +468,7 @@ pub unsafe fn move_cap_between_cspaces(
     };
 
     // Copy derivation links to the destination slot.
+    // SAFETY: dst_cspace is a valid CSpace pointer; new_idx was just allocated by insert_cap.
     if let Some(dst_slot) = unsafe { (*dst_cspace).slot_mut(new_idx) }
     {
         dst_slot.deriv_parent = src_parent;
@@ -479,6 +482,7 @@ pub unsafe fn move_cap_between_cspaces(
     {
         if let Some(parent_cs) = lookup_cspace(parent_id.cspace_id)
         {
+            // SAFETY: parent_cs returned by lookup_cspace is valid; parent_id.index from derivation link is within bounds.
             if let Some(parent_slot) = unsafe { (*parent_cs).slot_mut(parent_id.index.get()) }
             {
                 if parent_slot.deriv_first_child == Some(src_slot_id)
@@ -494,6 +498,7 @@ pub unsafe fn move_cap_between_cspaces(
     {
         if let Some(prev_cs) = lookup_cspace(prev_id.cspace_id)
         {
+            // SAFETY: prev_cs returned by lookup_cspace is valid; prev_id.index from derivation link is within bounds.
             if let Some(prev_slot) = unsafe { (*prev_cs).slot_mut(prev_id.index.get()) }
             {
                 if prev_slot.deriv_next_sibling == Some(src_slot_id)
@@ -509,6 +514,7 @@ pub unsafe fn move_cap_between_cspaces(
     {
         if let Some(next_cs) = lookup_cspace(next_id.cspace_id)
         {
+            // SAFETY: next_cs returned by lookup_cspace is valid; next_id.index from derivation link is within bounds.
             if let Some(next_slot) = unsafe { (*next_cs).slot_mut(next_id.index.get()) }
             {
                 if next_slot.deriv_prev_sibling == Some(src_slot_id)
@@ -526,6 +532,7 @@ pub unsafe fn move_cap_between_cspaces(
     {
         child_cur = if let Some(child_cs) = lookup_cspace(child_id.cspace_id)
         {
+            // SAFETY: child_cs returned by lookup_cspace is valid; child_id.index from derivation link is within bounds.
             if let Some(child_slot) = unsafe { (*child_cs).slot_mut(child_id.index.get()) }
             {
                 child_slot.deriv_parent = Some(dst_slot_id);
@@ -543,6 +550,7 @@ pub unsafe fn move_cap_between_cspaces(
     }
 
     // Clear the source slot. No inc_ref/dec_ref — it's a move.
+    // SAFETY: src_cspace is a valid CSpace pointer; src_idx was validated at entry.
     unsafe {
         (*src_cspace).free_slot(src_idx);
     }

@@ -45,6 +45,8 @@ unsafe fn syscall2(nr: u64, a0: u64, a1: u64) -> i64
 {
     let ret: i64;
     let nr = nr as i64;
+    // SAFETY: inline asm issues syscall instruction per x86-64 ABI; syscall number in rax,
+    // args in rdi/rsi; clobbers rcx/r11 as documented; no memory side effects (nostack).
     unsafe {
         core::arch::asm!(
             "syscall",
@@ -69,6 +71,8 @@ unsafe fn syscall2(nr: u64, a0: u64, a1: u64) -> i64
 {
     let ret: i64;
     let a0 = a0 as i64;
+    // SAFETY: inline asm issues ecall instruction per RISC-V ABI; syscall number in a7,
+    // args in a0/a1; no caller-saved registers clobbered beyond return; no memory side effects.
     unsafe {
         core::arch::asm!(
             "ecall",
@@ -91,6 +95,8 @@ unsafe fn syscall4(nr: u64, a0: u64, a1: u64, a2: u64, a3: u64) -> i64
 {
     let ret: i64;
     let nr = nr as i64;
+    // SAFETY: inline asm issues syscall instruction per x86-64 ABI; syscall number in rax,
+    // args in rdi/rsi/rdx/r10; clobbers rcx/r11 as documented; no memory side effects (nostack).
     unsafe {
         core::arch::asm!(
             "syscall",
@@ -116,6 +122,8 @@ unsafe fn syscall4(nr: u64, a0: u64, a1: u64, a2: u64, a3: u64) -> i64
 {
     let ret: i64;
     let a0 = a0 as i64;
+    // SAFETY: inline asm issues ecall instruction per RISC-V ABI; syscall number in a7,
+    // args in a0-a3; no caller-saved registers clobbered beyond return; no memory side effects.
     unsafe {
         core::arch::asm!(
             "ecall",
@@ -140,6 +148,8 @@ unsafe fn syscall5(nr: u64, a0: u64, a1: u64, a2: u64, a3: u64, a4: u64) -> i64
 {
     let ret: i64;
     let nr = nr as i64;
+    // SAFETY: inline asm issues syscall instruction per x86-64 ABI; syscall number in rax,
+    // args in rdi/rsi/rdx/r10/r8; clobbers rcx/r11 as documented; no memory side effects (nostack).
     unsafe {
         core::arch::asm!(
             "syscall",
@@ -166,6 +176,8 @@ unsafe fn syscall5(nr: u64, a0: u64, a1: u64, a2: u64, a3: u64, a4: u64) -> i64
 {
     let ret: i64;
     let a0 = a0 as i64;
+    // SAFETY: inline asm issues ecall instruction per RISC-V ABI; syscall number in a7,
+    // args in a0-a4; no caller-saved registers clobbered beyond return; no memory side effects.
     unsafe {
         core::arch::asm!(
             "ecall",
@@ -191,6 +203,8 @@ unsafe fn syscall3(nr: u64, a0: u64, a1: u64, a2: u64) -> i64
 {
     let ret: i64;
     let nr = nr as i64;
+    // SAFETY: inline asm issues syscall instruction per x86-64 ABI; syscall number in rax,
+    // args in rdi/rsi/rdx; clobbers rcx/r11 as documented; no memory side effects (nostack).
     unsafe {
         core::arch::asm!(
             "syscall",
@@ -215,6 +229,8 @@ unsafe fn syscall3(nr: u64, a0: u64, a1: u64, a2: u64) -> i64
 {
     let ret: i64;
     let a0 = a0 as i64;
+    // SAFETY: inline asm issues ecall instruction per RISC-V ABI; syscall number in a7,
+    // args in a0-a2; no caller-saved registers clobbered beyond return; no memory side effects.
     unsafe {
         core::arch::asm!(
             "ecall",
@@ -239,6 +255,8 @@ unsafe fn syscall5_ret2(nr: u64, a0: u64, a1: u64, a2: u64, a3: u64, a4: u64) ->
     let ret: i64;
     let secondary: u64;
     let nr = nr as i64;
+    // SAFETY: inline asm issues syscall instruction per x86-64 ABI; syscall number in rax,
+    // args in rdi/rsi/rdx/r10/r8; clobbers rcx/r11; reads secondary return from rdx (lateout).
     unsafe {
         core::arch::asm!(
             "syscall",
@@ -267,6 +285,8 @@ unsafe fn syscall5_ret2(nr: u64, a0: u64, a1: u64, a2: u64, a3: u64, a4: u64) ->
     let ret: i64;
     let secondary: u64;
     let a0 = a0 as i64;
+    // SAFETY: inline asm issues ecall instruction per RISC-V ABI; syscall number in a7,
+    // args in a0-a4; reads secondary return from a1 (inout); no memory side effects.
     unsafe {
         core::arch::asm!(
             "ecall",
@@ -335,6 +355,8 @@ pub unsafe fn read_recv_caps(ipc_buf: *const u64) -> (usize, [u32; MSG_CAP_SLOTS
     // cast_possible_truncation: Seraph targets 64-bit only (x86_64, riscv64);
     // usize == u64 on all supported targets.
     #[allow(clippy::cast_possible_truncation)]
+    // SAFETY: caller guarantees ipc_buf points to registered IPC buffer (4 KiB aligned);
+    // offset MSG_DATA_WORDS_MAX is within buffer bounds; volatile read required for kernel-written data.
     let cap_count =
         (unsafe { core::ptr::read_volatile(ipc_buf.add(MSG_DATA_WORDS_MAX)) } as usize)
             .min(MSG_CAP_SLOTS_MAX);
@@ -343,6 +365,8 @@ pub unsafe fn read_recv_caps(ipc_buf: *const u64) -> (usize, [u32; MSG_CAP_SLOTS
     #[allow(clippy::cast_possible_truncation)]
     for (i, slot) in indices.iter_mut().take(cap_count).enumerate()
     {
+        // SAFETY: caller guarantees ipc_buf points to registered IPC buffer; offset is bounded
+        // by cap_count <= MSG_CAP_SLOTS_MAX; volatile read required for kernel-written cap indices.
         *slot =
             unsafe { core::ptr::read_volatile(ipc_buf.add(MSG_DATA_WORDS_MAX + 1 + i)) } as u32;
     }
@@ -365,6 +389,8 @@ pub unsafe fn read_recv_caps(ipc_buf: *const u64) -> (usize, [u32; MSG_CAP_SLOTS
 #[inline]
 pub fn debug_log(msg: &str) -> Result<(), i64>
 {
+    // SAFETY: syscall2 issues raw syscall with pointer cast to u64; kernel validates pointer
+    // before dereference; msg slice guarantees pointer validity for msg.len() bytes.
     let ret = unsafe { syscall2(SYS_DEBUG_LOG, msg.as_ptr() as u64, msg.len() as u64) };
     if ret < 0
     {
@@ -383,6 +409,7 @@ pub fn debug_log(msg: &str) -> Result<(), i64>
 #[inline]
 pub fn thread_yield() -> Result<(), i64>
 {
+    // SAFETY: syscall2 issues raw syscall instruction; no pointer arguments; yield is always safe.
     let ret = unsafe { syscall2(SYS_THREAD_YIELD, 0, 0) };
     if ret < 0
     {
@@ -398,6 +425,7 @@ pub fn thread_yield() -> Result<(), i64>
 #[inline]
 pub fn thread_exit() -> !
 {
+    // SAFETY: syscall2 issues raw syscall instruction; no pointer arguments; never returns.
     unsafe { syscall2(SYS_THREAD_EXIT, 0, 0) };
     // The syscall never returns; loop to satisfy the diverging type.
     loop
@@ -416,6 +444,8 @@ pub fn thread_exit() -> !
 #[inline]
 pub fn ipc_buffer_set(virt: u64) -> Result<(), i64>
 {
+    // SAFETY: syscall2 issues raw syscall instruction; virt is virtual address passed as u64;
+    // kernel validates alignment and mapping before registering buffer.
     let ret = unsafe { syscall2(SYS_IPC_BUFFER_SET, virt, 0) };
     if ret < 0
     {
@@ -455,6 +485,8 @@ pub fn ipc_call(
 {
     let cap_count = cap_slots.len().min(MSG_CAP_SLOTS_MAX);
     let cap_packed = pack_cap_slots(cap_slots);
+    // SAFETY: syscall5_ret2 issues raw syscall instruction; all arguments are scalar u64 values
+    // (cap indices and packed slot array); kernel validates caps and reads IPC buffer.
     let (ret, secondary) = unsafe {
         syscall5_ret2(
             SYS_IPC_CALL,
@@ -486,6 +518,8 @@ pub fn ipc_call(
 #[inline]
 pub fn ipc_recv(ep: u32) -> Result<(u64, usize), i64>
 {
+    // SAFETY: syscall5_ret2 issues raw syscall instruction; ep is endpoint cap index as u64;
+    // kernel validates cap and writes to IPC buffer; returns label in secondary register.
     let (ret, secondary) = unsafe { syscall5_ret2(SYS_IPC_RECV, u64::from(ep), 0, 0, 0, 0) };
     if ret < 0
     {
@@ -513,6 +547,8 @@ pub fn ipc_reply(label: u64, data_count: usize, cap_slots: &[u32]) -> Result<(),
 {
     let cap_count = cap_slots.len().min(MSG_CAP_SLOTS_MAX);
     let cap_packed = pack_cap_slots(cap_slots);
+    // SAFETY: syscall4 issues raw syscall instruction; all arguments are scalar u64 values
+    // (label, counts, packed cap slots); kernel reads IPC buffer and validates caps.
     let ret = unsafe {
         syscall4(
             SYS_IPC_REPLY,
@@ -539,6 +575,8 @@ pub fn ipc_reply(label: u64, data_count: usize, cap_slots: &[u32]) -> Result<(),
 #[inline]
 pub fn signal_send(sig: u32, bits: u64) -> Result<(), i64>
 {
+    // SAFETY: syscall2 issues raw syscall instruction; sig is cap index as u64, bits is bitmask;
+    // kernel validates cap and updates signal state.
     let ret = unsafe { syscall2(SYS_SIGNAL_SEND, u64::from(sig), bits) };
     if ret < 0
     {
@@ -561,6 +599,8 @@ pub fn signal_send(sig: u32, bits: u64) -> Result<(), i64>
 #[inline]
 pub fn signal_wait(sig: u32) -> Result<u64, i64>
 {
+    // SAFETY: syscall2 issues raw syscall instruction; sig is cap index as u64;
+    // kernel validates cap, blocks until signal bits available, returns bitmask.
     let ret = unsafe { syscall2(SYS_SIGNAL_WAIT, u64::from(sig), 0) };
     if ret < 0
     {
@@ -583,6 +623,8 @@ pub fn signal_wait(sig: u32) -> Result<u64, i64>
 #[inline]
 pub fn cap_create_endpoint() -> Result<u32, i64>
 {
+    // SAFETY: syscall2 issues raw syscall instruction; no pointer arguments;
+    // kernel allocates endpoint and returns slot index.
     let ret = unsafe { syscall2(SYS_CAP_CREATE_ENDPOINT, 0, 0) };
     if ret < 0
     {
@@ -605,6 +647,8 @@ pub fn cap_create_endpoint() -> Result<u32, i64>
 #[inline]
 pub fn cap_create_signal() -> Result<u32, i64>
 {
+    // SAFETY: syscall2 issues raw syscall instruction; no pointer arguments;
+    // kernel allocates signal and returns slot index.
     let ret = unsafe { syscall2(SYS_CAP_CREATE_SIGNAL, 0, 0) };
     if ret < 0
     {
@@ -627,6 +671,8 @@ pub fn cap_create_signal() -> Result<u32, i64>
 #[inline]
 pub fn cap_create_aspace() -> Result<u32, i64>
 {
+    // SAFETY: syscall2 issues raw syscall instruction; no pointer arguments;
+    // kernel allocates address space and returns slot index.
     let ret = unsafe { syscall2(SYS_CAP_CREATE_ASPACE, 0, 0) };
     if ret < 0
     {
@@ -650,6 +696,8 @@ pub fn cap_create_aspace() -> Result<u32, i64>
 #[inline]
 pub fn cap_create_cspace(max_slots: u64) -> Result<u32, i64>
 {
+    // SAFETY: syscall2 issues raw syscall instruction; max_slots is scalar capacity argument;
+    // kernel allocates CSpace and returns slot index.
     let ret = unsafe { syscall2(SYS_CAP_CREATE_CSPACE, max_slots, 0) };
     if ret < 0
     {
@@ -673,6 +721,8 @@ pub fn cap_create_cspace(max_slots: u64) -> Result<u32, i64>
 #[inline]
 pub fn cap_create_thread(aspace_cap: u32, cspace_cap: u32) -> Result<u32, i64>
 {
+    // SAFETY: syscall2 issues raw syscall instruction; aspace_cap and cspace_cap are cap indices as u64;
+    // kernel validates caps, allocates thread, returns slot index.
     let ret =
         unsafe { syscall2(SYS_CAP_CREATE_THREAD, u64::from(aspace_cap), u64::from(cspace_cap)) };
     if ret < 0
@@ -705,6 +755,8 @@ pub fn mem_map(
     page_count: u64,
 ) -> Result<(), i64>
 {
+    // SAFETY: syscall5 issues raw syscall instruction; all arguments are scalar u64 values
+    // (cap indices, virtual address, page offset, count); kernel validates caps and mappings.
     let ret = unsafe {
         syscall5(
             SYS_MEM_MAP,
@@ -736,6 +788,8 @@ pub fn mem_map(
 #[inline]
 pub fn mem_unmap(aspace_cap: u32, virt: u64, page_count: u64) -> Result<(), i64>
 {
+    // SAFETY: syscall3 issues raw syscall instruction; all arguments are scalar u64 values
+    // (cap index, virtual address, page count); kernel validates cap and unmaps pages.
     let ret = unsafe { syscall3(SYS_MEM_UNMAP, u64::from(aspace_cap), virt, page_count) };
     if ret < 0
     {
@@ -766,6 +820,8 @@ pub fn mem_protect(
     prot: u64,
 ) -> Result<(), i64>
 {
+    // SAFETY: syscall5 issues raw syscall instruction; all arguments are scalar u64 values
+    // (cap indices, virtual address, page count, protection flags); kernel validates caps and rights.
     let ret = unsafe {
         syscall5(
             SYS_MEM_PROTECT,
@@ -801,6 +857,8 @@ pub fn mem_protect(
 #[inline]
 pub fn frame_split(frame_cap: u32, split_offset: u64) -> Result<(u32, u32), i64>
 {
+    // SAFETY: syscall3 issues raw syscall instruction; frame_cap is cap index as u64, split_offset
+    // is byte offset; kernel validates cap and offset, returns packed slot indices.
     let ret = unsafe { syscall3(SYS_FRAME_SPLIT, u64::from(frame_cap), split_offset, 0) };
     if ret < 0
     {
@@ -824,6 +882,8 @@ pub fn frame_split(frame_cap: u32, split_offset: u64) -> Result<(u32, u32), i64>
 #[inline]
 pub fn thread_configure(thread_cap: u32, entry: u64, stack_ptr: u64, arg: u64) -> Result<(), i64>
 {
+    // SAFETY: syscall4 issues raw syscall instruction; all arguments are scalar u64 values
+    // (cap index, entry point, stack pointer, initial arg); kernel validates cap and addresses.
     let ret = unsafe {
         syscall4(
             SYS_THREAD_CONFIGURE,
@@ -853,6 +913,8 @@ pub fn thread_configure(thread_cap: u32, entry: u64, stack_ptr: u64, arg: u64) -
 #[inline]
 pub fn thread_start(thread_cap: u32) -> Result<(), i64>
 {
+    // SAFETY: syscall2 issues raw syscall instruction; thread_cap is cap index as u64;
+    // kernel validates cap and enqueues thread.
     let ret = unsafe { syscall2(SYS_THREAD_START, u64::from(thread_cap), 0) };
     if ret < 0
     {
@@ -883,6 +945,8 @@ pub fn thread_start(thread_cap: u32) -> Result<(), i64>
 #[inline]
 pub fn cap_copy(src_slot: u32, dest_cspace_cap: u32, rights_mask: u64) -> Result<u32, i64>
 {
+    // SAFETY: syscall3 issues raw syscall instruction; all arguments are scalar u64 values
+    // (source slot, dest CSpace cap, rights mask); kernel validates caps and returns new slot.
     let ret = unsafe {
         syscall3(
             SYS_CAP_COPY,
@@ -916,6 +980,8 @@ pub fn cap_copy(src_slot: u32, dest_cspace_cap: u32, rights_mask: u64) -> Result
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 pub fn cap_derive(src_slot: u32, rights_mask: u64) -> Result<u32, i64>
 {
+    // SAFETY: syscall2 issues raw syscall instruction; src_slot is cap index as u64, rights_mask
+    // is bitmask; kernel validates cap, creates attenuated derivative, returns new slot.
     let ret = unsafe { syscall2(SYS_CAP_DERIVE, u64::from(src_slot), rights_mask) };
     if ret < 0
     {
@@ -936,6 +1002,8 @@ pub fn cap_derive(src_slot: u32, rights_mask: u64) -> Result<u32, i64>
 /// Returns a negative `i64` error code if the slot index is out of range.
 pub fn cap_delete(slot: u32) -> Result<(), i64>
 {
+    // SAFETY: syscall2 issues raw syscall instruction; slot is cap index as u64;
+    // kernel validates slot, unlinks from derivation tree, dec-refs object.
     let ret = unsafe { syscall2(SYS_CAP_DELETE, u64::from(slot), 0) };
     if ret < 0
     {
@@ -955,6 +1023,8 @@ pub fn cap_delete(slot: u32) -> Result<(), i64>
 /// Returns a negative `i64` error code if the slot index is out of range.
 pub fn cap_revoke(slot: u32) -> Result<(), i64>
 {
+    // SAFETY: syscall2 issues raw syscall instruction; slot is cap index as u64;
+    // kernel validates slot and revokes entire descendant subtree.
     let ret = unsafe { syscall2(SYS_CAP_REVOKE, u64::from(slot), 0) };
     if ret < 0
     {
@@ -981,6 +1051,8 @@ pub fn cap_revoke(slot: u32) -> Result<(), i64>
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 pub fn cap_move(src_slot: u32, dest_cspace_cap: u32, dest_index: u32) -> Result<u32, i64>
 {
+    // SAFETY: syscall3 issues raw syscall instruction; all arguments are scalar u64 values
+    // (source slot, dest CSpace cap, dest index); kernel validates and moves cap, returns slot.
     let ret = unsafe {
         syscall3(
             SYS_CAP_MOVE,
@@ -1013,6 +1085,8 @@ pub fn cap_insert(
     rights_mask: u64,
 ) -> Result<(), i64>
 {
+    // SAFETY: syscall4 issues raw syscall instruction; all arguments are scalar u64 values
+    // (source slot, dest CSpace cap, dest index, rights mask); kernel validates and inserts cap.
     let ret = unsafe {
         syscall4(
             SYS_CAP_INSERT,
@@ -1055,6 +1129,8 @@ pub fn cap_insert(
 pub fn system_info(kind: u64) -> Result<u64, i64>
 {
     // Unused second arg is required because no syscall1 raw variant exists.
+    // SAFETY: syscall2 issues raw syscall instruction; kind is SystemInfoType discriminant as u64;
+    // kernel validates kind and returns queried value.
     let ret = unsafe { syscall2(SYS_SYSTEM_INFO, kind, 0) };
     if ret < 0
     {
@@ -1082,6 +1158,8 @@ pub fn system_info(kind: u64) -> Result<u64, i64>
 #[inline]
 pub fn aspace_query(aspace_cap: u32, virt: u64) -> Result<u64, i64>
 {
+    // SAFETY: syscall2 issues raw syscall instruction; aspace_cap is cap index as u64, virt is
+    // virtual address; kernel validates cap and mapping, returns physical address.
     let ret = unsafe { syscall2(SYS_ASPACE_QUERY, u64::from(aspace_cap), virt) };
     if ret < 0
     {
@@ -1109,6 +1187,8 @@ pub fn aspace_query(aspace_cap: u32, virt: u64) -> Result<u64, i64>
 #[inline]
 pub fn event_queue_create(capacity: u32) -> Result<u32, i64>
 {
+    // SAFETY: syscall2 issues raw syscall instruction; capacity is scalar queue size as u64;
+    // kernel validates capacity (1..=4096), allocates event queue, returns slot index.
     let ret = unsafe { syscall2(SYS_CAP_CREATE_EVENT_Q, u64::from(capacity), 0) };
     if ret < 0
     {
@@ -1130,6 +1210,8 @@ pub fn event_queue_create(capacity: u32) -> Result<u32, i64>
 #[inline]
 pub fn event_post(queue_cap: u32, payload: u64) -> Result<(), i64>
 {
+    // SAFETY: syscall2 issues raw syscall instruction; queue_cap is cap index as u64, payload
+    // is opaque data; kernel validates cap and enqueues payload (non-blocking).
     let ret = unsafe { syscall2(SYS_EVENT_POST, u64::from(queue_cap), payload) };
     if ret < 0
     {
@@ -1153,6 +1235,8 @@ pub fn event_post(queue_cap: u32, payload: u64) -> Result<(), i64>
 pub fn event_recv(queue_cap: u32) -> Result<u64, i64>
 {
     // Payload is delivered in the secondary return register.
+    // SAFETY: syscall5_ret2 issues raw syscall instruction; queue_cap is cap index as u64;
+    // kernel validates cap, blocks until event available, returns payload in secondary register.
     let (ret, payload) =
         unsafe { syscall5_ret2(SYS_EVENT_RECV, u64::from(queue_cap), 0, 0, 0, 0) };
     if ret < 0
@@ -1178,6 +1262,8 @@ pub fn event_recv(queue_cap: u32) -> Result<u64, i64>
 #[inline]
 pub fn wait_set_create() -> Result<u32, i64>
 {
+    // SAFETY: syscall2 issues raw syscall instruction; no pointer arguments;
+    // kernel allocates wait set and returns slot index.
     let ret = unsafe { syscall2(SYS_CAP_CREATE_WAIT_SET, 0, 0) };
     if ret < 0
     {
@@ -1202,6 +1288,8 @@ pub fn wait_set_create() -> Result<u32, i64>
 #[inline]
 pub fn wait_set_add(ws_cap: u32, source_cap: u32, token: u64) -> Result<(), i64>
 {
+    // SAFETY: syscall3 issues raw syscall instruction; all arguments are scalar u64 values
+    // (wait set cap, source cap, opaque token); kernel validates caps and registers source.
     let ret = unsafe {
         syscall3(SYS_WAIT_SET_ADD, u64::from(ws_cap), u64::from(source_cap), token)
     };
@@ -1223,6 +1311,8 @@ pub fn wait_set_add(ws_cap: u32, source_cap: u32, token: u64) -> Result<(), i64>
 #[inline]
 pub fn wait_set_remove(ws_cap: u32, source_cap: u32) -> Result<(), i64>
 {
+    // SAFETY: syscall2 issues raw syscall instruction; ws_cap and source_cap are cap indices as u64;
+    // kernel validates caps and unregisters source from wait set.
     let ret = unsafe {
         syscall2(SYS_WAIT_SET_REMOVE, u64::from(ws_cap), u64::from(source_cap))
     };
@@ -1248,6 +1338,8 @@ pub fn wait_set_remove(ws_cap: u32, source_cap: u32) -> Result<(), i64>
 #[inline]
 pub fn wait_set_wait(ws_cap: u32) -> Result<u64, i64>
 {
+    // SAFETY: syscall5_ret2 issues raw syscall instruction; ws_cap is cap index as u64;
+    // kernel validates cap, blocks until source ready, returns token in secondary register.
     let (ret, token) =
         unsafe { syscall5_ret2(SYS_WAIT_SET_WAIT, u64::from(ws_cap), 0, 0, 0, 0) };
     if ret < 0
@@ -1273,6 +1365,8 @@ pub fn wait_set_wait(ws_cap: u32) -> Result<u64, i64>
 #[inline]
 pub fn irq_register(irq_cap: u32, signal_cap: u32) -> Result<(), i64>
 {
+    // SAFETY: syscall2 issues raw syscall instruction; irq_cap and signal_cap are cap indices as u64;
+    // kernel validates caps and binds IRQ to signal for interrupt delivery.
     let ret = unsafe { syscall2(SYS_IRQ_REGISTER, u64::from(irq_cap), u64::from(signal_cap)) };
     if ret < 0
     {
@@ -1294,6 +1388,8 @@ pub fn irq_register(irq_cap: u32, signal_cap: u32) -> Result<(), i64>
 #[inline]
 pub fn irq_ack(irq_cap: u32) -> Result<(), i64>
 {
+    // SAFETY: syscall2 issues raw syscall instruction; irq_cap is cap index as u64;
+    // kernel validates cap and unmasks IRQ to re-enable delivery.
     let ret = unsafe { syscall2(SYS_IRQ_ACK, u64::from(irq_cap), 0) };
     if ret < 0
     {
@@ -1317,6 +1413,8 @@ pub fn irq_ack(irq_cap: u32) -> Result<(), i64>
 #[inline]
 pub fn mmio_map(aspace_cap: u32, mmio_cap: u32, virt: u64, flags: u64) -> Result<(), i64>
 {
+    // SAFETY: syscall4 issues raw syscall instruction; all arguments are scalar u64 values
+    // (cap indices, virtual address, flags); kernel validates caps and creates uncacheable mapping.
     let ret = unsafe {
         syscall4(
             SYS_MMIO_MAP,
@@ -1346,6 +1444,8 @@ pub fn mmio_map(aspace_cap: u32, mmio_cap: u32, virt: u64, flags: u64) -> Result
 #[inline]
 pub fn ioport_bind(thread_cap: u32, ioport_cap: u32) -> Result<(), i64>
 {
+    // SAFETY: syscall2 issues raw syscall instruction; thread_cap and ioport_cap are cap indices as u64;
+    // kernel validates caps and grants I/O port access (x86-64 only; returns NotSupported on RISC-V).
     let ret = unsafe { syscall2(SYS_IOPORT_BIND, u64::from(thread_cap), u64::from(ioport_cap)) };
     if ret < 0
     {
@@ -1373,6 +1473,8 @@ pub fn ioport_bind(thread_cap: u32, ioport_cap: u32) -> Result<(), i64>
 #[inline]
 pub fn dma_grant(frame_cap: u32, device_id: u64, flags: u64) -> Result<u64, i64>
 {
+    // SAFETY: syscall3 issues raw syscall instruction; all arguments are scalar u64 values
+    // (cap index, device ID, flags); kernel validates cap and FLAG_DMA_UNSAFE, returns physical address.
     let ret = unsafe { syscall3(SYS_DMA_GRANT, u64::from(frame_cap), device_id, flags) };
     if ret < 0
     {
@@ -1394,6 +1496,8 @@ pub fn dma_grant(frame_cap: u32, device_id: u64, flags: u64) -> Result<u64, i64>
 #[inline]
 pub fn thread_stop(thread_cap: u32) -> Result<(), i64>
 {
+    // SAFETY: syscall2 issues raw syscall instruction; thread_cap is cap index as u64;
+    // kernel validates cap and transitions thread to Stopped state.
     let ret = unsafe { syscall2(SYS_THREAD_STOP, u64::from(thread_cap), 0) };
     if ret < 0
     {
@@ -1417,6 +1521,8 @@ pub fn thread_stop(thread_cap: u32) -> Result<(), i64>
 #[inline]
 pub fn thread_set_priority(thread_cap: u32, priority: u8, sched_cap: u32) -> Result<(), i64>
 {
+    // SAFETY: syscall3 issues raw syscall instruction; all arguments are scalar u64 values
+    // (thread cap, priority level, sched cap); kernel validates caps and priority range.
     let ret = unsafe {
         syscall3(
             SYS_THREAD_SET_PRIORITY,
@@ -1446,6 +1552,8 @@ pub fn thread_set_priority(thread_cap: u32, priority: u8, sched_cap: u32) -> Res
 #[inline]
 pub fn thread_set_affinity(thread_cap: u32, cpu_id: u32) -> Result<(), i64>
 {
+    // SAFETY: syscall2 issues raw syscall instruction; thread_cap and cpu_id are scalar u64 values;
+    // kernel validates cap and CPU ID, sets thread affinity.
     let ret = unsafe { syscall2(SYS_THREAD_SET_AFFINITY, u64::from(thread_cap), u64::from(cpu_id)) };
     if ret < 0
     {
@@ -1474,6 +1582,8 @@ pub fn thread_set_affinity(thread_cap: u32, cpu_id: u32) -> Result<(), i64>
 #[inline]
 pub fn thread_read_regs(thread_cap: u32, buf: *mut u8, buf_size: usize) -> Result<u64, i64>
 {
+    // SAFETY: syscall3 issues raw syscall instruction; buf pointer cast to u64 for syscall ABI;
+    // kernel validates thread cap, checks buf_size, writes TrapFrame only if thread stopped.
     let ret = unsafe {
         syscall3(
             SYS_THREAD_READ_REGS,
@@ -1507,6 +1617,8 @@ pub fn thread_read_regs(thread_cap: u32, buf: *mut u8, buf_size: usize) -> Resul
 #[inline]
 pub fn thread_write_regs(thread_cap: u32, buf: *const u8, buf_size: usize) -> Result<(), i64>
 {
+    // SAFETY: syscall3 issues raw syscall instruction; buf pointer cast to u64 for syscall ABI;
+    // kernel validates thread cap, checks buf_size, reads TrapFrame only if thread stopped and privileges cleared.
     let ret = unsafe {
         syscall3(
             SYS_THREAD_WRITE_REGS,

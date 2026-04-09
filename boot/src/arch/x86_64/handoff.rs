@@ -100,6 +100,7 @@ pub unsafe fn perform_handoff(
     // template before the jump. rax/rcx/rdx are not reserved and are constrained
     // directly, so no aliasing risk exists for those three.
     // No cld/cli here — the trampoline handles both.
+    // SAFETY: caller ensures all parameters are valid; asm clobbers no memory, never returns.
     unsafe {
         core::arch::asm!(
             "mov rbx, {entry}",

@@ -159,7 +159,8 @@ pub fn vpn0_index(va: u64) -> usize
 /// pool frame. No other mutable reference to the same frame may exist.
 unsafe fn table_at(frame_va: u64) -> &'static mut [PageTableEntry; 512]
 {
-    // SAFETY: contract stated in doc comment.
+    // SAFETY: frame_va is a valid direct-map VA; caller guarantees page table frame
+    // is allocated, writable, 4 KiB-aligned, and exclusively owned.
     unsafe { &mut *(frame_va as *mut [PageTableEntry; 512]) }
 }
 
@@ -177,16 +178,19 @@ pub fn map_page(
     pool: &mut PoolState,
 ) -> Result<(), PagingError>
 {
-    // SAFETY: root_va is a valid pool frame VA.
+    // SAFETY: root_va is the direct-map VA of a valid Sv48 root frame allocated from pool.
     let root = unsafe { table_at(root_va) };
     let l2_pa = walk_or_alloc(&mut root[vpn3_index(virt)], pool)?;
 
+    // SAFETY: l2_pa returned by walk_or_alloc is valid; phys_to_virt yields direct-map VA.
     let l2 = unsafe { table_at(pool.phys_to_virt(l2_pa)) };
     let l1_pa = walk_or_alloc(&mut l2[vpn2_index(virt)], pool)?;
 
+    // SAFETY: l1_pa returned by walk_or_alloc is valid; phys_to_virt yields direct-map VA.
     let l1 = unsafe { table_at(pool.phys_to_virt(l1_pa)) };
     let l0_pa = walk_or_alloc(&mut l1[vpn1_index(virt)], pool)?;
 
+    // SAFETY: l0_pa returned by walk_or_alloc is valid; phys_to_virt yields direct-map VA.
     let l0 = unsafe { table_at(pool.phys_to_virt(l0_pa)) };
     l0[vpn0_index(virt)] = PageTableEntry::new_page(phys, flags);
     Ok(())
@@ -206,12 +210,15 @@ pub fn map_large_page(
     pool: &mut PoolState,
 ) -> Result<(), PagingError>
 {
+    // SAFETY: root_va is the direct-map VA of a valid Sv48 root frame allocated from pool.
     let root = unsafe { table_at(root_va) };
     let l2_pa = walk_or_alloc(&mut root[vpn3_index(virt)], pool)?;
 
+    // SAFETY: l2_pa returned by walk_or_alloc is valid; phys_to_virt yields direct-map VA.
     let l2 = unsafe { table_at(pool.phys_to_virt(l2_pa)) };
     let l1_pa = walk_or_alloc(&mut l2[vpn2_index(virt)], pool)?;
 
+    // SAFETY: l1_pa returned by walk_or_alloc is valid; phys_to_virt yields direct-map VA.
     let l1 = unsafe { table_at(pool.phys_to_virt(l1_pa)) };
     l1[vpn1_index(virt)] = PageTableEntry::new_large_page(phys, flags);
     Ok(())
@@ -230,7 +237,8 @@ fn walk_or_alloc(entry: &mut PageTableEntry, pool: &mut PoolState) -> Result<u64
     else
     {
         let (frame_va, frame_pa) = pool.alloc_frame()?;
-        // SAFETY: frame_va is a freshly allocated, exclusively-owned pool frame.
+        // SAFETY: frame_va is a freshly allocated, exclusively-owned pool frame;
+        // write_bytes zeroes exactly one 4 KiB page.
         unsafe {
             core::ptr::write_bytes(frame_va as *mut u8, 0, 4096);
         }
@@ -252,7 +260,9 @@ fn walk_or_alloc(entry: &mut PageTableEntry, pool: &mut PoolState) -> Result<u64
 pub unsafe fn activate(root_phys: u64)
 {
     let satp = (9u64 << 60) | (root_phys >> 12);
-    // SAFETY: caller guarantees the new tables are complete.
+    // SAFETY: satp write switches active Sv48 page table; root_phys is a valid root frame;
+    // caller guarantees tables map current code, stack, and direct map. sfence.vma flushes
+    // TLB; RISC-V S-mode architecture primitive.
     unsafe {
         core::arch::asm!(
             "csrw satp, {}",
@@ -271,7 +281,7 @@ pub unsafe fn enable_nx() {}
 pub fn read_stack_pointer() -> u64
 {
     let sp: u64;
-    // SAFETY: sp is always accessible in S-mode.
+    // SAFETY: sp register read is always safe in S-mode; RISC-V architecture primitive.
     unsafe {
         core::arch::asm!("mv {}, sp", out(reg) sp, options(nostack, nomem));
     }
@@ -288,7 +298,7 @@ pub fn read_stack_pointer() -> u64
 pub unsafe fn read_root_phys() -> u64
 {
     let satp: u64;
-    // SAFETY: reading satp is safe in S-mode.
+    // SAFETY: satp CSR read is always safe in S-mode; RISC-V architecture primitive.
     unsafe {
         core::arch::asm!("csrr {}, satp", out(reg) satp, options(nostack, nomem));
     }
@@ -322,15 +332,19 @@ pub unsafe fn map_user_page(
     // U bit (bit 4) allows user-mode access.
     const USER: u64 = 1 << 4;
 
+    // SAFETY: root_virt is direct-map VA of valid user Sv48 root PT; caller contract.
     let root = unsafe { table_at(root_virt) };
 
     let l2_pa = rv_walk_or_alloc(&mut root[vpn3_index(virt)], allocator)?;
+    // SAFETY: l2_pa from rv_walk_or_alloc is valid; phys_to_virt yields direct-map VA.
     let l2 = unsafe { table_at(phys_to_virt(l2_pa)) };
 
     let l1_pa = rv_walk_or_alloc(&mut l2[vpn2_index(virt)], allocator)?;
+    // SAFETY: l1_pa from rv_walk_or_alloc is valid; phys_to_virt yields direct-map VA.
     let l1 = unsafe { table_at(phys_to_virt(l1_pa)) };
 
     let l0_pa = rv_walk_or_alloc(&mut l1[vpn1_index(virt)], allocator)?;
+    // SAFETY: l0_pa from rv_walk_or_alloc is valid; phys_to_virt yields direct-map VA.
     let l0 = unsafe { table_at(phys_to_virt(l0_pa)) };
     let mut pte = PageTableEntry::new_page(phys, flags);
     pte.0 |= USER;
@@ -359,7 +373,8 @@ fn rv_walk_or_alloc(
     let frame_pa = allocator.alloc(0).ok_or(())?;
     let frame_va = phys_to_virt(frame_pa);
 
-    // Zero the new table.
+    // SAFETY: frame_va is direct-map VA of freshly allocated buddy frame; exclusively
+    // owned; write_bytes zeroes exactly PAGE_SIZE (4 KiB).
     unsafe {
         core::ptr::write_bytes(frame_va as *mut u8, 0, PAGE_SIZE);
     }
@@ -375,7 +390,8 @@ fn rv_walk_or_alloc(
 #[cfg(not(test))]
 pub unsafe fn flush_page(virt: u64)
 {
-    // SAFETY: sfence.vma is safe in S-mode for any virtual address.
+    // SAFETY: sfence.vma flushes TLB for single VA; RISC-V S-mode architecture primitive;
+    // safe for any virtual address (mapped or unmapped).
     unsafe {
         core::arch::asm!(
             "sfence.vma {}, zero",
@@ -400,6 +416,7 @@ pub unsafe fn unmap_user_page(root_virt: u64, virt: u64)
 {
     use crate::mm::paging::phys_to_virt;
 
+    // SAFETY: root_virt is direct-map VA of valid user Sv48 root PT; caller contract.
     let root = unsafe { table_at(root_virt) };
     let e = root[vpn3_index(virt)];
     if !e.is_present()
@@ -407,6 +424,7 @@ pub unsafe fn unmap_user_page(root_virt: u64, virt: u64)
         return;
     }
 
+    // SAFETY: e.phys_addr() extracted from present PTE; phys_to_virt yields direct-map VA.
     let l2 = unsafe { table_at(phys_to_virt(e.phys_addr())) };
     let e = l2[vpn2_index(virt)];
     if !e.is_present()
@@ -414,6 +432,7 @@ pub unsafe fn unmap_user_page(root_virt: u64, virt: u64)
         return;
     }
 
+    // SAFETY: e.phys_addr() extracted from present PTE; phys_to_virt yields direct-map VA.
     let l1 = unsafe { table_at(phys_to_virt(e.phys_addr())) };
     let e = l1[vpn1_index(virt)];
     if !e.is_present()
@@ -421,9 +440,11 @@ pub unsafe fn unmap_user_page(root_virt: u64, virt: u64)
         return;
     }
 
+    // SAFETY: e.phys_addr() extracted from present PTE; phys_to_virt yields direct-map VA.
     let l0 = unsafe { table_at(phys_to_virt(e.phys_addr())) };
     l0[vpn0_index(virt)] = PageTableEntry(0);
 
+    // SAFETY: virt may now be unmapped; flush_page is safe for any VA.
     unsafe { flush_page(virt) };
 }
 
@@ -447,6 +468,7 @@ pub unsafe fn protect_user_page(
     // Set USER (U) bit (bit 4) to preserve user accessibility.
     const USER: u64 = 1 << 4;
 
+    // SAFETY: root_virt is direct-map VA of valid user Sv48 root PT; caller contract.
     let root = unsafe { table_at(root_virt) };
     let e = root[vpn3_index(virt)];
     if !e.is_present()
@@ -454,6 +476,7 @@ pub unsafe fn protect_user_page(
         return Err(PagingError::NotMapped);
     }
 
+    // SAFETY: e.phys_addr() extracted from present PTE; phys_to_virt yields direct-map VA.
     let l2 = unsafe { table_at(phys_to_virt(e.phys_addr())) };
     let e = l2[vpn2_index(virt)];
     if !e.is_present()
@@ -461,6 +484,7 @@ pub unsafe fn protect_user_page(
         return Err(PagingError::NotMapped);
     }
 
+    // SAFETY: e.phys_addr() extracted from present PTE; phys_to_virt yields direct-map VA.
     let l1 = unsafe { table_at(phys_to_virt(e.phys_addr())) };
     let e = l1[vpn1_index(virt)];
     if !e.is_present()
@@ -468,6 +492,7 @@ pub unsafe fn protect_user_page(
         return Err(PagingError::NotMapped);
     }
 
+    // SAFETY: e.phys_addr() extracted from present PTE; phys_to_virt yields direct-map VA.
     let l0 = unsafe { table_at(phys_to_virt(e.phys_addr())) };
     let leaf = &mut l0[vpn0_index(virt)];
     if !leaf.is_present()
@@ -480,6 +505,7 @@ pub unsafe fn protect_user_page(
     new_pte.0 |= USER;
     *leaf = new_pte;
 
+    // SAFETY: virt is mapped; flush_page is safe for any VA.
     unsafe { flush_page(virt) };
     Ok(())
 }
@@ -498,6 +524,7 @@ pub unsafe fn translate_user_page(root_virt: u64, virt: u64) -> Option<(u64, u64
 {
     use crate::mm::paging::phys_to_virt;
 
+    // SAFETY: root_virt is direct-map VA of valid user Sv48 root PT; caller contract.
     let root = unsafe { table_at(root_virt) };
     let e = root[vpn3_index(virt)];
     if !e.is_present()
@@ -505,6 +532,7 @@ pub unsafe fn translate_user_page(root_virt: u64, virt: u64) -> Option<(u64, u64
         return None;
     }
 
+    // SAFETY: e.phys_addr() extracted from present PTE; phys_to_virt yields direct-map VA.
     let l2 = unsafe { table_at(phys_to_virt(e.phys_addr())) };
     let e = l2[vpn2_index(virt)];
     if !e.is_present()
@@ -512,6 +540,7 @@ pub unsafe fn translate_user_page(root_virt: u64, virt: u64) -> Option<(u64, u64
         return None;
     }
 
+    // SAFETY: e.phys_addr() extracted from present PTE; phys_to_virt yields direct-map VA.
     let l1 = unsafe { table_at(phys_to_virt(e.phys_addr())) };
     let e = l1[vpn1_index(virt)];
     if !e.is_present()
@@ -519,6 +548,7 @@ pub unsafe fn translate_user_page(root_virt: u64, virt: u64) -> Option<(u64, u64
         return None;
     }
 
+    // SAFETY: e.phys_addr() extracted from present PTE; phys_to_virt yields direct-map VA.
     let l0 = unsafe { table_at(phys_to_virt(e.phys_addr())) };
     let leaf = l0[vpn0_index(virt)];
     if !leaf.is_present()

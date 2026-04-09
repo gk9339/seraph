@@ -53,6 +53,7 @@ pub struct SignalState
 
 // SAFETY: SignalState is accessed only under the relevant scheduler lock.
 unsafe impl Send for SignalState {}
+// SAFETY: SignalState is accessed only under the relevant scheduler lock; no Sync violation.
 unsafe impl Sync for SignalState {}
 
 impl SignalState
@@ -94,8 +95,8 @@ pub unsafe fn signal_send(sig: *mut SignalState, bits: u64) -> Option<*mut Threa
         // Notify any registered wait set that this signal now has bits pending.
         if !sig.wait_set.is_null()
         {
-            // SAFETY: wait_set is a valid *mut WaitSetState registered by
-            // sys_wait_set_add and cleared on removal or wait_set_drop.
+            // SAFETY: wait_set is a valid *mut WaitSetState registered by sys_wait_set_add
+            // and cleared on removal or wait_set_drop; lock is held.
             unsafe { crate::ipc::wait_set::waitset_notify(sig.wait_set, sig.wait_set_member_idx) };
         }
         None

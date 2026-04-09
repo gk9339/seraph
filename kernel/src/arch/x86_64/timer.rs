@@ -113,6 +113,8 @@ fn read_tsc() -> u64
 unsafe fn apic_write(offset: usize, val: u32)
 {
     let vaddr = (DIRECT_MAP_BASE + APIC_BASE_PHYS) as usize + offset;
+    // SAFETY: APIC_BASE_PHYS (0xFEE0_0000) is identity-mapped in DIRECT_MAP_BASE;
+    // vaddr points to a valid APIC MMIO register within the 4 KiB APIC page.
     unsafe {
         core::ptr::write_volatile(vaddr as *mut u32, val);
     }
@@ -122,6 +124,8 @@ unsafe fn apic_write(offset: usize, val: u32)
 fn apic_read(offset: usize) -> u32
 {
     let vaddr = (DIRECT_MAP_BASE + APIC_BASE_PHYS) as usize + offset;
+    // SAFETY: APIC_BASE_PHYS (0xFEE0_0000) is identity-mapped in DIRECT_MAP_BASE;
+    // vaddr points to a valid APIC MMIO register within the 4 KiB APIC page.
     unsafe { core::ptr::read_volatile(vaddr as *const u32) }
 }
 
@@ -131,6 +135,8 @@ fn apic_read(offset: usize) -> u32
 #[cfg(not(test))]
 unsafe fn outb(port: u16, val: u8)
 {
+    // SAFETY: x86 I/O port instruction; caller must ensure `port` is valid and
+    // that I/O privilege level (IOPL) or I/O permission bitmap allows access at ring 0.
     unsafe {
         core::arch::asm!(
             "out dx, al",
@@ -146,6 +152,8 @@ unsafe fn outb(port: u16, val: u8)
 unsafe fn inb(port: u16) -> u8
 {
     let val: u8;
+    // SAFETY: x86 I/O port instruction; caller must ensure `port` is valid and
+    // that I/O privilege level (IOPL) or I/O permission bitmap allows access at ring 0.
     unsafe {
         core::arch::asm!(
             "in al, dx",
@@ -183,6 +191,7 @@ unsafe fn calibrate_apic_timer() -> u64
 
     // Program PIT channel 2: mode 0 (interrupt on terminal count), binary.
     // Command byte: channel=10 (ch2), access=11 (lo+hi byte), mode=000, BCD=0.
+    // SAFETY: PIT ports (0x42, 0x43) are standard legacy hardware; ring 0 I/O access.
     unsafe {
         outb(PIT_CMD, 0b1011_0000);
         outb(PIT_CH2, (pit_counts & 0xFF) as u8);
@@ -190,6 +199,7 @@ unsafe fn calibrate_apic_timer() -> u64
     }
 
     // Set APIC timer divide-by-16 and start with max initial count.
+    // SAFETY: APIC MMIO registers are valid; single-threaded calibration context.
     unsafe {
         apic_write(APIC_TIMER_DIVIDE, DIVIDE_BY_16);
         apic_write(APIC_TIMER_INITIAL, 0xFFFF_FFFF);
@@ -199,12 +209,14 @@ unsafe fn calibrate_apic_timer() -> u64
     // Read TSC immediately before starting the gate so the measurement window
     // starts as close to gate-enable as possible.
     let tsc_start = read_tsc();
+    // SAFETY: port 0x61 (PIT gate control) is standard legacy hardware; ring 0 I/O access.
     unsafe {
         let gate = inb(PIT_GATE);
         outb(PIT_GATE, gate | 0x01);
     }
 
     // Spin until PIT output (bit 5 of port 0x61) goes high.
+    // SAFETY: port 0x61 read is safe at ring 0; polling PIT status.
     unsafe {
         while inb(PIT_GATE) & 0x20 == 0
         {
@@ -222,6 +234,7 @@ unsafe fn calibrate_apic_timer() -> u64
 
     // Stop the APIC timer.
     let remaining = apic_read(APIC_TIMER_CURRENT);
+    // SAFETY: APIC MMIO register write to stop the timer; single-threaded calibration context.
     unsafe {
         apic_write(APIC_TIMER_INITIAL, 0);
     }
@@ -246,7 +259,7 @@ unsafe fn calibrate_apic_timer() -> u64
 pub unsafe fn init(period_us: u64)
 {
     // Calibrate: measure APIC ticks per second.
-    // SAFETY: ring-0, single-threaded.
+    // SAFETY: ring 0, single-threaded; PIT and APIC hardware are accessible.
     let tps = unsafe { calibrate_apic_timer() };
     TICKS_PER_SEC.store(tps, Ordering::Relaxed);
 
@@ -256,6 +269,7 @@ pub unsafe fn init(period_us: u64)
     let initial_count = (tps * period_us / 1_000_000).max(1);
 
     // Configure APIC timer: periodic mode, vector TIMER_VECTOR.
+    // SAFETY: APIC MMIO registers are valid; single-threaded init context.
     unsafe {
         apic_write(APIC_TIMER_DIVIDE, DIVIDE_BY_16);
         apic_write(APIC_LVT_TIMER, LVT_TIMER_PERIODIC | TIMER_VECTOR as u32);
@@ -292,6 +306,8 @@ pub unsafe fn init_ap(period_us: u64)
         return;
     }
     let initial_count = (tps * period_us / 1_000_000).max(1);
+    // SAFETY: APIC MMIO registers are valid; IDT and timer ISR are initialized.
+    // Enabling interrupts is safe as timer handler is registered.
     unsafe {
         apic_write(APIC_TIMER_DIVIDE, DIVIDE_BY_16);
         apic_write(APIC_LVT_TIMER, LVT_TIMER_PERIODIC | TIMER_VECTOR as u32);

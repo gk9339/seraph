@@ -29,11 +29,13 @@ fn halt_loop() -> !
     loop
     {
         #[cfg(target_arch = "x86_64")]
+        // SAFETY: hlt is a privileged x86 instruction; halts CPU until next interrupt.
         unsafe {
             core::arch::asm!("hlt", options(nomem, nostack));
         }
 
         #[cfg(target_arch = "riscv64")]
+        // SAFETY: wfi is a RISC-V instruction; waits for interrupt.
         unsafe {
             core::arch::asm!("wfi", options(nomem, nostack));
         }

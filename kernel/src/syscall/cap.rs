@@ -45,12 +45,13 @@ pub fn sys_cap_create_endpoint(_tf: &mut TrapFrame) -> Result<u64, SyscallError>
     use crate::ipc::endpoint::EndpointState;
     use core::ptr::NonNull;
 
+    // SAFETY: syscall entry ensures current_tcb() returns the active thread's TCB.
     let tcb = unsafe { current_tcb() };
     if tcb.is_null()
     {
         return Err(SyscallError::InvalidCapability);
     }
-    // SAFETY: tcb is valid from syscall context.
+    // SAFETY: tcb validated non-null above; cspace field is immutable after thread creation.
     let cspace = unsafe { (*tcb).cspace };
     if cspace.is_null()
     {
@@ -67,9 +68,11 @@ pub fn sys_cap_create_endpoint(_tf: &mut TrapFrame) -> Result<u64, SyscallError>
     }));
 
     // Build NonNull<KernelObjectHeader> by casting (header is at offset 0).
+    // SAFETY: ep_obj_ptr is valid Box allocation; header at offset 0.
     let nonnull = unsafe { NonNull::new_unchecked(ep_obj_ptr.cast::<KernelObjectHeader>()) };
 
     // Insert into CSpace.
+    // SAFETY: cspace validated non-null above.
     let idx = unsafe {
         (*cspace).insert_cap(
             CapTag::Endpoint,
@@ -95,11 +98,13 @@ pub fn sys_cap_create_signal(_tf: &mut TrapFrame) -> Result<u64, SyscallError>
     use crate::ipc::signal::SignalState;
     use core::ptr::NonNull;
 
+    // SAFETY: syscall entry ensures current_tcb() returns active thread's TCB.
     let tcb = unsafe { current_tcb() };
     if tcb.is_null()
     {
         return Err(SyscallError::InvalidCapability);
     }
+    // SAFETY: tcb validated non-null above.
     let cspace = unsafe { (*tcb).cspace };
     if cspace.is_null()
     {
@@ -111,7 +116,9 @@ pub fn sys_cap_create_signal(_tf: &mut TrapFrame) -> Result<u64, SyscallError>
         header: KernelObjectHeader::new(ObjectType::Signal),
         state: sig_state_ptr,
     }));
+    // SAFETY: sig_obj_ptr is valid Box allocation; header at offset 0.
     let nonnull = unsafe { NonNull::new_unchecked(sig_obj_ptr.cast::<KernelObjectHeader>()) };
+    // SAFETY: cspace validated non-null above.
     let idx =
         unsafe { (*cspace).insert_cap(CapTag::Signal, Rights::SIGNAL | Rights::WAIT, nonnull) }
             .map_err(|_| SyscallError::OutOfMemory)?;
@@ -132,11 +139,13 @@ pub fn sys_cap_create_aspace(_tf: &mut TrapFrame) -> Result<u64, SyscallError>
     use crate::mm::with_frame_allocator;
     use core::ptr::NonNull;
 
+    // SAFETY: syscall entry ensures current_tcb() returns active thread's TCB.
     let tcb = unsafe { current_tcb() };
     if tcb.is_null()
     {
         return Err(SyscallError::InvalidCapability);
     }
+    // SAFETY: tcb validated non-null above.
     let cspace = unsafe { (*tcb).cspace };
     if cspace.is_null()
     {
@@ -154,8 +163,10 @@ pub fn sys_cap_create_aspace(_tf: &mut TrapFrame) -> Result<u64, SyscallError>
         address_space: Box::into_raw(Box::new(as_obj)),
     }));
 
+    // SAFETY: as_obj_ptr is valid Box allocation; header at offset 0.
     let nonnull = unsafe { NonNull::new_unchecked(as_obj_ptr.cast::<KernelObjectHeader>()) };
 
+    // SAFETY: cspace validated non-null above.
     let idx =
         unsafe { (*cspace).insert_cap(CapTag::AddressSpace, Rights::MAP | Rights::READ, nonnull) }
             .map_err(|_| SyscallError::OutOfMemory)?;
@@ -182,11 +193,13 @@ pub fn sys_cap_create_cspace(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     const DEFAULT_SLOTS: usize = 256;
     const MAX_SLOTS: usize = 16384;
 
+    // SAFETY: syscall entry ensures current_tcb() returns active thread's TCB.
     let tcb = unsafe { current_tcb() };
     if tcb.is_null()
     {
         return Err(SyscallError::InvalidCapability);
     }
+    // SAFETY: tcb validated non-null above.
     let cspace = unsafe { (*tcb).cspace };
     if cspace.is_null()
     {
@@ -217,8 +230,10 @@ pub fn sys_cap_create_cspace(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         cspace: new_cs_raw,
     }));
 
+    // SAFETY: cs_obj_ptr is valid Box allocation; header at offset 0.
     let nonnull = unsafe { NonNull::new_unchecked(cs_obj_ptr.cast::<KernelObjectHeader>()) };
 
+    // SAFETY: cspace validated non-null above.
     let idx = unsafe {
         (*cspace).insert_cap(
             CapTag::CSpace,
@@ -264,11 +279,13 @@ pub fn sys_cap_create_thread(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     // cast_possible_truncation: Seraph targets 64-bit only; cap slot indices fit in u32.
     let cs_idx = tf.arg(1) as u32;
 
+    // SAFETY: syscall entry ensures current_tcb() returns active thread's TCB.
     let tcb = unsafe { current_tcb() };
     if tcb.is_null()
     {
         return Err(SyscallError::InvalidCapability);
     }
+    // SAFETY: tcb validated non-null above.
     let caller_cspace = unsafe { (*tcb).cspace };
     if caller_cspace.is_null()
     {
@@ -276,6 +293,7 @@ pub fn sys_cap_create_thread(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     }
 
     // Resolve AddressSpace cap.
+    // SAFETY: caller_cspace validated non-null above.
     let as_slot =
         unsafe { super::lookup_cap(caller_cspace, as_idx, CapTag::AddressSpace, Rights::MAP) }?;
     let as_ptr = {
@@ -291,6 +309,7 @@ pub fn sys_cap_create_thread(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     };
 
     // Resolve CSpace cap.
+    // SAFETY: caller_cspace validated non-null above.
     let cs_slot =
         unsafe { super::lookup_cap(caller_cspace, cs_idx, CapTag::CSpace, Rights::INSERT) }?;
     let new_cs_ptr = {
@@ -366,8 +385,10 @@ pub fn sys_cap_create_thread(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         tcb: new_tcb,
     }));
 
+    // SAFETY: thread_obj_ptr is valid Box allocation; header at offset 0.
     let nonnull = unsafe { NonNull::new_unchecked(thread_obj_ptr.cast::<KernelObjectHeader>()) };
 
+    // SAFETY: caller_cspace validated non-null above.
     let idx = unsafe {
         (*caller_cspace).insert_cap(CapTag::Thread, Rights::CONTROL | Rights::OBSERVE, nonnull)
     }
@@ -397,20 +418,24 @@ pub fn sys_cap_copy(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     let dest_cs_idx = tf.arg(1) as u32;
     let rights_mask = Rights(tf.arg(2) as u32);
 
+    // SAFETY: syscall entry ensures current_tcb() returns active thread's TCB.
     let tcb = unsafe { current_tcb() };
     if tcb.is_null()
     {
         return Err(SyscallError::InvalidCapability);
     }
+    // SAFETY: tcb validated non-null above.
     let caller_cspace = unsafe { (*tcb).cspace };
     if caller_cspace.is_null()
     {
         return Err(SyscallError::InvalidCapability);
     }
+    // SAFETY: caller_cspace validated non-null above.
     let caller_cspace_id = unsafe { (*caller_cspace).id() };
 
     // Resolve source slot (any non-null tag, any rights — just non-null).
     let (src_tag, src_rights, src_object) = {
+        // SAFETY: caller_cspace validated non-null above.
         let cs = unsafe { &*caller_cspace };
         let slot = cs.slot(src_idx).ok_or(SyscallError::InvalidCapability)?;
         if slot.tag == crate::cap::slot::CapTag::Null
@@ -430,6 +455,7 @@ pub fn sys_cap_copy(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     let effective_rights = rights_mask & src_rights;
 
     // Resolve destination CSpace cap.
+    // SAFETY: caller_cspace validated non-null above.
     let dest_cs_slot = unsafe {
         super::lookup_cap(
             caller_cspace,
@@ -443,9 +469,11 @@ pub fn sys_cap_copy(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         let obj = dest_cs_slot.object.ok_or(SyscallError::InvalidCapability)?;
         // cast_ptr_alignment: header is at offset 0 of CSpaceKernelObject; allocator guarantees alignment.
         #[allow(clippy::cast_ptr_alignment)]
+        // SAFETY: cap tag confirmed CSpace; object pointer is valid.
         let cs_obj = unsafe { &*(obj.as_ptr().cast::<CSpaceKernelObject>()) };
         cs_obj.cspace
     };
+    // SAFETY: dest_cs_ptr extracted from validated CSpace object above.
     let dest_cs_id = unsafe { (*dest_cs_ptr).id() };
 
     // Increment reference count on the shared kernel object.
@@ -455,9 +483,11 @@ pub fn sys_cap_copy(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     }
 
     // Insert into destination CSpace with the effective (attenuated) rights.
+    // SAFETY: dest_cs_ptr validated above.
     let new_idx = unsafe { (*dest_cs_ptr).insert_cap(src_tag, effective_rights, src_object) }
         .map_err(|e| {
             // Roll back the inc_ref if insertion fails.
+            // SAFETY: src_object validated above; we just incremented refcount.
             unsafe {
                 (*src_object.as_ptr()).dec_ref();
             }
@@ -472,6 +502,7 @@ pub fn sys_cap_copy(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     let parent = crate::cap::slot::SlotId::new(caller_cspace_id, src_idx);
     let child = crate::cap::slot::SlotId::new(dest_cs_id, new_idx);
     crate::cap::DERIVATION_LOCK.write_lock();
+    // SAFETY: DERIVATION_LOCK held; parent/child are valid SlotIds just created.
     unsafe {
         crate::cap::derivation::link_child(parent, child);
     }
@@ -498,20 +529,24 @@ pub fn sys_cap_derive(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     let src_idx = tf.arg(0) as u32;
     let rights_mask = Rights(tf.arg(1) as u32);
 
+    // SAFETY: syscall entry ensures current_tcb() returns active thread's TCB.
     let tcb = unsafe { current_tcb() };
     if tcb.is_null()
     {
         return Err(SyscallError::InvalidCapability);
     }
+    // SAFETY: tcb validated non-null above.
     let caller_cspace = unsafe { (*tcb).cspace };
     if caller_cspace.is_null()
     {
         return Err(SyscallError::InvalidCapability);
     }
+    // SAFETY: caller_cspace validated non-null above.
     let cspace_id = unsafe { (*caller_cspace).id() };
 
     // Resolve source slot.
     let (src_tag, src_rights, src_object) = {
+        // SAFETY: caller_cspace validated non-null above.
         let cs = unsafe { &*caller_cspace };
         let slot = cs.slot(src_idx).ok_or(SyscallError::InvalidCapability)?;
         if slot.tag == crate::cap::slot::CapTag::Null
@@ -528,12 +563,15 @@ pub fn sys_cap_derive(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     let effective_rights = rights_mask & src_rights;
 
     // Increment refcount, then insert into caller's CSpace.
+    // SAFETY: src_object validated above as valid NonNull from live slot.
     unsafe {
         (*src_object.as_ptr()).inc_ref();
     }
 
+    // SAFETY: caller_cspace validated non-null above.
     let new_idx = unsafe { (*caller_cspace).insert_cap(src_tag, effective_rights, src_object) }
         .map_err(|e| {
+            // SAFETY: src_object validated above; we just incremented refcount.
             unsafe {
                 (*src_object.as_ptr()).dec_ref();
             }
@@ -548,6 +586,7 @@ pub fn sys_cap_derive(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     let parent = crate::cap::slot::SlotId::new(cspace_id, src_idx);
     let child = crate::cap::slot::SlotId::new(cspace_id, new_idx);
     crate::cap::DERIVATION_LOCK.write_lock();
+    // SAFETY: DERIVATION_LOCK held; parent/child are valid SlotIds.
     unsafe {
         crate::cap::derivation::link_child(parent, child);
     }
@@ -570,20 +609,24 @@ pub fn sys_cap_delete(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 {
     let slot_idx = tf.arg(0) as u32;
 
+    // SAFETY: syscall entry ensures current_tcb() returns active thread's TCB.
     let tcb = unsafe { current_tcb() };
     if tcb.is_null()
     {
         return Err(SyscallError::InvalidCapability);
     }
+    // SAFETY: tcb validated non-null above.
     let caller_cspace = unsafe { (*tcb).cspace };
     if caller_cspace.is_null()
     {
         return Err(SyscallError::InvalidCapability);
     }
+    // SAFETY: caller_cspace validated non-null above.
     let cspace_id = unsafe { (*caller_cspace).id() };
 
     // Read object pointer; if slot is Null, return success.
     let obj_ptr = {
+        // SAFETY: caller_cspace validated non-null above.
         let cs = unsafe { &*caller_cspace };
         let slot = cs.slot(slot_idx).ok_or(SyscallError::InvalidCapability)?;
         if slot.tag == crate::cap::slot::CapTag::Null
@@ -597,24 +640,30 @@ pub fn sys_cap_delete(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 
     // Reparent children to this slot's parent, then unlink the slot itself.
     crate::cap::DERIVATION_LOCK.write_lock();
+    // SAFETY: caller_cspace validated non-null above; DERIVATION_LOCK held.
     let parent = unsafe { (*caller_cspace).slot(slot_idx).and_then(|s| s.deriv_parent) };
+    // SAFETY: DERIVATION_LOCK held; node and parent are valid SlotIds.
     unsafe {
         crate::cap::derivation::reparent_children(node, parent);
     }
+    // SAFETY: DERIVATION_LOCK held; node is valid SlotId.
     unsafe {
         crate::cap::derivation::unlink_node(node);
     }
     crate::cap::DERIVATION_LOCK.write_unlock();
 
     // Clear the slot and return it to the free list.
+    // SAFETY: caller_cspace validated; slot_idx confirmed valid above.
     unsafe {
         (*caller_cspace).free_slot(slot_idx);
     }
 
     // Dec-ref the object; free if no references remain.
+    // SAFETY: obj_ptr validated as live NonNull above.
     let remaining = unsafe { (*obj_ptr.as_ptr()).dec_ref() };
     if remaining == 0
     {
+        // SAFETY: refcount reached 0; no other references exist.
         unsafe {
             crate::cap::object::dealloc_object(obj_ptr);
         }
@@ -635,20 +684,24 @@ pub fn sys_cap_revoke(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 {
     let slot_idx = tf.arg(0) as u32;
 
+    // SAFETY: syscall entry ensures current_tcb() returns active thread's TCB.
     let tcb = unsafe { current_tcb() };
     if tcb.is_null()
     {
         return Err(SyscallError::InvalidCapability);
     }
+    // SAFETY: tcb validated non-null above.
     let caller_cspace = unsafe { (*tcb).cspace };
     if caller_cspace.is_null()
     {
         return Err(SyscallError::InvalidCapability);
     }
+    // SAFETY: caller_cspace validated non-null above.
     let cspace_id = unsafe { (*caller_cspace).id() };
 
     // Validate slot is non-null.
     {
+        // SAFETY: caller_cspace validated non-null above.
         let cs = unsafe { &*caller_cspace };
         let slot = cs.slot(slot_idx).ok_or(SyscallError::InvalidCapability)?;
         if slot.tag == crate::cap::slot::CapTag::Null
@@ -661,15 +714,18 @@ pub fn sys_cap_revoke(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 
     // Revoke the subtree under the lock; collect objects for deallocation.
     crate::cap::DERIVATION_LOCK.write_lock();
+    // SAFETY: DERIVATION_LOCK held; root is valid SlotId.
     let objects = unsafe { crate::cap::derivation::revoke_subtree(root) };
     crate::cap::DERIVATION_LOCK.write_unlock();
 
     // Dec-ref and free objects outside the lock (may acquire other locks).
     for obj_ptr in objects
     {
+        // SAFETY: obj_ptr from revoke_subtree; was a live capability object.
         let remaining = unsafe { (*obj_ptr.as_ptr()).dec_ref() };
         if remaining == 0
         {
+            // SAFETY: refcount reached 0; no other references exist.
             unsafe {
                 crate::cap::object::dealloc_object(obj_ptr);
             }
@@ -703,11 +759,13 @@ pub fn sys_cap_move(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     let dest_cs_idx = tf.arg(1) as u32;
     let dest_idx = tf.arg(2) as u32; // 0 = auto-allocate
 
+    // SAFETY: syscall entry ensures current_tcb() returns active thread's TCB.
     let tcb = unsafe { current_tcb() };
     if tcb.is_null()
     {
         return Err(SyscallError::InvalidCapability);
     }
+    // SAFETY: tcb validated non-null above.
     let caller_cspace = unsafe { (*tcb).cspace };
     if caller_cspace.is_null()
     {
@@ -715,6 +773,7 @@ pub fn sys_cap_move(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     }
 
     // Resolve destination CSpace.
+    // SAFETY: caller_cspace validated non-null above.
     let dest_cs_slot = unsafe {
         super::lookup_cap(
             caller_cspace,
@@ -727,6 +786,7 @@ pub fn sys_cap_move(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         let obj = dest_cs_slot.object.ok_or(SyscallError::InvalidCapability)?;
         // cast_ptr_alignment: header is at offset 0 of CSpaceKernelObject; allocator guarantees alignment.
         #[allow(clippy::cast_ptr_alignment)]
+        // SAFETY: cap tag confirmed CSpace; object pointer is valid.
         let cs_obj = unsafe { &*(obj.as_ptr().cast::<CSpaceKernelObject>()) };
         cs_obj.cspace
     };
@@ -743,11 +803,14 @@ pub fn sys_cap_move(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     }
 
     // Explicit destination index — keep inline so we can use insert_cap_at.
+    // SAFETY: caller_cspace validated non-null above.
     let src_cspace_id = unsafe { (*caller_cspace).id() };
+    // SAFETY: dest_cs_ptr extracted from validated CSpace object above.
     let dest_cspace_id = unsafe { (*dest_cs_ptr).id() };
 
     // Read source slot contents.
     let (src_tag, src_rights, src_object) = {
+        // SAFETY: caller_cspace validated non-null above.
         let cs = unsafe { &*caller_cspace };
         let slot = cs.slot(src_idx).ok_or(SyscallError::InvalidCapability)?;
         if slot.tag == crate::cap::slot::CapTag::Null
@@ -763,6 +826,7 @@ pub fn sys_cap_move(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 
     crate::cap::DERIVATION_LOCK.write_lock();
 
+    // SAFETY: dest_cs_ptr validated above; DERIVATION_LOCK held.
     unsafe { (*dest_cs_ptr).insert_cap_at(dest_idx, src_tag, src_rights, src_object) }.map_err(
         |_| {
             crate::cap::DERIVATION_LOCK.write_unlock();
@@ -775,7 +839,10 @@ pub fn sys_cap_move(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 
     // Copy derivation links to destination.
     let (src_parent, src_first_child, src_prev, src_next) = {
+        // SAFETY: caller_cspace validated; DERIVATION_LOCK held.
         let cs = unsafe { &*caller_cspace };
+        // SAFETY: We validated src_idx exists at line 752
+        #[allow(clippy::unwrap_used)]
         let slot = cs.slot(src_idx).unwrap();
         (
             slot.deriv_parent,
@@ -784,6 +851,7 @@ pub fn sys_cap_move(tf: &mut TrapFrame) -> Result<u64, SyscallError>
             slot.deriv_next_sibling,
         )
     };
+    // SAFETY: dest_cs_ptr validated; DERIVATION_LOCK held.
     if let Some(dst_slot) = unsafe { (*dest_cs_ptr).slot_mut(dest_idx) }
     {
         dst_slot.deriv_parent = src_parent;
@@ -797,6 +865,7 @@ pub fn sys_cap_move(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     {
         if let Some(parent_cs) = crate::cap::lookup_cspace(parent_id.cspace_id)
         {
+            // SAFETY: parent_cs from registry; DERIVATION_LOCK held.
             if let Some(parent_slot) = unsafe { (*parent_cs).slot_mut(parent_id.index.get()) }
             {
                 if parent_slot.deriv_first_child == Some(src_slot_id)
@@ -812,6 +881,7 @@ pub fn sys_cap_move(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     {
         if let Some(prev_cs) = crate::cap::lookup_cspace(prev_id.cspace_id)
         {
+            // SAFETY: prev_cs from registry; DERIVATION_LOCK held.
             if let Some(prev_slot) = unsafe { (*prev_cs).slot_mut(prev_id.index.get()) }
             {
                 if prev_slot.deriv_next_sibling == Some(src_slot_id)
@@ -825,6 +895,7 @@ pub fn sys_cap_move(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     {
         if let Some(next_cs) = crate::cap::lookup_cspace(next_id.cspace_id)
         {
+            // SAFETY: next_cs from registry; DERIVATION_LOCK held.
             if let Some(next_slot) = unsafe { (*next_cs).slot_mut(next_id.index.get()) }
             {
                 if next_slot.deriv_prev_sibling == Some(src_slot_id)
@@ -841,6 +912,7 @@ pub fn sys_cap_move(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     {
         child_cur = if let Some(child_cs) = crate::cap::lookup_cspace(child_id.cspace_id)
         {
+            // SAFETY: child_cs from registry; DERIVATION_LOCK held.
             if let Some(child_slot) = unsafe { (*child_cs).slot_mut(child_id.index.get()) }
             {
                 child_slot.deriv_parent = Some(dst_slot_id);
@@ -858,6 +930,7 @@ pub fn sys_cap_move(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     }
 
     // Clear the source slot. No inc_ref/dec_ref needed (it's a move).
+    // SAFETY: caller_cspace validated; DERIVATION_LOCK held.
     unsafe {
         (*caller_cspace).free_slot(src_idx);
     }
@@ -889,20 +962,24 @@ pub fn sys_cap_insert(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     let dest_slot_idx = tf.arg(2) as u32;
     let rights_mask = Rights(tf.arg(3) as u32);
 
+    // SAFETY: syscall entry ensures current_tcb() returns active thread's TCB.
     let tcb = unsafe { current_tcb() };
     if tcb.is_null()
     {
         return Err(SyscallError::InvalidCapability);
     }
+    // SAFETY: tcb validated non-null above.
     let caller_cspace = unsafe { (*tcb).cspace };
     if caller_cspace.is_null()
     {
         return Err(SyscallError::InvalidCapability);
     }
+    // SAFETY: caller_cspace validated non-null above.
     let src_cspace_id = unsafe { (*caller_cspace).id() };
 
     // Read source slot.
     let (src_tag, src_rights, src_object) = {
+        // SAFETY: caller_cspace validated non-null above.
         let cs = unsafe { &*caller_cspace };
         let slot = cs.slot(src_idx).ok_or(SyscallError::InvalidCapability)?;
         if slot.tag == crate::cap::slot::CapTag::Null
@@ -919,6 +996,7 @@ pub fn sys_cap_insert(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     let effective_rights = rights_mask & src_rights;
 
     // Resolve destination CSpace.
+    // SAFETY: caller_cspace validated non-null above.
     let dest_cs_slot = unsafe {
         super::lookup_cap(
             caller_cspace,
@@ -931,19 +1009,24 @@ pub fn sys_cap_insert(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         let obj = dest_cs_slot.object.ok_or(SyscallError::InvalidCapability)?;
         // cast_ptr_alignment: header is at offset 0 of CSpaceKernelObject; allocator guarantees alignment.
         #[allow(clippy::cast_ptr_alignment)]
+        // SAFETY: cap tag confirmed CSpace; object pointer is valid.
         let cs_obj = unsafe { &*(obj.as_ptr().cast::<CSpaceKernelObject>()) };
         cs_obj.cspace
     };
+    // SAFETY: dest_cs_ptr extracted from validated CSpace object above.
     let dest_cspace_id = unsafe { (*dest_cs_ptr).id() };
 
     // Increment refcount before inserting.
+    // SAFETY: src_object validated above as live NonNull from slot.
     unsafe {
         (*src_object.as_ptr()).inc_ref();
     }
 
     // Insert at the specific index.
+    // SAFETY: dest_cs_ptr validated above.
     unsafe { (*dest_cs_ptr).insert_cap_at(dest_slot_idx, src_tag, effective_rights, src_object) }
         .map_err(|e| {
+        // SAFETY: src_object validated above; we just incremented refcount.
         unsafe {
             (*src_object.as_ptr()).dec_ref();
         }
@@ -959,6 +1042,7 @@ pub fn sys_cap_insert(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     let parent = crate::cap::slot::SlotId::new(src_cspace_id, src_idx);
     let child = crate::cap::slot::SlotId::new(dest_cspace_id, dest_slot_idx);
     crate::cap::DERIVATION_LOCK.write_lock();
+    // SAFETY: DERIVATION_LOCK held; parent/child are valid SlotIds.
     unsafe {
         crate::cap::derivation::link_child(parent, child);
     }
@@ -989,11 +1073,13 @@ pub fn sys_cap_create_event_queue(tf: &mut TrapFrame) -> Result<u64, SyscallErro
         return Err(SyscallError::InvalidArgument);
     }
 
+    // SAFETY: syscall entry ensures current_tcb() returns active thread's TCB.
     let tcb = unsafe { current_tcb() };
     if tcb.is_null()
     {
         return Err(SyscallError::InvalidCapability);
     }
+    // SAFETY: tcb validated non-null above.
     let cspace = unsafe { (*tcb).cspace };
     if cspace.is_null()
     {
@@ -1009,8 +1095,10 @@ pub fn sys_cap_create_event_queue(tf: &mut TrapFrame) -> Result<u64, SyscallErro
         state: eq_state_ptr,
     }));
 
+    // SAFETY: eq_obj_ptr is valid Box allocation; header at offset 0.
     let nonnull = unsafe { NonNull::new_unchecked(eq_obj_ptr.cast::<KernelObjectHeader>()) };
 
+    // SAFETY: cspace validated non-null above.
     let idx =
         unsafe { (*cspace).insert_cap(CapTag::EventQueue, Rights::POST | Rights::RECV, nonnull) }
             .map_err(|_| SyscallError::OutOfMemory)?;
@@ -1033,11 +1121,13 @@ pub fn sys_cap_create_wait_set(_tf: &mut TrapFrame) -> Result<u64, SyscallError>
     use crate::ipc::wait_set::WaitSetState;
     use core::ptr::NonNull;
 
+    // SAFETY: syscall entry ensures current_tcb() returns active thread's TCB.
     let tcb = unsafe { current_tcb() };
     if tcb.is_null()
     {
         return Err(SyscallError::InvalidCapability);
     }
+    // SAFETY: tcb validated non-null above.
     let cspace = unsafe { (*tcb).cspace };
     if cspace.is_null()
     {
@@ -1053,8 +1143,10 @@ pub fn sys_cap_create_wait_set(_tf: &mut TrapFrame) -> Result<u64, SyscallError>
         state: ws_state_ptr,
     }));
 
+    // SAFETY: ws_obj_ptr is valid Box allocation; header at offset 0.
     let nonnull = unsafe { NonNull::new_unchecked(ws_obj_ptr.cast::<KernelObjectHeader>()) };
 
+    // SAFETY: cspace validated non-null above.
     let idx =
         unsafe { (*cspace).insert_cap(CapTag::WaitSet, Rights::MODIFY | Rights::WAIT, nonnull) }
             .map_err(|_| SyscallError::OutOfMemory)?;

@@ -171,17 +171,30 @@ static mut IPC_BUF: IpcBuf = IpcBuf([0u64; 512]);
 
 /// Kernel entry point for ktest.
 ///
-/// `aspace_cap` — slot index in ktest's `CSpace` pointing to its own `AddressSpace`.
-/// Provided by the kernel as the initial argument (same as for real init).
+/// `info_ptr` — virtual address of the read-only [`InitInfo`](init_protocol::InitInfo)
+/// page mapped by the kernel. Provided as the initial argument (same as for real init).
 #[no_mangle]
-pub extern "C" fn _start(aspace_cap: u32) -> !
+pub extern "C" fn _start(info_ptr: u64) -> !
 {
-    run(aspace_cap)
+    run(info_ptr)
 }
 
-fn run(aspace_cap: u32) -> !
+fn run(info_ptr: u64) -> !
 {
     klog("ktest: starting");
+
+    // Read InitInfo from the kernel-mapped page.
+    // SAFETY: info_ptr is a valid page-aligned virtual address mapped by the
+    // kernel in Phase 9; the page contains a valid InitInfo struct.
+    let info: &init_protocol::InitInfo = unsafe { &*(info_ptr as *const init_protocol::InitInfo) };
+
+    if info.version != init_protocol::INIT_PROTOCOL_VERSION
+    {
+        klog("ktest: FATAL: init protocol version mismatch");
+        halt();
+    }
+
+    let aspace_cap = info.aspace_cap;
 
     // Register the IPC buffer before any IPC syscall. All Tier 1 IPC tests
     // and integration tests that use ipc_recv or read_recv_caps depend on this.
@@ -196,7 +209,7 @@ fn run(aspace_cap: u32) -> !
     // via splits; without pooling, resources are exhausted after ~10 tests.
     // SAFETY: Called once before any tests run; no concurrent access yet.
     unsafe {
-        frame_pool::init(aspace_cap);
+        frame_pool::init(info);
     }
 
     let ctx = TestContext {

@@ -6,6 +6,7 @@ publish = false
 
 [dependencies]
 boot-protocol = { workspace = true }
+init-protocol = { workspace = true }
 font = { workspace = true }
 syscall = { workspace = true }
 

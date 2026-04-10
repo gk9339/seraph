@@ -240,10 +240,10 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
     // Initialises the root CSpace and mints initial capabilities for all
     // boot-provided hardware resources.
     kprintln!("Phase 7: Capability System");
-    let cap_count = cap::init_capability_system(&platform_resources, boot_info as u64);
+    let cspace_layout = cap::init_capability_system(&platform_resources, boot_info as u64);
     kprintln!(
         "capability system initialised, {} slots populated",
-        cap_count
+        cspace_layout.total_populated
     );
 
     // ── Phase 8: scheduler ────────────────────────────────────────────────────
@@ -298,11 +298,7 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
         // CSpace, followed by Frame caps for each init segment. These are needed
         // so init can create child threads bound to its own address space and map
         // its code pages into child processes once a process manager is available.
-        //
-        // The AddressSpace cap slot index is passed to init as its initial
-        // argument (a0/rdi). Init locates the segment Frame caps at slots
-        // (init_aspace_slot + 1) through (init_aspace_slot + segment_count).
-        let init_aspace_cap_slot = {
+        let (init_aspace_cap_slot, segment_frame_base, segment_frame_count) = {
             use alloc::boxed::Box;
             use boot_protocol::SegmentFlags;
             use cap::object::{AddressSpaceObject, FrameObject, KernelObjectHeader, ObjectType};
@@ -322,13 +318,13 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
             // SAFETY: Box::into_raw returns non-null pointer; cast preserves validity.
             let as_nn =
                 unsafe { NonNull::new_unchecked(Box::into_raw(as_obj).cast::<KernelObjectHeader>()) };
-            let slot = cs
+            let aspace_slot = cs
                 .insert_cap(CapTag::AddressSpace, Rights::MAP | Rights::READ, as_nn)
                 .unwrap_or_else(|_| fatal("Phase 9: cannot insert init AddressSpace cap"));
 
             // Frame caps for each init segment (phys base + size + permissions).
-            // Stored in order: slot+1 = segment[0], slot+2 = segment[1], etc.
             let seg_count = init_image.segment_count as usize;
+            let mut seg_base: u32 = 0;
             for i in 0..seg_count
             {
                 let seg = &init_image.segments[i];
@@ -346,12 +342,106 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
                 // SAFETY: Box::into_raw returns non-null pointer; cast preserves validity.
                 let fo_nn =
                     unsafe { NonNull::new_unchecked(Box::into_raw(fo).cast::<KernelObjectHeader>()) };
-                cs.insert_cap(CapTag::Frame, rights, fo_nn)
+                let slot = cs.insert_cap(CapTag::Frame, rights, fo_nn)
                     .unwrap_or_else(|_| fatal("Phase 9: cannot insert init segment Frame cap"));
+                if i == 0
+                {
+                    seg_base = slot;
+                }
             }
-            kprintln!("init: aspace cap={} + {} frame caps", slot, seg_count,);
-            slot
+            kprintln!(
+                "init: aspace cap={} + {} frame caps",
+                aspace_slot,
+                seg_count,
+            );
+            (aspace_slot, seg_base, seg_count as u32)
         };
+
+        // ── Populate InitInfo page ───────────────────────────────────────────
+        // Allocate a physical frame, fill in InitInfo + CapDescriptor array,
+        // then map read-only into init's address space at INIT_INFO_VADDR.
+        let info_page_phys = allocator
+            .alloc(0) // 2^0 = 1 page
+            .unwrap_or_else(|| fatal("Phase 9: out of memory for InitInfo page"));
+
+        {
+            use init_protocol::{InitInfo, INIT_INFO_VADDR, INIT_PROTOCOL_VERSION};
+
+            let info_page_virt = mm::paging::phys_to_virt(info_page_phys) as *mut u8;
+
+            // Zero the page.
+            // SAFETY: info_page_virt is valid for PAGE_SIZE bytes; just allocated.
+            unsafe { core::ptr::write_bytes(info_page_virt, 0, mm::PAGE_SIZE) };
+
+            let descriptors_offset = core::mem::size_of::<InitInfo>() as u32;
+
+            let info = InitInfo {
+                version: INIT_PROTOCOL_VERSION,
+                cap_descriptor_count: cspace_layout.descriptors.len() as u32,
+                aspace_cap: init_aspace_cap_slot,
+                sched_control_cap: cspace_layout.sched_control_slot,
+                memory_frame_base: cspace_layout.memory_frame_base,
+                memory_frame_count: cspace_layout.memory_frame_count,
+                segment_frame_base,
+                segment_frame_count,
+                module_frame_base: 0,
+                module_frame_count: 0,
+                hw_cap_base: cspace_layout.hw_cap_base,
+                hw_cap_count: cspace_layout.hw_cap_count,
+                cap_descriptors_offset: descriptors_offset,
+                reserved: 0,
+            };
+
+            // Write InitInfo header.
+            // SAFETY: info_page_virt is page-aligned (4096-byte), satisfying InitInfo's
+            // 4-byte alignment requirement; page was just zeroed and is fully writable.
+            // cast_ptr_alignment: page alignment (4096) exceeds struct alignment (4).
+            #[allow(clippy::cast_ptr_alignment)]
+            unsafe {
+                core::ptr::write(info_page_virt.cast::<InitInfo>(), info);
+            }
+
+            // Write CapDescriptor array after the header.
+            // SAFETY: descriptors_offset < PAGE_SIZE (checked below); info_page_virt
+            // is valid for PAGE_SIZE bytes.
+            let desc_ptr = unsafe { info_page_virt.add(descriptors_offset as usize) };
+            let desc_count = cspace_layout.descriptors.len();
+            let desc_byte_len =
+                desc_count * core::mem::size_of::<init_protocol::CapDescriptor>();
+
+            // Verify the descriptors fit within the page.
+            if descriptors_offset as usize + desc_byte_len > mm::PAGE_SIZE
+            {
+                fatal("Phase 9: InitInfo + descriptors exceed one page");
+            }
+
+            // SAFETY: desc_ptr within the allocated page; descriptors slice is valid.
+            unsafe {
+                core::ptr::copy_nonoverlapping(
+                    cspace_layout.descriptors.as_ptr().cast::<u8>(),
+                    desc_ptr,
+                    desc_byte_len,
+                );
+            }
+
+            // Map the info page read-only into init's address space.
+            let flags = mm::paging::PageFlags {
+                readable: true,
+                writable: false,
+                executable: false,
+                uncacheable: false,
+            };
+            // SAFETY: init_as_ptr valid; info_page_phys just allocated; INIT_INFO_VADDR
+            // is page-aligned and within the user address range.
+            unsafe { (*init_as_ptr).map_page(INIT_INFO_VADDR, info_page_phys, flags, allocator) }
+                .unwrap_or_else(|()| fatal("Phase 9: failed to map InitInfo page"));
+
+            kprintln!(
+                "init: info page at {:#x} ({} cap descriptors)",
+                INIT_INFO_VADDR,
+                desc_count,
+            );
+        }
 
         // Map init's user stack (INIT_STACK_PAGES pages below INIT_STACK_TOP).
         // SAFETY: init_as_ptr valid (allocated above); stack_top is page-aligned
@@ -377,7 +467,7 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
         let init_saved = arch::current::context::new_state(
             init_image.entry_point,
             init_kstack_top,
-            u64::from(init_aspace_cap_slot), // forwarded to init's a0/rdi on first entry
+            init_protocol::INIT_INFO_VADDR, // forwarded to init's a0/rdi on first entry
             true,
         );
 

@@ -13,6 +13,7 @@ members = [
     "drivers/virtio/blk",
     "fs/fat",
     "abi/boot-protocol",
+    "abi/init-protocol",
     "abi/syscall",
     "shared/elf",
     "shared/font",
@@ -34,6 +35,7 @@ cast_ptr_alignment               = "warn"
 
 [workspace.dependencies]
 boot-protocol = { path = "abi/boot-protocol" }
+init-protocol = { path = "abi/init-protocol" }
 font = { path = "shared/font" }
 syscall = { path = "abi/syscall", package = "syscall-abi" }
 syscall-abi = { path = "abi/syscall" }

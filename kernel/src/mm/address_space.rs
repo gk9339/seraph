@@ -9,12 +9,8 @@
 //! on RISC-V). Intermediate page table frames are allocated from the buddy
 //! allocator on demand.
 //!
-//! ## Constants
-//!
-//! | Constant | Value | Meaning |
-//! |---|---|---|
-//! | `INIT_STACK_TOP` | `0x7FFF_FFFF_E000` | Virtual top of init's user stack |
-//! | `INIT_STACK_PAGES` | 4 | Number of 4 KiB pages in the user stack (16 KiB) |
+//! Init stack constants (`INIT_STACK_TOP`, `INIT_STACK_PAGES`) are defined in
+//! the `init-protocol` ABI crate and re-exported here for kernel use.
 //!
 //! ## Kernel mapping inheritance
 //! `new_user` copies kernel PML4 entries [256..512] from the currently active
@@ -38,14 +34,8 @@ use boot_protocol::{InitSegment, SegmentFlags};
 use crate::mm::paging::phys_to_virt;
 use crate::mm::{BuddyAllocator, PAGE_SIZE};
 
-/// Virtual address of the top of init's user stack.
-///
-/// `INIT_STACK_PAGES` pages are mapped immediately below this address.
-/// One additional guard page (unmapped) sits below the stack.
-pub const INIT_STACK_TOP: u64 = 0x7FFF_FFFF_E000;
-
-/// Number of 4 KiB pages in init's user stack (16 KiB total).
-pub const INIT_STACK_PAGES: usize = 4;
+// Init stack constants are defined in the init protocol ABI crate.
+pub use init_protocol::{INIT_STACK_PAGES, INIT_STACK_TOP};
 
 // ── AddressSpace ──────────────────────────────────────────────────────────────
 

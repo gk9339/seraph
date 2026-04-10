@@ -50,6 +50,7 @@ pub use slot::{CSpaceId, CapTag, CapabilitySlot, Rights, SlotId};
 use boot_protocol::{BootInfo, MemoryMapEntry, MemoryType, PlatformResource, ResourceType};
 use core::ptr::NonNull;
 use core::sync::atomic::{AtomicPtr, AtomicU32, Ordering};
+use init_protocol::CapDescriptor;
 
 use crate::mm::paging::phys_to_virt;
 
@@ -184,14 +185,38 @@ const ROOT_CSPACE_MAX_SLOTS: usize = 16384;
 
 // ── Phase 7 entry point ───────────────────────────────────────────────────────
 
+// ── CSpace layout ────────────────────────────────────────────────────────────
+
+/// Describes the `CSpace` slot layout after Phase 7 population.
+///
+/// Returned by [`init_capability_system`] so Phase 9 can populate the
+/// [`InitInfo`](init_protocol::InitInfo) page without re-scanning the `CSpace`.
+pub struct CSpaceLayout
+{
+    /// First slot index of usable memory `Frame` capabilities.
+    pub memory_frame_base: u32,
+    /// Number of usable memory `Frame` capabilities.
+    pub memory_frame_count: u32,
+    /// First slot index of hardware resource capabilities (MMIO, IRQ, I/O port, firmware tables).
+    pub hw_cap_base: u32,
+    /// Number of hardware resource capabilities.
+    pub hw_cap_count: u32,
+    /// Slot index of the `SchedControl` capability.
+    pub sched_control_slot: u32,
+    /// Total number of populated slots.
+    pub total_populated: usize,
+    /// Per-capability descriptors for all populated slots.
+    pub descriptors: alloc::vec::Vec<CapDescriptor>,
+}
+
 /// Initialise the capability system and populate the root `CSpace.`
 ///
 /// `platform_resources` is the validated list from Phase 6. `boot_info_phys`
 /// is the physical address of the [`BootInfo`] structure; re-derived here via
 /// the direct physical map (active since Phase 3) to access the memory map.
 ///
-/// Returns the number of capability slots populated. Calls [`crate::fatal`] on
-/// any allocation failure.
+/// Returns a [`CSpaceLayout`] describing the slot ranges populated. Calls
+/// [`crate::fatal`] on any allocation failure.
 ///
 /// # Safety
 ///
@@ -200,7 +225,7 @@ const ROOT_CSPACE_MAX_SLOTS: usize = 16384;
 pub fn init_capability_system(
     platform_resources: &[PlatformResource],
     boot_info_phys: u64,
-) -> usize
+) -> CSpaceLayout
 {
     let id = NEXT_CSPACE_ID.fetch_add(1, Ordering::Relaxed);
     let mut cspace = Box::new(CSpace::new(id, ROOT_CSPACE_MAX_SLOTS));
@@ -225,9 +250,7 @@ pub fn init_capability_system(
         }
     };
 
-    populate_cspace(&mut cspace, mmap, platform_resources);
-
-    let count = cspace.populated_count();
+    let layout = populate_cspace(&mut cspace, mmap, platform_resources);
 
     // Store in ROOT_CSPACE (kernel runtime only; test builds skip this).
     #[cfg(not(test))]
@@ -244,13 +267,14 @@ pub fn init_capability_system(
     #[cfg(test)]
     let _ = cspace;
 
-    count
+    layout
 }
 
 /// Core `CSpace` population logic, separated for testability.
 ///
 /// Creates one capability per usable memory region, per platform resource,
-/// and one `SchedControl` capability.
+/// and one `SchedControl` capability. Returns a [`CSpaceLayout`] describing
+/// the slot ranges and per-cap descriptors.
 // too_many_lines: one logical pass over all boot-time resource types; splitting
 // would require threading shared state (cspace) through multiple helper functions.
 #[allow(clippy::too_many_lines)]
@@ -258,9 +282,15 @@ fn populate_cspace(
     cspace: &mut CSpace,
     mmap: &[MemoryMapEntry],
     platform_resources: &[PlatformResource],
-)
+) -> CSpaceLayout
 {
+    use init_protocol::CapType;
+
+    let mut descriptors = alloc::vec::Vec::new();
+
     // Usable physical memory → Frame caps with MAP | WRITE.
+    let mut memory_frame_base: u32 = 0;
+    let mut memory_frame_count: u32 = 0;
     for entry in mmap
     {
         if entry.memory_type != MemoryType::Usable
@@ -273,16 +303,30 @@ fn populate_cspace(
             size: entry.size,
         });
         let ptr = nonnull_from_box(obj);
-        insert_or_fatal(
+        let slot = insert_or_fatal(
             cspace,
             CapTag::Frame,
             Rights::MAP | Rights::WRITE,
             ptr,
             "Phase 7: cannot allocate Frame capability for usable memory",
         );
+        if memory_frame_count == 0
+        {
+            memory_frame_base = slot;
+        }
+        descriptors.push(CapDescriptor {
+            slot,
+            cap_type: CapType::Frame,
+            pad: [0; 3],
+            aux0: entry.physical_base,
+            aux1: entry.size,
+        });
+        memory_frame_count += 1;
     }
 
     // Platform resources → type-specific capabilities.
+    let mut hw_cap_base: u32 = 0;
+    let mut hw_cap_count: u32 = 0;
     for res in platform_resources
     {
         match res.resource_type
@@ -298,13 +342,25 @@ fn populate_cspace(
                     _pad: 0,
                 });
                 let ptr = nonnull_from_box(obj);
-                insert_or_fatal(
+                let slot = insert_or_fatal(
                     cspace,
                     CapTag::MmioRegion,
                     Rights::MAP,
                     ptr,
                     "Phase 7: cannot allocate MmioRegion capability",
                 );
+                if hw_cap_count == 0
+                {
+                    hw_cap_base = slot;
+                }
+                descriptors.push(CapDescriptor {
+                    slot,
+                    cap_type: CapType::MmioRegion,
+                    pad: [0; 3],
+                    aux0: res.base,
+                    aux1: res.size,
+                });
+                hw_cap_count += 1;
             }
 
             // Firmware tables: Frame cap with MAP only (read-only, no WRITE/EXECUTE).
@@ -316,13 +372,25 @@ fn populate_cspace(
                     size: res.size,
                 });
                 let ptr = nonnull_from_box(obj);
-                insert_or_fatal(
+                let slot = insert_or_fatal(
                     cspace,
                     CapTag::Frame,
                     Rights::MAP,
                     ptr,
                     "Phase 7: cannot allocate Frame capability for firmware table",
                 );
+                if hw_cap_count == 0
+                {
+                    hw_cap_base = slot;
+                }
+                descriptors.push(CapDescriptor {
+                    slot,
+                    cap_type: CapType::Frame,
+                    pad: [0; 3],
+                    aux0: res.base,
+                    aux1: res.size,
+                });
+                hw_cap_count += 1;
             }
 
             // Interrupt lines: Interrupt cap with SIGNAL right so drivers can
@@ -335,13 +403,25 @@ fn populate_cspace(
                     flags: res.flags,
                 });
                 let ptr = nonnull_from_box(obj);
-                insert_or_fatal(
+                let slot = insert_or_fatal(
                     cspace,
                     CapTag::Interrupt,
                     Rights::SIGNAL,
                     ptr,
                     "Phase 7: cannot allocate Interrupt capability",
                 );
+                if hw_cap_count == 0
+                {
+                    hw_cap_base = slot;
+                }
+                descriptors.push(CapDescriptor {
+                    slot,
+                    cap_type: CapType::Interrupt,
+                    pad: [0; 3],
+                    aux0: u64::from(res.id as u32),
+                    aux1: u64::from(res.flags),
+                });
+                hw_cap_count += 1;
             }
 
             // I/O port ranges (x86-64 only — validated/filtered in Phase 6).
@@ -354,13 +434,25 @@ fn populate_cspace(
                     _pad: 0,
                 });
                 let ptr = nonnull_from_box(obj);
-                insert_or_fatal(
+                let slot = insert_or_fatal(
                     cspace,
                     CapTag::IoPortRange,
                     Rights::USE,
                     ptr,
                     "Phase 7: cannot allocate IoPortRange capability",
                 );
+                if hw_cap_count == 0
+                {
+                    hw_cap_base = slot;
+                }
+                descriptors.push(CapDescriptor {
+                    slot,
+                    cap_type: CapType::IoPortRange,
+                    pad: [0; 3],
+                    aux0: res.base,
+                    aux1: res.size,
+                });
+                hw_cap_count += 1;
             }
         }
     }
@@ -370,13 +462,30 @@ fn populate_cspace(
         header: KernelObjectHeader::new(ObjectType::SchedControl),
     });
     let ptr = nonnull_from_box(obj);
-    insert_or_fatal(
+    let sched_control_slot = insert_or_fatal(
         cspace,
         CapTag::SchedControl,
         Rights::ELEVATE,
         ptr,
         "Phase 7: cannot allocate SchedControl capability",
     );
+    descriptors.push(CapDescriptor {
+        slot: sched_control_slot,
+        cap_type: CapType::SchedControl,
+        pad: [0; 3],
+        aux0: 0,
+        aux1: 0,
+    });
+
+    CSpaceLayout {
+        memory_frame_base,
+        memory_frame_count,
+        hw_cap_base,
+        hw_cap_count,
+        sched_control_slot,
+        total_populated: cspace.populated_count(),
+        descriptors,
+    }
 }
 
 /// Cast `Box<T>` to `NonNull<KernelObjectHeader>` by leaking the box.

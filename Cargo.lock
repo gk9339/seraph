@@ -142,9 +142,14 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 name = "init"
 version = "0.1.0"
 dependencies = [
+ "init-protocol",
  "syscall",
  "syscall-abi",
 ]
+
+[[package]]
+name = "init-protocol"
+version = "0.1.0"
 
 [[package]]
 name = "is_terminal_polyfill"
@@ -158,6 +163,7 @@ version = "0.0.1"
 dependencies = [
  "boot-protocol",
  "font",
+ "init-protocol",
  "syscall-abi",
 ]
 
@@ -165,6 +171,7 @@ dependencies = [
 name = "ktest"
 version = "0.1.0"
 dependencies = [
+ "init-protocol",
  "syscall",
  "syscall-abi",
 ]

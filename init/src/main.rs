@@ -21,7 +21,7 @@
 use core::panic::PanicInfo;
 
 #[no_mangle]
-pub extern "C" fn _start(_aspace_cap: u32) -> !
+pub extern "C" fn _start(_info_ptr: u64) -> !
 {
     loop
     {

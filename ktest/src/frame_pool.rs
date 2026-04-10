@@ -119,9 +119,10 @@ unsafe fn split_frame_recursive(frame_cap: u32, count: &mut usize)
 /// # Safety
 ///
 /// Must be called exactly once before any tests run, while no other threads exist.
-pub unsafe fn init(aspace_cap: u32)
+pub unsafe fn init(info: &init_protocol::InitInfo)
 {
-    let bss_frame = aspace_cap + 3;
+    // BSS is the third segment (index 2) after TEXT and RODATA.
+    let bss_frame = info.segment_frame_base + 2;
 
     let mut count = 0usize;
 

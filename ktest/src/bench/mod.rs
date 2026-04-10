@@ -215,12 +215,16 @@ static mut BENCH_SIGNAL_STACK: ChildStack = ChildStack::ZERO;
 /// Child entry for `bench_signal_roundtrip`.
 ///
 /// Waits on `in_slot` then sends 1 bit on `out_slot`, repeated N times.
-/// `arg`: bits[15:0] = `in_slot`, bits[31:16] = `out_slot`, bits[47:32] = N.
+/// Signals `done_slot` before exiting so the parent can wait for completion.
+///
+/// `arg`: bits[15:0] = `in_slot`, bits[31:16] = `out_slot`,
+///        bits[47:32] = `done_slot`, bits[63:48] = N.
 fn signal_pong_entry(arg: u64) -> !
 {
     let in_slot = (arg & 0xFFFF) as u32;
     let out_slot = ((arg >> 16) & 0xFFFF) as u32;
-    let n = arg >> 32;
+    let done_slot = ((arg >> 32) & 0xFFFF) as u32;
+    let n = arg >> 48;
 
     for _ in 0..n
     {
@@ -233,6 +237,7 @@ fn signal_pong_entry(arg: u64) -> !
             break;
         }
     }
+    signal_send(done_slot, 1).ok();
     thread_exit()
 }
 
@@ -253,13 +258,18 @@ fn bench_signal_roundtrip(ctx: &crate::TestContext)
 
     let Ok(ping) = cap_create_signal() else { return };
     let Ok(pong) = cap_create_signal() else { return };
+    let Ok(done) = cap_create_signal() else { return };
 
     let Ok(cs) = cap_create_cspace(16) else { return };
-    // Child waits on ping → needs WAIT right; sends on pong → needs SIGNAL right.
+    // Child waits on ping → needs WAIT right; sends on pong/done → needs SIGNAL right.
     let Ok(child_ping) = cap_copy(ping, cs, RIGHTS_WAIT) else { return };
     let Ok(child_pong) = cap_copy(pong, cs, RIGHTS_SIGNAL) else { return };
+    let Ok(child_done) = cap_copy(done, cs, RIGHTS_SIGNAL) else { return };
 
-    let arg = u64::from(child_ping) | (u64::from(child_pong) << 16) | (N << 32);
+    let arg = u64::from(child_ping)
+        | (u64::from(child_pong) << 16)
+        | (u64::from(child_done) << 32)
+        | (N << 48);
     let Ok(th) = cap_create_thread(ctx.aspace_cap, cs) else { return };
     let stack_top = ChildStack::top(core::ptr::addr_of!(BENCH_SIGNAL_STACK));
 
@@ -284,12 +294,17 @@ fn bench_signal_roundtrip(ctx: &crate::TestContext)
     let t1 = cycles_now();
 
     let total = t1.saturating_sub(t0);
+
+    // Wait for child to signal completion before cleaning up.
+    signal_wait(done).ok();
+
     crate::klog("ktest: bench  signal_roundtrip  N=1000");
     crate::log_u64("ktest: bench  cycles_mean=", total / N);
 
     cap_delete(th).ok();
     cap_delete(ping).ok();
     cap_delete(pong).ok();
+    cap_delete(done).ok();
     cap_delete(cs).ok();
 }
 

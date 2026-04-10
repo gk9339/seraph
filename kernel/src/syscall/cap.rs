@@ -377,6 +377,8 @@ pub fn sys_cap_create_thread(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         iopb: core::ptr::null_mut(),
         blocked_on_object: core::ptr::null_mut(),
         thread_id: alloc_thread_id(),
+        context_saved: core::sync::atomic::AtomicU32::new(1),
+        magic: crate::sched::thread::TCB_MAGIC,
     }));
 
     // Wrap in a ThreadObject and insert into the caller's CSpace.
@@ -826,13 +828,64 @@ pub fn sys_cap_move(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 
     crate::cap::DERIVATION_LOCK.write_lock();
 
-    // SAFETY: dest_cs_ptr validated above; DERIVATION_LOCK held.
-    unsafe { (*dest_cs_ptr).insert_cap_at(dest_idx, src_tag, src_rights, src_object) }.map_err(
-        |_| {
-            crate::cap::DERIVATION_LOCK.write_unlock();
-            SyscallError::InvalidArgument
-        },
-    )?;
+    // Lock both CSpaces in pointer address order to prevent deadlock.
+    // SAFETY: Locking in deterministic order (lower address first) prevents
+    // ABBA deadlock. CSpace pointers validated above.
+    let (saved1, saved2) = unsafe {
+        use core::cmp::Ordering;
+        match caller_cspace.cmp(&dest_cs_ptr)
+        {
+            Ordering::Less =>
+            {
+                let s1 = (*caller_cspace).lock.lock_raw();
+                let s2 = (*dest_cs_ptr).lock.lock_raw();
+                (s1, s2)
+            }
+            Ordering::Greater =>
+            {
+                let s2 = (*dest_cs_ptr).lock.lock_raw();
+                let s1 = (*caller_cspace).lock.lock_raw();
+                (s1, s2)
+            }
+            Ordering::Equal =>
+            {
+                // caller_cspace == dest_cs_ptr: same CSpace, lock once.
+                let s = (*caller_cspace).lock.lock_raw();
+                (s, 0)
+            }
+        }
+    };
+
+    // SAFETY: dest_cs_ptr validated above; DERIVATION_LOCK and both CSpace locks held.
+    let insert_result =
+        unsafe { (*dest_cs_ptr).insert_cap_at(dest_idx, src_tag, src_rights, src_object) };
+    if insert_result.is_err()
+    {
+        // Unlock before returning error.
+        // SAFETY: saved1 and saved2 came from lock_raw calls above.
+        unsafe {
+            use core::cmp::Ordering;
+            match caller_cspace.cmp(&dest_cs_ptr)
+            {
+                Ordering::Equal =>
+                {
+                    (*caller_cspace).lock.unlock_raw(saved1);
+                }
+                Ordering::Less =>
+                {
+                    (*dest_cs_ptr).lock.unlock_raw(saved2);
+                    (*caller_cspace).lock.unlock_raw(saved1);
+                }
+                Ordering::Greater =>
+                {
+                    (*caller_cspace).lock.unlock_raw(saved1);
+                    (*dest_cs_ptr).lock.unlock_raw(saved2);
+                }
+            }
+        }
+        crate::cap::DERIVATION_LOCK.write_unlock();
+        return Err(SyscallError::InvalidArgument);
+    }
 
     let src_slot_id = SlotId::new(src_cspace_id, src_idx);
     let dst_slot_id = SlotId::new(dest_cspace_id, dest_idx);
@@ -930,9 +983,32 @@ pub fn sys_cap_move(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     }
 
     // Clear the source slot. No inc_ref/dec_ref needed (it's a move).
-    // SAFETY: caller_cspace validated; DERIVATION_LOCK held.
+    // SAFETY: caller_cspace validated; DERIVATION_LOCK and CSpace locks held.
     unsafe {
         (*caller_cspace).free_slot(src_idx);
+    }
+
+    // Unlock CSpaces in reverse order of acquisition.
+    // SAFETY: saved1 and saved2 came from lock_raw calls above.
+    unsafe {
+        use core::cmp::Ordering;
+        match caller_cspace.cmp(&dest_cs_ptr)
+        {
+            Ordering::Equal =>
+            {
+                (*caller_cspace).lock.unlock_raw(saved1);
+            }
+            Ordering::Less =>
+            {
+                (*dest_cs_ptr).lock.unlock_raw(saved2);
+                (*caller_cspace).lock.unlock_raw(saved1);
+            }
+            Ordering::Greater =>
+            {
+                (*caller_cspace).lock.unlock_raw(saved1);
+                (*dest_cs_ptr).lock.unlock_raw(saved2);
+            }
+        }
     }
 
     crate::cap::DERIVATION_LOCK.write_unlock();

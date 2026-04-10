@@ -140,8 +140,9 @@ pub unsafe fn dispatch(tf: *mut TrapFrame)
 fn sys_yield(_tf: &mut TrapFrame) -> Result<u64, SyscallError>
 {
     // SAFETY: called from syscall handler on a valid kernel stack.
+    // requeue=true: thread is voluntarily yielding but should remain runnable.
     unsafe {
-        crate::sched::schedule();
+        crate::sched::schedule(true);
     }
     Ok(0)
 }
@@ -167,11 +168,11 @@ fn sys_exit(_tf: &mut TrapFrame) -> Result<u64, SyscallError>
             (*tcb).state = ThreadState::Exited;
         }
     }
-    // Switch to the next runnable thread. The exited thread is in Exited state
-    // so schedule() will not re-enqueue it.
+    // Switch to the next runnable thread. The exited thread must not be
+    // re-enqueued.
     // SAFETY: called from syscall handler on a valid kernel stack.
     unsafe {
-        crate::sched::schedule();
+        crate::sched::schedule(false);
     }
     // schedule() returns here if the same thread is re-selected (shouldn't
     // happen for an Exited thread, but halt as a safety net).
@@ -180,7 +181,7 @@ fn sys_exit(_tf: &mut TrapFrame) -> Result<u64, SyscallError>
 
 // ── Scheduler / IPC helpers ───────────────────────────────────────────────────
 
-/// Get the current thread's TCB pointer (BSP only; single-CPU until WSMP).
+/// Get the current thread's TCB pointer for the executing CPU.
 ///
 /// # Safety
 /// Must be called from a kernel context. The current CPU's scheduler must have

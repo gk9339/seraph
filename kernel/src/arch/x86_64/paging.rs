@@ -620,6 +620,31 @@ pub unsafe fn translate_user_page(root_virt: u64, virt: u64) -> Option<(u64, u64
     Some((leaf.phys_addr(), leaf.0))
 }
 
+// ── TLB flush operations ──────────────────────────────────────────────────────
+
+/// Flush all TLB entries by reloading CR3.
+///
+/// Invalidates all non-global TLB entries for the current address space.
+/// Used by the TLB shootdown IPI handler.
+///
+/// # Safety
+/// Must be called at ring 0. Caller must ensure this CPU is not in the middle
+/// of a page table walk that would be invalidated by the flush.
+#[cfg(not(test))]
+pub unsafe fn flush_tlb_all()
+{
+    // SAFETY: CR3 is readable and writable at ring 0; reloading CR3 with its
+    // current value is the standard x86-64 TLB flush mechanism.
+    unsafe {
+        core::arch::asm!(
+            "mov {tmp}, cr3",
+            "mov cr3, {tmp}",
+            tmp = out(reg) _,
+            options(nostack, preserves_flags),
+        );
+    }
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]

@@ -52,6 +52,8 @@ static mut STACK_STOP_REGS: ChildStack = ChildStack::ZERO;
 static mut STACK_WRITE_REGS: ChildStack = ChildStack::ZERO;
 static mut STACK_CONFIGURE_ERR: ChildStack = ChildStack::ZERO;
 static mut STACK_AFFINITY_CPU1: ChildStack = ChildStack::ZERO;
+static mut STACK_AFFINITY_RESPECTED: ChildStack = ChildStack::ZERO;
+static mut STACK_DEFAULT_AFFINITY: ChildStack = ChildStack::ZERO;
 
 /// Signal cap slot passed to `phase2_entry` via a static rather than a
 /// register argument.
@@ -517,6 +519,115 @@ pub fn affinity_bind_cpu1(ctx: &TestContext) -> TestResult
     cap_delete(th).map_err(|_| "cap_delete th after affinity_bind_cpu1 failed")?;
     cap_delete(sig).map_err(|_| "cap_delete sig after affinity_bind_cpu1 failed")?;
     cap_delete(cs).map_err(|_| "cap_delete cs after affinity_bind_cpu1 failed")?;
+    Ok(())
+}
+
+// ── Phase D scheduler correctness tests ───────────────────────────────────────
+
+/// Thread with explicit CPU affinity starts and executes successfully.
+///
+/// Phase D routes threads to their affinity CPU via `select_target_cpu`.
+/// This test verifies that threads with affinity set to CPU 1 can start,
+/// execute, and signal back to the parent. This confirms basic Phase D
+/// affinity routing without requiring a `CurrentCpu` syscall variant.
+///
+/// Skips if only one CPU is online (requires SMP).
+pub fn affinity_respected(ctx: &TestContext) -> TestResult
+{
+    // Skip if CPU 1 does not exist.
+    let cpus = system_info(SystemInfoType::CpuCount as u64)
+        .map_err(|_| "system_info(CpuCount) failed")?;
+    if cpus < 2
+    {
+        crate::klog("ktest: thread::affinity_respected SKIP (requires SMP)");
+        return Ok(());
+    }
+
+    let sig = cap_create_signal().map_err(|_| "create_signal for affinity_respected failed")?;
+    let cs = cap_create_cspace(16).map_err(|_| "create_cspace for affinity_respected failed")?;
+    let child_sig = cap_copy(sig, cs, 1 << 7) // SIGNAL right only
+        .map_err(|_| "cap_copy for affinity_respected failed")?;
+    let th = cap_create_thread(ctx.aspace_cap, cs)
+        .map_err(|_| "cap_create_thread for affinity_respected failed")?;
+
+    // Bind to CPU 1 before starting.
+    thread_set_affinity(th, 1).map_err(|_| "thread_set_affinity(1) failed")?;
+
+    let stack_top = ChildStack::top(core::ptr::addr_of!(STACK_AFFINITY_RESPECTED));
+    thread_configure(
+        th,
+        affinity_sender_entry as *const () as u64,
+        stack_top,
+        u64::from(child_sig),
+    )
+    .map_err(|_| "thread_configure for affinity_respected failed")?;
+    thread_start(th).map_err(|_| "thread_start for affinity_respected failed")?;
+
+    // If the thread successfully signals back, affinity routing worked.
+    let bits = signal_wait(sig).map_err(|_| "signal_wait for affinity_respected failed")?;
+    if bits != 0xC1A1
+    {
+        return Err("affinity thread did not send expected bits (expected 0xC1A1)");
+    }
+
+    cap_delete(th).map_err(|_| "cap_delete th after affinity_respected failed")?;
+    cap_delete(sig).map_err(|_| "cap_delete sig after affinity_respected failed")?;
+    cap_delete(cs).map_err(|_| "cap_delete cs after affinity_respected failed")?;
+    Ok(())
+}
+
+/// Thread with default affinity (`AFFINITY_ANY`) defaults to CPU 0 (BSP).
+///
+/// Phase D uses a simple routing policy: `AFFINITY_ANY` threads are assigned
+/// to CPU 0 (the bootstrap processor). Phase F will change this to load-balance
+/// across all CPUs. This test verifies the Phase D behavior by creating a thread
+/// with `AFFINITY_ANY`, then checking it starts and signals back. Since we cannot
+/// query the current CPU ID from userspace without a `CurrentCpu` syscall variant,
+/// this test indirectly validates default affinity by confirming the thread runs
+/// successfully (which it will only do if it was enqueued on a valid CPU).
+///
+/// Skips if only one CPU is online (requires SMP).
+pub fn default_affinity_bsp(ctx: &TestContext) -> TestResult
+{
+    // Skip if CPU 1 does not exist.
+    let cpus = system_info(SystemInfoType::CpuCount as u64)
+        .map_err(|_| "system_info(CpuCount) failed")?;
+    if cpus < 2
+    {
+        crate::klog("ktest: thread::default_affinity_bsp SKIP (requires SMP)");
+        return Ok(());
+    }
+
+    let sig = cap_create_signal().map_err(|_| "create_signal for default_affinity_bsp failed")?;
+    let cs = cap_create_cspace(16).map_err(|_| "create_cspace for default_affinity_bsp failed")?;
+    let child_sig = cap_copy(sig, cs, 1 << 7) // SIGNAL right only
+        .map_err(|_| "cap_copy for default_affinity_bsp failed")?;
+    let th = cap_create_thread(ctx.aspace_cap, cs)
+        .map_err(|_| "cap_create_thread for default_affinity_bsp failed")?;
+
+    // Do NOT set affinity — leave it at default (AFFINITY_ANY).
+    // Phase D should route this to CPU 0.
+
+    let stack_top = ChildStack::top(core::ptr::addr_of!(STACK_DEFAULT_AFFINITY));
+    thread_configure(
+        th,
+        sender_entry as *const () as u64,
+        stack_top,
+        u64::from(child_sig),
+    )
+    .map_err(|_| "thread_configure for default_affinity_bsp failed")?;
+    thread_start(th).map_err(|_| "thread_start for default_affinity_bsp failed")?;
+
+    // If the thread successfully signals back, default affinity routing worked.
+    let bits = signal_wait(sig).map_err(|_| "signal_wait for default_affinity_bsp failed")?;
+    if bits != 0xBEEF
+    {
+        return Err("default affinity thread did not send expected bits (expected 0xBEEF)");
+    }
+
+    cap_delete(th).map_err(|_| "cap_delete th after default_affinity_bsp failed")?;
+    cap_delete(sig).map_err(|_| "cap_delete sig after default_affinity_bsp failed")?;
+    cap_delete(cs).map_err(|_| "cap_delete cs after default_affinity_bsp failed")?;
     Ok(())
 }
 

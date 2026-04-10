@@ -190,6 +190,10 @@ const ICR_INIT_ASSERT: u32 = 0x0000_C500;
 const ICR_INIT_DEASSERT: u32 = 0x0000_8500;
 /// ICR base value for STARTUP IPI: delivery=STARTUP, vector in bits[7:0].
 const ICR_SIPI_BASE: u32 = 0x0000_4600;
+/// IPI vector for TLB shootdown requests.
+pub const IPI_VECTOR_TLB_SHOOTDOWN: u8 = 250;
+/// IPI vector for waking idle CPUs.
+pub const IPI_VECTOR_WAKEUP: u8 = 251;
 
 /// Read this CPU's local APIC ID (bits [31:24] of the APIC ID register).
 #[allow(dead_code)] // Part of the arch interface; will be used by future SMP topology code.
@@ -254,6 +258,55 @@ unsafe fn send_sipi(target_apic_id: u32, vector: u8)
         apic_write(APIC_ICR_HIGH, target_apic_id << 24);
         apic_write(APIC_ICR_LOW, ICR_SIPI_BASE | vector as u32);
         wait_icr_idle();
+    }
+}
+
+/// Send a TLB shootdown IPI to a target CPU.
+///
+/// # Safety
+/// - `target_apic_id` must be a valid APIC ID of an online CPU
+/// - Caller must ensure the TLB shootdown protocol state is set up correctly
+// Used by TLB shootdown implementation.
+#[allow(dead_code)]
+#[cfg(not(test))]
+pub unsafe fn send_tlb_shootdown_ipi(target_apic_id: u32)
+{
+    // Wait for previous IPI to complete before sending a new one.
+    wait_icr_idle();
+
+    // SAFETY: APIC MMIO region is valid; ICR_HIGH takes destination in bits [31:24].
+    unsafe {
+        apic_write(APIC_ICR_HIGH, target_apic_id << 24);
+    }
+
+    // SAFETY: Delivery mode 0 (fixed), vector 250, level=0, trigger=edge.
+    unsafe {
+        apic_write(APIC_ICR_LOW, u32::from(IPI_VECTOR_TLB_SHOOTDOWN));
+    }
+}
+
+/// Send a wakeup IPI to a target CPU.
+///
+/// Used to break an idle CPU out of `hlt` when work is enqueued on its run queue.
+/// The handler itself just sends EOI; the interrupt breaks the halt state.
+///
+/// # Safety
+/// `target_apic_id` must be a valid APIC ID of an online CPU.
+#[cfg(not(test))]
+pub unsafe fn send_wakeup_ipi(target_apic_id: u32)
+{
+    // Wait for previous IPI to complete before sending a new one.
+    // SAFETY: wait_icr_idle polls ICR_LOW until delivery status clears.
+    wait_icr_idle();
+
+    // SAFETY: APIC MMIO region is valid; ICR_HIGH takes destination in bits [31:24].
+    unsafe {
+        apic_write(APIC_ICR_HIGH, target_apic_id << 24);
+    }
+
+    // SAFETY: Fixed delivery mode (0), vector 251, level=0, trigger=edge.
+    unsafe {
+        apic_write(APIC_ICR_LOW, u32::from(IPI_VECTOR_WAKEUP));
     }
 }
 

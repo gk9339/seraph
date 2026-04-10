@@ -223,7 +223,8 @@ pub unsafe fn waitset_notify(ws_opaque: *mut u8, member_idx: u8)
             (*waiter).ipc_state = IpcThreadState::None;
             (*waiter).blocked_on_object = core::ptr::null_mut();
             let prio = (*waiter).priority;
-            crate::sched::scheduler_for(0).enqueue(waiter, prio);
+            let target_cpu = crate::sched::select_target_cpu(waiter);
+            crate::sched::enqueue_and_wake(waiter, target_cpu, prio);
         }
     }
 }
@@ -309,7 +310,8 @@ pub unsafe fn waitset_add(
                 (*waiter).state = ThreadState::Ready;
                 (*waiter).ipc_state = IpcThreadState::None;
                 let prio = (*waiter).priority;
-                crate::sched::scheduler_for(0).enqueue(waiter, prio);
+                let target_cpu = crate::sched::select_target_cpu(waiter);
+                crate::sched::enqueue_and_wake(waiter, target_cpu, prio);
             }
         }
     }
@@ -370,7 +372,8 @@ pub unsafe fn wait_set_drop(ws: *mut WaitSetState)
             (*waiter).state = ThreadState::Ready;
             (*waiter).ipc_state = IpcThreadState::None;
             let prio = (*waiter).priority;
-            crate::sched::scheduler_for(0).enqueue(waiter, prio);
+            let target_cpu = crate::sched::select_target_cpu(waiter);
+            crate::sched::enqueue_and_wake(waiter, target_cpu, prio);
         }
     }
 

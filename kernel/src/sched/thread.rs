@@ -17,9 +17,6 @@
 //! - `is_user`: true for user-mode threads.
 //! - `ipc_buffer`: virtual address of the per-thread IPC buffer page (0 = none).
 //! - `wakeup_value`: value delivered by a signal sender to an unblocked waiter.
-//!
-//! # TODO WSMP (SMP)
-//! - Bind `cpu_affinity` and `preferred_cpu` to the actual CPU being started.
 
 use crate::arch::current::context::SavedState;
 
@@ -106,11 +103,11 @@ pub struct ThreadControlBlock
     pub slice_remaining: u32,
 
     /// Hard CPU affinity (`AFFINITY_ANY` = `0xFFFF_FFFF` means no hard affinity).
-    /// TODO WSMP: enforce during thread migration / load balancing.
+    /// TODO: enforce during thread migration / load balancing.
     pub cpu_affinity: u32,
 
     /// Soft affinity: last CPU this thread ran on (hint for the load balancer).
-    /// TODO WSMP: update on each context switch.
+    /// Updated by `schedule()` on each context switch.
     pub preferred_cpu: u32,
 
     /// Intrusive run-queue link — next TCB at the same priority.
@@ -196,7 +193,22 @@ pub struct ThreadControlBlock
     // === Identity ===
     /// Unique thread identifier assigned at creation.
     pub thread_id: u32,
+
+    // === Context switch synchronisation ===
+    /// Cleared before `release_lock_only()` in `schedule()`, set after
+    /// `switch()` has finished saving this thread's registers. A remote
+    /// CPU that dequeues this thread spins on this flag (Acquire) before
+    /// loading its `SavedState`, ensuring the save is globally visible
+    /// on RISC-V RVWMO.
+    pub context_saved: core::sync::atomic::AtomicU32,
+
+    // === Use-after-free detection ===
+    /// Magic cookie for use-after-free detection. Must be `TCB_MAGIC` when valid.
+    pub magic: u64,
 }
+
+/// Expected value of `ThreadControlBlock::magic` for a live TCB.
+pub const TCB_MAGIC: u64 = 0xDEAD_BEEF_CAFE_F00D;
 
 // SAFETY: TCB pointers are only accessed under the scheduler lock.
 unsafe impl Send for ThreadControlBlock {}

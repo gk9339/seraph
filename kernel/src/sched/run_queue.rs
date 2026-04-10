@@ -18,12 +18,29 @@
 //! - Invoke `arch::current::gdt::set_rsp0` (x86-64) or update `sscratch` (RISC-V)
 //!   with `next_tcb.kernel_stack_top` inside `context_switch`.
 //!
-//! # TODO WSMP (SMP)
+//! # TODO (SMP)
 //! - Implement `load_balance` across CPUs.
 //! - Add `preemption_pending: bool` flag per CPU.
 
 use super::thread::ThreadControlBlock;
 use super::NUM_PRIORITY_LEVELS;
+use core::sync::atomic::{AtomicU32, Ordering};
+
+use super::MAX_CPUS;
+
+// ── Per-CPU load tracking ─────────────────────────────────────────────────────
+
+/// Per-CPU load counters (number of Ready + Running threads).
+///
+/// Separate global array to avoid issues with `AtomicU32` in const-initialized
+/// `PerCpuScheduler` structs. Each entry is independently updated with Relaxed
+/// ordering; approximate load values are sufficient for load balancing.
+#[cfg(not(test))]
+static CPU_LOAD: [AtomicU32; MAX_CPUS] = {
+    // SAFETY: `AtomicU32` is `repr(transparent)` over `UnsafeCell<u32>`.
+    // Zero-initialized u32 array transmutes to valid array of `AtomicU32::new(0)`.
+    unsafe { core::mem::transmute::<[u32; MAX_CPUS], [AtomicU32; MAX_CPUS]>([0u32; MAX_CPUS]) }
+};
 
 // ── RunQueue ──────────────────────────────────────────────────────────────────
 
@@ -136,7 +153,14 @@ pub struct PerCpuScheduler
 
     /// Bitmask: bit N is set iff `queues[N]` is non-empty.
     /// Enables O(1) selection of the highest non-empty priority queue.
-    non_empty: u32,
+    ///
+    /// Atomic so the idle loop can read it without acquiring the lock.
+    /// On RISC-V (RVWMO), a plain `u32` written by CPU A under a lock
+    /// is not guaranteed visible to CPU B's lockless read — the Release
+    /// on unlock only orders A's stores; B needs an Acquire load on
+    /// the same variable to synchronize. Using `AtomicU32` with Acquire
+    /// in `has_runnable()` closes this gap.
+    non_empty: AtomicU32,
 
     /// Currently executing TCB on this CPU (non-null after `init`).
     pub current: *mut ThreadControlBlock,
@@ -149,6 +173,12 @@ pub struct PerCpuScheduler
     /// Acquire before any `enqueue`/`dequeue`/`set_current` operation.
     /// The lock disables interrupts while held, preventing timer-driven deadlock.
     pub lock: crate::sync::Spinlock,
+
+    /// Logical CPU ID for this scheduler (0-based).
+    ///
+    /// Used to index into the `CPU_LOAD` array for load tracking.
+    /// Set during `sched::init` before the scheduler is used.
+    pub cpu_id: usize,
 }
 
 // SAFETY: scheduler is protected by `lock` (Phase 9+) and only accessed
@@ -176,43 +206,70 @@ impl PerCpuScheduler
                 Q, Q, Q, Q, Q, Q, Q, Q, Q, Q, Q, Q, Q, Q, Q, Q, Q, Q, Q, Q, Q, Q, Q, Q, Q, Q, Q, Q,
                 Q, Q, Q, Q,
             ],
-            non_empty: 0,
+            non_empty: AtomicU32::new(0),
             current: core::ptr::null_mut(),
             idle: core::ptr::null_mut(),
             lock: crate::sync::Spinlock::new(),
+            cpu_id: 0,
         }
     }
 
     /// Enqueue `tcb` at the given `priority` level.
     ///
-    /// Sets bit `priority` in `non_empty`.
+    /// Sets bit `priority` in `non_empty` and increments load counter.
     pub fn enqueue(&mut self, tcb: *mut ThreadControlBlock, priority: u8)
     {
         let p = priority as usize;
-        debug_assert!(p < NUM_PRIORITY_LEVELS, "priority out of range");
+        // Debug: detect use-after-free via magic cookie.
+        // SAFETY: tcb is guaranteed valid by the caller; magic and thread_id are always readable.
+        #[allow(clippy::undocumented_unsafe_blocks)]
+        {
+            debug_assert!(
+                unsafe { (*tcb).magic == super::thread::TCB_MAGIC },
+                "enqueue: TCB magic corrupt at {tcb:?} (tid={}, prio={p}) — use-after-free?",
+                unsafe { (*tcb).thread_id },
+            );
+        }
+        debug_assert!(
+            p < NUM_PRIORITY_LEVELS,
+            "priority {p} out of range [0, {NUM_PRIORITY_LEVELS})"
+        );
+        self.increment_load();
         self.queues[p].enqueue(tcb);
-        self.non_empty |= 1 << p;
+        self.non_empty.fetch_or(1 << p, Ordering::Relaxed);
     }
 
     /// Dequeue the highest-priority ready TCB, or return `idle` if all queues
     /// are empty.
     ///
     /// Clears the `non_empty` bit if the queue at that priority becomes empty.
+    /// Decrements load counter when a non-idle thread is dequeued.
     pub fn dequeue_highest(&mut self) -> *mut ThreadControlBlock
     {
-        if self.non_empty == 0
+        let ne = self.non_empty.load(Ordering::Relaxed);
+        if ne == 0
         {
             return self.idle;
         }
         // Highest set bit gives the highest non-empty priority level.
-        let priority = 31 - self.non_empty.leading_zeros() as usize;
+        let priority = 31 - ne.leading_zeros() as usize;
         let tcb = self.queues[priority]
             .dequeue()
             .expect("non_empty bit set but queue is empty");
+        // Debug: detect use-after-free via magic cookie.
+        // SAFETY: tcb is from the run queue; magic field is always readable on valid TCB.
+        #[allow(clippy::undocumented_unsafe_blocks)]
+        {
+            debug_assert!(
+                unsafe { (*tcb).magic == super::thread::TCB_MAGIC },
+                "dequeue: TCB magic corrupt at {tcb:?} (prio={priority}) — use-after-free?",
+            );
+        }
         if self.queues[priority].is_empty()
         {
-            self.non_empty &= !(1 << priority);
+            self.non_empty.fetch_and(!(1 << priority), Ordering::Relaxed);
         }
+        self.decrement_load();
         tcb
     }
 
@@ -229,9 +286,14 @@ impl PerCpuScheduler
     }
 
     /// Return `true` if any thread is ready to run (non-empty run queues).
+    ///
+    /// Acquire ordering synchronizes with the Release in the scheduler
+    /// lock unlock on the enqueueing CPU. On RISC-V (RVWMO) this ensures
+    /// the idle loop sees enqueue stores from other CPUs without holding
+    /// the lock.
     pub fn has_runnable(&self) -> bool
     {
-        self.non_empty != 0
+        self.non_empty.load(Ordering::Acquire) != 0
     }
 
     /// Remove `tcb` from its priority queue. No-op if not found.
@@ -250,7 +312,7 @@ impl PerCpuScheduler
         }
         if self.queues[p].remove(tcb) && self.queues[p].is_empty()
         {
-            self.non_empty &= !(1 << p);
+            self.non_empty.fetch_and(!(1 << p), Ordering::Relaxed);
         }
     }
 
@@ -275,12 +337,54 @@ impl PerCpuScheduler
         // Remove from old queue (best-effort; TCB may have been dequeued already).
         if self.queues[old].remove(tcb) && self.queues[old].is_empty()
         {
-            self.non_empty &= !(1 << old);
+            self.non_empty.fetch_and(!(1 << old), Ordering::Relaxed);
         }
 
         // Enqueue at new priority.
         self.queues[new].enqueue(tcb);
-        self.non_empty |= 1 << new;
+        self.non_empty.fetch_or(1 << new, Ordering::Relaxed);
+    }
+
+    /// Increment the load counter when a thread becomes runnable.
+    ///
+    /// Relaxed ordering is sufficient: approximate load is acceptable for
+    /// load balancing decisions. Transient inconsistencies do not violate
+    /// correctness.
+    #[cfg(not(test))]
+    pub fn increment_load(&self)
+    {
+        CPU_LOAD[self.cpu_id].fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Decrement the load counter when a thread leaves runnable state.
+    ///
+    /// Relaxed ordering is sufficient: approximate load is acceptable for
+    /// load balancing decisions. Transient inconsistencies do not violate
+    /// correctness.
+    #[cfg(not(test))]
+    pub fn decrement_load(&self)
+    {
+        CPU_LOAD[self.cpu_id].fetch_sub(1, Ordering::Relaxed);
+    }
+
+    /// Get current load (number of runnable threads).
+    ///
+    /// Relaxed ordering is sufficient: load balancing reads are advisory only.
+    #[cfg(not(test))]
+    pub fn current_load(&self) -> u32
+    {
+        CPU_LOAD[self.cpu_id].load(Ordering::Relaxed)
+    }
+
+    // Test stubs for host-side unit tests
+    #[cfg(test)]
+    pub fn increment_load(&self) {}
+    #[cfg(test)]
+    pub fn decrement_load(&self) {}
+    #[cfg(test)]
+    pub fn current_load(&self) -> u32
+    {
+        0
     }
 }
 
@@ -306,13 +410,15 @@ mod tests
     use super::*;
     use crate::sched::thread::ThreadControlBlock;
 
-    /// Allocate a zero-initialized TCB for tests.
+    /// Allocate a zero-initialized TCB for tests with magic cookie set.
     ///
-    /// SAFETY: only `run_queue_next` is accessed by RunQueue/PerCpuScheduler;
-    /// all other TCB fields remain zero/null for the duration of these tests.
+    /// SAFETY: only `run_queue_next` and `magic` are accessed by
+    /// RunQueue/PerCpuScheduler; all other TCB fields remain zero/null.
     fn make_tcb() -> Box<ThreadControlBlock>
     {
-        unsafe { Box::new(core::mem::zeroed()) }
+        let mut tcb: ThreadControlBlock = unsafe { core::mem::zeroed() };
+        tcb.magic = crate::sched::thread::TCB_MAGIC;
+        Box::new(tcb)
     }
 
     // ── RunQueue tests (exercised through PerCpuScheduler at priority 0) ──────
@@ -374,11 +480,11 @@ mod tests
         let mut a = make_tcb();
         let pa = &mut *a as *mut _;
 
-        assert_eq!(sched.non_empty, 0);
+        assert_eq!(sched.non_empty.load(Ordering::Relaxed), 0);
         sched.enqueue(pa, 7);
-        assert_eq!(sched.non_empty, 1 << 7);
+        assert_eq!(sched.non_empty.load(Ordering::Relaxed), 1 << 7);
         sched.enqueue(pa, 15);
-        assert_eq!(sched.non_empty, (1 << 7) | (1 << 15));
+        assert_eq!(sched.non_empty.load(Ordering::Relaxed), (1 << 7) | (1 << 15));
     }
 
     #[test]
@@ -411,11 +517,11 @@ mod tests
         let pa = &mut *a as *mut _;
 
         sched.enqueue(pa, 3);
-        assert_ne!(sched.non_empty & (1 << 3), 0);
+        assert_ne!(sched.non_empty.load(Ordering::Relaxed) & (1 << 3), 0);
         sched.set_idle(pa);
         sched.dequeue_highest();
         // Queue at priority 3 is now empty; bit must be cleared.
-        assert_eq!(sched.non_empty & (1 << 3), 0);
+        assert_eq!(sched.non_empty.load(Ordering::Relaxed) & (1 << 3), 0);
     }
 
     #[test]
@@ -426,9 +532,9 @@ mod tests
         let pa = &mut *a as *mut _;
 
         sched.enqueue(pa, 10);
-        assert_ne!(sched.non_empty & (1 << 10), 0);
+        assert_ne!(sched.non_empty.load(Ordering::Relaxed) & (1 << 10), 0);
         sched.remove_from_queue(pa, 10);
-        assert_eq!(sched.non_empty & (1 << 10), 0);
+        assert_eq!(sched.non_empty.load(Ordering::Relaxed) & (1 << 10), 0);
     }
 
     #[test]
@@ -439,7 +545,7 @@ mod tests
         let pa = &mut *a as *mut _;
         // remove on a TCB that was never enqueued must not panic.
         sched.remove_from_queue(pa, 5);
-        assert_eq!(sched.non_empty, 0);
+        assert_eq!(sched.non_empty.load(Ordering::Relaxed), 0);
     }
 
     #[test]
@@ -472,11 +578,11 @@ mod tests
         let pa = &mut *a as *mut _;
 
         sched.enqueue(pa, 2);
-        assert_ne!(sched.non_empty & (1 << 2), 0);
+        assert_ne!(sched.non_empty.load(Ordering::Relaxed) & (1 << 2), 0);
         sched.change_priority(pa, 2, 8);
         // Old priority queue must be empty; new priority queue must be set.
-        assert_eq!(sched.non_empty & (1 << 2), 0);
-        assert_ne!(sched.non_empty & (1 << 8), 0);
+        assert_eq!(sched.non_empty.load(Ordering::Relaxed) & (1 << 2), 0);
+        assert_ne!(sched.non_empty.load(Ordering::Relaxed) & (1 << 8), 0);
         sched.set_idle(pa);
         assert_eq!(sched.dequeue_highest(), pa);
     }
@@ -489,10 +595,10 @@ mod tests
         let pa = &mut *a as *mut _;
 
         sched.enqueue(pa, 4);
-        let before = sched.non_empty;
+        let before = sched.non_empty.load(Ordering::Relaxed);
         sched.change_priority(pa, 4, 4);
         // No state change when old == new.
-        assert_eq!(sched.non_empty, before);
+        assert_eq!(sched.non_empty.load(Ordering::Relaxed), before);
     }
 
     #[test]

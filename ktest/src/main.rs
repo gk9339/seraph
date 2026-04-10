@@ -24,6 +24,7 @@ use core::panic::PanicInfo;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 mod bench;
+mod frame_pool;
 mod integration;
 mod unit;
 
@@ -190,6 +191,13 @@ fn run(aspace_cap: u32) -> !
         klog("ktest: FATAL: ipc_buffer_set failed");
         halt()
     });
+
+    // Initialize the frame pool before running tests. Tests consume frame caps
+    // via splits; without pooling, resources are exhausted after ~10 tests.
+    // SAFETY: Called once before any tests run; no concurrent access yet.
+    unsafe {
+        frame_pool::init(aspace_cap);
+    }
 
     let ctx = TestContext {
         aspace_cap,

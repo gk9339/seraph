@@ -15,15 +15,16 @@
 //! via `SYS_IRQ_ACK` after handling.
 //!
 //! # Thread safety
-//! The routing table is protected by disabling interrupts during modification.
-//! `dispatch_device_irq` is only called from interrupt context (interrupts
-//! disabled at entry on both x86-64 and RISC-V), so reads there are safe.
+//! The routing table uses atomic pointers with Release/Acquire ordering for
+//! SMP-safe registration and dispatch. `dispatch_device_irq` runs in interrupt
+//! context and cannot spin on locks; atomic loads provide lock-free access.
 //!
 //! # Modification notes
 //! - To support multiple signals per IRQ line (e.g. shared interrupts): replace
 //!   the single pointer with a small fixed-size list.
-//! - To support SMP: the table will need a spinlock; current single-CPU
-//!   assumption relies on interrupt disable being sufficient.
+
+use core::ptr::null_mut;
+use core::sync::atomic::{AtomicPtr, Ordering};
 
 use crate::ipc::signal::SignalState;
 
@@ -34,24 +35,19 @@ use crate::ipc::signal::SignalState;
 const MAX_IRQ: usize = 256;
 
 /// Per-IRQ routing entry.
-#[derive(Clone, Copy)]
 struct IrqRoute
 {
-    /// Pointer to the `SignalState` to notify, or null if unregistered.
-    signal: *mut SignalState,
+    /// Atomic pointer to the `SignalState` to notify, or null if unregistered.
+    /// Uses Release/Acquire ordering for SMP-safe updates and reads.
+    signal: AtomicPtr<SignalState>,
 }
-
-// SAFETY: IrqRoute is only accessed with interrupts disabled (single-CPU).
-unsafe impl Send for IrqRoute {}
-// SAFETY: IrqRoute is only accessed with interrupts disabled; no Sync violation.
-unsafe impl Sync for IrqRoute {}
 
 impl IrqRoute
 {
     const fn empty() -> Self
     {
         Self {
-            signal: core::ptr::null_mut(),
+            signal: AtomicPtr::new(null_mut()),
         }
     }
 }
@@ -59,57 +55,47 @@ impl IrqRoute
 /// Global IRQ routing table.
 ///
 /// Entries are set at IRQ registration time and cleared on cap deallocation.
-/// Access is safe because all modifications disable interrupts, and
-/// `dispatch_device_irq` is always called from interrupt context (IRQs off).
-static mut IRQ_TABLE: [IrqRoute; MAX_IRQ] = {
-    // const-initialise all entries to empty.
-    let mut arr = [IrqRoute::empty(); MAX_IRQ];
-    // const blocks cannot use loops over non-Copy types cleanly — zero-init is
-    // guaranteed by BSS for a static mut, but we set explicitly for clarity.
-    let mut i = 0;
-    while i < MAX_IRQ
-    {
-        arr[i] = IrqRoute::empty();
-        i += 1;
-    }
-    arr
+/// Uses atomic pointers for lock-free SMP-safe access from both registration
+/// paths and interrupt handlers.
+static IRQ_TABLE: [IrqRoute; MAX_IRQ] = {
+    // const-initialise all entries to empty. IrqRoute contains AtomicPtr which
+    // is not Copy, so we use a const block to evaluate the constructor for each
+    // array element.
+    [const { IrqRoute::empty() }; MAX_IRQ]
 };
 
 // ── Public interface ──────────────────────────────────────────────────────────
 
 /// Register `signal` to receive notifications for interrupt line `irq`.
 ///
-/// Replaces any previous registration for the same line. The previous signal
-/// pointer (may be null) is returned but is not dereferenced; the caller is
-/// responsible for tracking object lifetimes.
+/// Replaces any previous registration for the same line using atomic Release
+/// ordering, ensuring visibility to all CPUs that later load the pointer.
 ///
 /// # Safety
 /// - `irq` must be < [`MAX_IRQ`].
 /// - `signal` must be a valid, live `SignalState` pointer (or null to clear).
-/// - Must be called with interrupts disabled.
 #[cfg(not(test))]
 pub unsafe fn register(irq: u32, signal: *mut SignalState)
 {
     debug_assert!((irq as usize) < MAX_IRQ, "irq out of range");
-    // SAFETY: IRQ_TABLE sized for MAX_IRQ; interrupts disabled; index bounds-checked by caller.
-    unsafe {
-        IRQ_TABLE[irq as usize].signal = signal;
-    }
+    // SAFETY: index is bounds-checked by debug_assert; Release ordering ensures
+    // the stored pointer becomes visible to all CPUs that Acquire-load it.
+    IRQ_TABLE[irq as usize].signal.store(signal, Ordering::Release);
 }
 
 /// Clear the routing entry for `irq` (called when the Interrupt cap is freed).
 ///
 /// # Safety
 /// - `irq` must be < [`MAX_IRQ`].
-/// - Must be called with interrupts disabled.
 #[cfg(not(test))]
 pub unsafe fn unregister(irq: u32)
 {
     debug_assert!((irq as usize) < MAX_IRQ, "irq out of range");
-    // SAFETY: IRQ_TABLE sized for MAX_IRQ; interrupts disabled; index bounds-checked by caller.
-    unsafe {
-        IRQ_TABLE[irq as usize].signal = core::ptr::null_mut();
-    }
+    // SAFETY: index is bounds-checked by debug_assert; Release ordering ensures
+    // the null write becomes visible to all CPUs.
+    IRQ_TABLE[irq as usize]
+        .signal
+        .store(null_mut(), Ordering::Release);
 }
 
 /// Clear all routing entries that point to `signal` (called when a Signal
@@ -120,24 +106,23 @@ pub unsafe fn unregister(irq: u32)
 ///
 /// # Safety
 /// - `signal` must be a valid (still live) `SignalState` pointer.
-/// - Must be called with interrupts disabled.
 #[cfg(not(test))]
 pub unsafe fn unregister_signal(signal: *mut SignalState)
 {
-    // SAFETY: interrupts are disabled; single-CPU; index is in bounds.
-    // static_mut_refs: single-CPU, interrupts disabled — exclusive access is guaranteed.
-    #[allow(static_mut_refs)]
-    unsafe {
-        for (i, entry) in IRQ_TABLE.iter_mut().enumerate()
+    for (i, entry) in IRQ_TABLE.iter().enumerate()
+    {
+        // SAFETY: Acquire ordering ensures we see the latest stored pointer value.
+        // Pointer equality check is safe even if the pointer is dangling (no deref).
+        let current = entry.signal.load(Ordering::Acquire);
+        if core::ptr::eq(current, signal)
         {
-            if core::ptr::eq(entry.signal, signal)
-            {
-                entry.signal = core::ptr::null_mut();
-                // Mask the IRQ line since there's no longer a handler.
-                // i is always < MAX_IRQ (= 22) which fits u32 with margin.
-                #[allow(clippy::cast_possible_truncation)]
-                crate::arch::current::interrupts::mask(i as u32);
-            }
+            // SAFETY: Release ordering ensures the null write becomes visible to
+            // all CPUs. Index is in bounds (iterator over IRQ_TABLE).
+            entry.signal.store(null_mut(), Ordering::Release);
+            // Mask the IRQ line since there's no longer a handler.
+            // i is always < MAX_IRQ (= 256) which fits u32.
+            #[allow(clippy::cast_possible_truncation)]
+            crate::arch::current::interrupts::mask(i as u32);
         }
     }
 }
@@ -165,8 +150,9 @@ pub unsafe fn dispatch_device_irq(irq: u32)
         return;
     }
 
-    // SAFETY: index is bounds-checked; interrupts are disabled.
-    let sig_ptr = unsafe { IRQ_TABLE[irq as usize].signal };
+    // SAFETY: index is bounds-checked; Acquire ordering ensures we see the
+    // latest pointer stored by register/unregister on any CPU.
+    let sig_ptr = IRQ_TABLE[irq as usize].signal.load(Ordering::Acquire);
     if sig_ptr.is_null()
     {
         // No handler registered — mask and drop. Must still acknowledge at the
@@ -195,6 +181,11 @@ pub unsafe fn dispatch_device_irq(irq: u32)
     {
         // SAFETY: tcb is a valid ThreadControlBlock pointer returned by signal_send.
         let prio = unsafe { (*tcb).priority };
-        crate::sched::scheduler_for(0).enqueue(tcb, prio);
+        // SAFETY: tcb is a valid ThreadControlBlock pointer returned by signal_send.
+        let target_cpu = unsafe { crate::sched::select_target_cpu(tcb) };
+        // SAFETY: tcb and target_cpu are valid; enqueue_and_wake sends wakeup IPI if needed.
+        unsafe {
+            crate::sched::enqueue_and_wake(tcb, target_cpu, prio);
+        }
     }
 }

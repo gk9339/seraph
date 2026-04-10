@@ -559,6 +559,28 @@ pub unsafe fn translate_user_page(root_virt: u64, virt: u64) -> Option<(u64, u64
     Some((leaf.phys_addr(), leaf.0))
 }
 
+// ── TLB flush operations ──────────────────────────────────────────────────────
+
+/// Flush all TLB entries for all address spaces.
+///
+/// Uses `sfence.vma` with both arguments zero to invalidate all TLB entries.
+/// Used by the TLB shootdown IPI handler.
+///
+/// # Safety
+/// Must be called in supervisor mode. Caller must ensure this hart is not in
+/// the middle of a page table walk that would be invalidated by the flush.
+#[cfg(not(test))]
+pub unsafe fn flush_tlb_all()
+{
+    // SAFETY: sfence.vma with both arguments zero invalidates all TLB entries.
+    unsafe {
+        core::arch::asm!(
+            "sfence.vma zero, zero",
+            options(nostack, preserves_flags),
+        );
+    }
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]

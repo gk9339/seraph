@@ -41,8 +41,7 @@
 /// | 88     | s9      |
 /// | 96     | s10     |
 /// | 104    | s11     |
-/// | 112    | sstatus |
-/// | 120    | a0      |
+/// | 112    | a0      |
 #[derive(Debug, Default, Clone, Copy)]
 #[repr(C)]
 pub struct SavedState
@@ -64,8 +63,6 @@ pub struct SavedState
     pub s9: u64,
     pub s10: u64,
     pub s11: u64,
-    /// sstatus snapshot (SIE bit controls interrupt enable).
-    pub sstatus: u64,
     /// First argument register `a0`, used to deliver the argument on first
     /// entry to a new kernel thread. Caller-saved; only meaningful at thread
     /// creation time.
@@ -103,22 +100,17 @@ impl SavedState
 /// `_is_user`  — unused; user-mode entry uses `return_to_user`.
 pub fn new_state(entry: u64, stack_top: u64, arg: u64, _is_user: bool) -> SavedState
 {
-    // sstatus.SIE must be 0 here. switch() restores sstatus via csrw before
-    // sp is switched; if SIE=1 an interrupt during that window sees sscratch
-    // non-zero (set by schedule() for user threads) and incorrectly takes the
-    // U-mode trap path, clearing sscratch. The thread then enters U-mode with
-    // sscratch=0, causing the next trap to misidentify S-mode vs U-mode.
-    //
+    // switch() does not save/restore sstatus. SIE is managed by schedule()'s
+    // lock_raw (disables) and restore_interrupts_from (re-enables after switch).
+    // SPP and SPIE are hardware-managed: set on trap entry, consumed by sret.
     // Interrupts are enabled later:
     //   - User threads: sret in return_to_user sets SIE ← SPIE (=1).
     //   - Idle thread:  explicitly calls interrupts::enable() in its entry.
-    let sstatus: u64 = 0;
 
     SavedState {
         ra: entry,
         sp: stack_top,
         a0: arg,
-        sstatus,
         ..SavedState::default()
     }
 }
@@ -133,12 +125,25 @@ pub fn new_state(entry: u64, stack_top: u64, arg: u64, _is_user: bool) -> SavedS
 ///
 /// # Safety
 /// Both pointers must be valid, aligned `SavedState` values. Caller must hold
-/// the scheduler lock.
+/// the scheduler lock. `save_flag` must be a valid `*const AtomicU32` (the
+/// current thread's `context_saved` field) or null (initial boot switch).
+///
+/// The lock (`now_serving` at `lock_ptr + 4`) is released inside this function
+/// between the save and load phases, so that another CPU cannot load the
+/// current thread's `SavedState` until the save is globally visible.
 #[cfg(not(test))]
 #[unsafe(naked)]
-pub unsafe extern "C" fn switch(current: *mut SavedState, next: *const SavedState)
+pub unsafe extern "C" fn switch(
+    current: *mut SavedState,
+    next: *const SavedState,
+    save_flag: *const core::sync::atomic::AtomicU32,
+    lock_ptr: *const crate::sync::Spinlock,
+)
 {
-    // a0 = current (*mut SavedState), a1 = next (*const SavedState)
+    // a0 = current (*mut SavedState)
+    // a1 = next (*const SavedState)
+    // a2 = save_flag (*const AtomicU32) — context_saved flag on current TCB
+    // a3 = lock_ptr (*const Spinlock) — scheduler lock (now_serving at offset 4)
     // SAFETY: switch_context preserves ABI; both pointers valid; stack/frame pointers valid.
     core::arch::naked_asm!(
         // ── Save current thread to *a0 ────────────────────────────────────
@@ -160,11 +165,30 @@ pub unsafe extern "C" fn switch(current: *mut SavedState, next: *const SavedStat
         "sd s9,    88(a0)",
         "sd s10,   96(a0)",
         "sd s11,  104(a0)",
-        "csrr t0, sstatus",
-        "sd t0,   112(a0)",
+
+        // ── Signal save complete (Release) ────────────────────────────────
+        // Set context_saved = 1 so a remote CPU spinning in schedule() can
+        // proceed to load this thread's SavedState. The Release fence
+        // ensures all prior stores (the register saves above) are globally
+        // visible before the flag write.
+        "beqz a2, 1f",             // skip if save_flag is null (boot path)
+        "li   t0, 1",
+        "fence rw, w",             // Release fence: order saves before flag
+        "sw   t0, 0(a2)",          // *save_flag = 1
+        "1:",
+
+        // ── Release scheduler lock ────────────────────────────────────────
+        // Advance now_serving (offset 4 in Spinlock) so other CPUs can
+        // acquire this CPU's scheduler lock. Uses fence + plain store
+        // since we only need Release ordering and the lock protocol
+        // guarantees single-writer (only the holder advances now_serving).
+        "fence rw, w",               // Release fence: order saves before unlock
+        "addi a3, a3, 4",            // a3 = &now_serving
+        "lw   t0, 0(a3)",            // t0 = now_serving
+        "addi t0, t0, 1",            // t0 += 1
+        "sw   t0, 0(a3)",            // now_serving = t0 + 1
+
         // ── Restore next thread from *a1 ──────────────────────────────────
-        "ld t0,   112(a1)", // sstatus
-        "csrw sstatus, t0",
         "ld ra,     8(a1)", // return address (or entry function)
         "ld sp,     0(a1)",
         "ld s0,    16(a1)",
@@ -179,7 +203,7 @@ pub unsafe extern "C" fn switch(current: *mut SavedState, next: *const SavedStat
         "ld s9,    88(a1)",
         "ld s10,   96(a1)",
         "ld s11,  104(a1)",
-        "ld a0,   120(a1)", // argument for first-entry threads
+        "ld a0,   112(a1)", // argument for first-entry threads
         "ret",              // jr ra → jumps to next thread's entry or resume point
     );
 }

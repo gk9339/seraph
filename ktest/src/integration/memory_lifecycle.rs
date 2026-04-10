@@ -16,39 +16,29 @@
 //!   `mem_protect` → `mem_unmap` → `aspace_query` (expect not mapped) →
 //!   `mem_unmap` (idempotent check)
 
-use syscall::{aspace_query, frame_split, mem_map, mem_protect, mem_unmap};
+use syscall::{aspace_query, mem_protect, mem_unmap};
 
 use crate::{TestContext, TestResult};
 
 const TEST_VA: u64 = 0x4800_0000; // 1.125 GiB — distinct from unit/mm.rs TEST_VA.
-const PAGE: u64 = 0x1000;
 
 pub fn run(ctx: &TestContext) -> TestResult
 {
-    // ── 1. Find a splittable frame cap. ──────────────────────────────────────
+    // ── 1. Allocate two frames from the pool. ────────────────────────────────
     //
-    // Segment frame caps live at aspace_cap+1 .. aspace_cap+segment_count.
-    // We don't know which segments are large enough to split at PAGE, so scan
-    // all of them (typically 3: text, rodata, data/bss) and use the first one
-    // that frame_split accepts. If none are splittable, skip the test.
-    let mut split_result = None;
-    for offset in 1..=3u32
-    {
-        let cap = ctx.aspace_cap + offset;
-        if let Ok(pair) = frame_split(cap, PAGE)
-        {
-            split_result = Some(pair);
-            break;
-        }
-    }
-    let Some((frame_a, frame_b)) = split_result else
-    {
-        crate::klog("ktest: integration::memory_lifecycle SKIP (no splittable frame cap)");
-        return Ok(());
-    };
+    // Pool frames are single-page (frame_split already consumed the BSS segment
+    // during init), so we can't test frame_split here. Instead, allocate two
+    // frames to test map/unmap/protect without consuming segments.
+    let mut frame_a = crate::frame_pool::FrameGuard::new(ctx.aspace_cap)
+        .ok_or("integration::memory_lifecycle: frame pool exhausted (a)")?;
+    let frame_b = crate::frame_pool::FrameGuard::new(ctx.aspace_cap)
+        .ok_or("integration::memory_lifecycle: frame pool exhausted (b)")?;
+
+    // Drop frame_b immediately — we only needed it to verify pool has capacity.
+    drop(frame_b);
 
     // ── 2. Map frame_a (one page) at TEST_VA. ────────────────────────────────
-    mem_map(frame_a, ctx.aspace_cap, TEST_VA, 0, 1)
+    frame_a.map(TEST_VA)
         .map_err(|_| "integration::memory_lifecycle: mem_map failed")?;
 
     // ── 3. Verify the mapping via aspace_query. ───────────────────────────────
@@ -60,11 +50,11 @@ pub fn run(ctx: &TestContext) -> TestResult
     }
 
     // ── 4. Change protection to read-only. ───────────────────────────────────
-    mem_protect(frame_a, ctx.aspace_cap, TEST_VA, 1, 0)
+    mem_protect(frame_a.cap(), ctx.aspace_cap, TEST_VA, 1, 0)
         .map_err(|_| "integration::memory_lifecycle: mem_protect (read-only) failed")?;
 
     // ── 5. Protect an unmapped VA — must fail. ────────────────────────────────
-    let protect_err = mem_protect(frame_a, ctx.aspace_cap, TEST_VA + 0x10_0000, 1, 0);
+    let protect_err = mem_protect(frame_a.cap(), ctx.aspace_cap, TEST_VA + 0x10_0000, 1, 0);
     if protect_err.is_ok()
     {
         return Err("integration::memory_lifecycle: mem_protect on unmapped VA should fail");
@@ -87,11 +77,6 @@ pub fn run(ctx: &TestContext) -> TestResult
     mem_unmap(ctx.aspace_cap, TEST_VA, 1)
         .map_err(|_| "integration::memory_lifecycle: idempotent mem_unmap failed")?;
 
-    // Cleanup: delete the split child frame caps.
-    syscall::cap_delete(frame_a)
-        .map_err(|_| "integration::memory_lifecycle: cap_delete frame_a failed")?;
-    syscall::cap_delete(frame_b)
-        .map_err(|_| "integration::memory_lifecycle: cap_delete frame_b failed")?;
-
+    // FrameGuard drop unmaps (third time, also idempotent) and returns to pool.
     Ok(())
 }

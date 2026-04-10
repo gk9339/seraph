@@ -13,12 +13,19 @@
 
 /// Suspend the hart until the next interrupt fires, then return.
 ///
-/// Unlike `halt_loop`, this requires interrupts to be enabled (via
-/// `sstatus.SIE`) so the supervisor timer can wake the hart.
-/// Interrupts remain enabled after `wfi` returns.
+/// On RISC-V, `wfi` only wakes for **enabled** interrupts (SIE must be
+/// set). The caller (idle loop) keeps SIE=1 on RISC-V, so `wfi` wakes
+/// on the next timer tick, wakeup IPI, or external interrupt.
+///
+/// A wakeup IPI can be consumed between the idle loop's `has_runnable`
+/// check and `wfi`. The IPI handler sets a reschedule-pending flag that
+/// the idle loop checks before calling this function; this catches most
+/// cases. For the remaining window (IPI between flag check and `wfi`),
+/// the timer interrupt (10 ms) provides a bounded fallback wakeup.
 pub fn halt_until_interrupt()
 {
-    // SAFETY: wfi is a hint; the CPU suspends until an enabled interrupt arrives.
+    // SAFETY: wfi suspends until an enabled interrupt arrives.
+    // SIE is already set by the caller (idle loop keeps SIE=1 on RISC-V).
     unsafe {
         core::arch::asm!("wfi", options(nostack, nomem));
     }

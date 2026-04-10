@@ -108,12 +108,20 @@ pub fn new_state(entry: u64, stack_top: u64, arg: u64, _is_user: bool) -> SavedS
 ///
 /// # Safety
 /// Both pointers must be valid, aligned `SavedState` values. The caller must
-/// hold the scheduler lock and have interrupts disabled.
+/// hold the scheduler lock and have interrupts disabled. `save_flag` and
+/// `lock_ptr` are used on RISC-V to release the lock between save/load;
+/// on x86-64 (TSO) the lock is released inline before the call and these
+/// parameters are ignored.
 #[cfg(not(test))]
 #[unsafe(naked)]
-pub unsafe extern "C" fn switch(current: *mut SavedState, next: *const SavedState)
+pub unsafe extern "C" fn switch(
+    current: *mut SavedState,
+    next: *const SavedState,
+    _save_flag: *const core::sync::atomic::AtomicU32,
+    _lock_ptr: *const crate::sync::Spinlock,
+)
 {
-    // rdi = current, rsi = next
+    // rdi = current, rsi = next, rdx = save_flag (unused), rcx = lock_ptr (unused)
     core::arch::naked_asm!(
         // ── Save current thread ───────────────────────────────────────────
         // Pop return address into rax; the caller will "return" to it when this
@@ -134,11 +142,17 @@ pub unsafe extern "C" fn switch(current: *mut SavedState, next: *const SavedStat
         "pushfq",
         "pop rax",
         "mov [rdi + 72], rax",
-        // ── Restore next thread ───────────────────────────────────────────
-        // Update TSS RSP0 with the next thread's kernel_stack_top.
-        // Caller (sched::enter / context_switch) is responsible for this
-        // before calling switch; skip here for Phase 9 simplicity.
 
+        // ── Signal save complete + release lock ───────────────────────────
+        // On x86-64 TSO, stores are globally visible in program order and
+        // the lock was released by release_lock_only() before the call.
+        // Set the context_saved flag for cross-arch consistency.
+        "test rdx, rdx",
+        "jz 1f",
+        "mov dword ptr [rdx], 1", // *save_flag = 1 (TSO: implicitly ordered)
+        "1:",
+
+        // ── Restore next thread ───────────────────────────────────────────
         // Restore rflags first so the restored flags take effect early.
         "mov rax, [rsi + 72]",
         "push rax",

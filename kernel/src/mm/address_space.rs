@@ -31,6 +31,8 @@
 // cast_possible_truncation: u64→usize page count arithmetic; bounded by address space size.
 #![allow(clippy::cast_possible_truncation)]
 
+use core::sync::atomic::{AtomicU64, Ordering};
+
 use boot_protocol::{InitSegment, SegmentFlags};
 
 use crate::mm::paging::phys_to_virt;
@@ -58,6 +60,12 @@ pub struct AddressSpace
     pub root_phys: u64,
     /// Virtual address of the root frame (via the direct physical map).
     pub root_virt: u64,
+    /// Bitmask of CPUs currently running threads in this address space.
+    ///
+    /// Bit N set = CPU N has this AS active, TLB may contain cached entries.
+    /// Updated on every context switch by the scheduler; queried by TLB
+    /// shootdown to determine which CPUs need IPIs.
+    active_cpus: AtomicU64,
 }
 
 // SAFETY: AddressSpace is accessed only from the single boot thread in Phase 9.
@@ -111,6 +119,7 @@ impl AddressSpace
         Self {
             root_phys,
             root_virt,
+            active_cpus: AtomicU64::new(0),
         }
     }
 
@@ -143,6 +152,9 @@ impl AddressSpace
     /// Map `virt` → `phys` as a 4 KiB page with the given permission flags.
     ///
     /// Allocates missing intermediate page table frames from `allocator`.
+    /// If this address space is active on other CPUs, sends TLB shootdown IPIs
+    /// to invalidate any stale TLB entries (some architectures cache negative
+    /// entries for non-present pages).
     ///
     /// # Safety
     /// `virt` must be in the user half (< `0x8000_0000_0000`). `phys` must be
@@ -156,10 +168,35 @@ impl AddressSpace
         allocator: &mut BuddyAllocator,
     ) -> Result<(), ()>
     {
-        use crate::arch::current::paging::map_user_page;
+        use crate::arch::current::paging::{flush_page, map_user_page};
 
+        // Perform the actual mapping via arch-specific page table walk.
         // SAFETY: contract passed to caller.
-        unsafe { map_user_page(self.root_virt, virt, phys, flags, allocator) }
+        unsafe { map_user_page(self.root_virt, virt, phys, flags, allocator)? };
+
+        // If this address space is active on other CPUs, they need TLB invalidation
+        // for the new mapping (some architectures cache negative lookups).
+        // The current CPU is excluded from the remote mask; it invalidates locally below.
+        let active = self.active_cpu_mask();
+        let current = crate::arch::current::cpu::current_cpu();
+        let remote_cpus = active & !(1u64 << current);
+
+        if remote_cpus != 0 {
+            // SAFETY: root_phys is a valid page table root; remote_cpus mask
+            // contains only bits for online CPUs (enforced by scheduler).
+            unsafe {
+                crate::mm::tlb_shootdown::shootdown(self.root_phys, remote_cpus);
+            }
+        }
+
+        // Local TLB invalidation for the mapped page. The current CPU does not
+        // send an IPI to itself; it performs the invalidation directly.
+        // SAFETY: virt is a valid user virtual address.
+        unsafe {
+            flush_page(virt);
+        }
+
+        Ok(())
     }
 
     /// Map each page of an ELF LOAD `segment` into this address space.
@@ -281,7 +318,8 @@ impl AddressSpace
     /// Remove the mapping for a single 4 KiB page at `virt`.
     ///
     /// If `virt` is not mapped, this is a no-op (safe to call redundantly).
-    /// Does not free intermediate page table frames.
+    /// Does not free intermediate page table frames. Invalidates TLB entries
+    /// on all CPUs where this address space is active.
     ///
     /// # Safety
     /// `virt` must be in the user half. Caller must not access `virt` after
@@ -289,15 +327,39 @@ impl AddressSpace
     #[cfg(not(test))]
     pub unsafe fn unmap_page(&mut self, virt: u64)
     {
-        use crate::arch::current::paging::unmap_user_page;
+        use crate::arch::current::paging::{flush_page, unmap_user_page};
+
+        // Remove the mapping via arch-specific page table walk.
         // SAFETY: root_virt is valid; virt is in user range (caller's contract).
-        unsafe { unmap_user_page(self.root_virt, virt) }
+        unsafe { unmap_user_page(self.root_virt, virt) };
+
+        // Shootdown remote CPUs. The current CPU is excluded from the mask;
+        // it will invalidate locally below (no need to IPI ourselves).
+        let active = self.active_cpu_mask();
+        let current = crate::arch::current::cpu::current_cpu();
+        let remote_cpus = active & !(1u64 << current);
+
+        if remote_cpus != 0 {
+            // SAFETY: root_phys is a valid page table root; remote_cpus mask
+            // contains only bits for online CPUs (enforced by scheduler).
+            unsafe {
+                crate::mm::tlb_shootdown::shootdown(self.root_phys, remote_cpus);
+            }
+        }
+
+        // Local TLB invalidation for the unmapped page. The current CPU does
+        // not send an IPI to itself; it performs the invalidation directly.
+        // SAFETY: virt is a valid user virtual address.
+        unsafe {
+            flush_page(virt);
+        }
     }
 
     /// Change the permission flags on an existing 4 KiB leaf mapping at `virt`.
     ///
     /// Returns `Err(PagingError::NotMapped)` if `virt` is not mapped.
     /// Caller is responsible for W^X and rights validation before calling.
+    /// Invalidates TLB entries on all CPUs where this address space is active.
     ///
     /// # Safety
     /// `virt` must be in the user half and currently mapped.
@@ -308,9 +370,34 @@ impl AddressSpace
         flags: crate::mm::paging::PageFlags,
     ) -> Result<(), crate::mm::paging::PagingError>
     {
-        use crate::arch::current::paging::protect_user_page;
+        use crate::arch::current::paging::{flush_page, protect_user_page};
+
+        // Change protection bits via arch-specific page table walk.
         // SAFETY: root_virt is valid; virt is in user range (caller's contract).
-        unsafe { protect_user_page(self.root_virt, virt, flags) }
+        unsafe { protect_user_page(self.root_virt, virt, flags)? };
+
+        // Shootdown remote CPUs. The current CPU is excluded from the mask;
+        // it will invalidate locally below (no need to IPI ourselves).
+        let active = self.active_cpu_mask();
+        let current = crate::arch::current::cpu::current_cpu();
+        let remote_cpus = active & !(1u64 << current);
+
+        if remote_cpus != 0 {
+            // SAFETY: root_phys is a valid page table root; remote_cpus mask
+            // contains only bits for online CPUs (enforced by scheduler).
+            unsafe {
+                crate::mm::tlb_shootdown::shootdown(self.root_phys, remote_cpus);
+            }
+        }
+
+        // Local TLB invalidation for the protected page. The current CPU does
+        // not send an IPI to itself; it performs the invalidation directly.
+        // SAFETY: virt is a valid user virtual address.
+        unsafe {
+            flush_page(virt);
+        }
+
+        Ok(())
     }
 
     /// Translate a user virtual address to its mapped physical address.
@@ -345,5 +432,57 @@ impl AddressSpace
         unsafe {
             activate(self.root_phys);
         }
+    }
+
+    /// Mark this address space as active on a CPU.
+    ///
+    /// Called during context switch when switching TO this address space.
+    /// Sets bit `cpu` in the `active_cpus` bitmask.
+    ///
+    /// # Memory Ordering
+    /// Uses Release ordering: ensures all prior address space setup (page
+    /// table modifications, mappings) is visible to other CPUs before marking
+    /// active, so TLB shootdown sees a consistent view when it queries
+    /// `active_cpu_mask`.
+    pub fn mark_active_on_cpu(&self, cpu: u32)
+    {
+        // SAFETY: Release ordering ensures prior address space setup (page
+        // table modifications) is visible before we mark it active for TLB
+        // shootdown purposes. The fetch_or is atomic; no data race on the mask.
+        self.active_cpus.fetch_or(1u64 << cpu, Ordering::Release);
+    }
+
+    /// Mark this address space as inactive on a CPU.
+    ///
+    /// Called during context switch when switching FROM this address space.
+    /// Clears bit `cpu` in the `active_cpus` bitmask.
+    ///
+    /// # Memory Ordering
+    /// Uses Release ordering: ensures all TLB-dependent operations complete
+    /// before clearing the active bit, so concurrent shootdowns see the correct
+    /// mask (a CPU remains active until it has fully switched away).
+    pub fn mark_inactive_on_cpu(&self, cpu: u32)
+    {
+        // SAFETY: Release ordering ensures all TLB-dependent operations
+        // complete before we mark inactive, so TLB shootdowns see the correct
+        // mask. The fetch_and is atomic; no data race on the mask.
+        self.active_cpus
+            .fetch_and(!(1u64 << cpu), Ordering::Release);
+    }
+
+    /// Get the bitmask of CPUs with this address space active.
+    ///
+    /// Used by TLB shootdown to determine which CPUs need IPIs.
+    /// Bit N set = CPU N is currently running threads in this address space.
+    ///
+    /// # Memory Ordering
+    /// Uses Acquire ordering: ensures we observe all prior `mark_active_on_cpu`
+    /// calls from other CPUs, giving an accurate snapshot of which CPUs have
+    /// cached TLB entries for this address space.
+    pub(crate) fn active_cpu_mask(&self) -> u64
+    {
+        // SAFETY: Acquire ordering ensures we see all mark_active calls from
+        // other CPUs. The load is atomic; no data race on the mask.
+        self.active_cpus.load(Ordering::Acquire)
     }
 }

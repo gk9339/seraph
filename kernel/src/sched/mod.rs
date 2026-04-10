@@ -12,7 +12,7 @@
 //! context switching; timer preemption decrements `slice_remaining` per tick.
 //!
 //! # Deferred work
-//! - WSMP: SMP bringup, secondary CPU idle threads, load balancing.
+//! - Cross-CPU load balancing and thread migration.
 
 // cast_possible_truncation: usize→u32 CPU index and u64→usize address bounded by MAX_CPUS.
 #![allow(clippy::cast_possible_truncation)]
@@ -50,7 +50,7 @@ pub const TIME_SLICE_TICKS: u32 = 10;
 pub const KERNEL_STACK_PAGES: usize = 4;
 
 /// Maximum number of CPUs. Matches the `u64` TLB-shootdown cpu-mask width.
-/// TODO WSMP: enforce during SMP bringup if `cpu_count` exceeds this.
+/// TODO: enforce if `cpu_count` exceeds this.
 pub const MAX_CPUS: usize = 64;
 
 /// Hard affinity sentinel: no hard CPU affinity.
@@ -105,6 +105,44 @@ static NEXT_THREAD_ID: core::sync::atomic::AtomicU32 = core::sync::atomic::Atomi
 /// Written once during boot by `init`, then read by `SYS_SYSTEM_INFO(CpuCount)`.
 pub static CPU_COUNT: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
 
+// ── Reschedule-pending flag (RISC-V) ─────────────────────────────────────────
+
+/// Per-CPU reschedule-pending bitmask.
+///
+/// On RISC-V, the wakeup IPI handler cannot call `schedule()` directly
+/// (reentrancy risk — the interrupt may fire while `schedule()` is on the
+/// call stack). Instead, the handler sets the target CPU's bit here.
+///
+/// The flag is consumed in two places:
+/// 1. **Trap return path** (`trap_dispatch`): after handling an interrupt,
+///    if the CPU is idle and the flag is set, `schedule()` runs before
+///    `sret`. This eliminates the `wfi` lost-wakeup race.
+/// 2. **Idle loop**: checks the flag before `wfi` as a fallback
+///    (defense-in-depth for flags set without a corresponding interrupt).
+///
+/// On x86-64 this flag is unused because `sti; hlt` is atomic.
+static RESCHEDULE_PENDING: core::sync::atomic::AtomicU64 =
+    core::sync::atomic::AtomicU64::new(0);
+
+/// Signal that the current CPU should reschedule.
+///
+/// Called from the RISC-V software interrupt handler after a wakeup IPI.
+#[allow(dead_code)] // Only called from riscv64 interrupt handler
+pub fn set_reschedule_pending()
+{
+    let cpu = u64::from(crate::arch::current::cpu::current_cpu());
+    RESCHEDULE_PENDING.fetch_or(1u64 << cpu, core::sync::atomic::Ordering::Release);
+}
+
+/// Check and clear the reschedule-pending flag for a CPU.
+///
+/// Returns `true` if a reschedule was pending (and clears the flag).
+pub fn take_reschedule_pending(cpu: usize) -> bool
+{
+    let bit = 1u64 << cpu;
+    RESCHEDULE_PENDING.fetch_and(!bit, core::sync::atomic::Ordering::AcqRel) & bit != 0
+}
+
 /// Allocate a unique thread ID.
 ///
 /// Called during idle thread creation, init TCB creation, and
@@ -126,11 +164,10 @@ pub fn alloc_thread_id() -> u32
 fn idle_thread_entry(_cpu_id: u64) -> !
 {
     // Enable supervisor interrupts so wfi can be woken by the timer.
-    // new_state() sets sstatus.SIE=0 to prevent a race in switch() where
-    // an interrupt during the register-restore window corrupts sscratch
-    // (see context.rs comment). Idle must enable SIE explicitly here;
-    // sscratch=0 at this point (idle is !is_user) so any S-mode interrupt
-    // correctly takes the S-mode trap path.
+    // switch() does not touch sstatus; SIE starts at 0 (from lock_raw).
+    // Idle must enable SIE explicitly here; sscratch=0 at this point
+    // (idle is !is_user) so any S-mode interrupt correctly takes the
+    // S-mode trap path.
     #[cfg(not(test))]
     // SAFETY: idle thread runs in supervisor mode with sscratch=0; enabling
     // interrupts allows wfi wakeup without corrupting user-mode state.
@@ -140,24 +177,69 @@ fn idle_thread_entry(_cpu_id: u64) -> !
 
     loop
     {
-        // Check this CPU's run queue before halting. Use current_cpu() so APs
-        // consult their own scheduler rather than the BSP's (SCHEDULERS[0]).
-        // schedule() still uses SCHEDULERS[0] (Phase D fix); this check is
-        // safe as long as APs have empty run queues (true until Phase D).
+        // Check this CPU's run queue before halting. Each CPU consults its
+        // own scheduler via current_cpu().
         #[cfg(not(test))]
         {
             let cpu = crate::arch::current::cpu::current_cpu() as usize;
-            // SAFETY: single-CPU system (Phase 8); CPU 0 scheduler is always valid.
-            // WSMP Phase D will fix this for per-CPU AP schedulers.
+
+            // Mark idle BEFORE checking the run queue. Any concurrent
+            // enqueue_and_wake that adds work after our check will see
+            // is_idle=true and send a wakeup IPI.
+            crate::percpu::mark_idle(cpu);
+
+            // Disable interrupts before the check on x86-64 only.
+            // sti;hlt atomically re-enables and halts — no lost wakeup.
+            //
+            // On RISC-V, SIE stays enabled (wfi with SIE=0 does not
+            // wake on QEMU). The reschedule_pending flag catches IPIs
+            // consumed between the check and wfi.
+            #[cfg(target_arch = "x86_64")]
+            // SAFETY: disabling interrupts is safe in ring-0; sti;hlt
+            // in halt_until_interrupt re-enables atomically.
+            unsafe {
+                crate::arch::current::cpu::disable_interrupts();
+            }
+
+            // SAFETY: SCHEDULERS[cpu] is initialized for this CPU.
             let has_work = unsafe { SCHEDULERS[cpu].has_runnable() };
             if has_work
             {
-                // SAFETY: called from scheduler context on a valid kernel stack.
+                #[cfg(target_arch = "x86_64")]
+                // SAFETY: re-enables interrupts after the cli above.
                 unsafe {
-                    schedule();
+                    crate::arch::current::interrupts::enable();
+                }
+                crate::percpu::mark_active(cpu);
+                // SAFETY: called from scheduler context on a valid kernel stack.
+                // requeue=true: idle thread is Running and should go back in queue.
+                unsafe {
+                    schedule(true);
                 }
             }
+            else if take_reschedule_pending(cpu)
+            {
+                // IPI handler set the flag — work was enqueued.
+                // Skip halt and re-check on next iteration.
+                #[cfg(target_arch = "x86_64")]
+                // SAFETY: re-enables interrupts after the cli above.
+                unsafe {
+                    crate::arch::current::interrupts::enable();
+                }
+                crate::percpu::mark_active(cpu);
+            }
+            else
+            {
+                // Genuinely idle. Halt until next interrupt.
+                //   x86-64: sti;hlt (atomic enable+halt)
+                //   RISC-V: wfi (SIE=1; timer provides bounded wakeup)
+                halt_until_interrupt();
+                crate::percpu::mark_active(cpu);
+            }
         }
+
+        // Test mode: no actual halt; just loop.
+        #[cfg(test)]
         halt_until_interrupt();
     }
 }
@@ -244,11 +326,15 @@ pub fn init(cpu_count: u32, allocator: &mut BuddyAllocator) -> u32
             iopb: core::ptr::null_mut(),
             blocked_on_object: core::ptr::null_mut(),
             thread_id: alloc_thread_id(),
+            context_saved: core::sync::atomic::AtomicU32::new(1),
+            magic: thread::TCB_MAGIC,
         }));
 
         // 4. Register in per-CPU scheduler.
         // SAFETY: single-threaded boot; SCHEDULERS[cpu] is exclusively owned during init.
         unsafe {
+            // Set CPU ID so the scheduler can index into the global CPU_LOAD array.
+            SCHEDULERS[cpu].cpu_id = cpu;
             SCHEDULERS[cpu].set_idle(tcb);
             SCHEDULERS[cpu].set_current(tcb);
         }
@@ -277,7 +363,7 @@ pub fn init(_cpu_count: u32, _allocator: &mut crate::mm::BuddyAllocator) -> u32
 ///
 /// Called from `kernel_entry_ap` after per-CPU hardware initialisation is
 /// complete. The AP has an empty run queue at this point; it idles until
-/// the scheduler enqueues work (Phase D / F will add cross-CPU wakeup).
+/// `enqueue_and_wake` places work on this CPU and sends a wakeup IPI.
 ///
 /// This function never returns.
 ///
@@ -322,10 +408,164 @@ pub unsafe fn idle_stack_top_for(cpu_id: usize) -> u64
 #[allow(dead_code)] // Multi-CPU accessor; called once SMP bringup is implemented.
 pub unsafe fn scheduler_for(id: usize) -> &'static mut PerCpuScheduler
 {
-    debug_assert!(id < MAX_CPUS);
+    if id >= MAX_CPUS
+    {
+        crate::kprintln!("scheduler_for: id={id} >= MAX_CPUS={MAX_CPUS}");
+        panic!("scheduler_for: id out of range");
+    }
     // SAFETY: caller guarantees id < MAX_CPUS and exclusive access to this CPU's scheduler.
     unsafe { &mut SCHEDULERS[id] }
 }
+
+/// Enqueue a thread on a target CPU's run queue and wake the CPU if idle.
+///
+/// This function acquires the target CPU's scheduler lock, enqueues the thread,
+/// releases the lock, and then sends a wakeup IPI if the target CPU is idle.
+///
+/// This is the preferred way to enqueue a thread from cross-CPU contexts (IPC,
+/// IRQ handlers, etc.) as it handles both enqueuing and wakeup atomically.
+///
+/// # Safety
+/// - `tcb` must be a valid [`ThreadControlBlock`] pointer
+/// - `target_cpu` must be < [`MAX_CPUS`] and initialized by `sched::init`
+#[cfg(not(test))]
+pub unsafe fn enqueue_and_wake(tcb: *mut ThreadControlBlock, target_cpu: usize, priority: u8)
+{
+    if target_cpu >= MAX_CPUS
+    {
+        // SAFETY: tcb may or may not be valid; thread_id is at a known offset.
+        let tid = unsafe { (*tcb).thread_id };
+        crate::kprintln!(
+            "enqueue_and_wake: target_cpu={target_cpu} >= MAX_CPUS, tid={tid}, prio={priority}"
+        );
+    }
+    // SAFETY: caller guarantees tcb is valid and target_cpu is initialized.
+    let sched = unsafe { scheduler_for(target_cpu) };
+
+    // Acquire the scheduler lock.
+    // SAFETY: lock_raw must be paired with unlock_raw below.
+    let saved = unsafe { sched.lock.lock_raw() };
+
+    // Enqueue the thread while holding the lock.
+    // SAFETY: lock is held; tcb is valid.
+    sched.enqueue(tcb, priority);
+
+    // Update preferred_cpu under the lock so dealloc_object always
+    // targets the correct scheduler. Without this, preferred_cpu can be stale
+    // if select_target_cpu chose a different CPU than the thread last ran on.
+    // SAFETY: tcb is valid; lock is held.
+    unsafe { (*tcb).preferred_cpu = target_cpu as u32 };
+
+    // Release the lock before sending the IPI.
+    // SAFETY: saved was returned by the matching lock_raw above.
+    unsafe { sched.lock.unlock_raw(saved) };
+
+    // Wake the target CPU if it's idle. This breaks the CPU out of hlt/wfi
+    // so it can immediately pick up the newly enqueued work. The IPI is sent
+    // AFTER releasing the lock to minimize lock hold time.
+    // SAFETY: target_cpu is validated < MAX_CPUS by scheduler_for.
+    unsafe { wake_idle_cpu(target_cpu) };
+}
+
+/// Test stub for `enqueue_and_wake` (no-op in test mode).
+#[cfg(test)]
+#[allow(unused_variables)]
+pub unsafe fn enqueue_and_wake(_tcb: *mut ThreadControlBlock, _target_cpu: usize, _priority: u8) {}
+
+/// Select target CPU for enqueueing a thread based on affinity and load.
+///
+/// If the thread has explicit CPU affinity, returns that CPU. Otherwise,
+/// selects the least-loaded CPU for load balancing.
+///
+/// # Safety
+/// `tcb` must be a valid pointer to an initialized [`ThreadControlBlock`].
+// needless_range_loop: we must use indexing for explicit bounds control with
+// static mut SCHEDULERS; iter/enumerate would require unsafe coercion that is
+// less clear than explicit bounds checking here.
+#[allow(clippy::needless_range_loop)]
+#[cfg(not(test))]
+pub unsafe fn select_target_cpu(tcb: *mut ThreadControlBlock) -> usize
+{
+    // SAFETY: caller guarantees tcb is valid; cpu_affinity field is always valid.
+    let affinity = unsafe { (*tcb).cpu_affinity };
+
+    // Hard affinity: use specified CPU
+    if affinity != AFFINITY_ANY
+    {
+        return affinity as usize;
+    }
+
+    // No preference: load balance across all CPUs
+    let cpu_count = CPU_COUNT.load(core::sync::atomic::Ordering::Relaxed) as usize;
+    let mut min_load = u32::MAX;
+    let mut min_cpu = 0;
+
+    // SAFETY: SCHEDULERS is a valid static array; cpu < cpu_count < MAX_CPUS
+    for cpu in 0..cpu_count
+    {
+        // SAFETY: cpu is in bounds [0, cpu_count); SCHEDULERS is initialized for
+        // all CPUs [0, cpu_count) by sched::init.
+        let load = unsafe { SCHEDULERS[cpu].current_load() };
+        if load < min_load
+        {
+            min_load = load;
+            min_cpu = cpu;
+        }
+    }
+
+    min_cpu
+}
+
+/// Test stub for `select_target_cpu` (always returns CPU 0).
+#[cfg(test)]
+#[allow(unused_variables)]
+pub unsafe fn select_target_cpu(tcb: *mut ThreadControlBlock) -> usize
+{
+    0
+}
+
+/// Wake an idle CPU if needed after enqueueing work.
+///
+/// If the target CPU is idle and not the current CPU, sends a wakeup IPI to
+/// break it out of `hlt`/`wfi`. No IPI is sent if the target is already active
+/// or if it is the current CPU (work will be picked up naturally on next schedule).
+///
+/// # Safety
+/// `target_cpu` must be a valid online CPU index (< `CPU_COUNT`).
+#[cfg(not(test))]
+unsafe fn wake_idle_cpu(target_cpu: usize)
+{
+    let current = crate::arch::current::cpu::current_cpu() as usize;
+
+    // Don't IPI ourselves; the newly enqueued thread will be picked up on the
+    // next schedule() call (either from sys_yield or timer preemption).
+    if target_cpu == current
+    {
+        return;
+    }
+
+    // Check if target is idle. Acquire ordering ensures we observe the idle bit
+    // after the target CPU completed its run queue check and set the bit.
+    if !crate::percpu::is_idle(target_cpu)
+    {
+        return;
+    }
+
+    // Send wakeup IPI. The IPI breaks the halt state; the handler just sends EOI.
+    // SAFETY: target_cpu is valid; apic_id_for returns the APIC/hart ID for the CPU.
+    let hw_id = unsafe { crate::percpu::apic_id_for(target_cpu) };
+
+    // SAFETY: hw_id is valid for an online CPU (APIC ID on x86-64, hart ID on RISC-V);
+    // send_wakeup_ipi is safe with a valid hardware ID.
+    unsafe {
+        crate::arch::current::interrupts::send_wakeup_ipi(hw_id);
+    }
+}
+
+/// Test stub for `wake_idle_cpu` (no-op in test mode).
+#[cfg(test)]
+#[allow(unused_variables)]
+unsafe fn wake_idle_cpu(_target_cpu: usize) {}
 
 // ── schedule ──────────────────────────────────────────────────────────────────
 
@@ -334,9 +574,18 @@ pub unsafe fn scheduler_for(id: usize) -> &'static mut PerCpuScheduler
 /// Called from `sys_yield`, timer preemption, and the idle thread. On a
 /// single CPU (until WSMP) this always uses `SCHEDULERS[0]`.
 ///
-/// If the current thread is still `Running` it is re-queued at its priority
-/// before selection. If the selected next thread is the same as the current
-/// one, no switch occurs.
+/// `requeue_current`: if `true`, the current thread is placed back in the
+/// run queue at its priority (timer preemption, yield). If `false`, the
+/// thread has already been marked Blocked/Exited by the caller and must
+/// not be re-enqueued.
+///
+/// **Why a parameter instead of checking `state == Running`:** after a
+/// voluntary block (`signal_wait`, IPC), the thread's state is `Blocked`.
+/// But between the IPC lock release and this function acquiring the
+/// scheduler lock, another CPU can wake the thread, enqueue it on a
+/// different CPU, dequeue it, and set its state back to `Running`. If
+/// we checked state here we would re-enqueue it, creating a double-schedule
+/// where two CPUs run the same thread on the same kernel stack.
 ///
 /// After updating architecture-specific kernel-stack pointers the scheduler
 /// lock is released, then `arch::current::context::switch` performs the actual
@@ -346,15 +595,23 @@ pub unsafe fn scheduler_for(id: usize) -> &'static mut PerCpuScheduler
 /// Must be called from within a kernel context (interrupt handler or syscall
 /// handler) with a valid kernel stack. Interrupts are disabled by the
 /// scheduler lock; they are re-enabled as part of lock release.
+// too_many_lines: schedule() is the core scheduler critical path; splitting would
+// introduce indirection that obscures the single logical context-switch sequence.
+#[allow(clippy::too_many_lines)]
 #[cfg(not(test))]
-pub unsafe fn schedule()
+pub unsafe fn schedule(requeue_current: bool)
 {
     use crate::arch::current::context::switch;
     use thread::ThreadState;
 
-    // SAFETY: single-CPU system; CPU 0 scheduler is always valid.
-    let sched =
-        unsafe { &mut SCHEDULERS[crate::arch::current::cpu::current_cpu() as usize] };
+    let cpu = crate::arch::current::cpu::current_cpu() as usize;
+    if cpu >= MAX_CPUS
+    {
+        crate::kprintln!("schedule: current_cpu()={cpu} >= MAX_CPUS");
+        panic!("schedule: current_cpu out of range");
+    }
+    // SAFETY: cpu < MAX_CPUS validated above; SCHEDULERS[cpu] initialized by init().
+    let sched = unsafe { &mut SCHEDULERS[cpu] };
 
     // Acquire the scheduler lock via lock_raw so we hold no borrow reference
     // to `sched` during the critical section — allowing us to call mutable
@@ -365,19 +622,26 @@ pub unsafe fn schedule()
 
     let current = sched.current;
 
-    // If the current thread is still actively running, put it back in the
-    // run queue so it can be rescheduled.
-    if !current.is_null()
+    // Re-enqueue the current thread if the caller requested it (preemption,
+    // yield). Voluntary-block callers pass requeue_current=false because the
+    // thread is already Blocked/Exited and may have been woken and migrated
+    // to another CPU between the IPC lock release and this point.
+    if !current.is_null() && requeue_current
     {
         // SAFETY: current is a valid TCB set by enter() or a previous schedule();
         // state, priority fields are always valid.
         unsafe {
-            if (*current).state == ThreadState::Running
-            {
-                (*current).state = ThreadState::Ready;
-                let prio = (*current).priority;
-                sched.enqueue(current, prio);
-            }
+            debug_assert!(
+                (*current).magic == thread::TCB_MAGIC,
+                "schedule: current TCB magic corrupt on cpu {cpu}"
+            );
+            (*current).state = ThreadState::Ready;
+            let prio = (*current).priority;
+            debug_assert!(
+                (prio as usize) < NUM_PRIORITY_LEVELS,
+                "schedule: current priority {prio} out of range on cpu {cpu}"
+            );
+            sched.enqueue(current, prio);
         }
     }
 
@@ -394,6 +658,23 @@ pub unsafe fn schedule()
         )
     {
         next = sched.dequeue_highest();
+    }
+
+    // Validate the selected thread.
+    if !core::ptr::eq(next, sched.idle) && !next.is_null()
+    {
+        // SAFETY: next is from the run queue; all fields readable.
+        unsafe {
+            debug_assert!(
+                (*next).magic == thread::TCB_MAGIC,
+                "schedule: next TCB magic corrupt on cpu {cpu}"
+            );
+            debug_assert!(
+                ((*next).priority as usize) < NUM_PRIORITY_LEVELS,
+                "schedule: next priority {} out of range on cpu {cpu}",
+                (*next).priority
+            );
+        }
     }
 
     // If the scheduler selected the same thread, nothing to do.
@@ -418,6 +699,8 @@ pub unsafe fn schedule()
     // SAFETY: next is a valid TCB from the run queue or idle; state field is always valid.
     unsafe {
         (*next).state = ThreadState::Running;
+        // Record the CPU this thread is running on as its preferred CPU.
+        (*next).preferred_cpu = crate::arch::current::cpu::current_cpu();
     }
     sched.set_current(next);
 
@@ -449,7 +732,16 @@ pub unsafe fn schedule()
         crate::arch::current::cpu::set_kernel_trap_stack(trap_stack);
     }
 
-    // Switch address space if different (both non-null).
+    // Switch address space tracking and page tables.
+    //
+    // Three cases:
+    //   (a) nxt_as != null && nxt_as != cur_as → full switch (mark inactive, activate new)
+    //   (b) nxt_as == null && cur_as != null → switching to kernel/idle thread; mark
+    //       old address space inactive (no page table switch needed — kernel mappings
+    //       are shared). Without this, active_cpus grows monotonically and TLB
+    //       shootdowns target halted CPUs that don't need invalidation.
+    //   (c) same address space or both null → no-op
+    //
     // SAFETY: current and next are valid TCBs; address_space pointers were set up
     // by Phase 9 init or thread creation; null means kernel thread (shares kernel mappings).
     unsafe {
@@ -462,8 +754,31 @@ pub unsafe fn schedule()
             (*current).address_space
         };
         let nxt_as = (*next).address_space;
+
+        // Mark old address space inactive when leaving it (cases a and b).
+        if !cur_as.is_null() && (nxt_as.is_null() || nxt_as != cur_as)
+        {
+            let cpu = crate::arch::current::cpu::current_cpu();
+            // SAFETY: cur_as is a valid AddressSpace pointer from the previous
+            // thread's TCB; mark_inactive_on_cpu uses Release ordering to ensure
+            // all TLB-dependent operations complete before clearing the active bit.
+            (*cur_as).mark_inactive_on_cpu(cpu);
+        }
+
+        // Case (a): full address space switch.
         if !nxt_as.is_null() && nxt_as != cur_as
         {
+            let cpu = crate::arch::current::cpu::current_cpu();
+
+            // Mark new address space active on this CPU before activating.
+            // SAFETY: nxt_as is a valid AddressSpace pointer from the next thread's
+            // TCB; mark_active_on_cpu uses Release ordering to ensure prior address
+            // space setup is visible before marking active for TLB shootdown purposes.
+            (*nxt_as).mark_active_on_cpu(cpu);
+
+            // Activate (load CR3/satp).
+            // SAFETY: activate loads the page table root into CR3/satp; nxt_as is
+            // a valid AddressSpace with a properly initialized root_phys field.
             (*nxt_as).activate();
         }
     }
@@ -497,67 +812,152 @@ pub unsafe fn schedule()
     // SAFETY: next is a valid TCB; saved_state field is always valid.
     let next_state = unsafe { core::ptr::addr_of!((*next).saved_state) };
 
-    // Release the lock before calling switch. The context switch changes RSP
-    // to the next thread's kernel stack; the unlock_raw call must complete on
-    // the current stack before that happens.
-    // SAFETY: saved_flags was returned by the matching lock_raw above;
-    // restores interrupt state and unlocks scheduler.
-    unsafe {
-        sched.lock.unlock_raw(saved_flags);
+    // Prepare the context_saved flag for the current thread. Clear it so
+    // a remote CPU that dequeues this thread (after wakeup) spins until
+    // switch() has finished saving the registers.
+    let save_flag: *const core::sync::atomic::AtomicU32 = if current.is_null()
+    {
+        core::ptr::null()
+    }
+    else
+    {
+        // SAFETY: current is a valid TCB; context_saved field is always valid.
+        unsafe { core::ptr::addr_of!((*current).context_saved) }
+    };
+    if !save_flag.is_null()
+    {
+        // SAFETY: save_flag points to a valid AtomicU32 on a live TCB.
+        unsafe { (*save_flag).store(0, core::sync::atomic::Ordering::Relaxed) };
     }
 
-    if !current_state.is_null()
+    // Wait for the next thread's SavedState to be fully committed by its
+    // previous CPU's switch(). On RISC-V RVWMO, without this Acquire the
+    // loads in the restore phase could see stale register values.
+    if !core::ptr::eq(next, sched.idle) && !next.is_null()
     {
-        // SAFETY: both current_state and next_state are valid SavedState pointers
-        // on heap-allocated TCBs; kernel stacks are valid; interrupts are re-enabled.
-        unsafe {
-            switch(current_state, next_state);
+        // SAFETY: next is a valid TCB; context_saved field always valid.
+        while unsafe { (*next).context_saved.load(core::sync::atomic::Ordering::Acquire) } == 0
+        {
+            core::hint::spin_loop();
         }
     }
-    // If current_state is null (unreachable post-init), the idle TCB is
-    // always current, so this path cannot be reached normally.
+
+    let lock_ptr: *const crate::sync::Spinlock = core::ptr::addr_of!(sched.lock);
+
+    // On x86-64 (TSO): release the lock before switch(). Stores are
+    // globally visible in program order, so the save is complete before
+    // any remote CPU can observe the lock release. The lock_ptr and
+    // save_flag parameters are still passed for cross-arch consistency
+    // but the lock is already released.
+    //
+    // On RISC-V (RVWMO): the lock is released INSIDE switch(), between
+    // the save and load phases. This ensures the save is globally visible
+    // (via Release fence) before another CPU can acquire the lock and
+    // load the saved state.
+    #[cfg(target_arch = "x86_64")]
+    // SAFETY: release_lock_only advances the ticket; saved_flags is preserved
+    // for restore_interrupts_from after switch.
+    unsafe {
+        sched.lock.release_lock_only();
+    }
+
+    if current_state.is_null()
+    {
+        // No current thread to save (boot path). Release the lock directly.
+        #[cfg(target_arch = "riscv64")]
+        // SAFETY: lock held; no save needed.
+        unsafe {
+            sched.lock.release_lock_only();
+        }
+    }
+    else
+    {
+        // SAFETY: both current_state and next_state are valid SavedState pointers
+        // on heap-allocated TCBs; kernel stacks are valid; interrupts are disabled;
+        // save_flag is valid or null; lock_ptr is valid.
+        unsafe {
+            switch(current_state, next_state, save_flag, lock_ptr);
+        }
+    }
+
+    // Now on the new thread's stack. Restore the interrupt state that was
+    // saved when this thread last called lock_raw in its own schedule().
+    // For the very first switch (from boot/idle), saved_flags is 0 (interrupts
+    // were disabled during boot), which is correct.
+    // SAFETY: saved_flags was returned by the matching lock_raw above (and
+    // was saved/restored across the context switch via the callee-saved
+    // register convention).
+    unsafe {
+        crate::sync::restore_interrupts_from(saved_flags);
+    }
 }
 
-/// Decrement the current thread's time slice and call `schedule()` if expired.
+/// Timer interrupt handler: decrement current thread's time slice.
 ///
-/// Called from architecture-specific timer handlers on each timer tick.
+/// If the slice expires, mark the thread for rescheduling. This function is
+/// called from the timer interrupt handler on each CPU independently.
 ///
 /// # Safety
-/// Must be called from within an interrupt handler with a valid kernel stack.
+/// Must be called from interrupt context on the local CPU only.
 #[cfg(not(test))]
 pub unsafe fn timer_tick()
 {
-    // SAFETY: single-CPU system; CPU 0 scheduler is always valid.
-    let sched =
-        unsafe { &mut SCHEDULERS[crate::arch::current::cpu::current_cpu() as usize] };
+    let cpu = crate::arch::current::cpu::current_cpu() as usize;
+    debug_assert!(cpu < MAX_CPUS, "timer_tick: cpu={cpu} out of range");
+    // SAFETY: cpu is in bounds [0, MAX_CPUS); SCHEDULERS is a valid static array
+    let sched = unsafe { &mut SCHEDULERS[cpu] };
+
+    // SAFETY: Acquire scheduler lock to prevent race with schedule().
+    // lock_raw is used because we hold no borrow reference to sched during
+    // the critical section, allowing unlock before a potential schedule() call.
+    let saved = unsafe { sched.lock.lock_raw() };
+
     let current = sched.current;
-    if current.is_null()
-    {
+
+    // If no current thread or slice already expired, nothing to do
+    if current.is_null() {
+        // SAFETY: Paired with lock_raw above
+        unsafe { sched.lock.unlock_raw(saved) };
         return;
     }
-    // SAFETY: current is a valid TCB; slice_remaining field is always valid.
+
+    // SAFETY: current is a valid TCB pointer set by schedule();
+    // magic, slice_remaining are always valid to read.
+    #[allow(clippy::undocumented_unsafe_blocks)]
+    {
+        debug_assert!(
+            unsafe { (*current).magic == thread::TCB_MAGIC },
+            "timer_tick: current TCB magic corrupt on cpu {cpu}"
+        );
+    }
+    // SAFETY: current validated non-null above; slice_remaining is always valid.
     let remaining = unsafe { (*current).slice_remaining };
-    if remaining == 0
-    {
+    if remaining == 0 {
         // Idle threads have slice_remaining = 0 and should not be preempted.
+        // SAFETY: Paired with lock_raw above
+        unsafe { sched.lock.unlock_raw(saved) };
         return;
     }
+
     let new_remaining = remaining - 1;
-    // SAFETY: current is a valid TCB; slice_remaining field is always valid.
-    unsafe {
-        (*current).slice_remaining = new_remaining;
-    }
-    if new_remaining == 0
-    {
-        // Reset slice for next run.
-        // SAFETY: current is a valid TCB; slice_remaining field is always valid.
-        unsafe {
-            (*current).slice_remaining = TIME_SLICE_TICKS;
-        }
-        // SAFETY: called from interrupt handler; valid kernel stack.
-        unsafe {
-            schedule();
-        }
+    // SAFETY: current is a valid TCB; slice_remaining field is always valid
+    unsafe { (*current).slice_remaining = new_remaining };
+
+    if new_remaining == 0 {
+        // Slice expired - reset counter and reschedule
+        // SAFETY: TIME_SLICE_TICKS is a valid u32 constant
+        unsafe { (*current).slice_remaining = TIME_SLICE_TICKS };
+
+        // SAFETY: Unlock before calling schedule(), which will re-acquire
+        unsafe { sched.lock.unlock_raw(saved) };
+
+        // SAFETY: schedule() re-acquires the lock and performs a context switch.
+        // requeue=true: thread was preempted and should go back in queue.
+        unsafe { schedule(true) };
+    } else {
+        // Still has time remaining - just unlock and return
+        // SAFETY: Paired with lock_raw above
+        unsafe { sched.lock.unlock_raw(saved) };
     }
 }
 
@@ -688,6 +1088,13 @@ pub fn enter() -> !
     // SAFETY: init_tcb.address_space is non-null and valid, set up in main.rs Phase 9 init;
     // root_phys field is always valid.
     let root_phys = unsafe { (*init_tcb.address_space).root_phys };
+
+    // Mark init's address space as active on CPU 0 (BSP) before entering user mode.
+    // SAFETY: init_tcb.address_space is a valid AddressSpace pointer; mark_active_on_cpu
+    // uses Release ordering to ensure address space setup is visible before marking active.
+    unsafe {
+        (*init_tcb.address_space).mark_active_on_cpu(0);
+    }
 
     crate::kprintln!("sched: enter - handing control to init");
 

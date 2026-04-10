@@ -406,6 +406,129 @@ unsafe extern "C" fn isr_spurious()
     core::arch::naked_asm!("iretq");
 }
 
+/// TLB shootdown IPI handler stub (vector 250).
+///
+/// Reads the shootdown request from `TLB_SHOOTDOWN`, flushes the TLB for the
+/// target address space, and acknowledges by clearing this CPU's bit.
+#[cfg(not(test))]
+#[unsafe(naked)]
+unsafe extern "C" fn ipi_tlb_shootdown_stub()
+{
+    core::arch::naked_asm!(
+        "push rax",
+        "push rcx",
+        "push rdx",
+        "push rsi",
+        "push rdi",
+        "push r8",
+        "push r9",
+        "push r10",
+        "push r11",
+        "call {handler}",
+        "pop r11",
+        "pop r10",
+        "pop r9",
+        "pop r8",
+        "pop rdi",
+        "pop rsi",
+        "pop rdx",
+        "pop rcx",
+        "pop rax",
+        "iretq",
+        handler = sym ipi_tlb_shootdown_handler,
+    );
+}
+
+/// Wakeup IPI handler stub (vector 251).
+///
+/// Breaks idle CPUs out of `hlt` when work is enqueued. The handler itself
+/// just sends EOI; the interrupt is sufficient to wake the CPU.
+#[cfg(not(test))]
+#[unsafe(naked)]
+unsafe extern "C" fn ipi_wakeup_stub()
+{
+    core::arch::naked_asm!(
+        "push rax",
+        "push rcx",
+        "push rdx",
+        "push rsi",
+        "push rdi",
+        "push r8",
+        "push r9",
+        "push r10",
+        "push r11",
+        "call {handler}",
+        "pop r11",
+        "pop r10",
+        "pop r9",
+        "pop r8",
+        "pop rdi",
+        "pop rsi",
+        "pop rdx",
+        "pop rcx",
+        "pop rax",
+        "iretq",
+        handler = sym ipi_wakeup_handler,
+    );
+}
+
+/// TLB shootdown IPI handler.
+///
+/// Reads the shootdown request, flushes the TLB for the target address space,
+/// and acknowledges by clearing this CPU's bit in the pending mask.
+#[cfg(not(test))]
+extern "C" fn ipi_tlb_shootdown_handler()
+{
+    // SAFETY: Acquire ordering ensures we see the root_phys stored by initiator
+    let root_phys = crate::mm::tlb_shootdown::TLB_SHOOTDOWN
+        .root_phys
+        .load(core::sync::atomic::Ordering::Acquire);
+
+    // Flush TLB for the target address space
+    if root_phys == 0 {
+        // Full TLB flush (all address spaces)
+        // SAFETY: CR3 write invalidates all TLB entries
+        unsafe {
+            super::paging::flush_tlb_all();
+        }
+    } else {
+        // Flush specific address space (if supported; fallback to full flush)
+        // x86-64 doesn't have ASID-specific flush without PCID, so flush all
+        // SAFETY: CR3 write invalidates all non-global TLB entries
+        unsafe {
+            super::paging::flush_tlb_all();
+        }
+    }
+
+    // Acknowledge by clearing our bit in pending_cpus
+    let cpu_id = super::cpu::current_cpu();
+    let mask = !(1u64 << cpu_id);
+
+    // SAFETY: Release ordering ensures TLB flush completes before bit clear is visible
+    crate::mm::tlb_shootdown::TLB_SHOOTDOWN
+        .pending_cpus
+        .fetch_and(mask, core::sync::atomic::Ordering::Release);
+
+    // Send EOI to local APIC
+    // SAFETY: Vector 250 is the TLB shootdown vector
+    super::interrupts::acknowledge(u32::from(
+        super::interrupts::IPI_VECTOR_TLB_SHOOTDOWN,
+    ));
+}
+
+/// Wakeup IPI handler (vector 251).
+///
+/// The interrupt itself breaks `hlt`, so this handler just sends EOI and returns.
+/// No additional work is needed; the idle loop will check for runnable threads
+/// immediately after returning from the interrupt.
+#[cfg(not(test))]
+extern "C" fn ipi_wakeup_handler()
+{
+    // Send EOI to local APIC. No other work needed; the interrupt wakes the CPU.
+    // SAFETY: Vector 251 is the wakeup IPI vector.
+    super::interrupts::acknowledge(u32::from(super::interrupts::IPI_VECTOR_WAKEUP));
+}
+
 // ── IDT population ────────────────────────────────────────────────────────────
 
 /// Populate the IDT and execute `lidt`.
@@ -464,6 +587,20 @@ pub unsafe fn init()
     // APIC timer and spurious.
     set(32, isr_timer, 0);
     set(255, isr_spurious, 0);
+
+    // TLB shootdown IPI.
+    set(
+        usize::from(super::interrupts::IPI_VECTOR_TLB_SHOOTDOWN),
+        ipi_tlb_shootdown_stub,
+        0,
+    );
+
+    // Wakeup IPI.
+    set(
+        usize::from(super::interrupts::IPI_VECTOR_WAKEUP),
+        ipi_wakeup_stub,
+        0,
+    );
 
     // Device IRQ stubs for IOAPIC GSIs 0–22 (vectors 33–55).
     set(33, isr_dev0, 0);

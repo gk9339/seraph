@@ -38,10 +38,6 @@ pub struct SignalState
     /// Pending signal bits. Senders OR into this; the waiter read-and-clears.
     pub bits: AtomicU64,
     /// The single thread blocked waiting for a non-zero bitmask, or null.
-    ///
-    /// # Safety
-    /// Access to this field is serialised by the owning thread's scheduler
-    /// lock. Never read/write from multiple CPUs simultaneously.
     pub waiter: *mut ThreadControlBlock,
     /// Opaque pointer to the `WaitSetState` this signal is registered with,
     /// or null if not in any wait set. Type-erased to avoid a circular import.
@@ -49,6 +45,18 @@ pub struct SignalState
     pub wait_set: *mut u8,
     /// Index of this signal's entry in `WaitSetState::members`.
     pub wait_set_member_idx: u8,
+    /// Serialises `signal_send` and `signal_wait` across CPUs.
+    ///
+    /// On RISC-V (RVWMO), plain stores to `waiter` from one CPU are not
+    /// guaranteed visible to another CPU's load. The lock provides the
+    /// Acquire/Release fence pair that makes the check-waiter-then-set-bits
+    /// (send) and swap-bits-then-set-waiter (wait) sequences mutually
+    /// exclusive, preventing lost wakeups.
+    ///
+    /// On x86-64 (TSO) the lock is technically unnecessary because store
+    /// visibility is ordered, but correctness should not depend on the
+    /// memory model.
+    pub lock: crate::sync::Spinlock,
 }
 
 // SAFETY: SignalState is accessed only under the relevant scheduler lock.
@@ -66,6 +74,7 @@ impl SignalState
             waiter: core::ptr::null_mut(),
             wait_set: core::ptr::null_mut(),
             wait_set_member_idx: 0,
+            lock: crate::sync::Spinlock::new(),
         }
     }
 }
@@ -85,13 +94,15 @@ impl SignalState
 #[cfg(not(test))]
 pub unsafe fn signal_send(sig: *mut SignalState, bits: u64) -> Option<*mut ThreadControlBlock>
 {
-    // SAFETY: caller guarantees sig is valid and lock is held.
+    // SAFETY: caller guarantees sig is valid.
     let sig = unsafe { &mut *sig };
-    // If a waiter is present, atomically swap the bits out so we can deliver
-    // the exact value to the waiter rather than leaving it to read-and-clear.
-    if sig.waiter.is_null()
+
+    // SAFETY: lock serialises send/wait; paired with unlock_raw below.
+    let saved = unsafe { sig.lock.lock_raw() };
+
+    let result = if sig.waiter.is_null()
     {
-        sig.bits.fetch_or(bits, Ordering::Release);
+        sig.bits.fetch_or(bits, Ordering::Relaxed);
         // Notify any registered wait set that this signal now has bits pending.
         if !sig.wait_set.is_null()
         {
@@ -105,20 +116,32 @@ pub unsafe fn signal_send(sig: *mut SignalState, bits: u64) -> Option<*mut Threa
     {
         // OR our bits in, then swap the whole bitmask to zero so the waiter
         // gets exactly what was pending (including bits set before this call).
-        sig.bits.fetch_or(bits, Ordering::AcqRel);
-        let delivered = sig.bits.swap(0, Ordering::AcqRel);
+        sig.bits.fetch_or(bits, Ordering::Relaxed);
+        let delivered = sig.bits.swap(0, Ordering::Relaxed);
 
         let waiter = sig.waiter;
         sig.waiter = core::ptr::null_mut();
         // SAFETY: waiter is a valid TCB pointer placed here by signal_wait.
         unsafe {
+            debug_assert!(
+                (*waiter).magic == crate::sched::thread::TCB_MAGIC,
+                "signal_send: waiter TCB magic corrupt — use-after-free?"
+            );
+            debug_assert!(
+                (*waiter).state == crate::sched::thread::ThreadState::Blocked,
+                "signal_send: waiter not Blocked"
+            );
             (*waiter).wakeup_value = delivered;
             (*waiter).state = crate::sched::thread::ThreadState::Ready;
             (*waiter).ipc_state = IpcThreadState::None;
             (*waiter).blocked_on_object = core::ptr::null_mut();
         }
         Some(waiter)
-    }
+    };
+
+    // SAFETY: paired with lock_raw above.
+    unsafe { sig.lock.unlock_raw(saved) };
+    result
 }
 
 /// Wait for at least one bit in `sig` to be set.
@@ -134,11 +157,17 @@ pub unsafe fn signal_send(sig: *mut SignalState, bits: u64) -> Option<*mut Threa
 pub unsafe fn signal_wait(sig: *mut SignalState, caller: *mut ThreadControlBlock)
     -> Result<u64, ()>
 {
-    // SAFETY: caller guarantees sig is valid and lock is held.
+    // SAFETY: caller guarantees sig is valid.
     let sig = unsafe { &mut *sig };
-    let bits = sig.bits.swap(0, Ordering::Acquire);
+
+    // SAFETY: lock serialises send/wait; paired with unlock_raw below.
+    let saved = unsafe { sig.lock.lock_raw() };
+
+    let bits = sig.bits.swap(0, Ordering::Relaxed);
     if bits != 0
     {
+        // SAFETY: paired with lock_raw above.
+        unsafe { sig.lock.unlock_raw(saved) };
         return Ok(bits);
     }
 
@@ -150,6 +179,9 @@ pub unsafe fn signal_wait(sig: *mut SignalState, caller: *mut ThreadControlBlock
         (*caller).ipc_state = IpcThreadState::BlockedOnSignal;
         (*caller).blocked_on_object = core::ptr::addr_of_mut!(*sig).cast::<u8>();
     }
+
+    // SAFETY: paired with lock_raw above.
+    unsafe { sig.lock.unlock_raw(saved) };
     Err(())
 }
 

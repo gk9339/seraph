@@ -134,10 +134,7 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
     let allocator = unsafe { &mut *core::ptr::addr_of_mut!(mm::FRAME_ALLOCATOR) };
     kprintln!("Phase 2: Memory Map Parsing and Buddy Allocator");
     mm::init::init_physical_memory(info, allocator);
-    kprintln!(
-        "RAM: {} MiB",
-        allocator.free_page_count() * mm::PAGE_SIZE / (1024 * 1024)
-    );
+    mm::init::print_memory_map(info);
 
     // ── Phase 3: kernel page tables ─────────────────────────────────────────
     // Replace the bootloader's minimal page tables with the kernel's own,
@@ -194,6 +191,13 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
         arch::current::interrupts::init();
     }
     kprintln!("interrupts ok");
+    // Enable preemption timer.
+    //   x86-64: 10 ms — sti;hlt is atomic so the timer is only for preemption.
+    //   RISC-V: 1 ms — wfi has no atomic enable+halt, so the timer also serves
+    //           as the fallback wakeup for consumed IPIs (standard RISC-V pattern).
+    // timer::init() enables interrupts as its final step.
+    // SAFETY: IDT/GDT/interrupts initialized above; timer IRQ handler registered;
+    // called once during boot with all prerequisites met.
     // Enable preemption timer at 10 ms period.
     // timer::init() enables interrupts as its final step.
     // SAFETY: IDT/GDT/interrupts initialized above; timer IRQ handler registered;
@@ -217,6 +221,14 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
         percpu::init_bsp();
     }
     kprintln!("percpu ok");
+
+    // Initialize the CPU-to-APIC-ID mapping for wakeup IPIs.
+    #[cfg(not(test))]
+    // SAFETY: single-threaded boot; boot_cpu_ids copied from BootInfo above;
+    // init_apic_ids writes CPU_APIC_IDS once before SMP is active.
+    unsafe {
+        percpu::init_apic_ids(&boot_cpu_ids);
+    }
 
     // ── Phase 6: platform resource validation ─────────────────────────────────
     // Validate platform_resources from BootInfo before Phase 7 mints
@@ -401,6 +413,8 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
                     alloc::boxed::Box::into_raw(cs)
                 },
                 thread_id: 1, // 0 = idle BSP, 1 = init
+                context_saved: core::sync::atomic::AtomicU32::new(1),
+                magic: sched::thread::TCB_MAGIC,
             },
         ));
 

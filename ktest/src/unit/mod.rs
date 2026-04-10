@@ -196,6 +196,14 @@ pub fn run_all(ctx: &TestContext)
         "thread::affinity_bind_cpu1",
         thread::affinity_bind_cpu1(ctx)
     );
+    run_test!(
+        "thread::affinity_respected",
+        thread::affinity_respected(ctx)
+    );
+    run_test!(
+        "thread::default_affinity_bsp",
+        thread::default_affinity_bsp(ctx)
+    );
 
     // ── Hardware access syscalls ──────────────────────────────────────────────
     run_test!(

@@ -15,6 +15,8 @@ pub mod init;
 pub mod paging;
 pub mod size_class;
 pub mod slab;
+#[cfg(not(test))]
+pub mod tlb_shootdown;
 
 pub use buddy::{BuddyAllocator, PAGE_SIZE};
 

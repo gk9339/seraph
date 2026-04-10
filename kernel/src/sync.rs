@@ -85,6 +85,34 @@ impl Spinlock
         self.now_serving.fetch_add(1, Ordering::Release);
         restore_interrupts(saved_flags);
     }
+
+    /// Release the lock without restoring interrupt state.
+    ///
+    /// Use this when you need to keep interrupts disabled after releasing the
+    /// lock (e.g., during a context switch where re-enabling interrupts before
+    /// the switch completes would cause re-entrancy). Call
+    /// [`restore_interrupts_from`] separately when ready to re-enable.
+    ///
+    /// # Safety
+    /// Caller must eventually call `restore_interrupts_from(saved_flags)` with
+    /// the value returned by the original `lock_raw`.
+    pub unsafe fn release_lock_only(&self)
+    {
+        self.now_serving.fetch_add(1, Ordering::Release);
+    }
+}
+
+/// Restore interrupt state saved by `lock_raw`.
+///
+/// Separate from `unlock_raw` for use cases where the lock is released
+/// before interrupt restoration is safe (e.g., context switch).
+///
+/// # Safety
+/// `saved_flags` must be the value returned by a prior `lock_raw` call.
+#[cfg(not(test))]
+pub unsafe fn restore_interrupts_from(saved_flags: u64)
+{
+    restore_interrupts(saved_flags);
 }
 
 // ── Interrupt save/restore helpers ────────────────────────────────────────────

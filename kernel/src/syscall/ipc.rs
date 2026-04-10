@@ -215,10 +215,39 @@ unsafe fn transfer_caps(
     // Acquire derivation lock for the batch move.
     crate::cap::DERIVATION_LOCK.write_lock();
 
+    // Lock both CSpaces in pointer address order to prevent deadlock when two
+    // threads transfer caps between the same pair of CSpaces concurrently.
+    // SAFETY: Locking in deterministic order (lower address first) prevents
+    // ABBA deadlock. CSpace pointers validated by caller.
+    let (saved1, saved2) = unsafe {
+        use core::cmp::Ordering;
+        match src_cspace.cmp(&dst_cspace)
+        {
+            Ordering::Less =>
+            {
+                let s1 = (*src_cspace).lock.lock_raw();
+                let s2 = (*dst_cspace).lock.lock_raw();
+                (s1, s2)
+            }
+            Ordering::Greater =>
+            {
+                let s2 = (*dst_cspace).lock.lock_raw();
+                let s1 = (*src_cspace).lock.lock_raw();
+                (s1, s2)
+            }
+            Ordering::Equal =>
+            {
+                // src_cspace == dst_cspace: same-process IPC, lock once.
+                let s = (*src_cspace).lock.lock_raw();
+                (s, 0)
+            }
+        }
+    };
+
     let mut dst_indices = [0u32; MSG_CAP_SLOTS_MAX];
     for (i, &src_idx) in src_slots[..cap_count].iter().enumerate()
     {
-        // SAFETY: DERIVATION_LOCK held; CSpace pointers valid.
+        // SAFETY: DERIVATION_LOCK and both CSpace locks held; pointers valid.
         dst_indices[i] =
             unsafe { crate::cap::move_cap_between_cspaces(src_cspace, src_idx, dst_cspace) }
                 .unwrap_or_else(|_| {
@@ -230,6 +259,29 @@ unsafe fn transfer_caps(
                     );
                     0
                 });
+    }
+
+    // Unlock in reverse order of acquisition.
+    // SAFETY: saved1 and saved2 came from lock_raw calls above.
+    unsafe {
+        use core::cmp::Ordering;
+        match src_cspace.cmp(&dst_cspace)
+        {
+            Ordering::Equal =>
+            {
+                (*src_cspace).lock.unlock_raw(saved1);
+            }
+            Ordering::Less =>
+            {
+                (*dst_cspace).lock.unlock_raw(saved2);
+                (*src_cspace).lock.unlock_raw(saved1);
+            }
+            Ordering::Greater =>
+            {
+                (*src_cspace).lock.unlock_raw(saved1);
+                (*dst_cspace).lock.unlock_raw(saved2);
+            }
+        }
     }
 
     crate::cap::DERIVATION_LOCK.write_unlock();
@@ -346,8 +398,12 @@ pub fn sys_ipc_call(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         // A server was waiting; enqueue it and yield so it can run.
         // SAFETY: woken_server returned by endpoint_call; is valid TCB.
         unsafe {
+            debug_assert!((*woken_server).magic == crate::sched::thread::TCB_MAGIC);
             let prio = (*woken_server).priority;
-            crate::sched::scheduler_for(0).enqueue(woken_server, prio);
+            debug_assert!((prio as usize) < crate::sched::NUM_PRIORITY_LEVELS);
+            let target_cpu = crate::sched::select_target_cpu(woken_server);
+            debug_assert!(target_cpu < crate::sched::MAX_CPUS);
+            crate::sched::enqueue_and_wake(woken_server, target_cpu, prio);
         }
     }
     // else: No server; caller is blocked on send queue. Yield to another thread.
@@ -355,7 +411,7 @@ pub fn sys_ipc_call(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     // Yield CPU — the current thread is now Blocked.
     // SAFETY: scheduler initialized; called from syscall context.
     unsafe {
-        crate::sched::schedule();
+        crate::sched::schedule(false);
     }
 
     // On resume (after reply): write reply data to caller's IPC buffer.
@@ -459,7 +515,7 @@ pub fn sys_ipc_recv(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 
     // SAFETY: scheduler initialized; called from syscall context.
     unsafe {
-        crate::sched::schedule();
+        crate::sched::schedule(false);
     }
 
     // On resume (caller arrived), deliver message from ipc_msg.
@@ -610,8 +666,12 @@ pub fn sys_ipc_reply(tf: &mut TrapFrame) -> Result<u64, SyscallError>
             // Re-enqueue caller (it is now Ready).
             // SAFETY: caller returned by endpoint_reply; is valid TCB.
             unsafe {
+                debug_assert!((*caller).magic == crate::sched::thread::TCB_MAGIC);
                 let prio = (*caller).priority;
-                crate::sched::scheduler_for(0).enqueue(caller, prio);
+                debug_assert!((prio as usize) < crate::sched::NUM_PRIORITY_LEVELS);
+                let target_cpu = crate::sched::select_target_cpu(caller);
+                debug_assert!(target_cpu < crate::sched::MAX_CPUS);
+                crate::sched::enqueue_and_wake(caller, target_cpu, prio);
             }
             Ok(0)
         }
@@ -662,8 +722,21 @@ pub fn sys_signal_send(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     {
         // SAFETY: waiter returned by signal_send; is valid TCB.
         unsafe {
+            debug_assert!(
+                (*waiter).magic == crate::sched::thread::TCB_MAGIC,
+                "sys_signal_send: woken waiter magic corrupt"
+            );
             let prio = (*waiter).priority;
-            crate::sched::scheduler_for(0).enqueue(waiter, prio);
+            debug_assert!(
+                (prio as usize) < crate::sched::NUM_PRIORITY_LEVELS,
+                "sys_signal_send: waiter priority {prio} out of range"
+            );
+            let target_cpu = crate::sched::select_target_cpu(waiter);
+            debug_assert!(
+                target_cpu < crate::sched::MAX_CPUS,
+                "sys_signal_send: target_cpu {target_cpu} out of range"
+            );
+            crate::sched::enqueue_and_wake(waiter, target_cpu, prio);
         }
     }
 
@@ -714,7 +787,7 @@ pub fn sys_signal_wait(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     // No bits; thread is Blocked. Yield CPU.
     // SAFETY: scheduler initialized; called from syscall context.
     unsafe {
-        crate::sched::schedule();
+        crate::sched::schedule(false);
     }
 
     // On resume, `signal_send` stored the delivered bits in wakeup_value.
@@ -775,8 +848,12 @@ pub fn sys_event_post(tf: &mut TrapFrame) -> Result<u64, SyscallError>
             // A waiter was woken; enqueue it.
             // SAFETY: woken returned by event_queue_post; is valid TCB.
             unsafe {
+                debug_assert!((*woken).magic == crate::sched::thread::TCB_MAGIC);
                 let prio = (*woken).priority;
-                crate::sched::scheduler_for(0).enqueue(woken, prio);
+                debug_assert!((prio as usize) < crate::sched::NUM_PRIORITY_LEVELS);
+                let target_cpu = crate::sched::select_target_cpu(woken);
+                debug_assert!(target_cpu < crate::sched::MAX_CPUS);
+                crate::sched::enqueue_and_wake(woken, target_cpu, prio);
             }
             Ok(0)
         }
@@ -831,7 +908,7 @@ pub fn sys_event_recv(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 
     // SAFETY: scheduler initialized; called from syscall context.
     unsafe {
-        crate::sched::schedule();
+        crate::sched::schedule(false);
     }
 
     // On resume, event_queue_post stored the payload in wakeup_value.
@@ -1214,7 +1291,7 @@ pub fn sys_wait_set_wait(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 
     // SAFETY: scheduler initialized; called from syscall context.
     unsafe {
-        crate::sched::schedule();
+        crate::sched::schedule(false);
     }
 
     // On resume, waitset_notify stored the token in wakeup_value.

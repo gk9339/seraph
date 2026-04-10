@@ -22,6 +22,110 @@ use boot_protocol::{BootInfo, MemoryType};
 
 use super::buddy::{BuddyAllocator, PAGE_SIZE};
 
+use crate::kprintln;
+
+/// Print one merged memory map line.
+fn print_memory_line(idx: usize, start: u64, end: u64, ty: MemoryType)
+{
+    let size_kib = (end - start) / 1024;
+    kprintln!(
+        "  [{:3}]  {:#018x} - {:#018x}  {:8} KiB  {}",
+        idx,
+        start,
+        end,
+        size_kib,
+        memory_type_name(ty)
+    );
+}
+
+/// Print the physical memory map from the bootloader to the serial console.
+///
+/// Iterates all entries in `info.memory_map`, printing address range, size in
+/// KiB, and memory type for each entry. Prints a summary line with usable and
+/// total RAM in MiB at the end.
+///
+/// Must be called before Phase 3 activates the kernel page tables; the
+/// `memory_map.entries` pointer is a physical address covered by the
+/// bootloader's identity map, which is replaced in Phase 3.
+pub fn print_memory_map(info: &BootInfo)
+{
+    kprintln!("Memory map:");
+
+    // SAFETY: Phase 0 validated entries is non-null and count > 0. The memory
+    // map region is identity-mapped by the bootloader at handoff.
+    let entries = unsafe {
+        core::slice::from_raw_parts(info.memory_map.entries, info.memory_map.count as usize)
+    };
+
+    let mut usable_bytes: u64 = 0;
+    let mut total_bytes: u64 = 0;
+
+    // Merge contiguous entries of the same type to reduce output volume.
+    // Track current run; emit when type changes or a gap appears.
+    let mut run_start: u64 = 0;
+    let mut run_end: u64 = 0;
+    let mut run_type: Option<MemoryType> = None;
+    let mut line_idx: usize = 0;
+
+    for entry in entries
+    {
+        if entry.size == 0
+        {
+            continue;
+        }
+
+        let start = entry.physical_base;
+        let end = start + entry.size;
+
+        total_bytes = total_bytes.saturating_add(entry.size);
+        if entry.memory_type == MemoryType::Usable
+        {
+            usable_bytes = usable_bytes.saturating_add(entry.size);
+        }
+
+        if let Some(rt) = run_type
+        {
+            if rt == entry.memory_type && start == run_end
+            {
+                // Extend current run.
+                run_end = end;
+                continue;
+            }
+            // Emit previous run.
+            print_memory_line(line_idx, run_start, run_end, rt);
+            line_idx += 1;
+        }
+
+        // Start new run.
+        run_start = start;
+        run_end = end;
+        run_type = Some(entry.memory_type);
+    }
+
+    // Emit final run.
+    if let Some(rt) = run_type
+    {
+        print_memory_line(line_idx, run_start, run_end, rt);
+    }
+
+    let usable_mib = usable_bytes / (1024 * 1024);
+    let total_mib = total_bytes / (1024 * 1024);
+    kprintln!("RAM: {} MiB usable ({} MiB total)", usable_mib, total_mib);
+}
+
+/// Return a human-readable name for a [`MemoryType`] variant.
+fn memory_type_name(ty: MemoryType) -> &'static str
+{
+    match ty
+    {
+        MemoryType::Usable => "usable",
+        MemoryType::Loaded => "loaded",
+        MemoryType::Reserved => "reserved",
+        MemoryType::AcpiReclaimable => "acpi-reclaimable",
+        MemoryType::Persistent => "persistent",
+    }
+}
+
 /// Maximum usable physical ranges tracked during init. Memory maps are
 /// typically small; 64 entries is generous for real hardware.
 const MAX_RANGES: usize = 64;

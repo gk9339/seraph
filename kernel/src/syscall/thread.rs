@@ -167,18 +167,9 @@ pub fn sys_thread_start(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 
         (*target_tcb).state = ThreadState::Ready;
         let prio = (*target_tcb).priority;
-        // Enqueue on the affinity CPU if set; otherwise CPU 0 (BSP).
-        // Full preferred_cpu migration is Phase D.
-        let affinity = (*target_tcb).cpu_affinity;
-        let target_cpu = if affinity == crate::sched::AFFINITY_ANY
-        {
-            0
-        }
-        else
-        {
-            affinity as usize
-        };
-        crate::sched::scheduler_for(target_cpu).enqueue(target_tcb, prio);
+        // Route to correct CPU based on affinity.
+        let target_cpu = crate::sched::select_target_cpu(target_tcb);
+        crate::sched::enqueue_and_wake(target_tcb, target_cpu, prio);
     }
 
     Ok(0)
@@ -261,7 +252,7 @@ pub fn sys_thread_stop(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         // If stopping self (Running → Stopped): yield so another thread runs.
         if core::ptr::eq(target_tcb, caller_tcb)
         {
-            crate::sched::schedule();
+            crate::sched::schedule(false);
         }
     }
 
@@ -490,8 +481,9 @@ pub fn sys_thread_set_priority(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         // If the thread is Ready, move it to the new priority queue immediately.
         if (*target_tcb).state == ThreadState::Ready
         {
-            // WSMP: use the correct per-CPU scheduler for the thread's CPU.
-            crate::sched::scheduler_for(0).change_priority(target_tcb, old_prio, priority);
+            // Use the thread's preferred CPU (where it last ran).
+            let target_cpu = (*target_tcb).preferred_cpu as usize;
+            crate::sched::scheduler_for(target_cpu).change_priority(target_tcb, old_prio, priority);
         }
     }
 

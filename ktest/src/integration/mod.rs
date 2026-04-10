@@ -24,6 +24,7 @@ pub mod cap_transfer;
 pub mod memory_lifecycle;
 pub mod multi_caller_ipc_fifo;
 pub mod thread_lifecycle;
+pub mod tlb_coherency;
 pub mod wait_concurrency;
 
 use crate::run_integration_test;
@@ -47,4 +48,5 @@ pub fn run_all(ctx: &TestContext)
         "integration::cap_delegation_chain",
         cap_delegation_chain::run(ctx)
     );
+    run_integration_test!("integration::tlb_coherency", tlb_coherency::run(ctx));
 }

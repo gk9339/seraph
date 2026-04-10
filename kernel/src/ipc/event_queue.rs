@@ -49,6 +49,8 @@ pub struct EventQueueState
     pub wait_set: *mut u8,
     /// Index of this queue's entry in `WaitSetState::members`.
     pub wait_set_member_idx: u8,
+    /// Serialises post/recv across CPUs (see signal.rs for rationale).
+    pub lock: crate::sync::Spinlock,
 }
 
 // SAFETY: EventQueueState is accessed only under the scheduler lock.
@@ -78,6 +80,7 @@ impl EventQueueState
             waiter: core::ptr::null_mut(),
             wait_set: core::ptr::null_mut(),
             wait_set_member_idx: 0,
+            lock: crate::sync::Spinlock::new(),
         }
     }
 }
@@ -101,8 +104,11 @@ pub unsafe fn event_queue_post(
     payload: u64,
 ) -> Result<Option<*mut ThreadControlBlock>, ()>
 {
-    // SAFETY: caller guarantees lock is held and eq is valid.
+    // SAFETY: caller guarantees eq is valid.
     let eq = unsafe { &mut *eq };
+
+    // SAFETY: lock serialises post/recv; paired with unlock_raw below.
+    let saved = unsafe { eq.lock.lock_raw() };
 
     // If a waiter is blocked, deliver directly without touching the ring.
     if !eq.waiter.is_null()
@@ -116,12 +122,16 @@ pub unsafe fn event_queue_post(
             (*waiter).ipc_state = IpcThreadState::None;
             (*waiter).blocked_on_object = core::ptr::null_mut();
         }
+        // SAFETY: paired with lock_raw above.
+        unsafe { eq.lock.unlock_raw(saved) };
         return Ok(Some(waiter));
     }
 
     // Queue full?
     if eq.count >= eq.capacity
     {
+        // SAFETY: paired with lock_raw above.
+        unsafe { eq.lock.unlock_raw(saved) };
         return Err(());
     }
 
@@ -142,6 +152,8 @@ pub unsafe fn event_queue_post(
         unsafe { crate::ipc::wait_set::waitset_notify(eq.wait_set, eq.wait_set_member_idx) };
     }
 
+    // SAFETY: paired with lock_raw above.
+    unsafe { eq.lock.unlock_raw(saved) };
     Ok(None)
 }
 
@@ -159,8 +171,11 @@ pub unsafe fn event_queue_recv(
     caller: *mut ThreadControlBlock,
 ) -> Result<u64, ()>
 {
-    // SAFETY: caller guarantees lock is held and eq is valid.
+    // SAFETY: caller guarantees eq is valid.
     let eq = unsafe { &mut *eq };
+
+    // SAFETY: lock serialises post/recv; paired with unlock_raw below.
+    let saved = unsafe { eq.lock.lock_raw() };
 
     if eq.count > 0
     {
@@ -169,6 +184,8 @@ pub unsafe fn event_queue_recv(
         let payload = unsafe { *eq.ring.add(eq.read_idx as usize) };
         eq.read_idx = (eq.read_idx + 1) % ring_len;
         eq.count -= 1;
+        // SAFETY: paired with lock_raw above.
+        unsafe { eq.lock.unlock_raw(saved) };
         return Ok(payload);
     }
 
@@ -180,6 +197,8 @@ pub unsafe fn event_queue_recv(
         (*caller).ipc_state = IpcThreadState::BlockedOnEventQueue;
         (*caller).blocked_on_object = core::ptr::addr_of_mut!(*eq).cast::<u8>();
     }
+    // SAFETY: paired with lock_raw above.
+    unsafe { eq.lock.unlock_raw(saved) };
     Err(())
 }
 
@@ -209,7 +228,8 @@ pub unsafe fn event_queue_drop(eq: *mut EventQueueState)
             (*waiter).state = ThreadState::Ready;
             (*waiter).ipc_state = IpcThreadState::None;
             let prio = (*waiter).priority;
-            crate::sched::scheduler_for(0).enqueue(waiter, prio);
+            let target_cpu = crate::sched::select_target_cpu(waiter);
+            crate::sched::enqueue_and_wake(waiter, target_cpu, prio);
         }
     }
 

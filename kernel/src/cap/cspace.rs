@@ -79,6 +79,14 @@ struct CSpacePage
 ///
 /// To add a capability: call [`insert_cap`][CSpace::insert_cap].
 /// To look up a slot: call [`slot`][CSpace::slot] or [`slot_mut`][CSpace::slot_mut].
+///
+/// ## Concurrency
+///
+/// All operations are protected by an internal spinlock to allow safe
+/// concurrent access from multiple CPUs (e.g., parent inserting caps into
+/// child's `CSpace` while child accesses it). External callers of `slot()` and
+/// `slot_mut()` automatically acquire the lock. Internal helpers use unlocked
+/// accessors when the lock is already held.
 pub struct CSpace
 {
     id: CSpaceId,
@@ -92,6 +100,8 @@ pub struct CSpace
     free_head: Option<u32>,
     /// Number of slots currently on the free list (for O(1) `pre_allocate`).
     free_count: usize,
+    /// Protects concurrent access to all `CSpace` state.
+    pub(crate) lock: crate::sync::Spinlock,
 }
 
 impl CSpace
@@ -107,6 +117,7 @@ impl CSpace
             max_slots,
             free_head: None,
             free_count: 0,
+            lock: crate::sync::Spinlock::new(),
         }
     }
 

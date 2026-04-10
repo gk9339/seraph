@@ -3,7 +3,7 @@
 
 // kernel/src/percpu.rs
 
-//! Per-CPU private state (WSMP — SMP bringup).
+//! Per-CPU private state.
 //!
 //! One [`PerCpuData`] instance exists per logical CPU. The BSP's entry
 //! (`PER_CPU[0]`) is initialised during Phase 5 via [`init_bsp`].
@@ -36,6 +36,90 @@
 //! the struct by offset.
 
 use crate::sched::MAX_CPUS;
+use core::sync::atomic::{AtomicU64, Ordering};
+
+// ── Idle CPU tracking ─────────────────────────────────────────────────────────
+
+/// Bitmask of CPUs currently idle (halted).
+///
+/// Bit N set = CPU N is in idle loop waiting for interrupts. Set by
+/// [`mark_idle`] before `hlt`/`wfi`, cleared by [`mark_active`] after wakeup.
+pub static CPU_IDLE_MASK: AtomicU64 = AtomicU64::new(0);
+
+/// Mark a CPU as idle (about to halt).
+///
+/// # Memory ordering
+/// Release ensures all prior work (run queue checks) completes before the
+/// idle bit becomes visible to other CPUs checking [`is_idle`].
+pub fn mark_idle(cpu: usize)
+{
+    CPU_IDLE_MASK.fetch_or(1u64 << cpu, Ordering::Release);
+}
+
+/// Mark a CPU as active (woke from halt or has work).
+///
+/// # Memory ordering
+/// Release ensures the idle bit is cleared before any subsequent work
+/// becomes visible.
+pub fn mark_active(cpu: usize)
+{
+    CPU_IDLE_MASK.fetch_and(!(1u64 << cpu), Ordering::Release);
+}
+
+/// Check if a CPU is currently idle.
+///
+/// # Memory ordering
+/// Acquire ensures we observe the idle bit after the CPU set it and completed
+/// its run queue checks.
+pub fn is_idle(cpu: usize) -> bool
+{
+    (CPU_IDLE_MASK.load(Ordering::Acquire) & (1u64 << cpu)) != 0
+}
+
+// ── APIC ID mapping ───────────────────────────────────────────────────────────
+
+/// Array mapping logical CPU index to hardware APIC ID (x86-64) or hart ID (RISC-V).
+///
+/// Populated by [`init_apic_ids`] from `BootInfo::cpu_ids` during Phase 5.
+/// Accessed by [`apic_id_for`] to retrieve the APIC ID for a given logical CPU.
+///
+/// # Safety
+/// Written once during single-threaded boot, then read-only during SMP.
+#[cfg(not(test))]
+static mut CPU_APIC_IDS: [u32; MAX_CPUS] = [0; MAX_CPUS];
+
+/// Initialize the CPU-to-APIC-ID mapping from `BootInfo::cpu_ids`.
+///
+/// Must be called once during boot before any SMP operations that require
+/// sending IPIs to specific CPUs.
+///
+/// # Safety
+/// Single-threaded boot phase; must be called before SMP is active.
+#[cfg(not(test))]
+pub unsafe fn init_apic_ids(cpu_ids: &[u32; MAX_CPUS])
+{
+    // SAFETY: single-threaded boot; CPU_APIC_IDS is not accessed concurrently.
+    // Use raw pointer to avoid static-mut-refs lint. The outer unsafe block
+    // covers both addr_of_mut and copy_nonoverlapping.
+    let dst = core::ptr::addr_of_mut!(CPU_APIC_IDS);
+    // SAFETY: dst points to a valid [u32; MAX_CPUS] array; cpu_ids is a valid
+    // source of the same size; no aliasing during single-threaded boot.
+    core::ptr::copy_nonoverlapping(cpu_ids.as_ptr(), (*dst).as_mut_ptr(), MAX_CPUS);
+}
+
+/// Retrieve the hardware APIC ID (x86-64) or hart ID (RISC-V) for a logical CPU.
+///
+/// Returns the APIC/hart ID that can be used as the target for an IPI.
+///
+/// # Safety
+/// `cpu` must be < [`MAX_CPUS`] and [`init_apic_ids`] must have been called.
+#[cfg(not(test))]
+pub unsafe fn apic_id_for(cpu: usize) -> u32
+{
+    debug_assert!(cpu < MAX_CPUS);
+    // SAFETY: cpu is validated in bounds; CPU_APIC_IDS is read-only after init_apic_ids.
+    unsafe { CPU_APIC_IDS[cpu] }
+}
 
 // ── Field offsets (must match #[repr(C)] layout) ──────────────────────────────
 
@@ -85,7 +169,7 @@ pub struct PerCpuData
     /// repurposed to carry user RSP to `user_rsp`.
     pub scratch: u64,
     /// x86-64: virtual address of this CPU's TSS. Used by `set_rsp0`
-    /// to locate the TSS without a global variable. Zero until B3 init.
+    /// to locate the TSS without a global variable. Zero until Phase 5 init.
     pub tss_ptr: u64,
 }
 

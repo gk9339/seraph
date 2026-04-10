@@ -93,6 +93,9 @@ unsafe fn plic_write(offset: u64, val: u32)
 ///
 /// `sscratch` must be initialised to the initial thread's kernel stack top
 /// before the first `sret` to U-mode (done in `sched::enter`).
+// too_many_lines: trap_entry is a single naked-asm block; the register
+// save/restore sequence cannot be meaningfully split.
+#[allow(clippy::too_many_lines)]
 #[cfg(not(test))]
 #[unsafe(naked)]
 unsafe extern "C" fn trap_entry()
@@ -210,26 +213,33 @@ unsafe extern "C" fn trap_entry()
         "ld t0, 248(sp)",
         "csrw sepc, t0",
 
-        // ── Restore sscratch if returning to U-mode ─────────────────────────────
+        // ── Restore sscratch and tp (privilege-dependent) ────────────────────────
         // Check sstatus.SPP (bit 8): 0 = return to U-mode, 1 = return to S-mode.
         "csrr t0, sstatus",
         "srli t0, t0, 8",
         "andi t0, t0, 1",
         "bnez t0, 3f",
-        // Returning to U-mode: set sscratch = &PER_CPU so the next trap can
-        // detect U-mode (sscratch != 0) and recover the per-CPU pointer.
-        // tp (x4) is still &PER_CPU here; it will be overwritten below.
-        "csrw sscratch, x4",
 
-        // ── Restore all registers ────────────────────────────────────────────────
-        // x2 (sp) is restored last since it changes the addressing base.
-        // x4 (tp) is restored: for U-mode return this is the user TLS pointer;
-        //         for S-mode return it is &PER_CPU (saved in S-mode path above).
+        // U-mode return: set sscratch = &PER_CPU for the next U-mode trap,
+        // then restore x4 from the TrapFrame (user TLS pointer).
+        "csrw sscratch, x4",
+        "ld x4,  24(sp)",
+        "j 4f",
+
+        // S-mode return: do NOT restore x4 (tp). tp is kernel-reserved and
+        // already holds &PER_CPU[current_cpu]. The TrapFrame's x4 is stale
+        // if schedule() migrated this thread to a different CPU during the
+        // trap (e.g. timer preemption during a shootdown spin loop).
         "3:",
+
+        // ── Restore remaining registers ──────────────────────────────────────────
+        // x4 (tp): handled above — restored for U-mode, preserved for S-mode.
+        // x2 (sp): restored last since it changes the addressing base.
+        "4:",
         "ld x1,   0(sp)",
         // x2 restored last
         "ld x3,  16(sp)",
-        "ld x4,  24(sp)",
+        // x4 already handled above
         "ld x5,  32(sp)",
         "ld x6,  40(sp)",
         "ld x7,  48(sp)",
@@ -267,6 +277,85 @@ unsafe extern "C" fn trap_entry()
 /// Dispatch a trap to the appropriate handler.
 ///
 /// `scause` bit 63 set = interrupt; clear = exception.
+/// TLB shootdown IPI handler.
+///
+/// Reads the shootdown request from `TLB_SHOOTDOWN`, flushes the TLB for the
+/// target address space, and acknowledges by clearing this hart's bit in the
+/// pending mask.
+#[cfg(not(test))]
+fn handle_software_interrupt()
+{
+    // On RISC-V, both TLB shootdown and wakeup IPIs arrive as supervisor
+    // software interrupts (scause=1). Distinguish by checking if our bit
+    // is set in the shootdown pending mask.
+
+    // Clear SSIP *before* checking pending_cpus. This is critical for
+    // correctness: if a new IPI arrives between our check and sret, the
+    // 0→1 transition on SSIP generates a fresh interrupt after sret.
+    //
+    // Clearing SSIP *after* the check is racy: a wakeup IPI sets SSIP,
+    // we enter the handler and check pending_cpus (0 — shootdown store
+    // hasn't happened yet), then the shootdown IPI arrives (SSIP already
+    // 1, no new edge), and clear_sip_ssip wipes both signals. The
+    // shootdown is never processed.
+    //
+    // SAFETY: sip.SSIP write clears supervisor software interrupt pending.
+    unsafe {
+        clear_sip_ssip();
+    }
+
+    let hart_id = super::cpu::current_cpu();
+    let my_bit = 1u64 << hart_id;
+
+    let pending = crate::mm::tlb_shootdown::TLB_SHOOTDOWN
+        .pending_cpus
+        .load(core::sync::atomic::Ordering::Acquire);
+
+    if pending & my_bit != 0
+    {
+        // TLB shootdown request: flush TLB and acknowledge.
+        // SAFETY: sfence.vma invalidates all TLB entries.
+        unsafe {
+            super::paging::flush_tlb_all();
+        }
+
+        // Clear our bit to acknowledge completion.
+        // SAFETY: Release ordering ensures TLB flush is visible before bit clear.
+        crate::mm::tlb_shootdown::TLB_SHOOTDOWN
+            .pending_cpus
+            .fetch_and(!my_bit, core::sync::atomic::Ordering::Release);
+    }
+
+    // Signal the idle loop that a wakeup IPI was received. The idle loop
+    // checks this flag before wfi and skips the halt if set, ensuring
+    // enqueued work is noticed immediately without waiting for the timer.
+    //
+    // We cannot call schedule() directly from the interrupt handler
+    // because schedule() is not reentrant — this interrupt may fire
+    // while schedule() is already on the call stack (interrupts are
+    // briefly enabled between scheduler lock release and switch).
+    crate::sched::set_reschedule_pending();
+}
+
+/// Clear the supervisor software interrupt pending bit (SIP.SSIP).
+///
+/// # Safety
+/// Must be called in supervisor mode.
+#[cfg(not(test))]
+unsafe fn clear_sip_ssip()
+{
+    // SAFETY: csrc sip, 2 clears bit 1 (SSIP) in supervisor interrupt pending register
+    unsafe {
+        core::arch::asm!(
+            "csrc sip, {mask}",
+            mask = in(reg) 2u64,
+            options(nostack, preserves_flags),
+        );
+    }
+}
+
+/// Main trap dispatch routine.
+///
 /// Called with interrupts disabled (sstatus.SIE is cleared on trap entry).
 #[cfg(not(test))]
 extern "C" fn trap_dispatch(frame: &mut TrapFrame)
@@ -279,6 +368,11 @@ extern "C" fn trap_dispatch(frame: &mut TrapFrame)
     {
         match cause_code
         {
+            1 =>
+            {
+                // Supervisor software interrupt — TLB shootdown or wakeup IPI.
+                handle_software_interrupt();
+            }
             5 => super::timer::handle_tick(), // Supervisor timer interrupt
             9 =>
             {
@@ -302,6 +396,7 @@ extern "C" fn trap_dispatch(frame: &mut TrapFrame)
                 crate::fatal("unhandled interrupt");
             }
         }
+
     }
     else if cause_code == 8
     {
@@ -473,12 +568,16 @@ pub unsafe fn init()
         );
     }
 
-    // Enable SEIP (bit 9) and STIP (bit 5) in sie.
+    // Enable SSIP (bit 1), STIP (bit 5), and SEIP (bit 9) in sie.
+    // SSIP: supervisor software interrupts — used for wakeup IPIs and TLB
+    //   shootdown IPIs (both delivered via SBI IPI extension).
+    // STIP: supervisor timer interrupts — scheduler preemption.
+    // SEIP: supervisor external interrupts — PLIC device interrupts.
     // SAFETY: csrs sie is a privileged S-mode instruction; caller ensures S-mode.
     unsafe {
         core::arch::asm!(
             "csrs sie, {mask}",
-            mask = in(reg) (1u64 << 9) | (1u64 << 5),
+            mask = in(reg) (1u64 << 1) | (1u64 << 9) | (1u64 << 5),
             options(nostack, nomem),
         );
     }
@@ -525,21 +624,25 @@ pub unsafe fn init_ap()
     // all CSR operations (stvec, sscratch, sstatus, sie, scounteren) are S-mode
     // privileged instructions; per-hart registers; no shared state.
     unsafe {
+        // Clear SIE FIRST to prevent any stray interrupt from firing before
+        // stvec and sscratch are configured. Firmware may leave SIE=1.
+        core::arch::asm!(
+            "csrc sstatus, {mask}",
+            mask = in(reg) (1u64 << 1) | (1u64 << 8) | (1u64 << 18),
+            options(nostack, nomem),
+        );
+
         // Install stvec — per-hart CSR, must be written on every hart.
         install_trap_vector();
 
         // Clear sscratch so trap_entry identifies S-mode traps correctly.
         core::arch::asm!("csrw sscratch, zero", options(nostack, nomem));
 
-        // Clear sstatus.SIE, SPP, SUM; then enable SEIP and STIP in sie.
-        core::arch::asm!(
-            "csrc sstatus, {mask}",
-            mask = in(reg) (1u64 << 1) | (1u64 << 8) | (1u64 << 18),
-            options(nostack, nomem),
-        );
+        // Enable SSIP, STIP, SEIP in sie (SIE is still 0; these only take
+        // effect when SIE is re-enabled by the idle loop or sret).
         core::arch::asm!(
             "csrs sie, {mask}",
-            mask = in(reg) (1u64 << 9) | (1u64 << 5),
+            mask = in(reg) (1u64 << 1) | (1u64 << 9) | (1u64 << 5),
             options(nostack, nomem),
         );
 
@@ -614,6 +717,82 @@ pub fn acknowledge(irq: u32)
     unsafe {
         plic_write(PLIC_CLAIM_COMPLETE, irq);
     }
+}
+
+// ── IPI infrastructure ────────────────────────────────────────────────────────
+
+/// Send a TLB shootdown IPI to a target hart via SBI IPI.
+///
+/// Sends a supervisor software interrupt to the target hart. The
+/// `handle_tlb_shootdown_ipi` handler (scause=1) on the target reads
+/// the shootdown request, executes sfence.vma, clears its pending bit,
+/// and clears SSIP.
+///
+/// Note: this uses SBI IPI (not RFENCE) because RFENCE is a blocking
+/// firmware call that performs the flush internally without generating a
+/// supervisor interrupt. The shootdown protocol requires the target to
+/// clear its bit in `pending_cpus` via the handler.
+///
+/// # Safety
+/// - `target_hart_id` must be a valid hart ID of an online hart
+/// - Caller must ensure the TLB shootdown protocol state is set up correctly
+// Used by TLB shootdown implementation.
+#[allow(dead_code)]
+pub unsafe fn send_tlb_shootdown_ipi(target_hart_id: u32)
+{
+    // SBI IPI extension (EID=0x735049 'sPI'), function SEND_IPI (fid=0).
+    let hart_mask = 1u64 << target_hart_id;
+    let hart_mask_base = 0u64;
+
+    // SAFETY: SBI call sends a supervisor software interrupt to the target hart.
+    unsafe {
+        sbi_call_2(0x0073_5049, 0, hart_mask, hart_mask_base);
+    }
+}
+
+/// Send a wakeup IPI to a target hart.
+///
+/// Used to break an idle hart out of `wfi` when work is enqueued on its run queue.
+/// On RISC-V this is implemented via the SBI IPI extension, which sends a supervisor
+/// software interrupt to the target hart.
+///
+/// # Safety
+/// `target_hart_id` must be a valid online hart ID.
+#[cfg(not(test))]
+pub unsafe fn send_wakeup_ipi(target_hart_id: u32)
+{
+    // SBI IPI extension (EID=0x735049 'sPI'), function SEND_IPI (fid=0).
+    // Argument: hart_mask (bitmask of target harts).
+    let hart_mask = 1u64 << target_hart_id;
+    let hart_mask_base = 0u64; // hart_mask represents harts [0..63]
+
+    // SAFETY: SBI call with EID=sPI, FID=0, sends an IPI to the target hart.
+    // The target will receive a supervisor software interrupt, waking it from wfi.
+    unsafe {
+        sbi_call_2(0x0073_5049, 0, hart_mask, hart_mask_base);
+    }
+}
+
+/// Make SBI call with 2 arguments.
+///
+/// # Safety
+/// Caller must ensure the SBI extension and function are valid.
+unsafe fn sbi_call_2(ext_id: u64, fid: u64, arg0: u64, arg1: u64) -> u64
+{
+    let ret: u64;
+    // SAFETY: SBI ecall convention, inputs in a7/a6/a0/a1, result in a0.
+    unsafe {
+        core::arch::asm!(
+            "ecall",
+            in("a7") ext_id,
+            in("a6") fid,
+            in("a0") arg0,
+            in("a1") arg1,
+            lateout("a0") ret,
+            options(nostack),
+        );
+    }
+    ret
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────

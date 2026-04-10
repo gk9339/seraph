@@ -50,6 +50,8 @@ pub struct EndpointState
     pub wait_set: *mut u8,
     /// Index of this endpoint's entry in `WaitSetState::members`.
     pub wait_set_member_idx: u8,
+    /// Serialises call/recv/reply across CPUs (see signal.rs for rationale).
+    pub lock: crate::sync::Spinlock,
 }
 
 // SAFETY: EndpointState is accessed only under the relevant scheduler lock.
@@ -69,6 +71,7 @@ impl EndpointState
             recv_tail: core::ptr::null_mut(),
             wait_set: core::ptr::null_mut(),
             wait_set_member_idx: 0,
+            lock: crate::sync::Spinlock::new(),
         }
     }
 }
@@ -149,61 +152,68 @@ pub unsafe fn endpoint_call(
     msg: &Message,
 ) -> Result<*mut ThreadControlBlock, ()>
 {
-    // SAFETY: ep validated by caller; endpoint state pointer allocated at endpoint creation.
+    // SAFETY: ep validated by caller.
     let ep = unsafe { &mut *ep };
+
+    // SAFETY: lock serialises call/recv/reply; paired with unlock_raw below.
+    let saved = unsafe { ep.lock.lock_raw() };
 
     // Is a server waiting?
     // SAFETY: recv_head/recv_tail maintained by enqueue/dequeue operations.
     let server = unsafe { dequeue(&mut ep.recv_head, &mut ep.recv_tail) };
     if !server.is_null()
     {
-        // Transfer message to server.
-        // SAFETY: server dequeued from recv_head; scheduler lock held; ensures exclusive
-        // access to thread state and IPC fields.
+        // SAFETY: server dequeued from recv_head; validate before use.
+        #[allow(clippy::undocumented_unsafe_blocks)]
+        {
+            debug_assert!(
+                unsafe { (*server).magic == crate::sched::thread::TCB_MAGIC },
+                "endpoint_call: server TCB magic corrupt — use-after-free?"
+            );
+            debug_assert!(
+                unsafe { (*server).state == ThreadState::Blocked },
+                "endpoint_call: server not Blocked"
+            );
+        }
+        // SAFETY: server dequeued from recv_head.
         unsafe {
             (*server).ipc_msg = *msg;
-            // Store caller as the reply target in the server's TCB.
             (*server).reply_tcb = caller;
             (*server).state = ThreadState::Ready;
             (*server).ipc_state = IpcThreadState::None;
             (*server).blocked_on_object = core::ptr::null_mut();
         }
-        // Block caller on reply; record the server as the blocking object so
-        // SYS_THREAD_STOP can cancel by clearing server.reply_tcb.
-        // SAFETY: caller validated by syscall layer; scheduler lock held; ensures exclusive
-        // access to thread state.
+        // SAFETY: caller validated by syscall layer.
         unsafe {
             (*caller).state = ThreadState::Blocked;
             (*caller).ipc_state = IpcThreadState::BlockedOnReply;
             (*caller).blocked_on_object = server.cast::<u8>();
         }
+        // SAFETY: paired with lock_raw above.
+        unsafe { ep.lock.unlock_raw(saved) };
         return Ok(server);
     }
 
     // No server available — block caller on send queue.
     let was_empty = ep.send_head.is_null();
-    // SAFETY: caller validated by syscall layer; scheduler lock held; ensures exclusive
-    // access to thread state and send queue.
+    // SAFETY: caller validated by syscall layer.
     unsafe {
         (*caller).ipc_msg = *msg;
         (*caller).state = ThreadState::Blocked;
         (*caller).ipc_state = IpcThreadState::BlockedOnSend;
-        // cast_ptr_alignment: ep is a valid EndpointState aligned to its own alignment;
-        // we type-erase to *mut u8 as a storage convention for blocked_on_object.
         #[allow(clippy::cast_ptr_alignment)]
         {
         (*caller).blocked_on_object = core::ptr::from_mut::<EndpointState>(ep).cast::<u8>();
         }
         enqueue(&mut ep.send_head, &mut ep.send_tail, caller);
     }
-    // Notify a registered wait set on the transition from empty → non-empty.
-    // Only fire on the first pending sender to avoid duplicate wakes.
     if was_empty && !ep.wait_set.is_null()
     {
-        // SAFETY: wait_set validated non-null; registered by sys_wait_set_add and cleared
-        // on removal or wait_set_drop; scheduler lock held.
+        // SAFETY: wait_set validated non-null.
         unsafe { crate::ipc::wait_set::waitset_notify(ep.wait_set, ep.wait_set_member_idx) };
     }
+    // SAFETY: paired with lock_raw above.
+    unsafe { ep.lock.unlock_raw(saved) };
     Err(())
 }
 
@@ -221,47 +231,45 @@ pub unsafe fn endpoint_recv(
     server: *mut ThreadControlBlock,
 ) -> Result<(*mut ThreadControlBlock, Message), ()>
 {
-    // SAFETY: ep validated by caller; endpoint state pointer allocated at endpoint creation.
+    // SAFETY: ep validated by caller.
     let ep = unsafe { &mut *ep };
+
+    // SAFETY: lock serialises call/recv/reply; paired with unlock_raw below.
+    let saved = unsafe { ep.lock.lock_raw() };
 
     // SAFETY: send_head/send_tail maintained by enqueue/dequeue operations.
     let caller = unsafe { dequeue(&mut ep.send_head, &mut ep.send_tail) };
     if !caller.is_null()
     {
-        // Dequeue the pending call and deliver to server.
-        // SAFETY: caller dequeued from send_head; ipc_msg field always valid in TCB.
+        // SAFETY: caller dequeued from send_head.
         let msg = unsafe { (*caller).ipc_msg };
-        // Record who the server should reply to.
-        // SAFETY: server validated by syscall layer; reply_tcb field always valid in TCB.
+        // SAFETY: server validated by syscall layer.
         unsafe {
             (*server).reply_tcb = caller;
         }
-        // Update caller's blocking state: it is now waiting for this server's
-        // reply, not in the send queue. SYS_THREAD_STOP will use blocked_on_object
-        // (the server TCB) to cancel the reply if needed.
-        // SAFETY: caller dequeued from send_head; scheduler lock held; ensures exclusive
-        // access to thread state.
+        // SAFETY: caller dequeued from send_head.
         unsafe {
             (*caller).ipc_state = IpcThreadState::BlockedOnReply;
             (*caller).blocked_on_object = server.cast::<u8>();
         }
+        // SAFETY: paired with lock_raw above.
+        unsafe { ep.lock.unlock_raw(saved) };
         return Ok((caller, msg));
     }
 
     // No sender — block server on recv queue.
-    // SAFETY: server validated by syscall layer; scheduler lock held; ensures exclusive
-    // access to thread state and recv queue.
+    // SAFETY: server validated by syscall layer.
     unsafe {
         (*server).state = ThreadState::Blocked;
         (*server).ipc_state = IpcThreadState::BlockedOnRecv;
-        // cast_ptr_alignment: ep is a valid EndpointState aligned to its own alignment;
-        // we type-erase to *mut u8 as a storage convention for blocked_on_object.
         #[allow(clippy::cast_ptr_alignment)]
         {
         (*server).blocked_on_object = core::ptr::from_mut::<EndpointState>(ep).cast::<u8>();
         }
         enqueue(&mut ep.recv_head, &mut ep.recv_tail, server);
     }
+    // SAFETY: paired with lock_raw above.
+    unsafe { ep.lock.unlock_raw(saved) };
     Err(())
 }
 

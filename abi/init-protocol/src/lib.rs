@@ -28,7 +28,10 @@
 // ── Protocol version ─────────────────────────────────────────────────────────
 
 /// Init protocol version. Incremented on any breaking layout or semantic change.
-pub const INIT_PROTOCOL_VERSION: u32 = 2;
+///
+/// v3: Added `cmdline_offset`, `cmdline_len`, and `sbi_control_cap` for kernel
+///     command line passthrough and RISC-V SBI forwarding.
+pub const INIT_PROTOCOL_VERSION: u32 = 3;
 
 // ── Address space constants ──────────────────────────────────────────────────
 
@@ -119,6 +122,30 @@ pub struct InitInfo
     /// Allows init to bind I/O port ranges to itself (`ioport_bind`), set its
     /// own priority and affinity, and delegate thread authority to child services.
     pub thread_cap: u32,
+
+    // ── Command line (added in protocol version 3) ──────────────────────
+
+    /// Byte offset from the start of this struct to the kernel command line.
+    ///
+    /// The command line is placed after the [`CapDescriptor`] array within the
+    /// same 4 KiB page. Zero if no command line is present.
+    pub cmdline_offset: u32,
+
+    /// Length of the command line in bytes (no null terminator). Zero if absent.
+    pub cmdline_len: u32,
+
+    // ── RISC-V SBI forwarding (added in protocol version 3) ─────────────
+
+    /// Slot index of the `SbiControl` capability (RISC-V only).
+    ///
+    /// Grants authority to forward SBI calls from userspace through the kernel.
+    /// Zero on x86-64 (no SBI concept).
+    pub sbi_control_cap: u32,
+
+    /// Padding to keep `InitInfo` size a multiple of 8 bytes so the
+    /// `CapDescriptor` array that follows is correctly aligned (contains `u64`).
+    #[doc(hidden)]
+    pub _pad: u32,
 }
 
 // ── CapDescriptor ────────────────────────────────────────────────────────────
@@ -180,4 +207,27 @@ pub enum CapType
     IoPortRange = 11,
     /// Scheduling control authority. Matches `CapTag::SchedControl = 12`.
     SchedControl = 12,
+    /// SBI forwarding authority (RISC-V only). Matches `CapTag::SbiControl = 13`.
+    SbiControl = 13,
+}
+
+// ── Helpers ─────────────────────────────────────────────────────────────
+
+/// Return the kernel command line as a byte slice from the [`InitInfo`] page.
+///
+/// # Safety
+/// `info` must point into the read-only [`InitInfo`] page mapped by the kernel
+/// at [`INIT_INFO_VADDR`]. The page must contain at least
+/// `info.cmdline_offset + info.cmdline_len` valid bytes.
+#[must_use]
+pub unsafe fn cmdline_bytes(info: &InitInfo) -> &[u8]
+{
+    if info.cmdline_len == 0 || info.cmdline_offset == 0
+    {
+        return &[];
+    }
+    let base = core::ptr::from_ref::<InitInfo>(info).cast::<u8>();
+    // SAFETY: caller guarantees the InitInfo page contains valid cmdline data
+    // at the specified offset and length, populated by the kernel in Phase 9.
+    unsafe { core::slice::from_raw_parts(base.add(info.cmdline_offset as usize), info.cmdline_len as usize) }
 }

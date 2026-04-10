@@ -527,6 +527,7 @@ pub unsafe fn load_iopb(iopb: Option<&[u8; IOPB_SIZE]>)
 ///
 /// # Panics
 /// Panics in debug mode if `base as u32 + count as u32 > 65536`.
+#[cfg(test)] // Only used by tests; runtime uses permit_port_range_u32.
 pub fn permit_port_range(iopb: &mut [u8; IOPB_SIZE], base: u16, count: u16)
 {
     if count == 0
@@ -537,6 +538,30 @@ pub fn permit_port_range(iopb: &mut [u8; IOPB_SIZE], base: u16, count: u16)
     let end = base as u32 + count as u32;
     debug_assert!(end <= 65536, "port range exceeds 0xFFFF");
     for port in base as u32..end
+    {
+        let byte = (port / 8) as usize;
+        let bit = port % 8;
+        if byte < IOPB_SIZE
+        {
+            iopb[byte] &= !(1 << bit);
+        }
+    }
+}
+
+/// Like [`permit_port_range`] but accepts `u32` base and count to support
+/// the full 64K range (65536 ports) without overflow.
+///
+/// # Panics
+/// Panics in debug mode if `base + count > 65536`.
+pub fn permit_port_range_u32(iopb: &mut [u8; IOPB_SIZE], base: u32, count: u32)
+{
+    if count == 0
+    {
+        return;
+    }
+    let end = base + count;
+    debug_assert!(end <= 65536, "port range exceeds 0xFFFF");
+    for port in base..end
     {
         let byte = (port / 8) as usize;
         let bit = port % 8;

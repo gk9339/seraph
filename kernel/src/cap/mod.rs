@@ -13,7 +13,7 @@
 //! - MMIO ranges (`MmioRange`, `PciEcam`, `IommuUnit`) → [`CapTag::MmioRegion`] caps (MAP | WRITE)
 //! - Interrupt lines → [`CapTag::Interrupt`] caps
 //! - Firmware tables → [`CapTag::Frame`] caps (MAP only, no WRITE)
-//! - I/O port ranges (x86-64) → [`CapTag::IoPortRange`] caps (USE)
+//! - One root [`CapTag::IoPortRange`] cap covering the full 64K I/O port space (x86-64, USE)
 //! - One [`CapTag::SchedControl`] cap (ELEVATE)
 //!
 //! The populated `CSpace` is stored in [`ROOT_CSPACE`] until Phase 9 hands it
@@ -41,8 +41,8 @@ pub use derivation::DERIVATION_LOCK;
 #[allow(unused_imports)]
 pub use object::{
     AddressSpaceObject, CSpaceKernelObject, EndpointObject, FrameObject, InterruptObject,
-    IoPortRangeObject, KernelObjectHeader, MmioRegionObject, ObjectType, SchedControlObject,
-    SignalObject, ThreadObject,
+    IoPortRangeObject, KernelObjectHeader, MmioRegionObject, ObjectType, SbiControlObject,
+    SchedControlObject, SignalObject, ThreadObject,
 };
 #[allow(unused_imports)]
 pub use slot::{CSpaceId, CapTag, CapabilitySlot, Rights, SlotId};
@@ -203,6 +203,8 @@ pub struct CSpaceLayout
     pub hw_cap_count: u32,
     /// Slot index of the `SchedControl` capability.
     pub sched_control_slot: u32,
+    /// Slot index of the `SbiControl` capability (RISC-V only; 0 on x86-64).
+    pub sbi_control_slot: u32,
     /// Total number of populated slots.
     pub total_populated: usize,
     /// Per-capability descriptors for all populated slots.
@@ -365,12 +367,16 @@ fn populate_cspace(
             }
 
             // Firmware tables: Frame cap with MAP only (read-only, no WRITE/EXECUTE).
+            // Size is rounded up to cover whole pages so mem_map can map them.
+            // The intra-page offset of base is preserved; userspace accounts for it.
             ResourceType::PlatformTable =>
             {
+                let page_offset = res.base & 0xFFF;
+                let rounded_size = (page_offset + res.size + 0xFFF) & !0xFFF;
                 let obj = Box::new(FrameObject {
                     header: KernelObjectHeader::new(ObjectType::Frame),
                     base: res.base,
-                    size: res.size,
+                    size: rounded_size,
                 });
                 let ptr = nonnull_from_box(obj);
                 let slot = insert_or_fatal(
@@ -478,12 +484,67 @@ fn populate_cspace(
         aux1: 0,
     });
 
+    // x86-64: root IoPortRange covering the full 64K I/O port space.
+    // This is a static architectural fact — not from bootloader PlatformResources.
+    // Init subdivides and delegates sub-ranges to services as needed.
+    #[cfg(target_arch = "x86_64")]
+    {
+        let obj = Box::new(IoPortRangeObject {
+            header: KernelObjectHeader::new(ObjectType::IoPortRange),
+            base: 0,
+            size: 0, // 0 means 0x10000 (full range; u16 cannot hold 65536)
+            _pad: 0,
+        });
+        let ptr = nonnull_from_box(obj);
+        let ioport_root_slot = insert_or_fatal(
+            cspace,
+            CapTag::IoPortRange,
+            Rights::USE,
+            ptr,
+            "Phase 7: cannot allocate root IoPortRange capability",
+        );
+        descriptors.push(CapDescriptor {
+            slot: ioport_root_slot,
+            cap_type: CapType::IoPortRange,
+            pad: [0; 3],
+            aux0: 0,
+            aux1: 0x10000, // full 64K range
+        });
+    }
+
+    // RISC-V: one SbiControl capability — grants authority to forward SBI calls.
+    #[cfg(target_arch = "riscv64")]
+    let sbi_control_slot = {
+        let obj = Box::new(SbiControlObject {
+            header: KernelObjectHeader::new(ObjectType::SbiControl),
+        });
+        let ptr = nonnull_from_box(obj);
+        let slot = insert_or_fatal(
+            cspace,
+            CapTag::SbiControl,
+            Rights::CALL,
+            ptr,
+            "Phase 7: cannot allocate SbiControl capability",
+        );
+        descriptors.push(CapDescriptor {
+            slot,
+            cap_type: CapType::SbiControl,
+            pad: [0; 3],
+            aux0: 0,
+            aux1: 0,
+        });
+        slot
+    };
+    #[cfg(not(target_arch = "riscv64"))]
+    let sbi_control_slot = 0u32;
+
     CSpaceLayout {
         memory_frame_base,
         memory_frame_count,
         hw_cap_base,
         hw_cap_count,
         sched_control_slot,
+        sbi_control_slot,
         total_populated: cspace.populated_count(),
         descriptors,
     }

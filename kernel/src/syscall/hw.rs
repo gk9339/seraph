@@ -382,9 +382,11 @@ pub fn sys_ioport_bind(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         }
 
         // Clear the bits for the requested port range (0 = allow).
+        // size == 0 encodes the full 64K range (u16 cannot hold 65536).
+        let effective_size = if port_size == 0 { 65536u32 } else { u32::from(port_size) };
         // SAFETY: iopb is non-null after the allocation above; target_tcb validated.
         unsafe {
-            gdt::permit_port_range(&mut *(*target_tcb).iopb, port_base, port_size);
+            gdt::permit_port_range_u32(&mut *(*target_tcb).iopb, u32::from(port_base), effective_size);
         }
 
         // If binding to the currently running thread, reload the TSS IOPB

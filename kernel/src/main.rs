@@ -102,6 +102,8 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
     let boot_cpu_ids      = info.cpu_ids;
     let trampoline_pa     = info.ap_trampoline_page;
     let init_image        = info.init_image; // InitImage is Copy
+    let cmdline_phys      = info.command_line as u64;
+    let cmdline_len       = info.command_line_len as usize;
 
     // ── Phase 1: early console ──────────────────────────────────────────────
     // SAFETY: called exactly once, from the single kernel boot thread, after
@@ -387,6 +389,14 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
 
             let descriptors_offset = core::mem::size_of::<InitInfo>() as u32;
 
+            // Compute where the command line goes: after the CapDescriptor array.
+            let desc_byte_len_pre =
+                cspace_layout.descriptors.len() * core::mem::size_of::<init_protocol::CapDescriptor>();
+            let cmdline_start = descriptors_offset as usize + desc_byte_len_pre;
+            // Truncate if the cmdline doesn't fit in the remaining page space.
+            let cmdline_copy_len = cmdline_len.min(mm::PAGE_SIZE.saturating_sub(cmdline_start));
+            let cmdline_off = if cmdline_copy_len > 0 { cmdline_start as u32 } else { 0 };
+
             let info = InitInfo {
                 version: INIT_PROTOCOL_VERSION,
                 cap_descriptor_count: cspace_layout.descriptors.len() as u32,
@@ -402,6 +412,10 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
                 hw_cap_count: cspace_layout.hw_cap_count,
                 cap_descriptors_offset: descriptors_offset,
                 thread_cap: 0, // patched below after Thread cap is minted
+                cmdline_offset: cmdline_off,
+                cmdline_len: cmdline_copy_len as u32,
+                sbi_control_cap: cspace_layout.sbi_control_slot,
+                _pad: 0,
             };
 
             // Write InitInfo header.
@@ -434,6 +448,20 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
                     desc_ptr,
                     desc_byte_len,
                 );
+            }
+
+            // Copy kernel command line after the CapDescriptor array.
+            if cmdline_copy_len > 0 && cmdline_phys != 0
+            {
+                let cmdline_src = mm::paging::phys_to_virt(cmdline_phys) as *const u8;
+                // SAFETY: cmdline_start is within the page (bounds-checked above).
+                let cmdline_dst = unsafe { info_page_virt.add(cmdline_start) };
+                // SAFETY: cmdline_src points to a bootloader-allocated page accessible
+                // via the direct physical map; cmdline_dst is within the InitInfo page;
+                // cmdline_copy_len was bounds-checked above.
+                unsafe {
+                    core::ptr::copy_nonoverlapping(cmdline_src, cmdline_dst, cmdline_copy_len);
+                }
             }
 
             // Map the info page read-only into init's address space.

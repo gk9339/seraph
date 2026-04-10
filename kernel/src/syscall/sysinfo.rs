@@ -60,6 +60,11 @@ pub fn sys_system_info(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         {
             Ok(u64::from(boot_protocol::BOOT_PROTOCOL_VERSION))
         }
+        6 =>
+        // ElapsedUs
+        {
+            Ok(crate::arch::current::timer::elapsed_us().unwrap_or(0))
+        }
         _ => Err(SyscallError::InvalidArgument),
     }
 }

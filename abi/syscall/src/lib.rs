@@ -119,6 +119,8 @@ pub const SYS_ASPACE_QUERY: u64 = 41;
 pub const SYS_IPC_BUFFER_SET: u64 = 42;
 /// System: query kernel capabilities / version.
 pub const SYS_SYSTEM_INFO: u64 = 43;
+/// SBI: forward an SBI call to M-mode firmware (RISC-V only).
+pub const SYS_SBI_CALL: u64 = 44;
 
 // ── Error codes ───────────────────────────────────────────────────────────────
 
@@ -259,4 +261,7 @@ pub enum SystemInfoType
     /// Boot protocol version used by the bootloader.
     /// Userspace can use this to interpret fields in the boot info struct.
     BootProtocolVersion = 5,
+    /// Microseconds elapsed since kernel timer initialisation.
+    /// Returns 0 if the timer has not been initialised yet.
+    ElapsedUs = 6,
 }

@@ -75,6 +75,30 @@ Defined in `src/main.rs`:
 - `PASS_COUNT` / `FAIL_COUNT` — atomic counters updated by `run_test!`.
 - `log(msg)` / `log_u64(prefix, value)` — heap-free logging utilities.
 
+## Command line options
+
+ktest reads the kernel command line (passed via `boot.conf` `cmdline=`) for
+options prefixed with `ktest.`. All options are optional; defaults preserve the
+pre-shutdown behavior (halt in place).
+
+| Option | Values | Default | Description |
+|---|---|---|---|
+| `ktest.shutdown` | `always`, `pass`, `never` | `never` | When to shut down the system after tests complete |
+| `ktest.timeout` | decimal seconds | `0` | Seconds to wait before shutdown (allows reading output) |
+
+`ktest.shutdown=always` shuts down regardless of test outcome.
+`ktest.shutdown=pass` shuts down only if all tests passed; halts otherwise.
+`ktest.shutdown=never` halts in place after printing results.
+
+On x86-64 shutdown uses ACPI S5 (parsed from FADT/DSDT in userspace).
+On RISC-V shutdown uses SBI SRST via the `SYS_SBI_CALL` syscall.
+
+Example `boot.conf`:
+
+```
+cmdline=ktest.shutdown=always ktest.timeout=3
+```
+
 ## Output format
 
 Each test produces two lines on the serial console:

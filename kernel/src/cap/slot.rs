@@ -96,6 +96,8 @@ pub enum CapTag
     IoPortRange = 11,
     /// Scheduling control authority.
     SchedControl = 12,
+    /// SBI forwarding authority (RISC-V only).
+    SbiControl = 13,
 }
 
 // ── Rights ────────────────────────────────────────────────────────────────────
@@ -171,6 +173,10 @@ impl Rights
     // ── SchedControl ──────────────────────────────────────────────────────────
     /// May set thread priorities in the elevated range.
     pub const ELEVATE: Rights = Rights(1 << 19);
+
+    // ── SbiControl ───────────────────────────────────────────────────────────
+    /// May forward SBI calls to M-mode firmware (RISC-V only).
+    pub const CALL: Rights = Rights(1 << 20);
 
     /// Return `true` if all bits in `mask` are present in `self`.
     pub fn contains(self, mask: Rights) -> bool

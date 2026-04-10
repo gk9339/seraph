@@ -122,7 +122,6 @@ pub(crate) unsafe fn phys_slice<'a>(phys: u64, len: usize) -> &'a [u8]
 /// - MADT: local APIC MMIO base, I/O APIC [`MmioRanges`], interrupt ISOs ([`IrqLine`])
 /// - MCFG: PCI ECAM windows ([`PciEcam`])
 /// - RSDP region: [`PlatformTable`]
-/// - `x86_64` legacy PCI I/O ports 0xCF8–0xCFF ([`IoPortRange`], only on `x86_64`)
 ///
 /// # Safety
 /// `rsdp_addr` must be a physical address of a valid, identity-mapped ACPI RSDP.
@@ -263,34 +262,61 @@ pub unsafe fn parse_acpi_resources(rsdp_addr: u64, out: &mut [PlatformResource])
                     }
                 }
             }
+            b"FACP" =>
+            {
+                // FADT: record as PlatformTable (id=3) so userspace can parse
+                // power management registers (PM1a_CNT_BLK, SLP_TYPa, etc.).
+                push!(PlatformResource {
+                    resource_type: ResourceType::PlatformTable,
+                    flags: 0,
+                    base: table_addr,
+                    size: table_len as u64,
+                    id: 3,
+                });
+
+                // Record the DSDT as PlatformTable (id=4). DSDT physical address
+                // is at FADT offset 40 (u32) or X_DSDT at offset 140 (u64).
+                let dsdt_addr = if table_len >= 148
+                {
+                    let x_dsdt = read_u64(table, 140);
+                    if x_dsdt != 0 { x_dsdt } else { u64::from(read_u32(table, 40)) }
+                }
+                else if table_len > 44
+                {
+                    u64::from(read_u32(table, 40))
+                }
+                else
+                {
+                    0
+                };
+
+                if dsdt_addr != 0
+                {
+                    // Read the DSDT's own length from its SDT header.
+                    // SAFETY: dsdt_addr from FADT; firmware guarantees physical mapping.
+                    let dsdt_hdr = unsafe { phys_slice(dsdt_addr, SDT_HDR_LEN) };
+                    let dsdt_len = read_u32(dsdt_hdr, SDT_OFF_LENGTH);
+                    #[allow(clippy::cast_possible_truncation)] // SDT_HDR_LEN is 36, always fits u32.
+                    if dsdt_len >= SDT_HDR_LEN as u32
+                    {
+                        push!(PlatformResource {
+                            resource_type: ResourceType::PlatformTable,
+                            flags: 0,
+                            base: dsdt_addr,
+                            size: u64::from(dsdt_len),
+                            id: 4,
+                        });
+                    }
+                }
+            }
             _ =>
             {} // Skip unknown tables gracefully.
         }
     }
 
-    // x86-64 legacy I/O port ranges.
-    // Only present when MADT was found (implies x86/APIC platform).
-    #[cfg(target_arch = "x86_64")]
-    if found_madt
-    {
-        // COM1 serial port 0x3F8–0x3FF (8 ports).
-        push!(PlatformResource {
-            resource_type: ResourceType::IoPortRange,
-            flags: 0,
-            base: 0x3F8,
-            size: 8,
-            id: 0,
-        });
-        // PCI configuration I/O ports 0xCF8–0xCFF (8 ports).
-        push!(PlatformResource {
-            resource_type: ResourceType::IoPortRange,
-            flags: 0,
-            base: 0xCF8,
-            size: 8,
-            id: 0,
-        });
-    }
-    #[cfg(not(target_arch = "x86_64"))]
+    // x86-64 I/O port capabilities are created directly by the kernel
+    // (root IoPortRange covering the full 64K space) — not from bootloader
+    // PlatformResources. The bootloader only enumerates discovered hardware.
     let _ = found_madt;
 
     count

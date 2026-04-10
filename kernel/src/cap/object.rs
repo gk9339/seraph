@@ -63,6 +63,7 @@ pub enum ObjectType
     Signal = 9,
     EventQueue = 10,
     WaitSet = 11,
+    SbiControl = 12,
 }
 
 // ── KernelObjectHeader ────────────────────────────────────────────────────────
@@ -176,6 +177,17 @@ pub struct IoPortRangeObject
 /// There is exactly one `SchedControl` object, created at boot.
 #[repr(C)]
 pub struct SchedControlObject
+{
+    pub header: KernelObjectHeader,
+}
+
+/// Kernel object for SBI forwarding authority (`SbiControl` capability).
+///
+/// RISC-V only. There is exactly one `SbiControl` object, created at boot.
+/// Grants the holder authority to forward SBI calls through the kernel to
+/// M-mode firmware.
+#[repr(C)]
+pub struct SbiControlObject
 {
     pub header: KernelObjectHeader,
 }
@@ -363,6 +375,11 @@ pub unsafe fn dealloc_object(ptr: core::ptr::NonNull<KernelObjectHeader>)
         {
             // SAFETY: ptr originally from Box<SchedControlObject>::into_raw; header at offset 0.
             unsafe { drop(Box::from_raw(ptr.as_ptr().cast::<SchedControlObject>())) };
+        }
+        ObjectType::SbiControl =>
+        {
+            // SAFETY: ptr originally from Box<SbiControlObject>::into_raw; header at offset 0.
+            unsafe { drop(Box::from_raw(ptr.as_ptr().cast::<SbiControlObject>())) };
         }
 
         // ── Thread ────────────────────────────────────────────────────────

@@ -26,6 +26,7 @@ pub mod cap;
 pub mod hw;
 pub mod ipc;
 pub mod mem;
+pub mod sbi;
 pub mod sysinfo;
 pub mod thread;
 
@@ -44,7 +45,7 @@ use syscall::{
     SYS_SIGNAL_WAIT, SYS_SYSTEM_INFO, SYS_THREAD_CONFIGURE, SYS_THREAD_EXIT, SYS_THREAD_READ_REGS,
     SYS_THREAD_SET_AFFINITY, SYS_THREAD_SET_PRIORITY, SYS_THREAD_START, SYS_THREAD_STOP,
     SYS_THREAD_WRITE_REGS, SYS_THREAD_YIELD, SYS_WAIT_SET_ADD, SYS_WAIT_SET_REMOVE,
-    SYS_WAIT_SET_WAIT,
+    SYS_WAIT_SET_WAIT, SYS_SBI_CALL,
 };
 
 // ── TrapFrame accessor shims ──────────────────────────────────────────────────
@@ -118,6 +119,7 @@ pub unsafe fn dispatch(tf: *mut TrapFrame)
         SYS_MMIO_MAP => hw::sys_mmio_map(tf),
         SYS_IOPORT_BIND => hw::sys_ioport_bind(tf),
         SYS_DMA_GRANT => hw::sys_dma_grant(tf),
+        SYS_SBI_CALL => sbi::sys_sbi_call(tf),
         _ => Err(SyscallError::UnknownSyscall),
     };
 

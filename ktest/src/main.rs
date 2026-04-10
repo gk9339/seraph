@@ -24,11 +24,17 @@ use core::panic::PanicInfo;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 mod bench;
+mod cmdline;
 mod frame_pool;
 mod framebuffer;
 mod integration;
 mod serial;
 mod unit;
+
+#[cfg(target_arch = "x86_64")]
+mod acpi_shutdown;
+#[cfg(target_arch = "riscv64")]
+mod sbi_shutdown;
 
 // ── Test infrastructure ───────────────────────────────────────────────────────
 
@@ -190,6 +196,8 @@ fn run(info_ptr: u64) -> !
 
     if info.version != init_protocol::INIT_PROTOCOL_VERSION
     {
+        // Version mismatch: kernel and ktest disagree on InitInfo layout.
+        // Cannot log (serial not initialised yet). Halt immediately.
         halt();
     }
 
@@ -250,6 +258,35 @@ fn run(info_ptr: u64) -> !
     else
     {
         log("ktest: SOME TESTS FAILED");
+    }
+
+    // ── Shutdown ─────────────────────────────────────────────────────────────
+    // SAFETY: info is valid for the lifetime of the process (kernel-mapped page).
+    let config = cmdline::parse(unsafe { init_protocol::cmdline_bytes(info) });
+    let all_passed = failed == 0;
+    let should_shutdown = match config.shutdown_policy
+    {
+        cmdline::ShutdownPolicy::Always => true,
+        cmdline::ShutdownPolicy::Pass => all_passed,
+        cmdline::ShutdownPolicy::Never => false,
+    };
+
+    if should_shutdown
+    {
+        if config.timeout_secs > 0
+        {
+            log_u64("ktest: shutdown in ", u64::from(config.timeout_secs));
+            wait_seconds(config.timeout_secs);
+        }
+
+        log("ktest: shutdown");
+        #[cfg(target_arch = "x86_64")]
+        acpi_shutdown::shutdown(info);
+        #[cfg(target_arch = "riscv64")]
+        sbi_shutdown::shutdown(info);
+
+        // Shutdown failed; fall through to thread_exit.
+        log("ktest: shutdown failed, halting");
     }
 
     syscall::thread_exit()
@@ -369,6 +406,24 @@ pub fn log_version(prefix: &str, ver: u64)
     if let Ok(s) = core::str::from_utf8(&buf[..pos])
     {
         log(s);
+    }
+}
+
+/// Wait for `secs` seconds using the kernel timer via `system_info(ElapsedUs)`.
+///
+/// Yields the CPU between polls so the scheduler can run other threads.
+fn wait_seconds(secs: u32)
+{
+    let target_us = u64::from(secs) * 1_000_000;
+    let start = syscall::system_info(6).unwrap_or(0); // ElapsedUs = 6
+    loop
+    {
+        let now = syscall::system_info(6).unwrap_or(0);
+        if now.wrapping_sub(start) >= target_us
+        {
+            break;
+        }
+        let _ = syscall::thread_yield();
     }
 }
 

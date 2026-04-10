@@ -90,7 +90,6 @@ pub fn run(ctx: &BuildContext, args: &RunArgs) -> Result<()>
         "-serial".into(),
         "stdio".into(),
         "-no-reboot".into(),
-        "-no-shutdown".into(),
     ];
 
     if args.headless

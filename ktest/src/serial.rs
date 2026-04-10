@@ -24,9 +24,8 @@ static mut SERIAL_READY: bool = false;
 
 // ── Cap discovery ────────────────────────────────────────────────────────────
 
-/// Scan the `CapDescriptor` array for a cap matching `wanted_type` and
-/// `wanted_aux0`. Returns the `CSpace` slot index if found.
-fn find_cap(info: &InitInfo, wanted_type: CapType, wanted_aux0: u64) -> Option<u32>
+/// Read the `CapDescriptor` array from the `InitInfo` page.
+fn descriptors(info: &InitInfo) -> &[CapDescriptor]
 {
     let base = core::ptr::from_ref::<InitInfo>(info).cast::<u8>();
     // SAFETY: cap_descriptors_offset is set by the kernel to point within the
@@ -37,14 +36,35 @@ fn find_cap(info: &InitInfo, wanted_type: CapType, wanted_aux0: u64) -> Option<u
     // cast_ptr_alignment: InitInfo is 4-byte aligned and CapDescriptor array
     // immediately follows it at a 4-byte-aligned offset.
     #[allow(clippy::cast_ptr_alignment)]
-    let descs = unsafe {
+    unsafe {
         let ptr = base.add(info.cap_descriptors_offset as usize).cast::<CapDescriptor>();
         core::slice::from_raw_parts(ptr, info.cap_descriptor_count as usize)
-    };
+    }
+}
 
-    for d in descs
+/// Scan the `CapDescriptor` array for a cap matching `wanted_type` and
+/// `wanted_aux0`. Returns the `CSpace` slot index if found.
+#[allow(dead_code)] // Used on RISC-V (MmioRegion lookup), not on x86-64.
+fn find_cap(info: &InitInfo, wanted_type: CapType, wanted_aux0: u64) -> Option<u32>
+{
+    for d in descriptors(info)
     {
         if d.cap_type == wanted_type && d.aux0 == wanted_aux0
+        {
+            return Some(d.slot);
+        }
+    }
+    None
+}
+
+/// Scan the `CapDescriptor` array for the first cap matching `wanted_type`.
+/// Returns the `CSpace` slot index if found.
+#[allow(dead_code)] // Used on x86-64 (IoPortRange lookup), not on RISC-V.
+fn find_cap_by_type(info: &InitInfo, wanted_type: CapType) -> Option<u32>
+{
+    for d in descriptors(info)
+    {
+        if d.cap_type == wanted_type
         {
             return Some(d.slot);
         }
@@ -69,10 +89,10 @@ mod arch
     /// Must be called once, from the main thread, after `InitInfo` is mapped.
     pub unsafe fn init(info: &super::InitInfo, thread_cap: u32)
     {
-        let Some(slot) = super::find_cap(info, super::CapType::IoPortRange, u64::from(COM1))
+        let Some(slot) = super::find_cap_by_type(info, super::CapType::IoPortRange)
         else
         {
-            return; // no COM1 cap — serial stays uninitialised
+            return; // no IoPortRange cap — serial stays uninitialised
         };
 
         if syscall::ioport_bind(thread_cap, slot).is_err()

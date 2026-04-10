@@ -30,7 +30,7 @@ use syscall_abi::{
     SYS_MMIO_MAP, SYS_SIGNAL_SEND, SYS_SIGNAL_WAIT, SYS_SYSTEM_INFO, SYS_THREAD_CONFIGURE,
     SYS_THREAD_EXIT, SYS_THREAD_READ_REGS, SYS_THREAD_SET_AFFINITY, SYS_THREAD_SET_PRIORITY,
     SYS_THREAD_START, SYS_THREAD_STOP, SYS_THREAD_WRITE_REGS, SYS_THREAD_YIELD, SYS_WAIT_SET_ADD,
-    SYS_WAIT_SET_REMOVE, SYS_WAIT_SET_WAIT,
+    SYS_WAIT_SET_REMOVE, SYS_WAIT_SET_WAIT, SYS_SBI_CALL,
 };
 
 // ── Raw syscall entry ─────────────────────────────────────────────────────────
@@ -300,6 +300,63 @@ unsafe fn syscall5_ret2(nr: u64, a0: u64, a1: u64, a2: u64, a3: u64, a4: u64) ->
         );
     }
     (ret, secondary)
+}
+
+/// Issue a syscall with 6 arguments. Returns the primary return value.
+#[cfg(target_arch = "x86_64")]
+// inline_always: syscall wrapper contains inline asm; must inline to call site.
+// cast_possible_wrap: u64 syscall number reinterpreted as i64 register value; bit pattern preserved.
+#[allow(clippy::inline_always, clippy::cast_possible_wrap)]
+#[inline(always)]
+unsafe fn syscall6(nr: u64, a0: u64, a1: u64, a2: u64, a3: u64, a4: u64, a5: u64) -> i64
+{
+    let ret: i64;
+    let nr = nr as i64;
+    // SAFETY: inline asm issues syscall instruction per x86-64 ABI; syscall number in rax,
+    // args in rdi/rsi/rdx/r10/r8/r9; clobbers rcx/r11 as documented; no memory side effects.
+    unsafe {
+        core::arch::asm!(
+            "syscall",
+            inout("rax") nr => ret,
+            in("rdi") a0,
+            in("rsi") a1,
+            in("rdx") a2,
+            in("r10") a3,
+            in("r8")  a4,
+            in("r9")  a5,
+            out("rcx") _,
+            out("r11") _,
+            options(nostack),
+        );
+    }
+    ret
+}
+
+#[cfg(target_arch = "riscv64")]
+// inline_always: syscall wrapper contains inline asm; must inline to call site.
+// cast_possible_wrap: u64 arg reinterpreted as i64 register value; bit pattern preserved.
+#[allow(clippy::inline_always, clippy::cast_possible_wrap)]
+#[inline(always)]
+unsafe fn syscall6(nr: u64, a0: u64, a1: u64, a2: u64, a3: u64, a4: u64, a5: u64) -> i64
+{
+    let ret: i64;
+    let a0 = a0 as i64;
+    // SAFETY: inline asm issues ecall instruction per RISC-V ABI; syscall number in a7,
+    // args in a0-a5; no memory side effects.
+    unsafe {
+        core::arch::asm!(
+            "ecall",
+            inout("a0") a0 => ret,
+            in("a1") a1,
+            in("a2") a2,
+            in("a3") a3,
+            in("a4") a4,
+            in("a5") a5,
+            in("a7") nr,
+            options(nostack),
+        );
+    }
+    ret
 }
 
 // ── IPC capability slot helpers ───────────────────────────────────────────────
@@ -1607,6 +1664,45 @@ pub fn thread_write_regs(thread_cap: u32, buf: *const u8, buf_size: usize) -> Re
     else
     {
         Ok(())
+    }
+}
+
+// ── SBI ──────────────────────────────────────────────────────────────────────
+
+/// Forward an SBI call to M-mode firmware (RISC-V only).
+///
+/// - `sbi_cap`: `SbiControl` capability slot index
+/// - `extension`: SBI extension ID
+/// - `function`: SBI function ID
+/// - `a0`–`a2`: SBI arguments
+///
+/// Returns the SBI return value on success.
+///
+/// # Errors
+/// Returns a negative `i64` error code if the kernel rejects the call
+/// (e.g., invalid cap, or SBI firmware returns an error).
+#[inline]
+pub fn sbi_call(sbi_cap: u32, extension: u64, function: u64, a0: u64, a1: u64, a2: u64) -> Result<u64, i64>
+{
+    // SAFETY: syscall6 issues raw syscall instruction; all arguments are plain u64 values.
+    let ret = unsafe {
+        syscall6(
+            SYS_SBI_CALL,
+            u64::from(sbi_cap),
+            extension,
+            function,
+            a0,
+            a1,
+            a2,
+        )
+    };
+    if ret < 0
+    {
+        Err(ret)
+    }
+    else
+    {
+        Ok(ret.cast_unsigned())
     }
 }
 

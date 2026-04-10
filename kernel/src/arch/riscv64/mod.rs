@@ -13,6 +13,7 @@ pub mod gdt;
 pub mod idt;
 pub mod interrupts;
 pub mod paging;
+pub mod sbi;
 pub mod syscall;
 pub mod timer;
 pub mod trap_frame;

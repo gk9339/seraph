@@ -19,18 +19,26 @@ use crate::error::BootError;
 use crate::firmware::FirmwareInfo;
 use crate::uefi::{allocate_pages, EfiBootServices};
 use crate::{bprint, bprintln};
-use boot_protocol::{PlatformResource, ResourceType};
+use boot_protocol::{FramebufferInfo, PlatformResource, ResourceType};
 
 /// Maximum number of platform resources tracked across all parsers.
 ///
 /// Increase if ACPI + DTB together produce more than this many entries.
 const MAX_PLATFORM_RESOURCES: usize = 64;
 
+/// Seraph Framebuffer Descriptor magic: `"SFBD"` as little-endian u32.
+const SFBD_MAGIC: u32 = 0x4442_4653;
+
 /// Parse platform firmware tables and return a physical allocation holding
 /// the sorted [`PlatformResource`] array.
 ///
-/// Returns `(physical_address, entry_count)`. If no resources are found,
-/// returns `(0, 0)` (no allocation is made).
+/// If a framebuffer is present (`fb.physical_base != 0`), emits an
+/// `MmioRange` for the pixel memory and a `PlatformTable` for a
+/// boot-constructed framebuffer descriptor page.
+///
+/// Returns `(resource_array_phys, entry_count, fb_descriptor_phys)`.
+/// `fb_descriptor_phys` is 0 if no framebuffer or no resources found.
+/// If no resources are found at all, returns `(0, 0, 0)`.
 ///
 /// # Safety
 /// `bs` must be valid UEFI boot services. `firmware` must contain physical
@@ -38,7 +46,8 @@ const MAX_PLATFORM_RESOURCES: usize = 64;
 pub unsafe fn parse_platform_resources(
     bs: *mut EfiBootServices,
     firmware: &FirmwareInfo,
-) -> Result<(u64, usize), BootError>
+    fb: &FramebufferInfo,
+) -> Result<(u64, usize, u64), BootError>
 {
     // Stack-allocate the scratch buffer. PlatformResource is Copy.
     let zero = PlatformResource {
@@ -79,9 +88,69 @@ pub unsafe fn parse_platform_resources(
         bprintln!(" resources");
     }
 
+    // Framebuffer: if present, allocate a descriptor page and emit two resources.
+    let mut fb_desc_phys: u64 = 0;
+    if fb.physical_base != 0 && count + 2 <= MAX_PLATFORM_RESOURCES
+    {
+        // Allocate a page for the Seraph Framebuffer Descriptor (SFBD).
+        // SAFETY: bs is valid boot services.
+        let desc_phys = unsafe { allocate_pages(bs, 1)? };
+        fb_desc_phys = desc_phys;
+
+        // Write the descriptor: magic, version, physical_base, width, height,
+        // stride, pixel_format — 32 bytes at the start of the page.
+        let ptr = desc_phys as *mut u8;
+        // SAFETY: desc_phys is a fresh 4096-byte allocation; writes are within bounds.
+        unsafe {
+            core::ptr::write_bytes(ptr, 0, 4096);
+            core::ptr::copy_nonoverlapping(
+                SFBD_MAGIC.to_le_bytes().as_ptr(), ptr, 4,
+            );
+            core::ptr::copy_nonoverlapping(
+                1u32.to_le_bytes().as_ptr(), ptr.add(4), 4,
+            );
+            core::ptr::copy_nonoverlapping(
+                fb.physical_base.to_le_bytes().as_ptr(), ptr.add(8), 8,
+            );
+            core::ptr::copy_nonoverlapping(
+                fb.width.to_le_bytes().as_ptr(), ptr.add(16), 4,
+            );
+            core::ptr::copy_nonoverlapping(
+                fb.height.to_le_bytes().as_ptr(), ptr.add(20), 4,
+            );
+            core::ptr::copy_nonoverlapping(
+                fb.stride.to_le_bytes().as_ptr(), ptr.add(24), 4,
+            );
+            core::ptr::copy_nonoverlapping(
+                (fb.pixel_format as u32).to_le_bytes().as_ptr(), ptr.add(28), 4,
+            );
+        }
+
+        // Framebuffer pixel memory: MmioRange with write-combine flag.
+        let fb_size = u64::from(fb.stride) * u64::from(fb.height);
+        buf[count] = PlatformResource {
+            resource_type: ResourceType::MmioRange,
+            flags: 1, // bit 0 = write-combine
+            base: fb.physical_base,
+            size: (fb_size + 4095) & !4095, // page-align up
+            id: 0,
+        };
+        count += 1;
+
+        // Framebuffer descriptor: PlatformTable (id=2: SFBD).
+        buf[count] = PlatformResource {
+            resource_type: ResourceType::PlatformTable,
+            flags: 0,
+            base: desc_phys,
+            size: 4096,
+            id: 2,
+        };
+        count += 1;
+    }
+
     if count == 0
     {
-        return Ok((0, 0));
+        return Ok((0, 0, 0));
     }
 
     // Sort by (resource_type as u32, base) ascending — insertion sort.
@@ -113,7 +182,7 @@ pub unsafe fn parse_platform_resources(
         unsafe { core::ptr::write(ptr.add(i), r) };
     }
 
-    Ok((phys, count))
+    Ok((phys, count, fb_desc_phys))
 }
 
 /// Sort key: `(resource_type discriminant, base address)`.

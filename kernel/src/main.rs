@@ -149,6 +149,18 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
     {
         fatal("Phase 3: boot page table pool exhausted (RAM > 248 GiB?)");
     }
+
+    // Rebase the boot stack pointer from identity-mapped (VA == PA) to the
+    // direct physical map (VA == DIRECT_MAP_BASE + PA). The identity mapping
+    // covers only 64 KiB around SP and can be exhausted by later phases;
+    // the direct map covers all physical RAM with no size limit.
+    // SAFETY: new page tables active with direct map covering all RAM.
+    // Adding DIRECT_MAP_BASE to RSP/RBP switches to the same physical
+    // frames through the direct map virtual range.
+    unsafe {
+        arch::current::paging::rebase_boot_stack(mm::paging::DIRECT_MAP_BASE);
+    }
+
     // Rebase MMIO-based console devices to the direct physical map.
     // On RISC-V the UART is MMIO and must be accessed via the direct map after
     // the page table switch; on x86-64 the UART is I/O-mapped (no-op).
@@ -364,7 +376,7 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
             .alloc(0) // 2^0 = 1 page
             .unwrap_or_else(|| fatal("Phase 9: out of memory for InitInfo page"));
 
-        {
+        let info_page_virt = {
             use init_protocol::{InitInfo, INIT_INFO_VADDR, INIT_PROTOCOL_VERSION};
 
             let info_page_virt = mm::paging::phys_to_virt(info_page_phys) as *mut u8;
@@ -389,7 +401,7 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
                 hw_cap_base: cspace_layout.hw_cap_base,
                 hw_cap_count: cspace_layout.hw_cap_count,
                 cap_descriptors_offset: descriptors_offset,
-                reserved: 0,
+                thread_cap: 0, // patched below after Thread cap is minted
             };
 
             // Write InitInfo header.
@@ -441,7 +453,9 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
                 INIT_INFO_VADDR,
                 desc_count,
             );
-        }
+
+            info_page_virt
+        };
 
         // Map init's user stack (INIT_STACK_PAGES pages below INIT_STACK_TOP).
         // SAFETY: init_as_ptr valid (allocated above); stack_top is page-aligned
@@ -462,8 +476,8 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
         let init_kstack_virt = mm::paging::phys_to_virt(init_kstack_phys);
         let init_kstack_top = init_kstack_virt + (sched::KERNEL_STACK_PAGES * mm::PAGE_SIZE) as u64;
 
-        // Build the init TCB.  saved_state.rip / .ra stores the user entry point
-        // so sched::enter() can retrieve it without depending on BootInfo.
+        // Prepare saved CPU state for init: user entry point + kernel stack.
+        // sched::enter() restores this state to begin init execution.
         let init_saved = arch::current::context::new_state(
             init_image.entry_point,
             init_kstack_top,
@@ -471,6 +485,9 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
             true,
         );
 
+        // Build the init TCB with a null cspace; CSpace is assigned below after
+        // the Thread cap is minted (the cap must be inserted before the CSpace is
+        // transferred out of ROOT_CSPACE).
         let init_tcb = alloc::boxed::Box::into_raw(alloc::boxed::Box::new(
             sched::thread::ThreadControlBlock {
                 state: sched::thread::ThreadState::Ready,
@@ -492,21 +509,55 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
                 wakeup_value: 0,
                 iopb: core::ptr::null_mut(),
                 blocked_on_object: core::ptr::null_mut(),
-                cspace: {
-                    // Transfer root CSpace ownership to init. ROOT_CSPACE is
-                    // an Option<Box<CSpace>> set in Phase 7; take it here so
-                    // the raw pointer is valid for the lifetime of the process.
-                    // SAFETY: ROOT_CSPACE initialized in Phase 7; single-threaded
-                    // boot; ownership transferred once to init process.
-                    let cs = unsafe { cap::take_root_cspace() }
-                        .unwrap_or_else(|| fatal("Phase 9: ROOT_CSPACE missing"));
-                    alloc::boxed::Box::into_raw(cs)
-                },
+                cspace: core::ptr::null_mut(),
                 thread_id: 1, // 0 = idle BSP, 1 = init
                 context_saved: core::sync::atomic::AtomicU32::new(1),
                 magic: sched::thread::TCB_MAGIC,
             },
         ));
+
+        // Mint a Thread cap for init's own thread (CONTROL right) into the root
+        // CSpace. This must happen before take_root_cspace transfers ownership.
+        let init_thread_cap_slot = {
+            use alloc::boxed::Box;
+            use cap::object::{KernelObjectHeader, ObjectType, ThreadObject};
+            use cap::slot::{CapTag, Rights};
+            use core::ptr::NonNull;
+
+            let th_obj = Box::new(ThreadObject {
+                header: KernelObjectHeader::new(ObjectType::Thread),
+                tcb: init_tcb,
+            });
+            // SAFETY: Box::into_raw returns non-null pointer; cast preserves validity.
+            let th_nn =
+                unsafe { NonNull::new_unchecked(Box::into_raw(th_obj).cast::<KernelObjectHeader>()) };
+            // SAFETY: ROOT_CSPACE initialized in Phase 7; single-threaded boot.
+            let cs = unsafe { cap::root_cspace_mut() }
+                .unwrap_or_else(|| fatal("Phase 9: ROOT_CSPACE missing for Thread cap"));
+            cs.insert_cap(CapTag::Thread, Rights::CONTROL, th_nn)
+                .unwrap_or_else(|_| fatal("Phase 9: cannot insert init Thread cap"))
+        };
+
+        kprintln!("init: thread cap={}", init_thread_cap_slot);
+
+        // Patch thread_cap in the InitInfo page now that the slot is known.
+        // SAFETY: info_page_virt points to a kernel-writable page (mapped
+        // read-only in userspace but writable via the direct physical map);
+        // single-threaded boot; the write is within the InitInfo struct bounds.
+        // cast_ptr_alignment: page alignment (4096) exceeds InitInfo alignment (4).
+        #[allow(clippy::cast_ptr_alignment)]
+        unsafe {
+            let info_ptr = info_page_virt.cast::<init_protocol::InitInfo>();
+            (*info_ptr).thread_cap = init_thread_cap_slot;
+        }
+
+        // Transfer root CSpace ownership to init.
+        // SAFETY: ROOT_CSPACE initialized in Phase 7; single-threaded boot;
+        // ownership transferred once to init process.
+        let init_cspace = unsafe { cap::take_root_cspace() }
+            .unwrap_or_else(|| fatal("Phase 9: ROOT_CSPACE missing"));
+        // SAFETY: init_tcb was just allocated above and is valid; single-threaded boot.
+        unsafe { (*init_tcb).cspace = alloc::boxed::Box::into_raw(init_cspace) };
 
         // Enqueue init on the BSP scheduler at INIT_PRIORITY.
         // SAFETY: scheduler initialized in Phase 8; single-threaded boot phase;

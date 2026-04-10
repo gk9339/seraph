@@ -24,7 +24,7 @@ use syscall_abi::{
     MSG_CAP_SLOTS_MAX, MSG_DATA_WORDS_MAX, SYS_ASPACE_QUERY, SYS_CAP_COPY, SYS_CAP_CREATE_ASPACE,
     SYS_CAP_CREATE_CSPACE, SYS_CAP_CREATE_ENDPOINT, SYS_CAP_CREATE_EVENT_Q, SYS_CAP_CREATE_SIGNAL,
     SYS_CAP_CREATE_THREAD, SYS_CAP_CREATE_WAIT_SET, SYS_CAP_DELETE, SYS_CAP_DERIVE, SYS_CAP_INSERT,
-    SYS_CAP_MOVE, SYS_CAP_REVOKE, SYS_DEBUG_LOG, SYS_DMA_GRANT, SYS_EVENT_POST, SYS_EVENT_RECV,
+    SYS_CAP_MOVE, SYS_CAP_REVOKE, SYS_DMA_GRANT, SYS_EVENT_POST, SYS_EVENT_RECV,
     SYS_FRAME_SPLIT, SYS_IOPORT_BIND, SYS_IPC_BUFFER_SET, SYS_IPC_CALL, SYS_IPC_RECV,
     SYS_IPC_REPLY, SYS_IRQ_ACK, SYS_IRQ_REGISTER, SYS_MEM_MAP, SYS_MEM_PROTECT, SYS_MEM_UNMAP,
     SYS_MMIO_MAP, SYS_SIGNAL_SEND, SYS_SIGNAL_WAIT, SYS_SYSTEM_INFO, SYS_THREAD_CONFIGURE,
@@ -374,33 +374,6 @@ pub unsafe fn read_recv_caps(ipc_buf: *const u64) -> (usize, [u32; MSG_CAP_SLOTS
 }
 
 // ── Public syscall wrappers ───────────────────────────────────────────────────
-
-/// Write a UTF-8 string to the kernel console.
-///
-/// **TEMPORARY — do not use in production code.**
-///
-/// This is a thin wrapper around `SYS_DEBUG_LOG`, a development scaffold
-/// that exists only until `logd` and the IPC logging path are available.
-/// It will be removed once userspace can log via `logd`. Use it only in
-/// early-boot test programs.
-///
-/// # Errors
-/// Returns a negative `i64` error code if the kernel rejects the call.
-#[inline]
-pub fn debug_log(msg: &str) -> Result<(), i64>
-{
-    // SAFETY: syscall2 issues raw syscall with pointer cast to u64; kernel validates pointer
-    // before dereference; msg slice guarantees pointer validity for msg.len() bytes.
-    let ret = unsafe { syscall2(SYS_DEBUG_LOG, msg.as_ptr() as u64, msg.len() as u64) };
-    if ret < 0
-    {
-        Err(ret)
-    }
-    else
-    {
-        Ok(())
-    }
-}
 
 /// Voluntarily yield the CPU to the next runnable thread.
 ///

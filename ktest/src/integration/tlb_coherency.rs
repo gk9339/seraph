@@ -43,7 +43,7 @@ pub fn run(ctx: &TestContext) -> TestResult
 
     if cpus < 2
     {
-        crate::klog("ktest: integration::tlb_coherency SKIP (need 2+ CPUs)");
+        crate::log("ktest: integration::tlb_coherency SKIP (need 2+ CPUs)");
         return Ok(());
     }
 

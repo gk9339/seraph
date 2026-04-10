@@ -288,6 +288,37 @@ pub fn read_stack_pointer() -> u64
     sp
 }
 
+/// Rebase the boot stack from identity-mapped to the direct physical map.
+///
+/// Adds `direct_map_base` to `sp` and `s0` (frame pointer), switching from
+/// VA == PA to VA == `direct_map_base` + PA. Both mappings cover the same
+/// physical frames; this eliminates the 64 KiB identity-map limit.
+///
+/// # Safety
+/// Must be called exactly once, immediately after `activate`, while the
+/// boot stack identity mapping is still valid. `direct_map_base` must be
+/// the base of a direct physical map that covers all of physical RAM.
+#[cfg(not(test))]
+pub unsafe fn rebase_boot_stack(direct_map_base: u64)
+{
+    // SAFETY: adding the direct-map offset to sp switches to the same
+    // physical memory through the direct map virtual range. Both the
+    // identity mapping (old) and direct map (new) are valid at this point.
+    // s0 is NOT rebased: in release mode it is a general-purpose register,
+    // not a frame pointer, and adding to it would corrupt live data.
+    unsafe {
+        core::arch::asm!(
+            "add sp, sp, {base}",
+            base = in(reg) direct_map_base,
+            options(nostack),
+        );
+    }
+}
+
+/// No-op test stub.
+#[cfg(test)]
+pub unsafe fn rebase_boot_stack(_direct_map_base: u64) {}
+
 /// Read the current page table root physical address from `satp`.
 ///
 /// Extracts PPN from `satp[43:0]` and converts to a physical address.

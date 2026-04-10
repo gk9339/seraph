@@ -38,7 +38,7 @@ kernel's own source layout.
 | `ipc.rs` | `SYS_IPC_CALL`, `SYS_IPC_REPLY`, `SYS_IPC_RECV`, `SYS_IPC_BUFFER_SET` |
 | `thread.rs` | `SYS_THREAD_START/STOP/YIELD/EXIT/CONFIGURE/SET_PRIORITY/SET_AFFINITY/READ_REGS/WRITE_REGS` |
 | `hw.rs` | `SYS_MMIO_MAP`, `SYS_DMA_GRANT`, `SYS_IRQ_REGISTER/ACK`, `SYS_IOPORT_BIND` |
-| `sysinfo.rs` | `SYS_SYSTEM_INFO`, `SYS_DEBUG_LOG` |
+| `sysinfo.rs` | `SYS_SYSTEM_INFO` |
 
 Adding a new syscall means adding a section in the appropriate file here.
 
@@ -73,7 +73,7 @@ Defined in `src/main.rs`:
 - `TestContext` — thin struct carrying `aspace_cap` and the IPC buffer pointer,
   passed by reference to every test function.
 - `PASS_COUNT` / `FAIL_COUNT` — atomic counters updated by `run_test!`.
-- `klog(msg)` / `log_u64(prefix, value)` — heap-free logging utilities.
+- `log(msg)` / `log_u64(prefix, value)` — heap-free logging utilities.
 
 ## Output format
 

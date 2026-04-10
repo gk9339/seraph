@@ -37,21 +37,21 @@ static mut CHILD_STACK: ChildStack = ChildStack::ZERO;
 
 pub fn run(ctx: &TestContext) -> TestResult
 {
-    crate::klog("cap_transfer: entering run");
+    crate::log("cap_transfer: entering run");
     // Create the endpoint for the IPC call.
     let ep = cap_create_endpoint()
         .map_err(|_| "integration::cap_transfer: cap_create_endpoint failed")?;
-    crate::klog("cap_transfer: ep created");
+    crate::log("cap_transfer: ep created");
 
     // test_sig is the cap the child will transfer to the server via IPC.
     let test_sig = cap_create_signal()
         .map_err(|_| "integration::cap_transfer: cap_create_signal (test_sig) failed")?;
-    crate::klog("cap_transfer: test_sig created");
+    crate::log("cap_transfer: test_sig created");
 
     // sync_sig is used by the child to report its post-reply verification result.
     let sync_sig = cap_create_signal()
         .map_err(|_| "integration::cap_transfer: cap_create_signal (sync_sig) failed")?;
-    crate::klog("cap_transfer: sync_sig created");
+    crate::log("cap_transfer: sync_sig created");
 
     // Build the child's CSpace with three caps:
     //   child_ep       — SEND | GRANT copy of ep (needed to call and transfer caps)
@@ -59,17 +59,17 @@ pub fn run(ctx: &TestContext) -> TestResult
     //   child_sync_sig — SIGNAL-only copy of sync_sig (for reporting back)
     let cs =
         cap_create_cspace(32).map_err(|_| "integration::cap_transfer: cap_create_cspace failed")?;
-    crate::klog("cap_transfer: cspace created");
+    crate::log("cap_transfer: cspace created");
 
     let child_ep = cap_copy(ep, cs, RIGHTS_SEND_GRANT)
         .map_err(|_| "integration::cap_transfer: cap_copy ep failed")?;
-    crate::klog("cap_transfer: child_ep copied");
+    crate::log("cap_transfer: child_ep copied");
     let child_test_sig = cap_copy(test_sig, cs, RIGHTS_SIGNAL)
         .map_err(|_| "integration::cap_transfer: cap_copy test_sig failed")?;
-    crate::klog("cap_transfer: child_test_sig copied");
+    crate::log("cap_transfer: child_test_sig copied");
     let child_sync_sig = cap_copy(sync_sig, cs, RIGHTS_SIGNAL)
         .map_err(|_| "integration::cap_transfer: cap_copy sync_sig failed")?;
-    crate::klog("cap_transfer: child_sync_sig copied");
+    crate::log("cap_transfer: child_sync_sig copied");
 
     // Pack three 16-bit slot indices into a single u64 argument.
     let child_arg =
@@ -77,19 +77,19 @@ pub fn run(ctx: &TestContext) -> TestResult
 
     let th = cap_create_thread(ctx.aspace_cap, cs)
         .map_err(|_| "integration::cap_transfer: cap_create_thread failed")?;
-    crate::klog("cap_transfer: child thread created");
+    crate::log("cap_transfer: child thread created");
 
     let stack_top = ChildStack::top(core::ptr::addr_of!(CHILD_STACK));
     thread_configure(th, child_entry as *const () as u64, stack_top, child_arg)
         .map_err(|_| "integration::cap_transfer: thread_configure failed")?;
-    crate::klog("cap_transfer: thread configured");
+    crate::log("cap_transfer: thread configured");
     thread_start(th).map_err(|_| "integration::cap_transfer: thread_start failed")?;
-    crate::klog("cap_transfer: thread started");
+    crate::log("cap_transfer: thread started");
 
     // ── Server: receive the child's IPC call. ─────────────────────────────────
-    crate::klog("cap_transfer: server blocking on ipc_recv");
+    crate::log("cap_transfer: server blocking on ipc_recv");
     ipc_recv(ep).map_err(|_| "integration::cap_transfer: ipc_recv failed")?;
-    crate::klog("cap_transfer: server ipc_recv returned");
+    crate::log("cap_transfer: server ipc_recv returned");
 
     // Read the transferred cap from the IPC buffer.
     // SAFETY: ctx.ipc_buf is the registered IPC buffer; the kernel wrote cap
@@ -104,14 +104,14 @@ pub fn run(ctx: &TestContext) -> TestResult
     crate::log_u64("cap_transfer: recv_sig slot=", u64::from(recv_sig));
 
     // Verify the transferred cap is usable.
-    crate::klog("cap_transfer: calling signal_send on transferred cap");
+    crate::log("cap_transfer: calling signal_send on transferred cap");
     signal_send(recv_sig, 0x1)
         .map_err(|_| "integration::cap_transfer: signal_send on transferred cap failed")?;
-    crate::klog("cap_transfer: signal_send OK, calling ipc_reply");
+    crate::log("cap_transfer: signal_send OK, calling ipc_reply");
 
     // Reply to the child (no caps, no data).
     ipc_reply(0, 0, &[]).map_err(|_| "integration::cap_transfer: ipc_reply failed")?;
-    crate::klog("cap_transfer: ipc_reply done, waiting for child sync");
+    crate::log("cap_transfer: ipc_reply done, waiting for child sync");
 
     // Wait for the child to confirm its original cap slot is now null.
     let result = signal_wait(sync_sig)
@@ -143,18 +143,13 @@ fn child_entry(arg: u64) -> !
     let test_sig_slot = ((arg >> 16) & 0xFFFF) as u32;
     let sync_sig_slot = ((arg >> 32) & 0xFFFF) as u32;
 
-    syscall::debug_log("cap_transfer child: started").ok();
-
     // Call the endpoint, passing test_sig in cap_slots[0].
     // The kernel moves test_sig to the server's CSpace on transfer.
-    syscall::debug_log("cap_transfer child: calling ipc_call").ok();
     if ipc_call(ep_slot, 0, 0, &[test_sig_slot]).is_err()
     {
-        syscall::debug_log("cap_transfer child: ipc_call failed").ok();
         signal_send(sync_sig_slot, 0xBAD).ok();
         thread_exit()
     }
-    syscall::debug_log("cap_transfer child: ipc_call returned OK").ok();
 
     // After the reply, test_sig_slot must be null — the kernel moved it.
     let null_check = signal_send(test_sig_slot, 0x1);

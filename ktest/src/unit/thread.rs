@@ -338,7 +338,7 @@ pub fn set_priority_elevated_with_cap(ctx: &TestContext) -> TestResult
 
     if !found
     {
-        crate::klog("ktest: thread::set_priority_elevated_with_cap SKIP (no SchedControl cap)");
+        crate::log("ktest: thread::set_priority_elevated_with_cap SKIP (no SchedControl cap)");
     }
 
     cap_delete(th).map_err(|_| "cap_delete th after elevated_with_cap test failed")?;
@@ -486,7 +486,7 @@ pub fn affinity_bind_cpu1(ctx: &TestContext) -> TestResult
         .map_err(|_| "system_info(CpuCount) failed")?;
     if cpus < 2
     {
-        crate::klog("ktest: thread::affinity_bind_cpu1 SKIP (requires SMP)");
+        crate::log("ktest: thread::affinity_bind_cpu1 SKIP (requires SMP)");
         return Ok(());
     }
 
@@ -539,7 +539,7 @@ pub fn affinity_respected(ctx: &TestContext) -> TestResult
         .map_err(|_| "system_info(CpuCount) failed")?;
     if cpus < 2
     {
-        crate::klog("ktest: thread::affinity_respected SKIP (requires SMP)");
+        crate::log("ktest: thread::affinity_respected SKIP (requires SMP)");
         return Ok(());
     }
 
@@ -594,7 +594,7 @@ pub fn default_affinity_bsp(ctx: &TestContext) -> TestResult
         .map_err(|_| "system_info(CpuCount) failed")?;
     if cpus < 2
     {
-        crate::klog("ktest: thread::default_affinity_bsp SKIP (requires SMP)");
+        crate::log("ktest: thread::default_affinity_bsp SKIP (requires SMP)");
         return Ok(());
     }
 

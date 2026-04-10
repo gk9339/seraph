@@ -119,18 +119,6 @@ pub const SYS_ASPACE_QUERY: u64 = 41;
 pub const SYS_IPC_BUFFER_SET: u64 = 42;
 /// System: query kernel capabilities / version.
 pub const SYS_SYSTEM_INFO: u64 = 43;
-/// **TEMPORARY — debug builds only.**
-///
-/// Write a UTF-8 string directly to the kernel serial console.
-///
-/// This syscall exists solely as a development scaffold so early userspace
-/// programs can produce output before `logd` is available. It bypasses the
-/// proper userspace logging path (`init` → `logd` via IPC) and couples
-/// userspace directly to the kernel's internal console. It will be removed
-/// once `logd` and the IPC logging path are implemented.
-///
-/// Do not use in any production code; removed once logd is running (W11).
-pub const SYS_DEBUG_LOG: u64 = 44;
 
 // ── Error codes ───────────────────────────────────────────────────────────────
 

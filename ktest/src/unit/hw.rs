@@ -89,7 +89,7 @@ pub fn mmio_map(ctx: &TestContext) -> TestResult
         }
     }
 
-    crate::klog("ktest: hw::mmio_map SKIP (no MmioRegion caps in initial cap set)");
+    crate::log("ktest: hw::mmio_map SKIP (no MmioRegion caps in initial cap set)");
     Ok(())
 }
 
@@ -120,7 +120,7 @@ pub fn irq_register_ack(ctx: &TestContext) -> TestResult
         }
     }
 
-    crate::klog("ktest: hw::irq_register_ack SKIP (no Interrupt caps in initial cap set)");
+    crate::log("ktest: hw::irq_register_ack SKIP (no Interrupt caps in initial cap set)");
     syscall::cap_delete(irq_sig).ok();
     Ok(())
 }
@@ -171,7 +171,7 @@ pub fn ioport_bind(ctx: &TestContext) -> TestResult
             }
         }
 
-        crate::klog("ktest: hw::ioport_bind SKIP (no IoPortRange caps in initial cap set)");
+        crate::log("ktest: hw::ioport_bind SKIP (no IoPortRange caps in initial cap set)");
         syscall::cap_delete(th).ok();
         syscall::cap_delete(cs).ok();
         Ok(())

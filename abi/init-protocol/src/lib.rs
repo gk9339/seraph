@@ -28,7 +28,7 @@
 // ── Protocol version ─────────────────────────────────────────────────────────
 
 /// Init protocol version. Incremented on any breaking layout or semantic change.
-pub const INIT_PROTOCOL_VERSION: u32 = 1;
+pub const INIT_PROTOCOL_VERSION: u32 = 2;
 
 // ── Address space constants ──────────────────────────────────────────────────
 
@@ -114,9 +114,11 @@ pub struct InitInfo
     /// these to identify what each capability slot represents without probing.
     pub cap_descriptors_offset: u32,
 
-    /// Reserved for future use; must be zero.
-    #[doc(hidden)]
-    pub reserved: u32,
+    /// Slot index of init's own `Thread` capability (CONTROL right).
+    ///
+    /// Allows init to bind I/O port ranges to itself (`ioport_bind`), set its
+    /// own priority and affinity, and delegate thread authority to child services.
+    pub thread_cap: u32,
 }
 
 // ── CapDescriptor ────────────────────────────────────────────────────────────

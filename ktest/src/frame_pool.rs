@@ -185,7 +185,7 @@ pub unsafe fn init(info: &init_protocol::InitInfo)
 
     if let Ok(s) = core::str::from_utf8(&msg[..pos])
     {
-        crate::klog(s);
+        crate::log(s);
     }
 }
 
@@ -248,7 +248,7 @@ pub unsafe fn free(frame_cap: u32)
     }
 
     // Frame not in pool - this is a bug
-    crate::klog("BUG: frame_pool::free() called with unknown frame cap");
+    crate::log("BUG: frame_pool::free() called with unknown frame cap");
 }
 
 // ── RAII wrapper ──────────────────────────────────────────────────────────────

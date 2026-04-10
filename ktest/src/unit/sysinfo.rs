@@ -3,10 +3,10 @@
 
 // ktest/src/unit/sysinfo.rs
 
-//! Tier 1 tests for system info and debug log syscalls.
+//! Tier 1 tests for system info syscalls.
 //!
 //! Covers: `SYS_SYSTEM_INFO` (all `SystemInfoType` variants and unknown
-//! discriminant), `SYS_DEBUG_LOG`.
+//! discriminant).
 
 use syscall::system_info;
 use syscall_abi::{SyscallError, SystemInfoType, KERNEL_VERSION};
@@ -120,22 +120,9 @@ pub fn cpu_count_smp(_ctx: &TestContext) -> TestResult
         system_info(SystemInfoType::CpuCount as u64).map_err(|_| "system_info(CpuCount) failed")?;
     if cpus < 2
     {
-        crate::klog("ktest: sysinfo::cpu_count_smp SKIP (boot with -smp N for SMP test)");
+        crate::log("ktest: sysinfo::cpu_count_smp SKIP (boot with -smp N for SMP test)");
         return Ok(());
     }
     crate::log_u64("ktest: SMP CpuCount=", cpus);
-    Ok(())
-}
-
-// ── SYS_DEBUG_LOG ─────────────────────────────────────────────────────────────
-
-/// `debug_log` accepts a valid UTF-8 string without error.
-///
-/// This is a development scaffold syscall; this test just confirms it does not
-/// unexpectedly fail. All other tests already rely on it working.
-pub fn debug_log_works(_ctx: &TestContext) -> TestResult
-{
-    syscall::debug_log("ktest: sysinfo::debug_log self-test")
-        .map_err(|_| "debug_log returned an error")?;
     Ok(())
 }

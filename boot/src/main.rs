@@ -387,9 +387,11 @@ unsafe fn boot_sequence(image: EfiHandle, st: *mut EfiSystemTable) -> Result<!, 
     };
 
     // Parse ACPI and/or DTB tables into a sorted PlatformResource array.
+    // If a framebuffer is present, a descriptor page is allocated and two
+    // additional resources (MmioRange + PlatformTable) are emitted.
     // SAFETY: bs is valid boot services; firmware addresses are from UEFI config table.
-    let (resources_phys, resource_count) =
-        unsafe { platform::parse_platform_resources(bs, &firmware)? };
+    let (resources_phys, resource_count, fb_desc_phys) =
+        unsafe { platform::parse_platform_resources(bs, &firmware, &framebuffer)? };
     bprint!("[--------] boot: platform resources: ");
     // resource_count is bounded by the platform_resources array size (≤ 256), fits in u32.
     #[allow(clippy::cast_possible_truncation)]
@@ -520,6 +522,12 @@ unsafe fn boot_sequence(image: EfiHandle, st: *mut EfiSystemTable) -> Result<!, 
     {
         let resource_array_size = resource_count * core::mem::size_of::<PlatformResource>();
         track_region!(resources_phys, (resource_array_size + 4095) & !4095);
+    }
+
+    // Framebuffer descriptor page: identity-map if allocated.
+    if fb_desc_phys != 0
+    {
+        track_region!(fb_desc_phys, 4096u64);
     }
 
     // ── Step 5b: Allocate AP trampoline page (x86-64 only) ───────────────────

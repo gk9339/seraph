@@ -496,12 +496,23 @@ pub unsafe fn init_ap(cpu_id: u32, rsp0: u64, ist1_top: u64, ist2_top: u64)
 ///
 /// # Safety
 /// Must be called with interrupts disabled or from a single-CPU context.
+/// GS-base must point to a valid `PerCpuData` with `tss_ptr` set.
 #[cfg(not(test))]
 pub unsafe fn load_iopb(iopb: Option<&[u8; IOPB_SIZE]>)
 {
-    // SAFETY: interrupts disabled by caller; TSS is a static structure accessed
-    // at ring 0 during context switch; no concurrent access from other CPUs.
-    let tss_iopb = unsafe { &mut (*core::ptr::addr_of_mut!(TSS)).iopb };
+    let tss_ptr: u64;
+    // SAFETY: gs:[32] == PerCpuData::tss_ptr (PERCPU_TSS_PTR_OFFSET=32); valid
+    // after percpu::init_bsp() / init_ap() sets GS-base and tss_ptr.
+    unsafe {
+        core::arch::asm!(
+            "mov {}, gs:[32]",
+            out(reg) tss_ptr,
+            options(nostack, readonly, preserves_flags),
+        );
+    }
+    // SAFETY: tss_ptr points to the current CPU's TssWithIopb; interrupts
+    // disabled by caller; no concurrent access.
+    let tss_iopb = unsafe { &mut (*(tss_ptr as *mut TssWithIopb)).iopb };
     match iopb
     {
         Some(src) => tss_iopb.copy_from_slice(src),

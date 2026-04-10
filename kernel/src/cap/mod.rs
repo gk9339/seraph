@@ -10,7 +10,7 @@
 //! resources:
 //!
 //! - Usable physical memory → [`CapTag::Frame`] caps (MAP | WRITE)
-//! - MMIO ranges (`MmioRange`, `PciEcam`, `IommuUnit`) → [`CapTag::MmioRegion`] caps (MAP)
+//! - MMIO ranges (`MmioRange`, `PciEcam`, `IommuUnit`) → [`CapTag::MmioRegion`] caps (MAP | WRITE)
 //! - Interrupt lines → [`CapTag::Interrupt`] caps
 //! - Firmware tables → [`CapTag::Frame`] caps (MAP only, no WRITE)
 //! - I/O port ranges (x86-64) → [`CapTag::IoPortRange`] caps (USE)
@@ -331,7 +331,8 @@ fn populate_cspace(
     {
         match res.resource_type
         {
-            // MMIO regions: MAP only (no WRITE — drivers map via devmgr).
+            // MMIO regions: MAP | WRITE (init is root authority; it delegates
+            // narrower rights to child services).
             ResourceType::MmioRange | ResourceType::PciEcam | ResourceType::IommuUnit =>
             {
                 let obj = Box::new(MmioRegionObject {
@@ -345,7 +346,7 @@ fn populate_cspace(
                 let slot = insert_or_fatal(
                     cspace,
                     CapTag::MmioRegion,
-                    Rights::MAP,
+                    Rights::MAP | Rights::WRITE,
                     ptr,
                     "Phase 7: cannot allocate MmioRegion capability",
                 );

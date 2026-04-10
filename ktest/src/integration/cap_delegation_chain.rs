@@ -35,7 +35,7 @@ const RIGHTS_SIGNAL_WAIT: u64 = (1 << 7) | (1 << 8);
 
 pub fn run(_ctx: &TestContext) -> TestResult
 {
-    crate::klog("cap_delegation_chain: starting");
+    crate::log("cap_delegation_chain: starting");
 
     // Root cap: full SIGNAL+WAIT rights.
     let root = cap_create_signal().map_err(|_| "cap_delegation_chain: cap_create_signal failed")?;
@@ -51,7 +51,7 @@ pub fn run(_ctx: &TestContext) -> TestResult
         .map_err(|_| "cap_delegation_chain: cap_derive level2 failed")?;
 
     // ── Verify attenuation: level1 can send, cannot wait ─────────────────────
-    crate::klog("cap_delegation_chain: verifying level1 rights");
+    crate::log("cap_delegation_chain: verifying level1 rights");
     signal_send(level1, 0x1)
         .map_err(|_| "cap_delegation_chain: level1 signal_send should succeed")?;
     // Drain the bit via root so subsequent waits don't see stale state.
@@ -64,7 +64,7 @@ pub fn run(_ctx: &TestContext) -> TestResult
     }
 
     // ── Verify attenuation: level2 can send, cannot wait ─────────────────────
-    crate::klog("cap_delegation_chain: verifying level2 rights");
+    crate::log("cap_delegation_chain: verifying level2 rights");
     signal_send(level2, 0x2)
         .map_err(|_| "cap_delegation_chain: level2 signal_send should succeed")?;
     signal_wait(root).map_err(|_| "cap_delegation_chain: root drain after level2 send failed")?;
@@ -80,7 +80,7 @@ pub fn run(_ctx: &TestContext) -> TestResult
     // cap_revoke invalidates all *descendants* of the revoked cap. The revoked
     // cap itself (root) remains valid — revocation is an operation on children,
     // not self-destruction. Delete root explicitly after verifying the cascade.
-    crate::klog("cap_delegation_chain: revoking root");
+    crate::log("cap_delegation_chain: revoking root");
     cap_revoke(root).map_err(|_| "cap_delegation_chain: cap_revoke root failed")?;
 
     // Both derived caps must now be unusable.
@@ -106,6 +106,6 @@ pub fn run(_ctx: &TestContext) -> TestResult
     cap_delete(level1).ok();
     cap_delete(root).ok();
 
-    crate::klog("cap_delegation_chain: PASS");
+    crate::log("cap_delegation_chain: PASS");
     Ok(())
 }

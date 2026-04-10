@@ -225,6 +225,5 @@ pub fn run_all(ctx: &TestContext)
         sysinfo::boot_protocol_version(ctx)
     );
     run_test!("sysinfo::unknown_kind_err", sysinfo::unknown_kind_err(ctx));
-    run_test!("sysinfo::debug_log", sysinfo::debug_log_works(ctx));
     run_test!("sysinfo::cpu_count_smp", sysinfo::cpu_count_smp(ctx));
 }

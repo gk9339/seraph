@@ -38,7 +38,7 @@ use syscall::{
     SYS_ASPACE_QUERY, SYS_CAP_COPY, SYS_CAP_CREATE_ASPACE, SYS_CAP_CREATE_CSPACE,
     SYS_CAP_CREATE_ENDPOINT, SYS_CAP_CREATE_EVENT_Q, SYS_CAP_CREATE_SIGNAL, SYS_CAP_CREATE_THREAD,
     SYS_CAP_CREATE_WAIT_SET, SYS_CAP_DELETE, SYS_CAP_DERIVE, SYS_CAP_INSERT, SYS_CAP_MOVE,
-    SYS_CAP_REVOKE, SYS_DEBUG_LOG, SYS_DMA_GRANT, SYS_EVENT_POST, SYS_EVENT_RECV, SYS_FRAME_SPLIT,
+    SYS_CAP_REVOKE, SYS_DMA_GRANT, SYS_EVENT_POST, SYS_EVENT_RECV, SYS_FRAME_SPLIT,
     SYS_IOPORT_BIND, SYS_IPC_BUFFER_SET, SYS_IPC_CALL, SYS_IPC_RECV, SYS_IPC_REPLY, SYS_IRQ_ACK,
     SYS_IRQ_REGISTER, SYS_MEM_MAP, SYS_MEM_PROTECT, SYS_MEM_UNMAP, SYS_MMIO_MAP, SYS_SIGNAL_SEND,
     SYS_SIGNAL_WAIT, SYS_SYSTEM_INFO, SYS_THREAD_CONFIGURE, SYS_THREAD_EXIT, SYS_THREAD_READ_REGS,
@@ -104,7 +104,6 @@ pub unsafe fn dispatch(tf: *mut TrapFrame)
         SYS_IPC_BUFFER_SET => sys_ipc_buffer_set(tf),
         SYS_THREAD_YIELD => sys_yield(tf),
         SYS_THREAD_EXIT => sys_exit(tf),
-        SYS_DEBUG_LOG => sys_debug_log(tf),
         SYS_SYSTEM_INFO => sysinfo::sys_system_info(tf),
         SYS_ASPACE_QUERY => sysinfo::sys_aspace_query(tf),
         SYS_EVENT_POST => ipc::sys_event_post(tf),
@@ -256,53 +255,3 @@ fn sys_ipc_buffer_set(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     Ok(0)
 }
 
-// ── Debug log ─────────────────────────────────────────────────────────────────
-
-// TODO: remove SYS_DEBUG_LOG once logd is running and init uses IPC logging.
-
-/// `SYS_DEBUG_LOG` (44): write a UTF-8 string to the kernel console.
-///
-/// **TEMPORARY** — this syscall is a development scaffold for use before
-/// `logd` is available. It reads user memory directly and prints via the
-/// kernel's own console (`kprintln!`). The correct production path is for
-/// userspace to log via IPC to `logd`; this syscall will be removed once
-/// that path is implemented (W11). It must not be used in production code.
-///
-/// Arguments: arg0 = pointer to string data (user virtual address),
-///            arg1 = byte length (clamped to 1024).
-///
-/// Removed once logd is running and init uses IPC logging (W11).
-// cast_possible_truncation: Seraph is 64-bit only; usize == u64 at runtime.
-#[cfg(not(test))]
-#[allow(clippy::cast_possible_truncation)]
-fn sys_debug_log(tf: &mut TrapFrame) -> Result<u64, SyscallError>
-{
-    let ptr = tf.arg(0) as *const u8;
-    let len = (tf.arg(1) as usize).min(1024);
-
-    if ptr.is_null()
-    {
-        return Err(SyscallError::InvalidArgument);
-    }
-
-    // Copy user bytes into a kernel stack buffer before inspecting them.
-    // Bracket with user_access_begin/end to satisfy SMAP (x86-64) / SUM (RISC-V).
-    let mut buf = [0u8; 1024];
-    // SAFETY: user_access_begin/end bracket user memory copy; ptr validated non-null; len clamped to buf size.
-    unsafe {
-        crate::arch::current::cpu::user_access_begin();
-        core::ptr::copy_nonoverlapping(ptr, buf.as_mut_ptr(), len);
-        crate::arch::current::cpu::user_access_end();
-    }
-
-    if let Ok(s) = core::str::from_utf8(&buf[..len])
-    {
-        crate::kprintln!("[init] {}", s);
-    }
-    else
-    {
-        crate::kprintln!("[init] <{} non-UTF-8 bytes>", len);
-    }
-
-    Ok(0)
-}

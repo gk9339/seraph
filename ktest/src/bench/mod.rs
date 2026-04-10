@@ -116,7 +116,7 @@ fn bench_null_syscall(_ctx: &crate::TestContext)
         total = total.saturating_add(delta);
     }
 
-    crate::klog("ktest: bench  null_syscall_roundtrip  N=1000");
+    crate::log("ktest: bench  null_syscall_roundtrip  N=1000");
     crate::log_u64("ktest: bench  cycles_min=", min);
     crate::log_u64("ktest: bench  cycles_mean=", total / N);
     crate::log_u64("ktest: bench  cycles_max=", max);
@@ -198,7 +198,7 @@ fn bench_ipc_round_trip(ctx: &crate::TestContext)
     signal_wait(done).ok();
 
     let total = t1.saturating_sub(t0);
-    crate::klog("ktest: bench  ipc_round_trip  N=1000");
+    crate::log("ktest: bench  ipc_round_trip  N=1000");
     crate::log_u64("ktest: bench  cycles_mean=", total / N);
 
     cap_delete(th).ok();
@@ -298,7 +298,7 @@ fn bench_signal_roundtrip(ctx: &crate::TestContext)
     // Wait for child to signal completion before cleaning up.
     signal_wait(done).ok();
 
-    crate::klog("ktest: bench  signal_roundtrip  N=1000");
+    crate::log("ktest: bench  signal_roundtrip  N=1000");
     crate::log_u64("ktest: bench  cycles_mean=", total / N);
 
     cap_delete(th).ok();
@@ -313,7 +313,7 @@ fn bench_signal_roundtrip(ctx: &crate::TestContext)
 /// Run all Tier 3 benchmarks.
 ///
 /// Called from `main.rs` after Tier 2 integration tests complete. Results are
-/// logged directly via `klog`/`log_u64`; no PASS/FAIL counters are updated.
+/// logged directly via `log`/`log_u64`; no PASS/FAIL counters are updated.
 ///
 /// To add a benchmark: write a `bench_<name>` function and call it here.
 pub fn run_all(ctx: &crate::TestContext)

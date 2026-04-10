@@ -131,7 +131,6 @@ are never reassigned or reused.
 19  SYS_THREAD_START          41  SYS_ASPACE_QUERY
 20  SYS_THREAD_STOP           42  SYS_IPC_BUFFER_SET
 21  SYS_THREAD_YIELD          43  SYS_SYSTEM_INFO
-                              44  SYS_DEBUG_LOG  [temporary scaffold]
 ```
 
 **W6 implementation status:** Handlers implemented as of W6: 0–9 (IPC,
@@ -139,9 +138,8 @@ signal, event queue creation and I/O), 7–8 (endpoint/signal creation),
 10–13 (thread, aspace, cspace, wait set creation), 14–18 (cap management
 and memory), 21–28 (thread lifecycle, wait set operations), 29–30 (IRQ ACK
 and register), 31–36 (cap delete/insert, frame split, MMIO map, ioport bind,
-DMA grant), 41–44 (aspace query, ipc buffer set, system info, debug log).
-All other numbers return `UnknownSyscall`. Syscall 44 is a temporary
-scaffold; see the `SYS_DEBUG_LOG` section below.
+DMA grant), 41–43 (aspace query, ipc buffer set, system info).
+All other numbers return `UnknownSyscall`.
 
 ---
 
@@ -1272,37 +1270,6 @@ Translate a user virtual address to its mapped physical address.
 - `InvalidAddress` — `virt` is not page-aligned, outside the user half (`>= 0x0000_8000_0000_0000`), or not currently mapped.
 - `InvalidCapability` — cap slot is null, wrong type, or object is gone.
 - `InsufficientRights` — cap does not have `READ` right.
-
----
-
-### `SYS_DEBUG_LOG` (44) — TEMPORARY SCAFFOLD
-
-**This syscall is a development scaffold. It will be removed once `logd`
-and the IPC logging path are operational (W11). Do not use it in production
-components.**
-
-Write a UTF-8 string directly to the kernel serial console via `kprintln!`.
-This bypasses the proper userspace logging path (`init` → `logd` via IPC)
-and should be used only in early-boot test programs where `logd` is not yet
-available.
-
-The correct production approach is for userspace to send log messages to
-`logd` over an IPC endpoint. `logd` owns the console; the kernel does not.
-
-**Arguments:**
-
-| # | Name | Description |
-|---|---|---|
-| 0 | `ptr` | User virtual address of a UTF-8 string |
-| 1 | `len` | Byte length of the string (clamped to 1024 by the kernel) |
-
-**Return:** `rax`/`a0`: 0 on success; `SyscallError` on failure.
-
-**Capability requirement:** None.
-
-**Errors:** `InvalidArgument` (null pointer).
-
-**Removal target:** W11 (once `logd` is running and init uses IPC logging).
 
 ---
 

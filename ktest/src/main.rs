@@ -12,7 +12,7 @@
 //! 2. **Tier 2** (`integration/`) — cross-subsystem scenario tests.
 //! 3. **Tier 3** (`bench/`)       — placeholder for future timing/profiling.
 //!
-//! Results are printed to the kernel serial console via `SYS_DEBUG_LOG`.
+//! Results are printed directly to the serial console via hardware I/O.
 //! Each test prints `PASS` or `FAIL`. A summary follows. ktest then exits.
 //!
 //! See `ktest/README.md` for the full test structure and output format.
@@ -25,7 +25,9 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 
 mod bench;
 mod frame_pool;
+mod framebuffer;
 mod integration;
+mod serial;
 mod unit;
 
 // ── Test infrastructure ───────────────────────────────────────────────────────
@@ -61,13 +63,13 @@ macro_rules! run_test {
         {
             Ok(()) =>
             {
-                $crate::klog(concat!("ktest: PASS ", $name));
+                $crate::log(concat!("ktest: PASS ", $name));
                 $crate::PASS_COUNT.fetch_add(1, ::core::sync::atomic::Ordering::Relaxed);
             }
             Err(reason) =>
             {
-                $crate::klog(concat!("ktest: FAIL ", $name));
-                $crate::klog(reason);
+                $crate::log(concat!("ktest: FAIL ", $name));
+                $crate::log(reason);
                 $crate::FAIL_COUNT.fetch_add(1, ::core::sync::atomic::Ordering::Relaxed);
             }
         }
@@ -86,19 +88,19 @@ macro_rules! run_test {
 #[macro_export]
 macro_rules! run_integration_test {
     ($name:literal, $body:expr) => {{
-        $crate::klog(concat!("ktest: ", $name, " starting"));
+        $crate::log(concat!("ktest: ", $name, " starting"));
         let result: $crate::TestResult = { $body };
         match result
         {
             Ok(()) =>
             {
-                $crate::klog(concat!("ktest: PASS ", $name));
+                $crate::log(concat!("ktest: PASS ", $name));
                 $crate::PASS_COUNT.fetch_add(1, ::core::sync::atomic::Ordering::Relaxed);
             }
             Err(reason) =>
             {
-                $crate::klog(concat!("ktest: FAIL ", $name));
-                $crate::klog(reason);
+                $crate::log(concat!("ktest: FAIL ", $name));
+                $crate::log(reason);
                 $crate::FAIL_COUNT.fetch_add(1, ::core::sync::atomic::Ordering::Relaxed);
             }
         }
@@ -181,8 +183,6 @@ pub extern "C" fn _start(info_ptr: u64) -> !
 
 fn run(info_ptr: u64) -> !
 {
-    klog("ktest: starting");
-
     // Read InitInfo from the kernel-mapped page.
     // SAFETY: info_ptr is a valid page-aligned virtual address mapped by the
     // kernel in Phase 9; the page contains a valid InitInfo struct.
@@ -190,9 +190,18 @@ fn run(info_ptr: u64) -> !
 
     if info.version != init_protocol::INIT_PROTOCOL_VERSION
     {
-        klog("ktest: FATAL: init protocol version mismatch");
         halt();
     }
+
+    // Initialise direct serial output before any logging.
+    // SAFETY: called once, single-threaded, InitInfo is valid.
+    unsafe { serial::init(info, info.aspace_cap, info.thread_cap) };
+
+    // Initialise framebuffer output (best-effort; no-op if unavailable).
+    // SAFETY: called once, single-threaded, InitInfo is valid.
+    unsafe { framebuffer::init(info, info.aspace_cap) };
+
+    log("ktest: starting");
 
     let aspace_cap = info.aspace_cap;
 
@@ -201,7 +210,7 @@ fn run(info_ptr: u64) -> !
     // SAFETY: IPC_BUF is a page-aligned static in ktest's BSS; single-threaded here.
     let ipc_buf_ptr = core::ptr::addr_of!(IPC_BUF).cast::<u64>();
     syscall::ipc_buffer_set(ipc_buf_ptr as u64).unwrap_or_else(|_| {
-        klog("ktest: FATAL: ipc_buffer_set failed");
+        log("ktest: FATAL: ipc_buffer_set failed");
         halt()
     });
 
@@ -218,15 +227,15 @@ fn run(info_ptr: u64) -> !
     };
 
     // ── Tier 1: per-syscall isolation ─────────────────────────────────────────
-    klog("ktest: --- Tier 1: syscall isolation ---");
+    log("ktest: --- Tier 1: syscall isolation ---");
     unit::run_all(&ctx);
 
     // ── Tier 2: cross-subsystem integration ───────────────────────────────────
-    klog("ktest: --- Tier 2: integration ---");
+    log("ktest: --- Tier 2: integration ---");
     integration::run_all(&ctx);
 
     // ── Tier 3: benchmarks ────────────────────────────────────────────────────
-    klog("ktest: --- Tier 3: benchmarks ---");
+    log("ktest: --- Tier 3: benchmarks ---");
     bench::run_all(&ctx);
 
     // ── Summary ───────────────────────────────────────────────────────────────
@@ -236,11 +245,11 @@ fn run(info_ptr: u64) -> !
     log_u64("ktest: failed=", failed as u64);
     if failed == 0
     {
-        klog("ktest: ALL TESTS PASSED");
+        log("ktest: ALL TESTS PASSED");
     }
     else
     {
-        klog("ktest: SOME TESTS FAILED");
+        log("ktest: SOME TESTS FAILED");
     }
 
     syscall::thread_exit()
@@ -248,14 +257,16 @@ fn run(info_ptr: u64) -> !
 
 // ── Utilities ─────────────────────────────────────────────────────────────────
 
-/// Write a string to the kernel serial console via `SYS_DEBUG_LOG`.
+/// Write a string to all available output channels (serial + framebuffer).
 ///
-/// Errors from `debug_log` are silently ignored — if logging itself fails,
-/// there is nothing useful to do.
+/// Each channel is best-effort: no-op if its initialisation failed.
 #[inline]
-pub fn klog(msg: &str)
+pub fn log(msg: &str)
 {
-    syscall::debug_log(msg).ok();
+    serial::write_str(msg);
+    serial::write_byte(b'\n');
+    framebuffer::write_str(msg);
+    framebuffer::newline();
 }
 
 /// Log a decimal `u64` value prefixed by a static string.
@@ -292,7 +303,7 @@ pub fn log_u64(prefix: &str, value: u64)
     let total = plen + nlen;
     if let Ok(s) = core::str::from_utf8(&msg[..total])
     {
-        klog(s);
+        log(s);
     }
 }
 
@@ -357,7 +368,7 @@ pub fn log_version(prefix: &str, ver: u64)
 
     if let Ok(s) = core::str::from_utf8(&buf[..pos])
     {
-        klog(s);
+        log(s);
     }
 }
 
@@ -373,6 +384,8 @@ pub fn halt() -> !
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> !
 {
-    klog("ktest: panic");
-    halt()
+    // Only the main thread has IOPB access for serial output. Child threads
+    // that panic must not call log (outb would GP-fault without IOPB).
+    // Exit the thread instead.
+    syscall::thread_exit()
 }

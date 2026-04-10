@@ -234,8 +234,7 @@ pub unsafe fn parse_acpi_resources(rsdp_addr: u64, out: &mut [PlatformResource])
             }
             b"SPCR" =>
             {
-                // SPCR is parsed separately for UART discovery; here just
-                // record it as PlatformTable (id=1: SPCR) for devmgr.
+                // Record the SPCR table as PlatformTable for devmgr.
                 push!(PlatformResource {
                     resource_type: ResourceType::PlatformTable,
                     flags: 0,
@@ -243,17 +242,46 @@ pub unsafe fn parse_acpi_resources(rsdp_addr: u64, out: &mut [PlatformResource])
                     size: table_len as u64,
                     id: 1,
                 });
+
+                // Extract the UART MMIO base from the SPCR GAS and emit an
+                // MmioRange so init/ktest can map the serial port directly.
+                // GAS layout at SDT_HDR_LEN+4: addr_space_id(u8), ..., address(u64 at +4).
+                let gas_off = SDT_HDR_LEN + 4;
+                if table_len >= gas_off + 12
+                {
+                    let addr_space = table[gas_off]; // 0 = MMIO
+                    let uart_base = read_u64(table, gas_off + 4);
+                    if addr_space == 0 && uart_base != 0
+                    {
+                        push!(PlatformResource {
+                            resource_type: ResourceType::MmioRange,
+                            flags: 0,
+                            base: uart_base,
+                            size: 4096, // single page covers 16550 register set
+                            id: 0,
+                        });
+                    }
+                }
             }
             _ =>
             {} // Skip unknown tables gracefully.
         }
     }
 
-    // x86-64 legacy PCI configuration I/O ports 0xCF8–0xCFF (8 ports).
+    // x86-64 legacy I/O port ranges.
     // Only present when MADT was found (implies x86/APIC platform).
     #[cfg(target_arch = "x86_64")]
     if found_madt
     {
+        // COM1 serial port 0x3F8–0x3FF (8 ports).
+        push!(PlatformResource {
+            resource_type: ResourceType::IoPortRange,
+            flags: 0,
+            base: 0x3F8,
+            size: 8,
+            id: 0,
+        });
+        // PCI configuration I/O ports 0xCF8–0xCFF (8 ports).
         push!(PlatformResource {
             resource_type: ResourceType::IoPortRange,
             flags: 0,

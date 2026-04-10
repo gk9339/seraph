@@ -36,7 +36,7 @@ static mut STACK_C: ChildStack = ChildStack::ZERO;
 
 pub fn run(ctx: &TestContext) -> TestResult
 {
-    crate::klog("multi_caller_ipc_fifo: starting");
+    crate::log("multi_caller_ipc_fifo: starting");
 
     let ep =
         cap_create_endpoint().map_err(|_| "multi_caller_ipc_fifo: cap_create_endpoint failed")?;
@@ -99,7 +99,7 @@ pub fn run(ctx: &TestContext) -> TestResult
     thread_yield().map_err(|_| "multi_caller_ipc_fifo: yield after C failed")?;
 
     // ── Drain send queue in FIFO order ────────────────────────────────────────
-    crate::klog("multi_caller_ipc_fifo: recv 1 (expect label=1)");
+    crate::log("multi_caller_ipc_fifo: recv 1 (expect label=1)");
     let (label_a, _) = ipc_recv(ep).map_err(|_| "multi_caller_ipc_fifo: ipc_recv[0] failed")?;
     if label_a != 1
     {
@@ -107,7 +107,7 @@ pub fn run(ctx: &TestContext) -> TestResult
     }
     ipc_reply(0, 0, &[]).map_err(|_| "multi_caller_ipc_fifo: ipc_reply[0] failed")?;
 
-    crate::klog("multi_caller_ipc_fifo: recv 2 (expect label=2)");
+    crate::log("multi_caller_ipc_fifo: recv 2 (expect label=2)");
     let (label_b, _) = ipc_recv(ep).map_err(|_| "multi_caller_ipc_fifo: ipc_recv[1] failed")?;
     if label_b != 2
     {
@@ -115,7 +115,7 @@ pub fn run(ctx: &TestContext) -> TestResult
     }
     ipc_reply(0, 0, &[]).map_err(|_| "multi_caller_ipc_fifo: ipc_reply[1] failed")?;
 
-    crate::klog("multi_caller_ipc_fifo: recv 3 (expect label=3)");
+    crate::log("multi_caller_ipc_fifo: recv 3 (expect label=3)");
     let (label_c, _) = ipc_recv(ep).map_err(|_| "multi_caller_ipc_fifo: ipc_recv[2] failed")?;
     if label_c != 3
     {
@@ -144,7 +144,7 @@ pub fn run(ctx: &TestContext) -> TestResult
     cap_delete(ep).ok();
     cap_delete(done).ok();
 
-    crate::klog("multi_caller_ipc_fifo: PASS");
+    crate::log("multi_caller_ipc_fifo: PASS");
     Ok(())
 }
 

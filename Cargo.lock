@@ -171,6 +171,7 @@ dependencies = [
 name = "ktest"
 version = "0.1.0"
 dependencies = [
+ "font",
  "init-protocol",
  "syscall",
  "syscall-abi",

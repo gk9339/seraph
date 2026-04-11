@@ -22,7 +22,7 @@
 //! Replace `waiter` with an intrusive queue of TCBs and wake all of them
 //! on signal delivery.
 
-use core::sync::atomic::{AtomicU64, Ordering};
+use core::sync::atomic::{AtomicU64, AtomicU8, Ordering};
 
 use crate::sched::thread::ThreadControlBlock;
 
@@ -45,17 +45,18 @@ pub struct SignalState
     pub wait_set: *mut u8,
     /// Index of this signal's entry in `WaitSetState::members`.
     pub wait_set_member_idx: u8,
-    /// Serialises `signal_send` and `signal_wait` across CPUs.
+    /// Non-zero when a waiter or wait set is registered.
     ///
-    /// On RISC-V (RVWMO), plain stores to `waiter` from one CPU are not
-    /// guaranteed visible to another CPU's load. The lock provides the
-    /// Acquire/Release fence pair that makes the check-waiter-then-set-bits
-    /// (send) and swap-bits-then-set-waiter (wait) sequences mutually
-    /// exclusive, preventing lost wakeups.
+    /// `signal_send` uses this as a lock-free fast-path check: when zero,
+    /// the sender can OR bits without acquiring the lock (no one to wake).
+    /// Maintained under `lock`; read outside the lock with a `SeqCst` fence
+    /// (Dekker pattern) to prevent lost wakeups on RVWMO.
+    pub has_observer: AtomicU8,
+    /// Serialises wakeup coordination between `signal_send` and `signal_wait`.
     ///
-    /// On x86-64 (TSO) the lock is technically unnecessary because store
-    /// visibility is ordered, but correctness should not depend on the
-    /// memory model.
+    /// The lock is only needed when a waiter or wait set is present (the slow
+    /// path). The common no-observer path is lock-free: an atomic OR into
+    /// `bits` followed by a `SeqCst` fence + `has_observer` check.
     pub lock: crate::sync::Spinlock,
 }
 
@@ -74,6 +75,7 @@ impl SignalState
             waiter: core::ptr::null_mut(),
             wait_set: core::ptr::null_mut(),
             wait_set_member_idx: 0,
+            has_observer: AtomicU8::new(0),
             lock: crate::sync::Spinlock::new(),
         }
     }
@@ -88,39 +90,51 @@ impl SignalState
 ///
 /// Returns `Some(*mut TCB)` if a thread was woken (caller must enqueue it).
 ///
+/// # Lock-free fast path
+/// When `has_observer` is zero (no waiter, no wait set), the bits are OR'd
+/// atomically and the function returns without acquiring the lock. A `SeqCst`
+/// fence between the OR and the flag check forms one half of a Dekker-style
+/// pair with `signal_wait`, preventing lost wakeups on RVWMO.
+///
 /// # Safety
-/// Must be called with the relevant scheduler lock held (single-CPU boot
-/// is safe without a lock).
+/// `sig` must be a valid pointer to a live `SignalState`.
 #[cfg(not(test))]
 pub unsafe fn signal_send(sig: *mut SignalState, bits: u64) -> Option<*mut ThreadControlBlock>
 {
     // SAFETY: caller guarantees sig is valid.
     let sig = unsafe { &mut *sig };
 
-    // SAFETY: lock serialises send/wait; paired with unlock_raw below.
+    // Always OR bits first — even if we end up in the slow path, the bits
+    // are already in place.
+    sig.bits.fetch_or(bits, Ordering::Relaxed);
+
+    // Dekker fence: ensures our OR is visible before we read has_observer.
+    // Pairs with the SeqCst fence in signal_wait (between setting
+    // has_observer and swapping bits). Guarantees at least one side observes
+    // the other's store, preventing lost wakeups on RVWMO.
+    core::sync::atomic::fence(Ordering::SeqCst);
+
+    // Fast path: no one is watching — nothing to wake or notify.
+    if sig.has_observer.load(Ordering::Relaxed) == 0
+    {
+        return None;
+    }
+
+    // Slow path: a waiter or wait set is (or was recently) registered.
+    // SAFETY: lock serialises wakeup; paired with unlock_raw below.
     let saved = unsafe { sig.lock.lock_raw() };
 
-    let result = if sig.waiter.is_null()
+    let result = if !sig.waiter.is_null()
     {
-        sig.bits.fetch_or(bits, Ordering::Relaxed);
-        // Notify any registered wait set that this signal now has bits pending.
-        if !sig.wait_set.is_null()
-        {
-            // SAFETY: wait_set is a valid *mut WaitSetState registered by sys_wait_set_add
-            // and cleared on removal or wait_set_drop; lock is held.
-            unsafe { crate::ipc::wait_set::waitset_notify(sig.wait_set, sig.wait_set_member_idx) };
-        }
-        None
-    }
-    else
-    {
-        // OR our bits in, then swap the whole bitmask to zero so the waiter
-        // gets exactly what was pending (including bits set before this call).
-        sig.bits.fetch_or(bits, Ordering::Relaxed);
+        // Swap all pending bits (including ours) to zero and deliver them.
         let delivered = sig.bits.swap(0, Ordering::Relaxed);
 
         let waiter = sig.waiter;
         sig.waiter = core::ptr::null_mut();
+        sig.has_observer.store(
+            u8::from(!sig.wait_set.is_null()),
+            Ordering::Relaxed,
+        );
         // SAFETY: waiter is a valid TCB pointer placed here by signal_wait.
         unsafe {
             debug_assert!(
@@ -137,6 +151,20 @@ pub unsafe fn signal_send(sig: *mut SignalState, bits: u64) -> Option<*mut Threa
             (*waiter).blocked_on_object = core::ptr::null_mut();
         }
         Some(waiter)
+    }
+    else if !sig.wait_set.is_null()
+    {
+        // No blocked waiter, but a wait set needs notification.
+        // SAFETY: wait_set is a valid *mut WaitSetState registered by sys_wait_set_add
+        // and cleared on removal or wait_set_drop; lock is held.
+        unsafe { crate::ipc::wait_set::waitset_notify(sig.wait_set, sig.wait_set_member_idx) };
+        None
+    }
+    else
+    {
+        // Observer disappeared between the fast-path check and lock
+        // acquisition (benign race — bits are already accumulated).
+        None
     };
 
     // SAFETY: paired with lock_raw above.
@@ -151,8 +179,14 @@ pub unsafe fn signal_send(sig: *mut SignalState, bits: u64) -> Option<*mut Threa
 /// as the waiter, sets its state to `Blocked`, and returns `Err(())` —
 /// the caller must then call the scheduler to yield the CPU.
 ///
+/// # Dekker ordering
+/// Under the lock, the waiter is registered and `has_observer` is set
+/// **before** the bits swap. A `SeqCst` fence between these steps pairs with
+/// the fence in `signal_send` to guarantee: if `signal_send`'s fast path
+/// sees `has_observer == 0`, then this swap will see the `ORed` bits.
+///
 /// # Safety
-/// Must be called with the relevant scheduler lock held.
+/// `sig` and `caller` must be valid pointers.
 #[cfg(not(test))]
 pub unsafe fn signal_wait(sig: *mut SignalState, caller: *mut ThreadControlBlock)
     -> Result<u64, ()>
@@ -163,16 +197,48 @@ pub unsafe fn signal_wait(sig: *mut SignalState, caller: *mut ThreadControlBlock
     // SAFETY: lock serialises send/wait; paired with unlock_raw below.
     let saved = unsafe { sig.lock.lock_raw() };
 
+    // Clear context_saved BEFORE making the thread visible as a waiter.
+    // Without this, a remote CPU that wakes and schedules this thread can
+    // see the stale context_saved==1 from the previous switch-in and load
+    // a stale SavedState before the original CPU has called schedule() to
+    // save the real register state — causing two CPUs to share one stack.
+    // SAFETY: caller TCB is valid; context_saved is AtomicU32.
+    unsafe {
+        (*caller).context_saved.store(0, core::sync::atomic::Ordering::Relaxed);
+    }
+
+    // Register the waiter and mark the signal as observed. This must happen
+    // before the bits swap so that a concurrent signal_send that bypasses
+    // the lock (fast path) will either:
+    //   (a) see has_observer==1 → take the slow path and wake us, OR
+    //   (b) have its OR visible to our swap below (we get the bits).
+    sig.waiter = caller;
+    sig.has_observer.store(1, Ordering::Relaxed);
+
+    // Dekker fence: pairs with the SeqCst fence in signal_send.
+    core::sync::atomic::fence(Ordering::SeqCst);
+
+    // Attempt to harvest pending bits.
     let bits = sig.bits.swap(0, Ordering::Relaxed);
     if bits != 0
     {
+        // Bits were available — undo the waiter registration and restore
+        // context_saved (thread never actually blocked).
+        sig.waiter = core::ptr::null_mut();
+        sig.has_observer.store(
+            u8::from(!sig.wait_set.is_null()),
+            Ordering::Relaxed,
+        );
+        // SAFETY: caller TCB is valid; context_saved is AtomicU32.
+        unsafe {
+            (*caller).context_saved.store(1, core::sync::atomic::Ordering::Relaxed);
+        }
         // SAFETY: paired with lock_raw above.
         unsafe { sig.lock.unlock_raw(saved) };
         return Ok(bits);
     }
 
     // No bits available — block the caller.
-    sig.waiter = caller;
     // SAFETY: caller TCB is valid.
     unsafe {
         (*caller).state = crate::sched::thread::ThreadState::Blocked;
@@ -204,6 +270,7 @@ mod tests
         assert!(s.waiter.is_null());
         assert!(s.wait_set.is_null());
         assert_eq!(s.wait_set_member_idx, 0);
+        assert_eq!(s.has_observer.load(Ordering::Relaxed), 0);
     }
 
     #[test]

@@ -190,6 +190,13 @@ pub unsafe fn event_queue_recv(
     }
 
     // Queue empty — block caller.
+    //
+    // Clear context_saved before making the thread visible as a waiter.
+    // See signal.rs signal_wait for the full rationale.
+    // SAFETY: caller is a valid TCB; context_saved is AtomicU32.
+    unsafe {
+        (*caller).context_saved.store(0, core::sync::atomic::Ordering::Relaxed);
+    }
     eq.waiter = caller;
     // SAFETY: caller is a valid TCB.
     unsafe {

@@ -1097,6 +1097,7 @@ pub fn sys_wait_set_add(tf: &mut TrapFrame) -> Result<u64, SyscallError>
                 let sig = source_ptr.cast::<crate::ipc::signal::SignalState>();
                 (*sig).wait_set = ws_state.cast::<u8>();
                 (*sig).wait_set_member_idx = member_idx;
+                (*sig).has_observer.store(1, core::sync::atomic::Ordering::Relaxed);
             }
             WaitSetSourceTag::EventQueue =>
             {

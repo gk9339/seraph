@@ -183,6 +183,12 @@ pub unsafe fn endpoint_call(
             (*server).ipc_state = IpcThreadState::None;
             (*server).blocked_on_object = core::ptr::null_mut();
         }
+        // Clear context_saved before making the caller visible as blocked.
+        // See signal.rs signal_wait for the full rationale.
+        // SAFETY: caller validated by syscall layer; context_saved is AtomicU32.
+        unsafe {
+            (*caller).context_saved.store(0, core::sync::atomic::Ordering::Relaxed);
+        }
         // SAFETY: caller validated by syscall layer.
         unsafe {
             (*caller).state = ThreadState::Blocked;
@@ -196,6 +202,12 @@ pub unsafe fn endpoint_call(
 
     // No server available — block caller on send queue.
     let was_empty = ep.send_head.is_null();
+    // Clear context_saved before enqueuing on the send queue.
+    // See signal.rs signal_wait for the full rationale.
+    // SAFETY: caller validated by syscall layer; context_saved is AtomicU32.
+    unsafe {
+        (*caller).context_saved.store(0, core::sync::atomic::Ordering::Relaxed);
+    }
     // SAFETY: caller validated by syscall layer.
     unsafe {
         (*caller).ipc_msg = *msg;
@@ -258,6 +270,12 @@ pub unsafe fn endpoint_recv(
     }
 
     // No sender — block server on recv queue.
+    // Clear context_saved before enqueuing on the recv queue.
+    // See signal.rs signal_wait for the full rationale.
+    // SAFETY: server validated by syscall layer; context_saved is AtomicU32.
+    unsafe {
+        (*server).context_saved.store(0, core::sync::atomic::Ordering::Relaxed);
+    }
     // SAFETY: server validated by syscall layer.
     unsafe {
         (*server).state = ThreadState::Blocked;

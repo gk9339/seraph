@@ -252,6 +252,13 @@ pub unsafe fn waitset_wait(
     }
 
     // Nothing ready — block caller.
+    //
+    // Clear context_saved before making the thread visible as a waiter.
+    // See signal.rs signal_wait for the full rationale.
+    // SAFETY: caller is a valid TCB; context_saved is AtomicU32.
+    unsafe {
+        (*caller).context_saved.store(0, core::sync::atomic::Ordering::Relaxed);
+    }
     ws.waiter = caller;
     // SAFETY: caller is a valid TCB.
     unsafe {
@@ -452,6 +459,11 @@ unsafe fn clear_source_backpointer(source_ptr: *mut u8, tag: WaitSetSourceTag)
             unsafe {
                 (*sig).wait_set = core::ptr::null_mut();
                 (*sig).wait_set_member_idx = 0;
+                // Update has_observer: keep 1 only if a waiter is still registered.
+                (*sig).has_observer.store(
+                    u8::from(!(*sig).waiter.is_null()),
+                    core::sync::atomic::Ordering::Relaxed,
+                );
             }
         }
         WaitSetSourceTag::EventQueue =>

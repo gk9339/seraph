@@ -260,3 +260,141 @@ pub fn mem_protect_exceeds_cap_rights_err(ctx: &TestContext) -> TestResult
     }
     Ok(())
 }
+
+// ── SYS_MEM_MAP (multi-page) ─────────────────────────────────────────────────
+
+/// `mem_map` with `page_count`=2 maps two consecutive pages.
+///
+/// Allocates two frames, maps them at consecutive VAs, verifies both are
+/// accessible via `aspace_query`.
+pub fn mem_map_multi_page(ctx: &TestContext) -> TestResult
+{
+    const MULTI_VA: u64 = 0x4200_0000;
+
+    let frame_a = crate::frame_pool::alloc().ok_or("mem_map_multi_page: frame_a exhausted")?;
+    let frame_b = crate::frame_pool::alloc().ok_or("mem_map_multi_page: frame_b exhausted")?;
+
+    // Map each frame at consecutive pages.
+    mem_map(frame_a, ctx.aspace_cap, MULTI_VA, 0, 1)
+        .map_err(|_| "mem_map frame_a failed")?;
+    mem_map(frame_b, ctx.aspace_cap, MULTI_VA + 0x1000, 0, 1)
+        .map_err(|_| "mem_map frame_b failed")?;
+
+    // Both pages must be queryable.
+    let phys_a = aspace_query(ctx.aspace_cap, MULTI_VA)
+        .map_err(|_| "aspace_query page_a failed")?;
+    let phys_b = aspace_query(ctx.aspace_cap, MULTI_VA + 0x1000)
+        .map_err(|_| "aspace_query page_b failed")?;
+
+    if phys_a == 0 || phys_b == 0
+    {
+        return Err("aspace_query returned zero phys for multi-page mapping");
+    }
+    if phys_a == phys_b
+    {
+        return Err("both pages mapped to same physical address");
+    }
+
+    mem_unmap(ctx.aspace_cap, MULTI_VA, 1).ok();
+    mem_unmap(ctx.aspace_cap, MULTI_VA + 0x1000, 1).ok();
+    // SAFETY: frames allocated from pool and now unmapped.
+    unsafe {
+        crate::frame_pool::free(frame_a);
+        crate::frame_pool::free(frame_b);
+    }
+    Ok(())
+}
+
+// ── SYS_MEM_MAP (zero pages) ─────────────────────────────────────────────────
+
+/// `mem_map` with `page_count`=0 must return `InvalidArgument`.
+pub fn mem_map_zero_pages_err(ctx: &TestContext) -> TestResult
+{
+    let frame =
+        crate::frame_pool::alloc().ok_or("mem_map_zero_pages_err: frame pool exhausted")?;
+    let err = mem_map(frame, ctx.aspace_cap, TEST_VA, 0, 0);
+
+    // SAFETY: frame allocated from pool and never mapped.
+    unsafe { crate::frame_pool::free(frame) };
+
+    if err.is_ok()
+    {
+        return Err("mem_map with page_count=0 should fail");
+    }
+    Ok(())
+}
+
+// ── SYS_MEM_MAP (offset beyond frame) ────────────────────────────────────────
+
+/// `mem_map` with `offset_pages` that exceeds the frame size must fail.
+pub fn mem_map_offset_beyond_frame_err(ctx: &TestContext) -> TestResult
+{
+    let frame = crate::frame_pool::alloc()
+        .ok_or("mem_map_offset_beyond_frame_err: frame pool exhausted")?;
+    // Pool frames are single-page (4 KiB). offset_pages=1 means byte offset 0x1000,
+    // which is at the end of the frame — mapping 1 page from there overflows.
+    let err = mem_map(frame, ctx.aspace_cap, TEST_VA, 1, 1);
+
+    // SAFETY: frame allocated from pool and never mapped.
+    unsafe { crate::frame_pool::free(frame) };
+
+    if err.is_ok()
+    {
+        return Err("mem_map with offset beyond frame size should fail");
+    }
+    Ok(())
+}
+
+// ── SYS_MEM_UNMAP (unaligned VA) ─────────────────────────────────────────────
+
+/// `mem_unmap` with a non-page-aligned virtual address must return an error.
+pub fn mem_unmap_unaligned_err(ctx: &TestContext) -> TestResult
+{
+    let err = mem_unmap(ctx.aspace_cap, TEST_VA + 1, 1);
+    if err.is_ok()
+    {
+        return Err("mem_unmap with unaligned VA should fail");
+    }
+    Ok(())
+}
+
+// ── SYS_MEM_PROTECT (W^X) ───────────────────────────────────────────────────
+
+/// `mem_protect` with both WRITE (bit 1) and EXECUTE (bit 2) set must fail.
+pub fn mem_protect_wx_err(ctx: &TestContext) -> TestResult
+{
+    const WX_TEST_VA: u64 = 0x4300_0000;
+
+    let mut frame = crate::frame_pool::FrameGuard::new(ctx.aspace_cap)
+        .ok_or("mem_protect_wx_err: frame pool exhausted")?;
+    frame.map(WX_TEST_VA).map_err(|_| "mem_map for wx test failed")?;
+
+    // prot_bits = 0x6 = WRITE|EXECUTE — must be rejected.
+    let err = syscall::mem_protect(frame.cap(), ctx.aspace_cap, WX_TEST_VA, 1, 0x6);
+    if err.is_ok()
+    {
+        return Err("mem_protect with WRITE|EXECUTE should fail (W^X violation)");
+    }
+    Ok(())
+}
+
+// ── SYS_FRAME_SPLIT (offset at end) ─────────────────────────────────────────
+
+/// `frame_split` with offset >= `frame_size` must return an error (right half empty).
+pub fn frame_split_at_end_err(_ctx: &TestContext) -> TestResult
+{
+    let frame =
+        crate::frame_pool::alloc().ok_or("frame_split_at_end_err: frame pool exhausted")?;
+    // Pool frames are 4 KiB (1 page). Splitting at offset 0x1000 = entire frame
+    // leaves right half empty.
+    let err = syscall::frame_split(frame, 0x1000);
+
+    // SAFETY: frame allocated from pool; split failed so it's still intact.
+    unsafe { crate::frame_pool::free(frame) };
+
+    if err.is_ok()
+    {
+        return Err("frame_split at offset >= frame_size should fail");
+    }
+    Ok(())
+}

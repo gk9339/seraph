@@ -136,6 +136,57 @@ pub fn recv_blocks_until_post(ctx: &TestContext) -> TestResult
     Ok(())
 }
 
+// ── SYS_EVENT_POST (insufficient rights) ─────────────────────────────────────
+
+/// `event_post` on a cap without POST right must fail.
+pub fn post_insufficient_rights(_ctx: &TestContext) -> TestResult
+{
+    let eq = event_queue_create(4).map_err(|_| "event_queue_create for post_rights test failed")?;
+
+    // Derive with RECV right only (bit 10), no POST (bit 9).
+    let recv_only = syscall::cap_derive(eq, 1 << 10)
+        .map_err(|_| "cap_derive for post_rights test failed")?;
+
+    let err = event_post(recv_only, 0x42);
+    if err != Err(SyscallError::InsufficientRights as i64)
+    {
+        return Err("event_post on RECV-only cap did not return InsufficientRights");
+    }
+
+    cap_delete(recv_only).map_err(|_| "cap_delete recv_only failed")?;
+    cap_delete(eq).map_err(|_| "cap_delete eq after post_rights test failed")?;
+    Ok(())
+}
+
+// ── SYS_EVENT_RECV (insufficient rights) ─────────────────────────────────────
+
+/// `event_recv` on a cap without RECV right must fail.
+///
+/// Pre-posts a value so we test rights, not blocking.
+pub fn recv_insufficient_rights(_ctx: &TestContext) -> TestResult
+{
+    let eq = event_queue_create(4).map_err(|_| "event_queue_create for recv_rights test failed")?;
+
+    // Post a value first so the queue is non-empty.
+    event_post(eq, 0x42).map_err(|_| "event_post for recv_rights test failed")?;
+
+    // Derive with POST right only (bit 9), no RECV (bit 10).
+    let post_only = syscall::cap_derive(eq, 1 << 9)
+        .map_err(|_| "cap_derive for recv_rights test failed")?;
+
+    let err = event_recv(post_only);
+    if err != Err(SyscallError::InsufficientRights as i64)
+    {
+        return Err("event_recv on POST-only cap did not return InsufficientRights");
+    }
+
+    // Drain via full-rights cap.
+    event_recv(eq).ok();
+    cap_delete(post_only).map_err(|_| "cap_delete post_only failed")?;
+    cap_delete(eq).map_err(|_| "cap_delete eq after recv_rights test failed")?;
+    Ok(())
+}
+
 // ── Child thread entry ────────────────────────────────────────────────────────
 
 /// Child: blocks on `event_recv` then signals the received payload back.

@@ -64,6 +64,30 @@ pub fn run_all(ctx: &TestContext)
         "cap::copy_into_non_cspace_err",
         cap::copy_into_non_cspace_err(ctx)
     );
+    run_test!(
+        "cap::delete_null_slot_ok",
+        cap::delete_null_slot_ok(ctx)
+    );
+    run_test!(
+        "cap::insert_out_of_bounds_err",
+        cap::insert_out_of_bounds_err(ctx)
+    );
+    run_test!(
+        "cap::derive_zero_rights",
+        cap::derive_zero_rights(ctx)
+    );
+    run_test!(
+        "cap::revoke_null_slot_err",
+        cap::revoke_null_slot_err(ctx)
+    );
+    run_test!(
+        "cap::create_event_q_zero_capacity_err",
+        cap::create_event_q_zero_capacity_err(ctx)
+    );
+    run_test!(
+        "cap::create_event_q_over_max_err",
+        cap::create_event_q_over_max_err(ctx)
+    );
 
     // ── Memory management syscalls ────────────────────────────────────────────
     run_test!("mm::frame_split", mm::frame_split(ctx));
@@ -95,6 +119,24 @@ pub fn run_all(ctx: &TestContext)
         "mm::mem_protect_exceeds_cap_rights_err",
         mm::mem_protect_exceeds_cap_rights_err(ctx)
     );
+    run_test!("mm::mem_map_multi_page", mm::mem_map_multi_page(ctx));
+    run_test!(
+        "mm::mem_map_zero_pages_err",
+        mm::mem_map_zero_pages_err(ctx)
+    );
+    run_test!(
+        "mm::mem_map_offset_beyond_frame_err",
+        mm::mem_map_offset_beyond_frame_err(ctx)
+    );
+    run_test!(
+        "mm::mem_unmap_unaligned_err",
+        mm::mem_unmap_unaligned_err(ctx)
+    );
+    run_test!("mm::mem_protect_wx_err", mm::mem_protect_wx_err(ctx));
+    run_test!(
+        "mm::frame_split_at_end_err",
+        mm::frame_split_at_end_err(ctx)
+    );
 
     // ── Signal syscalls ───────────────────────────────────────────────────────
     run_test!("signal::send", signal::send(ctx));
@@ -118,6 +160,10 @@ pub fn run_all(ctx: &TestContext)
         "signal::send_zero_bits_is_noop",
         signal::send_zero_bits_is_noop(ctx)
     );
+    run_test!(
+        "signal::send_insufficient_rights",
+        signal::send_insufficient_rights(ctx)
+    );
 
     // ── Event queue syscalls ──────────────────────────────────────────────────
     run_test!("event::create", event::create(ctx));
@@ -126,6 +172,14 @@ pub fn run_all(ctx: &TestContext)
     run_test!(
         "event::recv_blocks_until_post",
         event::recv_blocks_until_post(ctx)
+    );
+    run_test!(
+        "event::post_insufficient_rights",
+        event::post_insufficient_rights(ctx)
+    );
+    run_test!(
+        "event::recv_insufficient_rights",
+        event::recv_insufficient_rights(ctx)
     );
 
     // ── Wait set syscalls ─────────────────────────────────────────────────────
@@ -149,6 +203,18 @@ pub fn run_all(ctx: &TestContext)
     run_test!(
         "ipc::ipc_buffer_misaligned_err",
         ipc::ipc_buffer_misaligned_err(ctx)
+    );
+    run_test!(
+        "ipc::send_insufficient_rights_err",
+        ipc::send_insufficient_rights_err(ctx)
+    );
+    run_test!(
+        "ipc::call_with_data_words",
+        ipc::call_with_data_words(ctx)
+    );
+    run_test!(
+        "ipc::call_with_cap_transfer",
+        ipc::call_with_cap_transfer(ctx)
     );
 
     // ── Thread syscalls ───────────────────────────────────────────────────────
@@ -225,5 +291,6 @@ pub fn run_all(ctx: &TestContext)
         sysinfo::boot_protocol_version(ctx)
     );
     run_test!("sysinfo::unknown_kind_err", sysinfo::unknown_kind_err(ctx));
+    run_test!("sysinfo::elapsed_us", sysinfo::elapsed_us(ctx));
     run_test!("sysinfo::cpu_count_smp", sysinfo::cpu_count_smp(ctx));
 }

@@ -12,6 +12,8 @@
 //! Supported options:
 //! - `ktest.shutdown=always|pass|never` — when to shut down after tests
 //! - `ktest.timeout=N` — seconds to wait before shutdown (decimal integer)
+//! - `ktest.filter=unit,integration,stress,bench` — comma-separated tier filter
+//! - `ktest.bench_iters=N` — benchmark iteration count (default 1000)
 
 /// When to perform system shutdown after tests complete.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -26,10 +28,16 @@ pub enum ShutdownPolicy
 }
 
 /// Parsed ktest configuration from the kernel command line.
+#[allow(clippy::struct_excessive_bools)]
 pub struct KtestConfig
 {
     pub shutdown_policy: ShutdownPolicy,
     pub timeout_secs: u32,
+    pub run_unit: bool,
+    pub run_integration: bool,
+    pub run_stress: bool,
+    pub run_bench: bool,
+    pub bench_iters: u32,
 }
 
 impl KtestConfig
@@ -37,6 +45,11 @@ impl KtestConfig
     const DEFAULT: KtestConfig = KtestConfig {
         shutdown_policy: ShutdownPolicy::Never,
         timeout_secs: 0,
+        run_unit: true,
+        run_integration: true,
+        run_stress: false,
+        run_bench: true,
+        bench_iters: 1000,
     };
 }
 
@@ -63,12 +76,48 @@ pub fn parse(cmdline: &[u8]) -> KtestConfig
         {
             config.timeout_secs = parse_u32(rest).unwrap_or(config.timeout_secs);
         }
+        else if let Some(rest) = strip_prefix(token, b"ktest.filter=")
+        {
+            // When filter is specified, start with all tiers disabled
+            // and enable only those listed.
+            config.run_unit = false;
+            config.run_integration = false;
+            config.run_stress = false;
+            config.run_bench = false;
+            parse_filter(rest, &mut config);
+        }
+        else if let Some(rest) = strip_prefix(token, b"ktest.bench_iters=")
+        {
+            config.bench_iters = parse_u32(rest).unwrap_or(config.bench_iters);
+        }
     }
 
     config
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
+
+/// Parse comma-separated tier names from the filter value.
+fn parse_filter(value: &[u8], config: &mut KtestConfig)
+{
+    let mut start = 0;
+    for i in 0..=value.len()
+    {
+        if i == value.len() || value[i] == b','
+        {
+            let segment = &value[start..i];
+            match segment
+            {
+                b"unit" => config.run_unit = true,
+                b"integration" => config.run_integration = true,
+                b"stress" => config.run_stress = true,
+                b"bench" => config.run_bench = true,
+                _ => {} // Unknown tier name — silently ignored.
+            }
+            start = i + 1;
+        }
+    }
+}
 
 fn strip_prefix<'a>(s: &'a [u8], prefix: &[u8]) -> Option<&'a [u8]>
 {

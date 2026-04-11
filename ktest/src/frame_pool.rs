@@ -18,7 +18,7 @@
 //!
 //! Tests call `alloc()` to reserve a frame cap from the pool. When done, they
 //! call `free()` to return it. The cap is never deleted, only marked available
-//! for reuse. With proper cleanup, 32 frame caps can service unlimited tests.
+//! for reuse. With proper cleanup, 64 frame caps can service unlimited tests.
 //!
 //! ## Usage
 //!
@@ -44,10 +44,10 @@
 //! // Drop automatically unmaps and returns to pool
 //! ```
 
-use core::sync::atomic::{AtomicU32, Ordering};
+use core::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
 /// Maximum frames in the pool.
-const POOL_SIZE: usize = 32;
+const POOL_SIZE: usize = 64;
 
 /// Size of one page.
 const PAGE_SIZE: u64 = 0x1000;
@@ -55,7 +55,7 @@ const PAGE_SIZE: u64 = 0x1000;
 /// Pool of available frame capability slots.
 ///
 /// Bit N set = slot N is available. Cleared = slot N is allocated to a test.
-static POOL_AVAILABLE: AtomicU32 = AtomicU32::new(0);
+static POOL_AVAILABLE: AtomicU64 = AtomicU64::new(0);
 
 /// Frame capability slots (indices into init's `CSpace`).
 ///
@@ -132,16 +132,16 @@ pub unsafe fn init(info: &init_protocol::InitInfo)
     split_frame_recursive(bss_frame, &mut count);
 
     // Mark all slots as available
-    let mask = if count >= 32
+    let mask = if count >= 64
     {
-        0xFFFF_FFFF
+        u64::MAX
     }
     else
     {
-        (1u32 << count) - 1
+        (1u64 << count) - 1
     };
     POOL_AVAILABLE.store(mask, Ordering::Release);
-    // count is bounded by POOL_SIZE (32), so cast is safe.
+    // count is bounded by POOL_SIZE (64), so cast is safe.
     #[allow(clippy::cast_possible_truncation)]
     let count_u32 = count as u32;
     POOL_COUNT.store(count_u32, Ordering::Release);
@@ -206,14 +206,14 @@ pub fn alloc() -> Option<u32>
 
         // Find first set bit (lowest available slot)
         let slot_idx = available.trailing_zeros() as usize;
-        let mask = 1u32 << slot_idx;
+        let mask = 1u64 << slot_idx;
 
         // Try to claim it atomically
         let prev = POOL_AVAILABLE.fetch_and(!mask, Ordering::AcqRel);
         if prev & mask != 0
         {
             // Successfully claimed
-            // SAFETY: slot_idx is within bounds (< trailing_zeros result < 32).
+            // SAFETY: slot_idx is within bounds (< trailing_zeros result < 64).
             unsafe { return Some(POOL_SLOTS[slot_idx]) }
         }
         // Race lost, retry
@@ -241,7 +241,7 @@ pub unsafe fn free(frame_cap: u32)
         let slot = unsafe { POOL_SLOTS[i] };
         if slot == frame_cap
         {
-            let mask = 1u32 << i;
+            let mask = 1u64 << i;
             POOL_AVAILABLE.fetch_or(mask, Ordering::Release);
             return;
         }

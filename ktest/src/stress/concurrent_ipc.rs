@@ -1,0 +1,131 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 George Kottler <mail@kottlerg.com>
+
+//! Stress test: concurrent IPC endpoint races.
+//!
+//! 4 callers simultaneously block on one endpoint. The server drains all 4,
+//! verifying no callers are lost. Repeats for 10 cycles.
+
+use syscall::{
+    cap_copy, cap_create_cspace, cap_create_endpoint, cap_create_signal, cap_create_thread,
+    cap_delete, ipc_call, ipc_recv, ipc_reply, signal_send, signal_wait, thread_configure,
+    thread_exit, thread_start,
+};
+
+use crate::{ChildStack, TestContext, TestResult};
+
+const NUM_CALLERS: usize = 4;
+const CYCLES: usize = 10;
+
+// SEND + GRANT rights.
+const RIGHTS_SEND_GRANT: u64 = (1 << 4) | (1 << 6);
+
+pub fn run(ctx: &TestContext) -> TestResult
+{
+    for _cycle in 0..CYCLES
+    {
+        let ep =
+            cap_create_endpoint().map_err(|_| "concurrent_ipc: create_endpoint failed")?;
+        let done =
+            cap_create_signal().map_err(|_| "concurrent_ipc: create_signal failed")?;
+
+        let mut threads = [0u32; NUM_CALLERS];
+        let mut cspaces = [0u32; NUM_CALLERS];
+
+        // Start all callers simultaneously (no yields between starts).
+        for i in 0..NUM_CALLERS
+        {
+            let cs = cap_create_cspace(16)
+                .map_err(|_| "concurrent_ipc: create_cspace failed")?;
+            let child_ep = cap_copy(ep, cs, RIGHTS_SEND_GRANT)
+                .map_err(|_| "concurrent_ipc: cap_copy ep failed")?;
+            let child_done = cap_copy(done, cs, 1 << 7)
+                .map_err(|_| "concurrent_ipc: cap_copy done failed")?;
+
+            let th = cap_create_thread(ctx.aspace_cap, cs)
+                .map_err(|_| "concurrent_ipc: create_thread failed")?;
+
+            // Pack: label = i+1 (1-based), done_bit = 1<<i (unique per child).
+            let arg = u64::from(child_ep)
+                | (u64::from(child_done) << 16)
+                | (((i + 1) as u64) << 32)
+                | ((1u64 << i) << 48);
+
+            // SAFETY: Each caller uses a distinct stack index.
+            let stack_top =
+                ChildStack::top(unsafe { core::ptr::addr_of!(super::STRESS_STACKS[i]) });
+            thread_configure(th, caller_entry as *const () as u64, stack_top, arg)
+                .map_err(|_| "concurrent_ipc: thread_configure failed")?;
+            thread_start(th).map_err(|_| "concurrent_ipc: thread_start failed")?;
+
+            threads[i] = th;
+            cspaces[i] = cs;
+        }
+
+        // Server: receive and reply to all 4 callers.
+        let mut received_bitmap: u32 = 0;
+        for _ in 0..NUM_CALLERS
+        {
+            let (label, _) =
+                ipc_recv(ep).map_err(|_| "concurrent_ipc: ipc_recv failed")?;
+            // Label values are 1..=4; fits in u32. Truncation is safe because
+            // we validate idx is in [1, NUM_CALLERS] immediately below.
+            #[allow(clippy::cast_possible_truncation)]
+            let idx = label as u32;
+            if idx == 0 || idx > 4
+            {
+                return Err("concurrent_ipc: received out-of-range label");
+            }
+            let bit = 1u32 << (idx - 1);
+            if received_bitmap & bit != 0
+            {
+                return Err("concurrent_ipc: duplicate label received");
+            }
+            received_bitmap |= bit;
+            ipc_reply(0, 0, &[]).map_err(|_| "concurrent_ipc: ipc_reply failed")?;
+        }
+
+        // Verify all callers received.
+        let expected = (1u32 << NUM_CALLERS) - 1;
+        if received_bitmap != expected
+        {
+            return Err("concurrent_ipc: not all callers received");
+        }
+
+        // Wait for all children to signal done. Each child sends a unique
+        // bit (1<<i), so we wait until all 4 bits are set.
+        let all_done = (1u64 << NUM_CALLERS) - 1;
+        let mut done_bits: u64 = 0;
+        while done_bits != all_done
+        {
+            let bits =
+                signal_wait(done).map_err(|_| "concurrent_ipc: signal_wait done failed")?;
+            done_bits |= bits;
+        }
+
+        // Clean up.
+        for i in 0..NUM_CALLERS
+        {
+            cap_delete(threads[i]).ok();
+            cap_delete(cspaces[i]).ok();
+        }
+        cap_delete(ep).ok();
+        cap_delete(done).ok();
+    }
+
+    Ok(())
+}
+
+// cast_possible_truncation: slot indices are kernel cap slots < 2^32.
+#[allow(clippy::cast_possible_truncation)]
+fn caller_entry(arg: u64) -> !
+{
+    let ep_slot = (arg & 0xFFFF) as u32;
+    let done_slot = ((arg >> 16) & 0xFFFF) as u32;
+    let label = (arg >> 32) & 0xFFFF;
+    let done_bit = arg >> 48;
+
+    let _ = ipc_call(ep_slot, label, 0, &[]);
+    signal_send(done_slot, done_bit).ok();
+    thread_exit()
+}

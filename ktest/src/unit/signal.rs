@@ -17,6 +17,8 @@ use crate::{ChildStack, TestContext, TestResult};
 
 // SIGNAL right only — no WAIT. Child threads only need to send.
 const RIGHTS_SIGNAL: u64 = 1 << 7;
+// WAIT right only — no SIGNAL. For testing insufficient rights on send.
+const RIGHTS_WAIT: u64 = 1 << 8;
 
 // Child stack for blocking-wait test.
 static mut CHILD_STACK: ChildStack = ChildStack::ZERO;
@@ -165,6 +167,29 @@ pub fn send_zero_bits_is_noop(_ctx: &TestContext) -> TestResult
     }
 
     cap_delete(sig).map_err(|_| "cap_delete after zero-send test failed")?;
+    Ok(())
+}
+
+// ── SYS_SIGNAL_SEND (insufficient rights) ────────────────────────────────────
+
+/// `signal_send` on a cap with only WAIT right (no SIGNAL) must fail.
+pub fn send_insufficient_rights(_ctx: &TestContext) -> TestResult
+{
+    let sig =
+        cap_create_signal().map_err(|_| "create_signal for send_insufficient_rights failed")?;
+
+    // Derive a cap with WAIT right only — no SIGNAL (send) right.
+    let wait_only =
+        cap_derive(sig, RIGHTS_WAIT).map_err(|_| "cap_derive for send_insufficient_rights failed")?;
+
+    let err = signal_send(wait_only, 0x1);
+    if err != Err(SyscallError::InsufficientRights as i64)
+    {
+        return Err("signal_send on WAIT-only cap did not return InsufficientRights");
+    }
+
+    cap_delete(wait_only).map_err(|_| "cap_delete wait_only failed")?;
+    cap_delete(sig).map_err(|_| "cap_delete sig after send_insufficient_rights failed")?;
     Ok(())
 }
 

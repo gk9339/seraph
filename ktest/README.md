@@ -55,13 +55,41 @@ concurrent signal and queue events.
 | `cap_transfer.rs` | Cap rights flow through an IPC endpoint round-trip |
 | `wait_concurrency.rs` | Wait set with concurrent signal + queue sources |
 | `memory_lifecycle.rs` | Frame split → map → protect → unmap with aspace\_query at each step |
+| `multi_caller_ipc_fifo.rs` | Three concurrent IPC callers verify FIFO send-queue ordering |
+| `cap_delegation_chain.rs` | Multi-level rights attenuation and cascaded revocation |
+| `tlb_coherency.rs` | Map/unmap cycles across CPUs to exercise TLB shootdown |
 
-### Tier 3 — `src/bench/` (placeholder)
+### Tier S — `src/stress/`
 
-Reserved for future timing and profiling infrastructure. Requires kernel-side
-timing support (e.g. a clock syscall or rdtsc/cycle-CSR exposure) before
-meaningful numbers can be collected. The module exists as a placeholder so the
-structure is clear when that work begins.
+Stress and torture tests that exercise race conditions, resource exhaustion, deep
+capability trees, and concurrent operations. **Not run by default**; enable with
+`ktest.filter=stress` (see [Command line options](#command-line-options)).
+
+| File | Scenario |
+|---|---|
+| `cap_tree_deep.rs` | 8-level derivation chain with cascading revocation |
+| `event_queue_fill_drain.rs` | Fill/drain cycles on a capacity-8 queue (ring buffer wrap-around) |
+| `thread_churn.rs` | 20 rapid thread create/destroy cycles (TCB and CSpace cleanup) |
+| `concurrent_signal.rs` | 4 threads sending distinct bits to one signal simultaneously |
+| `concurrent_ipc.rs` | 4 callers racing on one endpoint, 10 cycles (send-queue safety) |
+| `cap_revoke_under_use.rs` | Revoke root while 4 threads actively send on derived caps |
+| `concurrent_map_unmap.rs` | 4 threads mapping/unmapping distinct VAs in the same address space |
+
+### Tier 3 — `src/bench/`
+
+Cycle-accurate benchmarks using `rdtsc` (x86-64) or `csrr cycle` (RISC-V).
+Each benchmark logs min/mean/max cycle counts; no PASS/FAIL verdict.
+
+| Benchmark | What it measures |
+|---|---|
+| `null_syscall_roundtrip` | Kernel entry/exit baseline (`SYS_SYSTEM_INFO`) |
+| `ipc_round_trip` | Synchronous IPC call + reply |
+| `signal_roundtrip` | Signal ping-pong between two threads |
+| `cap_create_delete` | `cap_create_signal` + `cap_delete` cycle |
+| `mem_map_unmap` | `mem_map` + `mem_unmap` cycle |
+| `thread_lifecycle` | Full thread create → start → exit → cleanup |
+| `event_post_recv` | `event_post` + `event_recv` on a pre-created queue |
+| `wait_set_cycle` | Wait set create → add → wait → remove → delete |
 
 ## Test infrastructure
 
@@ -79,12 +107,16 @@ Defined in `src/main.rs`:
 
 ktest reads the kernel command line (passed via `boot.conf` `cmdline=`) for
 options prefixed with `ktest.`. All options are optional; defaults preserve the
-pre-shutdown behavior (halt in place).
+pre-shutdown behavior (halt in place, all tiers except stress).
 
 | Option | Values | Default | Description |
 |---|---|---|---|
 | `ktest.shutdown` | `always`, `pass`, `never` | `never` | When to shut down the system after tests complete |
 | `ktest.timeout` | decimal seconds | `0` | Seconds to wait before shutdown (allows reading output) |
+| `ktest.filter` | comma-separated tier names | `unit,integration,bench` | Which tiers to run (see below) |
+| `ktest.bench_iters` | decimal integer | `1000` | Number of iterations per benchmark |
+
+### Shutdown
 
 `ktest.shutdown=always` shuts down regardless of test outcome.
 `ktest.shutdown=pass` shuts down only if all tests passed; halts otherwise.
@@ -93,35 +125,26 @@ pre-shutdown behavior (halt in place).
 On x86-64 shutdown uses ACPI S5 (parsed from FADT/DSDT in userspace).
 On RISC-V shutdown uses SBI SRST via the `SYS_SBI_CALL` syscall.
 
-Example `boot.conf`:
+### Tier filter
+
+`ktest.filter` accepts a comma-separated list of tier names: `unit`,
+`integration`, `stress`, `bench`. When present, only the listed tiers run.
+When absent, the default is `unit,integration,bench` (stress tests are excluded
+by default because they are slower).
+
+
+### Examples
+
+Default (unit + integration + benchmarks, no shutdown):
 
 ```
 cmdline=ktest.shutdown=always ktest.timeout=3
 ```
 
-## Output format
-
-Each test produces two lines on the serial console:
+Full run including stress tests:
 
 ```
-ktest: run  cap::create_signal
-ktest: PASS cap::create_signal
-```
-
-or on failure:
-
-```
-ktest: run  cap::create_signal
-ktest: FAIL cap::create_signal
-ktest: <reason string>
-```
-
-A summary is printed at the end:
-
-```
-ktest: passed=42
-ktest: failed=0
-ktest: ALL TESTS PASSED
+cmdline=ktest.filter=unit,integration,stress,bench ktest.shutdown=pass ktest.timeout=3
 ```
 
 ---

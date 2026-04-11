@@ -29,6 +29,7 @@ mod frame_pool;
 mod framebuffer;
 mod integration;
 mod serial;
+mod stress;
 mod unit;
 
 #[cfg(target_arch = "x86_64")]
@@ -171,9 +172,9 @@ impl ChildStack
 #[repr(C, align(4096))]
 struct IpcBuf([u64; 512]);
 
-// SAFETY: ktest is single-threaded on the main test path. Child threads do not
-// call ipc_recv, so the kernel never writes the IPC buffer from child context.
-static mut IPC_BUF: IpcBuf = IpcBuf([0u64; 512]);
+// SAFETY: ktest is single-threaded on the main test path. Child threads that
+// need IPC data transfer must register this buffer via ipc_buffer_set.
+pub(crate) static mut IPC_BUF: IpcBuf = IpcBuf([0u64; 512]);
 
 // ── Entry point ───────────────────────────────────────────────────────────────
 
@@ -234,17 +235,37 @@ fn run(info_ptr: u64) -> !
         ipc_buf: ipc_buf_ptr,
     };
 
+    // Parse config early so we can gate tier execution and pass bench_iters.
+    // SAFETY: info is valid for the lifetime of the process (kernel-mapped page).
+    let config = cmdline::parse(unsafe { init_protocol::cmdline_bytes(info) });
+
     // ── Tier 1: per-syscall isolation ─────────────────────────────────────────
-    log("ktest: --- Tier 1: syscall isolation ---");
-    unit::run_all(&ctx);
+    if config.run_unit
+    {
+        log("ktest: --- Tier 1: syscall isolation ---");
+        unit::run_all(&ctx);
+    }
 
     // ── Tier 2: cross-subsystem integration ───────────────────────────────────
-    log("ktest: --- Tier 2: integration ---");
-    integration::run_all(&ctx);
+    if config.run_integration
+    {
+        log("ktest: --- Tier 2: integration ---");
+        integration::run_all(&ctx);
+    }
+
+    // ── Tier S: stress tests ─────────────────────────────────────────────────
+    if config.run_stress
+    {
+        log("ktest: --- Tier S: stress ---");
+        stress::run_all(&ctx);
+    }
 
     // ── Tier 3: benchmarks ────────────────────────────────────────────────────
-    log("ktest: --- Tier 3: benchmarks ---");
-    bench::run_all(&ctx);
+    if config.run_bench
+    {
+        log("ktest: --- Tier 3: benchmarks ---");
+        bench::run_all(&ctx, config.bench_iters);
+    }
 
     // ── Summary ───────────────────────────────────────────────────────────────
     let passed = PASS_COUNT.load(Ordering::Relaxed);
@@ -261,8 +282,6 @@ fn run(info_ptr: u64) -> !
     }
 
     // ── Shutdown ─────────────────────────────────────────────────────────────
-    // SAFETY: info is valid for the lifetime of the process (kernel-mapped page).
-    let config = cmdline::parse(unsafe { init_protocol::cmdline_bytes(info) });
     let all_passed = failed == 0;
     let should_shutdown = match config.shutdown_policy
     {

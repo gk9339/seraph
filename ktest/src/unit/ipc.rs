@@ -19,18 +19,22 @@
 
 use syscall::{
     cap_copy, cap_create_cspace, cap_create_endpoint, cap_create_signal, cap_create_thread,
-    cap_delete, ipc_buffer_set, ipc_call, ipc_recv, ipc_reply, signal_send, signal_wait,
-    thread_configure, thread_exit, thread_start, thread_yield,
+    cap_delete, cap_derive, ipc_buffer_set, ipc_call, ipc_recv, ipc_reply, signal_send,
+    signal_wait, thread_configure, thread_exit, thread_start, thread_yield,
 };
 
 use crate::{ChildStack, TestContext, TestResult};
 
 // SEND + GRANT rights (bits 4 and 6).
 const RIGHTS_SEND_GRANT: u64 = (1 << 4) | (1 << 6);
+// RECV right only (bit 4 for SEND is not set).
+const RIGHTS_RECV_ONLY: u64 = 1 << 10;
 
 // Child stacks — one per test that spawns a child.
 static mut CHILD_STACK: ChildStack = ChildStack::ZERO;
 static mut RECV_BLOCKS_STACK: ChildStack = ChildStack::ZERO;
+static mut DATA_WORDS_STACK: ChildStack = ChildStack::ZERO;
+static mut CAP_XFER_STACK: ChildStack = ChildStack::ZERO;
 
 // ── SYS_IPC_CALL / SYS_IPC_RECV / SYS_IPC_REPLY ─────────────────────────────
 
@@ -174,6 +178,172 @@ pub fn ipc_buffer_misaligned_err(_ctx: &TestContext) -> TestResult
     Ok(())
 }
 
+// ── SYS_IPC_CALL (insufficient rights) ───────────────────────────────────────
+
+/// `ipc_call` on an endpoint cap with only RECV right (no SEND) must fail.
+pub fn send_insufficient_rights_err(_ctx: &TestContext) -> TestResult
+{
+    let ep = cap_create_endpoint().map_err(|_| "cap_create_endpoint for send_rights test failed")?;
+
+    // Derive with RECV right only (bit 10), no SEND (bit 4).
+    let recv_only =
+        cap_derive(ep, RIGHTS_RECV_ONLY).map_err(|_| "cap_derive for send_rights test failed")?;
+
+    // ipc_call requires SEND right.
+    let err = ipc_call(recv_only, 0xABCD, 0, &[]);
+    if err.is_ok()
+    {
+        return Err("ipc_call on RECV-only cap should fail (InsufficientRights)");
+    }
+
+    cap_delete(recv_only).map_err(|_| "cap_delete recv_only failed")?;
+    cap_delete(ep).map_err(|_| "cap_delete ep after send_rights test failed")?;
+    Ok(())
+}
+
+// ── SYS_IPC_CALL with data words ─────────────────────────────────────────────
+
+/// IPC call with `data_count`=2 transfers data words via the IPC buffer.
+///
+/// The child writes two data words into its IPC buffer before calling.
+/// The server receives them and verifies the values.
+pub fn call_with_data_words(ctx: &TestContext) -> TestResult
+{
+    let ep = cap_create_endpoint()
+        .map_err(|_| "cap_create_endpoint for data_words test failed")?;
+    let done =
+        cap_create_signal().map_err(|_| "cap_create_signal for data_words test failed")?;
+
+    let child_cs =
+        cap_create_cspace(16).map_err(|_| "cap_create_cspace for data_words test failed")?;
+    let child_ep = cap_copy(ep, child_cs, RIGHTS_SEND_GRANT)
+        .map_err(|_| "cap_copy ep for data_words test failed")?;
+    let child_done = cap_copy(done, child_cs, 1 << 7)
+        .map_err(|_| "cap_copy done for data_words test failed")?;
+    let child_arg = u64::from(child_ep) | (u64::from(child_done) << 16);
+
+    let child_th = cap_create_thread(ctx.aspace_cap, child_cs)
+        .map_err(|_| "cap_create_thread for data_words test failed")?;
+    let stack_top = ChildStack::top(core::ptr::addr_of!(DATA_WORDS_STACK));
+    thread_configure(
+        child_th,
+        data_caller_entry as *const () as u64,
+        stack_top,
+        child_arg,
+    )
+    .map_err(|_| "thread_configure for data_words test failed")?;
+    thread_start(child_th).map_err(|_| "thread_start for data_words test failed")?;
+
+    // Server: receive the call.
+    let (label, _) =
+        ipc_recv(ep).map_err(|_| "ipc_recv for data_words test failed")?;
+    if label != 0xDA7A
+    {
+        return Err("ipc_recv returned wrong label for data_words test");
+    }
+
+    // Read data words from our IPC buffer.
+    // SAFETY: ctx.ipc_buf is the registered IPC buffer (4 KiB, page-aligned);
+    // kernel wrote data words at indices 0 and 1 during ipc_recv; volatile reads
+    // required for kernel-written data.
+    let (word0, word1) = unsafe {
+        (
+            core::ptr::read_volatile(ctx.ipc_buf),
+            core::ptr::read_volatile(ctx.ipc_buf.add(1)),
+        )
+    };
+
+    ipc_reply(0, 0, &[]).map_err(|_| "ipc_reply for data_words test failed")?;
+
+    signal_wait(done).map_err(|_| "signal_wait for data_words test failed")?;
+
+    if word0 != 0xAAAA_BBBB
+    {
+        return Err("data word[0] mismatch (expected 0xAAAABBBB)");
+    }
+    if word1 != 0xCCCC_DDDD
+    {
+        return Err("data word[1] mismatch (expected 0xCCCCDDDD)");
+    }
+
+    cap_delete(child_th).ok();
+    cap_delete(ep).ok();
+    cap_delete(done).ok();
+    cap_delete(child_cs).ok();
+    Ok(())
+}
+
+// ── SYS_IPC_CALL with cap transfer ───────────────────────────────────────────
+
+/// IPC call transferring one capability from caller to server.
+///
+/// The child creates a signal, passes it via the IPC cap transfer mechanism.
+/// The server receives it and verifies it can use the transferred cap.
+pub fn call_with_cap_transfer(ctx: &TestContext) -> TestResult
+{
+    let ep = cap_create_endpoint()
+        .map_err(|_| "cap_create_endpoint for cap_xfer test failed")?;
+    let done =
+        cap_create_signal().map_err(|_| "cap_create_signal for cap_xfer test failed")?;
+
+    let child_cs =
+        cap_create_cspace(16).map_err(|_| "cap_create_cspace for cap_xfer test failed")?;
+    let child_ep = cap_copy(ep, child_cs, RIGHTS_SEND_GRANT)
+        .map_err(|_| "cap_copy ep for cap_xfer test failed")?;
+    let child_done = cap_copy(done, child_cs, 1 << 7)
+        .map_err(|_| "cap_copy done for cap_xfer test failed")?;
+    let child_arg = u64::from(child_ep) | (u64::from(child_done) << 16);
+
+    let child_th = cap_create_thread(ctx.aspace_cap, child_cs)
+        .map_err(|_| "cap_create_thread for cap_xfer test failed")?;
+    let stack_top = ChildStack::top(core::ptr::addr_of!(CAP_XFER_STACK));
+    thread_configure(
+        child_th,
+        cap_xfer_caller_entry as *const () as u64,
+        stack_top,
+        child_arg,
+    )
+    .map_err(|_| "thread_configure for cap_xfer test failed")?;
+    thread_start(child_th).map_err(|_| "thread_start for cap_xfer test failed")?;
+
+    // Server: receive the call with cap transfer.
+    let (label, _) =
+        ipc_recv(ep).map_err(|_| "ipc_recv for cap_xfer test failed")?;
+    if label != 0xCAFE
+    {
+        return Err("ipc_recv returned wrong label for cap_xfer test");
+    }
+
+    // Read cap transfer results from IPC buffer.
+    // SAFETY: ctx.ipc_buf points to the registered IPC buffer.
+    let (cap_count, cap_indices) = unsafe { syscall::read_recv_caps(ctx.ipc_buf) };
+    if cap_count != 1
+    {
+        return Err("expected 1 transferred cap, got different count");
+    }
+
+    // The transferred cap should be a valid signal — try sending on it.
+    let transferred_sig = cap_indices[0];
+    let send_result = syscall::signal_send(transferred_sig, 0x1);
+
+    ipc_reply(0, 0, &[]).map_err(|_| "ipc_reply for cap_xfer test failed")?;
+
+    signal_wait(done).map_err(|_| "signal_wait for cap_xfer test failed")?;
+
+    if send_result.is_err()
+    {
+        return Err("transferred cap is not usable as a signal");
+    }
+
+    // Clean up the transferred cap.
+    cap_delete(transferred_sig).ok();
+    cap_delete(child_th).ok();
+    cap_delete(ep).ok();
+    cap_delete(done).ok();
+    cap_delete(child_cs).ok();
+    Ok(())
+}
+
 // ── Child thread entry ────────────────────────────────────────────────────────
 
 /// Child: calls the endpoint with label 0xCAFE, waits for reply, then signals.
@@ -228,5 +398,72 @@ fn queued_caller_entry(arg: u64) -> !
             signal_send(done_slot, 0xBAD).ok();
         }
     }
+    thread_exit()
+}
+
+/// Child for `call_with_data_words`: registers its IPC buffer, writes two data
+/// words, then calls with `data_count`=2.
+///
+/// `arg`: bits[15:0] = `ep_slot`, bits[31:16] = `done_slot`.
+fn data_caller_entry(arg: u64) -> !
+{
+    let ep_slot = (arg & 0xFFFF) as u32;
+    let done_slot = ((arg >> 16) & 0xFFFF) as u32;
+
+    // Register the shared IPC buffer for this child thread. Each thread has its
+    // own IPC buffer pointer in its TCB; the child must register before calling.
+    let buf_addr = core::ptr::addr_of!(crate::IPC_BUF) as u64;
+    if syscall::ipc_buffer_set(buf_addr).is_err()
+    {
+        signal_send(done_slot, 0xBAD).ok();
+        thread_exit()
+    }
+
+    // Write data words to the IPC buffer before calling.
+    // SAFETY: IPC_BUF is page-aligned and within our address space.
+    unsafe {
+        let buf = buf_addr as *mut u64;
+        core::ptr::write_volatile(buf, 0xAAAA_BBBB);
+        core::ptr::write_volatile(buf.add(1), 0xCCCC_DDDD);
+    }
+
+    match ipc_call(ep_slot, 0xDA7A, 2, &[])
+    {
+        Ok(_) => signal_send(done_slot, 0xDEAD).ok(),
+        Err(_) => signal_send(done_slot, 0xBAD).ok(),
+    };
+    thread_exit()
+}
+
+/// Child for `call_with_cap_transfer`: creates a signal and transfers it via IPC.
+///
+/// `arg`: bits[15:0] = `ep_slot`, bits[31:16] = `done_slot`.
+fn cap_xfer_caller_entry(arg: u64) -> !
+{
+    let ep_slot = (arg & 0xFFFF) as u32;
+    let done_slot = ((arg >> 16) & 0xFFFF) as u32;
+
+    // Register IPC buffer for cap transfer.
+    let buf_addr = core::ptr::addr_of!(crate::IPC_BUF) as u64;
+    if syscall::ipc_buffer_set(buf_addr).is_err()
+    {
+        signal_send(done_slot, 0xBAD).ok();
+        thread_exit()
+    }
+
+    // Create a signal in the child's CSpace.
+    let Ok(sig) = syscall::cap_create_signal()
+    else
+    {
+        signal_send(done_slot, 0xBAD).ok();
+        thread_exit()
+    };
+
+    // Call with 1 cap to transfer.
+    match ipc_call(ep_slot, 0xCAFE, 0, &[sig])
+    {
+        Ok(_) => signal_send(done_slot, 0xDEAD).ok(),
+        Err(_) => signal_send(done_slot, 0xBAD).ok(),
+    };
     thread_exit()
 }

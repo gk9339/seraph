@@ -15,7 +15,7 @@
 use syscall::{
     cap_copy, cap_create_aspace, cap_create_cspace, cap_create_endpoint, cap_create_signal,
     cap_create_thread, cap_delete, cap_derive, cap_insert, cap_move, cap_revoke,
-    event_queue_create, signal_send,
+    event_queue_create, signal_send, signal_wait,
 };
 use syscall_abi::SyscallError;
 
@@ -302,5 +302,115 @@ pub fn delete(_ctx: &TestContext) -> TestResult
         return Err("signal_send succeeded after cap_delete (slot not null)");
     }
 
+    Ok(())
+}
+
+// ── SYS_CAP_DELETE (idempotent) ──────────────────────────────────────────────
+
+/// `cap_delete` on an already-null slot returns Ok (idempotent).
+pub fn delete_null_slot_ok(_ctx: &TestContext) -> TestResult
+{
+    let sig = cap_create_signal().map_err(|_| "create_signal for delete_null_slot_ok failed")?;
+    cap_delete(sig).map_err(|_| "first cap_delete failed")?;
+
+    // Second delete on the now-null slot must succeed (no-op).
+    cap_delete(sig).map_err(|_| "second cap_delete on null slot returned error")?;
+    Ok(())
+}
+
+// ── SYS_CAP_INSERT negative (out of bounds) ──────────────────────────────────
+
+/// `cap_insert` with a slot index beyond the destination `CSpace` capacity must fail.
+pub fn insert_out_of_bounds_err(_ctx: &TestContext) -> TestResult
+{
+    let sig = cap_create_signal().map_err(|_| "create_signal for insert_oob test failed")?;
+    // CSpace capacity is clamped to [256, 16384]; create the smallest possible.
+    let dest_cs =
+        cap_create_cspace(16).map_err(|_| "create_cspace for insert_oob test failed")?;
+
+    // Slot 99999 is beyond any cspace capacity.
+    let err = cap_insert(sig, dest_cs, 99999, !0u64);
+    if err.is_ok()
+    {
+        return Err("cap_insert at out-of-bounds slot should fail");
+    }
+
+    cap_delete(sig).map_err(|_| "cap_delete sig after insert_oob test failed")?;
+    cap_delete(dest_cs).map_err(|_| "cap_delete dest_cs after insert_oob test failed")?;
+    Ok(())
+}
+
+// ── SYS_CAP_DERIVE (zero rights) ────────────────────────────────────────────
+
+/// `cap_derive` with `rights_mask`=0 succeeds; the derived cap cannot perform
+/// any operation.
+pub fn derive_zero_rights(_ctx: &TestContext) -> TestResult
+{
+    let sig = cap_create_signal().map_err(|_| "create_signal for derive_zero_rights failed")?;
+
+    let derived =
+        cap_derive(sig, 0).map_err(|_| "cap_derive(0) failed")?;
+
+    // Derived cap with zero rights cannot send.
+    let send_err = signal_send(derived, 0x1);
+    if send_err.is_ok()
+    {
+        return Err("signal_send on zero-rights derived cap should fail");
+    }
+
+    // Derived cap with zero rights cannot wait.
+    // Pre-set bits on the real signal so we test rights, not blocking.
+    signal_send(sig, 0x1).map_err(|_| "signal_send on root failed")?;
+    let wait_err = signal_wait(derived);
+    if wait_err.is_ok()
+    {
+        return Err("signal_wait on zero-rights derived cap should fail");
+    }
+
+    // Drain the bits.
+    signal_wait(sig).ok();
+    cap_delete(derived).map_err(|_| "cap_delete derived failed")?;
+    cap_delete(sig).map_err(|_| "cap_delete sig after derive_zero_rights failed")?;
+    Ok(())
+}
+
+// ── SYS_CAP_REVOKE negative (null slot) ──────────────────────────────────────
+
+/// `cap_revoke` on a null slot returns an error.
+pub fn revoke_null_slot_err(_ctx: &TestContext) -> TestResult
+{
+    let sig = cap_create_signal().map_err(|_| "create_signal for revoke_null_slot_err failed")?;
+    cap_delete(sig).map_err(|_| "cap_delete failed")?;
+
+    // Slot is now null; revoke must fail.
+    let err = cap_revoke(sig);
+    if err.is_ok()
+    {
+        return Err("cap_revoke on null slot should fail");
+    }
+    Ok(())
+}
+
+// ── SYS_CAP_CREATE_EVENT_Q negative ──────────────────────────────────────────
+
+/// `event_queue_create(0)` must return `InvalidArgument` (capacity must be 1-4096).
+pub fn create_event_q_zero_capacity_err(_ctx: &TestContext) -> TestResult
+{
+    let err = event_queue_create(0);
+    if err != Err(SyscallError::InvalidArgument as i64)
+    {
+        return Err("event_queue_create(0) did not return InvalidArgument");
+    }
+    Ok(())
+}
+
+/// `event_queue_create(4097)` must return `InvalidArgument` (max capacity is 4096).
+pub fn create_event_q_over_max_err(_ctx: &TestContext) -> TestResult
+{
+    let err = event_queue_create(4097);
+    if err != Err(SyscallError::InvalidArgument as i64)
+    {
+        return Err("event_queue_create(4097) did not return InvalidArgument");
+    }
     Ok(())
 }

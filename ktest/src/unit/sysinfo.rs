@@ -110,6 +110,26 @@ pub fn unknown_kind_err(_ctx: &TestContext) -> TestResult
     Ok(())
 }
 
+/// `system_info(ElapsedUs)` returns a positive, monotonically increasing value.
+pub fn elapsed_us(_ctx: &TestContext) -> TestResult
+{
+    let t0 = system_info(SystemInfoType::ElapsedUs as u64)
+        .map_err(|_| "system_info(ElapsedUs) first call failed")?;
+    if t0 == 0
+    {
+        return Err("system_info(ElapsedUs) returned 0 (expected > 0)");
+    }
+
+    // Second call must be >= first (monotonic).
+    let t1 = system_info(SystemInfoType::ElapsedUs as u64)
+        .map_err(|_| "system_info(ElapsedUs) second call failed")?;
+    if t1 < t0
+    {
+        return Err("system_info(ElapsedUs) not monotonic (second < first)");
+    }
+    Ok(())
+}
+
 /// `system_info(CpuCount)` returns ≥ 2 when the kernel was booted with SMP.
 ///
 /// Requires QEMU `-smp N` with N ≥ 2. Skips with a log message rather than

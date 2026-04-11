@@ -78,20 +78,53 @@ unsafe impl Sync for AddressSpace {}
 impl AddressSpace
 {
     /// Acquire the page table modification lock.
+    ///
+    /// On the contended path, enables interrupts while spinning so that
+    /// incoming TLB shootdown IPIs from the lock holder can be serviced.
+    /// Caller must have called `preempt_disable()` first.
     #[cfg(not(test))]
     #[inline]
     fn pt_lock(&self)
     {
-        while self
+        // Fast path: uncontended.
+        if self
             .pt_lock
-            .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
-            .is_err()
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_ok()
+        {
+            return;
+        }
+
+        // Contended path: enable interrupts while spinning so the lock
+        // holder's shootdown IPI can be delivered to this CPU. Without
+        // this, the holder spins forever on pending_cpus waiting for us
+        // to ack, while we spin forever on pt_lock waiting for the holder.
+        // Preemption is disabled by the caller, so timer_tick() will not
+        // call schedule().
+        //
+        // SAFETY: save_and_disable_interrupts is valid at ring 0 / S-mode.
+        let saved = unsafe { crate::arch::current::cpu::save_and_disable_interrupts() };
+        // SAFETY: IDT / trap vector is installed; enabling interrupts is safe
+        // at ring 0 / S-mode. Preemption is disabled by the caller.
+        unsafe { crate::arch::current::interrupts::enable() };
+
+        loop
         {
             while self.pt_lock.load(Ordering::Relaxed)
             {
                 core::hint::spin_loop();
             }
+            if self
+                .pt_lock
+                .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
+                .is_ok()
+            {
+                break;
+            }
         }
+
+        // SAFETY: restoring previously saved interrupt state.
+        unsafe { crate::arch::current::cpu::restore_interrupts(saved) };
     }
 
     /// Release the page table modification lock.

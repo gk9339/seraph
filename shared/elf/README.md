@@ -10,6 +10,28 @@ processes). No stability obligation; internal code reuse only.
 
 ---
 
+## Source Layout
+
+```
+shared/elf/
+├── Cargo.toml                  # Workspace member; no_std library
+├── README.md
+└── src/
+    └── lib.rs                  # ELF64 header validation, segment iteration
+```
+
+---
+
+## Relevant Design Documents
+
+| Document | Content |
+|---|---|
+| [docs/architecture.md](../../docs/architecture.md) | System design, init/procmgr roles |
+| [docs/boot-protocol.md](../../docs/boot-protocol.md) | Boot module format |
+| [docs/coding-standards.md](../../docs/coding-standards.md) | Formatting, naming, safety rules |
+
+---
+
 ## Summarized By
 
 None

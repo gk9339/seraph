@@ -14,6 +14,10 @@
 
 #![no_std]
 
+// cast_possible_truncation: this crate targets 64-bit only (x86-64, riscv64);
+// ELF64 u64 fields fit in usize on these platforms.
+#![allow(clippy::cast_possible_truncation)]
+
 use core::mem::size_of;
 
 // ── ELF identification constants ─────────────────────────────────────────────
@@ -263,7 +267,7 @@ pub struct LoadSegmentIter<'a>
     index: usize,
 }
 
-impl<'a> Iterator for LoadSegmentIter<'a>
+impl Iterator for LoadSegmentIter<'_>
 {
     type Item = Result<LoadSegment, ElfError>;
 

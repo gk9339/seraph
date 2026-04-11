@@ -353,6 +353,12 @@ impl CSpace
             return Err(CapError::InvalidIndex); // slot 0 is permanently null
         }
 
+        // Reject indices beyond the CSpace's maximum capacity.
+        if index as usize >= self.max_slots
+        {
+            return Err(CapError::InvalidIndex);
+        }
+
         // Ensure the page covering this index is allocated.
         let page_idx = index as usize / L2_SIZE;
         while self.directory[page_idx].is_none()

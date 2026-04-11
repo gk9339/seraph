@@ -205,29 +205,10 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
         arch::current::interrupts::init();
     }
     kprintln!("interrupts ok");
-    // Enable preemption timer.
-    //   x86-64: 10 ms — sti;hlt is atomic so the timer is only for preemption.
-    //   RISC-V: 1 ms — wfi has no atomic enable+halt, so the timer also serves
-    //           as the fallback wakeup for consumed IPIs (standard RISC-V pattern).
-    // timer::init() enables interrupts as its final step.
-    // SAFETY: IDT/GDT/interrupts initialized above; timer IRQ handler registered;
-    // called once during boot with all prerequisites met.
-    // Enable preemption timer at 10 ms period.
-    // timer::init() enables interrupts as its final step.
-    // SAFETY: IDT/GDT/interrupts initialized above; timer IRQ handler registered;
-    // called once during boot with all prerequisites met.
-    unsafe {
-        arch::current::timer::init(10_000);
-    }
-    kprintln!("timer ok");
-    // SAFETY: IDT installed and interrupts initialized above; syscall entry
-    // point registered during arch init; single-threaded boot phase.
-    unsafe {
-        arch::current::syscall::init();
-    }
-    kprintln!("syscall ok");
     // Install per-CPU GS-base (x86-64) / tp (RISC-V) for the BSP.
-    // Must be after arch init (GDT/TSS loaded) and before any current_cpu() call.
+    // Must be before timer::init() — the timer ISR calls current_cpu() which
+    // reads GS-base. Without this, a timer interrupt before init_bsp reads
+    // garbage from gs:[0].
     #[cfg(not(test))]
     // SAFETY: GDT/TSS loaded by interrupt init above; current_cpu() not yet
     // called; BSP per-CPU initialization happens once during boot.
@@ -235,6 +216,21 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
         percpu::init_bsp();
     }
     kprintln!("percpu ok");
+    // SAFETY: IDT installed and interrupts initialized above; syscall entry
+    // point registered during arch init; single-threaded boot phase.
+    unsafe {
+        arch::current::syscall::init();
+    }
+    kprintln!("syscall ok");
+    // Enable preemption timer at 1 ms period (both architectures).
+    // With TIME_SLICE_TICKS=10, this gives a 10 ms scheduling quantum.
+    // timer::init() enables interrupts as its final step.
+    // SAFETY: IDT/GDT/interrupts initialized above; percpu initialized;
+    // called once during boot with all prerequisites met.
+    unsafe {
+        arch::current::timer::init(1_000);
+    }
+    kprintln!("timer ok");
 
     // Initialize the CPU-to-APIC-ID mapping for wakeup IPIs.
     #[cfg(not(test))]
@@ -734,13 +730,13 @@ pub extern "C" fn kernel_entry_ap(cpu_id: u32, ist1_top: u64, ist2_top: u64) -> 
         arch::current::syscall::init();
     }
 
-    // 6. Start the per-CPU preemption timer.
+    // 6. Start the per-CPU preemption timer (1 ms, matching BSP).
     //    x86-64: programs the local APIC timer using the BSP's calibrated rate.
     //    RISC-V: arms the SBI timer using the BSP's stored tick period.
     // SAFETY: local APIC/interrupt delivery initialized above; timer IRQ
     // handler registered (Phase 5, BSP); per-CPU timer configuration.
     unsafe {
-        arch::current::timer::init_ap(10_000);
+        arch::current::timer::init_ap(1_000);
     }
 
     kprintln!("smp: AP {} online", cpu_id);

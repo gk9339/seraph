@@ -313,12 +313,80 @@ fn run(info_ptr: u64) -> !
 
 // ── Utilities ─────────────────────────────────────────────────────────────────
 
+/// Write a `[S.NNNNNN] ` timestamp prefix to all output channels.
+///
+/// Format matches the kernel console: `[S.NNNNNN] ` where S is whole seconds
+/// (variable width) and NNNNNN is zero-padded microseconds (6 digits).
+/// Source: `SYS_SYSTEM_INFO(ElapsedUs)` — microseconds since kernel timer init.
+fn write_timestamp()
+{
+    let us = syscall::system_info(6).unwrap_or(0);
+    let sec = us / 1_000_000;
+    let us_frac = us % 1_000_000;
+
+    // Format "[sec.uuuuuu] " into a stack buffer. Max seconds digits = 20 (u64),
+    // plus '[', '.', 6 fractional digits, ']', ' ' = 30 bytes max.
+    let mut buf = [0u8; 30];
+    let mut pos = 0usize;
+
+    buf[pos] = b'[';
+    pos += 1;
+
+    // Seconds (variable width, at least one digit).
+    let mut sec_buf = [0u8; 20];
+    let mut sec_len = 0usize;
+    let mut n = sec;
+    if n == 0
+    {
+        sec_buf[0] = b'0';
+        sec_len = 1;
+    }
+    else
+    {
+        while n > 0
+        {
+            sec_buf[sec_len] = b'0' + (n % 10) as u8;
+            n /= 10;
+            sec_len += 1;
+        }
+        sec_buf[..sec_len].reverse();
+    }
+    buf[pos..pos + sec_len].copy_from_slice(&sec_buf[..sec_len]);
+    pos += sec_len;
+
+    buf[pos] = b'.';
+    pos += 1;
+
+    // Microseconds (zero-padded to 6 digits).
+    let mut frac = us_frac;
+    for i in (0..6).rev()
+    {
+        buf[pos + i] = b'0' + (frac % 10) as u8;
+        frac /= 10;
+    }
+    pos += 6;
+
+    buf[pos] = b']';
+    pos += 1;
+    buf[pos] = b' ';
+    pos += 1;
+
+    if let Ok(s) = core::str::from_utf8(&buf[..pos])
+    {
+        serial::write_str(s);
+        framebuffer::write_str(s);
+    }
+}
+
 /// Write a string to all available output channels (serial + framebuffer).
 ///
-/// Each channel is best-effort: no-op if its initialisation failed.
+/// Each line is prefixed with a `[S.NNNNNN] ` timestamp matching the kernel
+/// console format. Each channel is best-effort: no-op if its initialisation
+/// failed.
 #[inline]
 pub fn log(msg: &str)
 {
+    write_timestamp();
     serial::write_str(msg);
     serial::write_byte(b'\n');
     framebuffer::write_str(msg);

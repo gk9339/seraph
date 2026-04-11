@@ -6,7 +6,9 @@
 //! Seraph process manager — IPC server for process lifecycle management.
 //!
 //! Receives `CREATE_PROCESS` requests via IPC, loads ELF images, creates
-//! address spaces, and starts new processes. See `procmgr/docs/ipc-interface.md`.
+//! address spaces, and prepares new processes in a suspended state. The
+//! caller injects capabilities and patches `ProcessInfo`, then calls
+//! `START_PROCESS` to begin execution. See `procmgr/docs/ipc-interface.md`.
 
 #![no_std]
 #![no_main]
@@ -26,6 +28,9 @@ const PAGE_SIZE: u64 = 0x1000;
 
 /// IPC label for `CREATE_PROCESS`.
 const LABEL_CREATE_PROCESS: u64 = 1;
+
+/// IPC label for `START_PROCESS`.
+const LABEL_START_PROCESS: u64 = 2;
 
 /// Temp VA base for mapping module frames during ELF parsing.
 const TEMP_MODULE_VA: u64 = 0x0000_0000_8000_0000; // 2 GiB
@@ -120,6 +125,12 @@ struct ProcessEntry
     aspace_cap: u32,
     cspace_cap: u32,
     thread_cap: u32,
+    /// Frame cap for the `ProcessInfo` page (retained for lifecycle management).
+    pi_frame_cap: u32,
+    /// ELF entry point virtual address (stored at create, used at start).
+    entry_point: u64,
+    /// Whether the process thread has been started.
+    started: bool,
     frames_allocated: u32,
 }
 
@@ -134,7 +145,6 @@ impl ProcessTable
 {
     const fn new() -> Self
     {
-        // const-compatible None array init.
         const NONE: Option<ProcessEntry> = None;
         Self {
             entries: [NONE; MAX_PROCESSES],
@@ -152,6 +162,14 @@ impl ProcessTable
             }
         }
         false
+    }
+
+    fn find_mut(&mut self, pid: u64) -> Option<&mut ProcessEntry>
+    {
+        self.entries
+            .iter_mut()
+            .filter_map(|s| s.as_mut())
+            .find(|e| e.pid == pid)
     }
 }
 
@@ -258,6 +276,9 @@ fn load_elf_page(
 }
 
 /// Populate a `ProcessInfo` page for a child process and map it read-only.
+///
+/// Returns the frame cap for the `ProcessInfo` page (retained for patching
+/// during `START_PROCESS`).
 // similar_names: child_aspace/child_cspace are intentionally parallel.
 #[allow(clippy::similar_names)]
 fn populate_child_info(
@@ -266,7 +287,7 @@ fn populate_child_info(
     child_aspace: u32,
     child_cspace: u32,
     child_thread: u32,
-) -> Option<()>
+) -> Option<u32>
 {
     let pi_frame = pool.alloc_page()?;
     syscall::mem_map(
@@ -293,7 +314,7 @@ fn populate_child_info(
     pi.self_aspace_cap = child_aspace_in_child;
     pi.self_cspace_cap = child_cspace_in_child;
     pi.ipc_buffer_vaddr = CHILD_IPC_BUF_VA;
-    pi.parent_endpoint_cap = 0; // No parent endpoint for Tier 1
+    pi.parent_endpoint_cap = 0;
     pi.initial_caps_base = 0;
     pi.initial_caps_count = 0;
     pi.cap_descriptor_count = 0;
@@ -307,7 +328,7 @@ fn populate_child_info(
     let pi_ro = syscall::cap_derive(pi_frame, 0x1).ok()?; // MAP only
     syscall::mem_map(pi_ro, child_aspace, PROCESS_INFO_VADDR, 0, 1, 0).ok()?;
 
-    Some(())
+    Some(pi_frame)
 }
 
 /// Map stack and IPC buffer pages into a child address space.
@@ -336,9 +357,22 @@ fn map_child_stack_and_ipc(pool: &mut FramePool, child_aspace: u32) -> Option<()
     Some(())
 }
 
+/// Result of a successful `create_process` call.
+struct CreateResult
+{
+    pid: u64,
+    /// Derived `CSpace` cap to transfer to caller (full rights).
+    cspace_for_caller: u32,
+    /// Derived `ProcessInfo` frame cap to transfer to caller (MAP\|WRITE).
+    pi_frame_for_caller: u32,
+}
+
 /// Create a process from an ELF module frame cap received via IPC.
 ///
-/// Returns the process ID on success. Records the process in `table`.
+/// The process is created in a **suspended** state — the thread is not
+/// started. The caller must inject capabilities and call `START_PROCESS`.
+///
+/// Returns the PID and derived caps for the caller on success.
 // similar_names: aspace/cspace are intentionally parallel kernel object names.
 #[allow(clippy::similar_names)]
 fn create_process(
@@ -346,7 +380,7 @@ fn create_process(
     pool: &mut FramePool,
     self_aspace: u32,
     table: &mut ProcessTable,
-) -> Option<u64>
+) -> Option<CreateResult>
 {
     let pages_before = pool.allocated_pages;
 
@@ -407,11 +441,13 @@ fn create_process(
 
     let _ = syscall::mem_unmap(self_aspace, TEMP_MODULE_VA, module_pages);
 
-    populate_child_info(pool, self_aspace, child_aspace, child_cspace, child_thread)?;
+    let pi_frame_cap =
+        populate_child_info(pool, self_aspace, child_aspace, child_cspace, child_thread)?;
     map_child_stack_and_ipc(pool, child_aspace)?;
 
-    syscall::thread_configure(child_thread, entry, PROCESS_STACK_TOP, PROCESS_INFO_VADDR).ok()?;
-    syscall::thread_start(child_thread).ok()?;
+    // Derive caps to transfer to caller. Procmgr retains originals.
+    let cspace_for_caller = syscall::cap_derive(child_cspace, !0u64).ok()?;
+    let pi_frame_for_caller = syscall::cap_derive(pi_frame_cap, 0x1 | 0x2).ok()?; // MAP | WRITE
 
     let pid = NEXT_PID.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
 
@@ -420,10 +456,43 @@ fn create_process(
         aspace_cap: child_aspace,
         cspace_cap: child_cspace,
         thread_cap: child_thread,
+        pi_frame_cap,
+        entry_point: entry,
+        started: false,
         frames_allocated: pool.allocated_pages - pages_before,
     });
 
-    Some(pid)
+    Some(CreateResult {
+        pid,
+        cspace_for_caller,
+        pi_frame_for_caller,
+    })
+}
+
+/// Start a previously created (suspended) process.
+///
+/// Calls `thread_configure` and `thread_start` on the process's thread.
+fn start_process(pid: u64, table: &mut ProcessTable) -> Result<(), u64>
+{
+    let entry = table.find_mut(pid).ok_or(4u64)?; // InvalidPid
+
+    if entry.started
+    {
+        return Err(5); // AlreadyStarted
+    }
+
+    syscall::thread_configure(
+        entry.thread_cap,
+        entry.entry_point,
+        PROCESS_STACK_TOP,
+        PROCESS_INFO_VADDR,
+    )
+    .map_err(|_| 3u64)?;
+
+    syscall::thread_start(entry.thread_cap).map_err(|_| 3u64)?;
+
+    entry.started = true;
+    Ok(())
 }
 
 // ── Entry point ──────────────────────────────────────────────────────────────
@@ -439,6 +508,9 @@ extern "Rust" fn main(startup: &StartupInfo) -> !
 
     let endpoint = startup.parent_endpoint;
     let self_aspace = startup.self_aspace;
+    // cast_ptr_alignment: IPC buffer is page-aligned (4096), exceeding u64 alignment.
+    #[allow(clippy::cast_ptr_alignment)]
+    let ipc_buf = startup.ipc_buffer.cast::<u64>();
 
     // Read initial cap slot range from the ProcessInfo page directly.
     // SAFETY: PROCESS_INFO_VADDR is mapped read-only by procmgr's creator (init).
@@ -457,42 +529,68 @@ extern "Rust" fn main(startup: &StartupInfo) -> !
             continue;
         };
 
-        if label == LABEL_CREATE_PROCESS
+        match label
         {
-            // Read transferred cap from IPC buffer.
-            // SAFETY: ipc_buffer is the registered IPC buffer page, page-aligned (4096).
-            // cast_ptr_alignment: IPC buffer is page-aligned, exceeding u64 alignment.
-            #[allow(clippy::cast_ptr_alignment)]
-            let (cap_count, caps) =
-                unsafe { syscall::read_recv_caps(startup.ipc_buffer.cast::<u64>()) };
-
-            if cap_count == 0
+            LABEL_CREATE_PROCESS =>
             {
-                // No module cap received — reply with error.
-                let _ = syscall::ipc_reply(1, 0, &[]); // label 1 = InvalidElf
-                continue;
+                // Read transferred cap from IPC buffer.
+                // SAFETY: ipc_buf is the registered IPC buffer page, page-aligned.
+                #[allow(clippy::cast_ptr_alignment)]
+                let (cap_count, caps) = unsafe { syscall::read_recv_caps(ipc_buf) };
+
+                if cap_count == 0
+                {
+                    let _ = syscall::ipc_reply(1, 0, &[]); // InvalidElf
+                    continue;
+                }
+
+                let module_frame_cap = caps[0];
+
+                match create_process(module_frame_cap, &mut pool, self_aspace, &mut table)
+                {
+                    Some(result) =>
+                    {
+                        // Write pid to IPC buffer data[0] for the reply.
+                        // SAFETY: ipc_buf is writable and page-aligned.
+                        unsafe {
+                            core::ptr::write_volatile(ipc_buf, result.pid);
+                        }
+                        let _ = syscall::ipc_reply(
+                            0,
+                            1,
+                            &[result.cspace_for_caller, result.pi_frame_for_caller],
+                        );
+                    }
+                    None =>
+                    {
+                        let _ = syscall::ipc_reply(2, 0, &[]); // OutOfMemory
+                    }
+                }
             }
 
-            let module_frame_cap = caps[0];
-
-            match create_process(module_frame_cap, &mut pool, self_aspace, &mut table)
+            LABEL_START_PROCESS =>
             {
-                Some(_pid) =>
+                // Read pid from IPC buffer data[0].
+                // SAFETY: ipc_buf is the registered IPC buffer, kernel wrote data words.
+                let pid = unsafe { core::ptr::read_volatile(ipc_buf) };
+
+                match start_process(pid, &mut table)
                 {
-                    // TODO: include pid in reply data once the kernel supports
-                    // cross-address-space IPC buffer writes during reply.
-                    let _ = syscall::ipc_reply(0, 0, &[]); // label 0 = success
-                }
-                None =>
-                {
-                    let _ = syscall::ipc_reply(2, 0, &[]); // label 2 = OutOfMemory
+                    Ok(()) =>
+                    {
+                        let _ = syscall::ipc_reply(0, 0, &[]);
+                    }
+                    Err(code) =>
+                    {
+                        let _ = syscall::ipc_reply(code, 0, &[]);
+                    }
                 }
             }
-        }
-        else
-        {
-            // Unknown label — reply with generic error.
-            let _ = syscall::ipc_reply(0xFFFF, 0, &[]);
+
+            _ =>
+            {
+                let _ = syscall::ipc_reply(0xFFFF, 0, &[]);
+            }
         }
     }
 }

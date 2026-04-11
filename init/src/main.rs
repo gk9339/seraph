@@ -41,6 +41,9 @@ const PROCMGR_IPC_BUF_VA: u64 = 0x0000_7FFF_FFFE_0000;
 /// IPC label for `CREATE_PROCESS` (per `procmgr/docs/ipc-interface.md`).
 const LABEL_CREATE_PROCESS: u64 = 1;
 
+/// IPC label for `START_PROCESS` (per `procmgr/docs/ipc-interface.md`).
+const LABEL_START_PROCESS: u64 = 2;
+
 // (IPC buffer is explicitly mapped at INIT_IPC_BUF_VA using a fresh frame.)
 
 // ── Architecture-specific code (serial output, ELF machine type) ─────────────
@@ -518,6 +521,50 @@ fn bootstrap_procmgr(info: &InitInfo, alloc: &mut FrameAlloc) -> Option<u32>
     Some(endpoint_cap)
 }
 
+// ── Two-phase service creation ───────────────────────────────────────────────
+
+/// Create a service via procmgr and immediately start it (no cap injection).
+///
+/// Used for services that don't need initial caps beyond their identity caps
+/// (e.g., vfsd in Tier 2). Services that need hardware caps (e.g., devmgr in
+/// Tier 3) should use `CREATE_PROCESS` + cap injection + `START_PROCESS`
+/// separately.
+fn create_and_start_service(
+    procmgr_ep: u32,
+    module_frame_cap: u32,
+    ipc_buf: *mut u64,
+    ok_msg: &str,
+    fail_msg: &str,
+)
+{
+    // Phase 1: CREATE_PROCESS (suspended).
+    let Ok((reply_label, _)) =
+        syscall::ipc_call(procmgr_ep, LABEL_CREATE_PROCESS, 0, &[module_frame_cap])
+    else
+    {
+        log(fail_msg);
+        return;
+    };
+    if reply_label != 0
+    {
+        log(fail_msg);
+        return;
+    }
+
+    // Read pid from IPC buffer data[0].
+    // SAFETY: IPC buffer is valid and kernel wrote reply data.
+    let pid = unsafe { core::ptr::read_volatile(ipc_buf) };
+
+    // Phase 2: START_PROCESS.
+    // SAFETY: writing pid to IPC buffer for the START_PROCESS call.
+    unsafe { core::ptr::write_volatile(ipc_buf, pid) };
+    match syscall::ipc_call(procmgr_ep, LABEL_START_PROCESS, 1, &[])
+    {
+        Ok((0, _)) => log(ok_msg),
+        _ => log(fail_msg),
+    }
+}
+
 // ── Entry point ──────────────────────────────────────────────────────────────
 
 #[no_mangle]
@@ -585,31 +632,25 @@ fn run(info_ptr: u64) -> !
     };
 
     // ── Request procmgr to create early services ──────────────────────────────
+    //
+    // CREATE_PROCESS returns the child in a suspended state. The caller injects
+    // caps and patches ProcessInfo, then calls START_PROCESS.
+
+    // SAFETY: INIT_IPC_BUF_VA is the registered IPC buffer, page-aligned.
+    #[allow(clippy::cast_ptr_alignment)]
+    let ipc_buf = INIT_IPC_BUF_VA as *mut u64;
 
     if info.module_frame_count >= 2
     {
         let devmgr_frame_cap = info.module_frame_base + 1; // Module 1 = devmgr
-
         log("init: requesting procmgr to create devmgr");
-
-        match syscall::ipc_call(endpoint_cap, LABEL_CREATE_PROCESS, 0, &[devmgr_frame_cap])
-        {
-            Ok((reply_label, _)) =>
-            {
-                if reply_label == 0
-                {
-                    log("init: devmgr created successfully");
-                }
-                else
-                {
-                    log("init: procmgr returned error creating devmgr");
-                }
-            }
-            Err(_) =>
-            {
-                log("init: IPC call to procmgr failed for devmgr");
-            }
-        }
+        create_and_start_service(
+            endpoint_cap,
+            devmgr_frame_cap,
+            ipc_buf,
+            "init: devmgr created and started",
+            "init: FAILED to create/start devmgr",
+        );
     }
     else
     {
@@ -619,27 +660,14 @@ fn run(info_ptr: u64) -> !
     if info.module_frame_count >= 3
     {
         let vfsd_frame_cap = info.module_frame_base + 2; // Module 2 = vfsd
-
         log("init: requesting procmgr to create vfsd");
-
-        match syscall::ipc_call(endpoint_cap, LABEL_CREATE_PROCESS, 0, &[vfsd_frame_cap])
-        {
-            Ok((reply_label, _)) =>
-            {
-                if reply_label == 0
-                {
-                    log("init: vfsd created successfully");
-                }
-                else
-                {
-                    log("init: procmgr returned error creating vfsd");
-                }
-            }
-            Err(_) =>
-            {
-                log("init: IPC call to procmgr failed for vfsd");
-            }
-        }
+        create_and_start_service(
+            endpoint_cap,
+            vfsd_frame_cap,
+            ipc_buf,
+            "init: vfsd created and started",
+            "init: FAILED to create/start vfsd",
+        );
     }
     else
     {

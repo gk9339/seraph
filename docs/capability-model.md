@@ -265,4 +265,4 @@ The kernel does not provide:
 
 ## Summarized By
 
-[Architecture Overview](architecture.md)
+[Architecture Overview](architecture.md), [init](../init/README.md)

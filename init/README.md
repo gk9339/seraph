@@ -7,6 +7,21 @@ manager.
 
 ---
 
+## Source Layout
+
+```
+init/
+├── Cargo.toml                  # Workspace member; no_std binary
+└── src/
+    └── main.rs                 # _start() entry point, bootstrap sequence
+```
+
+Init depends on `shared/elf` for ELF parsing (to load procmgr from its boot
+module) and `shared/syscall` for raw syscall wrappers (to create procmgr's
+process without IPC).
+
+---
+
 ## Role
 
 Init's responsibilities are strictly bounded:

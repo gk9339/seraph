@@ -1,24 +1,90 @@
 # devmgr
 
-Userspace device manager. Launched by init early in the service startup sequence,
-devmgr is responsible for platform enumeration and driver binding.
+Userspace device manager responsible for platform enumeration, hardware
+discovery, and driver binding.
 
-devmgr receives platform resource capabilities (MMIO regions, interrupt lines,
-I/O port ranges, IOMMU units) and read-only access to firmware tables (ACPI RSDP
-on x86-64, Device Tree blob on RISC-V) from init. It then:
+---
 
-- Parses firmware tables in userspace to build a complete picture of the platform
-- Enumerates PCI devices via the ECAM MMIO capability
-- Spawns driver processes from `drivers/` and delegates per-device capabilities
-- Exposes a device registry IPC service for vfs, net, and other services to query
-- Handles hotplug events on platforms that support them
+## Source Layout
 
-devmgr is privileged but not omnipotent — it holds only what init delegates to it,
-and init retains intermediary capabilities so that devmgr's authority can be revoked
-and re-delegated on restart.
+```
+devmgr/
+├── Cargo.toml
+├── README.md
+├── src/
+│   └── main.rs                     # Entry point (stub)
+└── docs/
+    ├── pci-enumeration.md          # PCI enumeration via ECAM MMIO
+    └── hotplug.md                  # Hotplug event handling
+```
 
-Full design, including the DMA safety model and the security boundary, is documented
-in [docs/device-management.md](../docs/device-management.md).
+---
+
+## Responsibilities
+
+devmgr is launched by init early in the bootstrap sequence. It is a privileged
+service but holds only the capabilities init delegates to it — init retains
+intermediary copies so that devmgr's authority can be revoked and re-delegated
+on restart. The full design is specified in
+[docs/device-management.md](../docs/device-management.md); devmgr's
+responsibilities are:
+
+- **Parse firmware tables** — read ACPI tables (x86-64) or Device Tree blob
+  (RISC-V) from read-only frame capabilities to resolve interrupt routing,
+  power domains, and the PCI hierarchy.
+- **Enumerate PCI devices** — map the ECAM MMIO region, read configuration
+  space, discover devices and BARs, resolve interrupt assignments. See
+  [`docs/pci-enumeration.md`](docs/pci-enumeration.md).
+- **Bind drivers** — match discovered devices to driver binaries in
+  [`drivers/`](../drivers/README.md), request procmgr to create driver
+  processes, and delegate per-device capabilities (MMIO, interrupt, optional
+  DMA grant and IoPortRange).
+- **Expose device registry** — maintain an IPC service that other services
+  (vfsd, netd) query to discover device endpoints after drivers are bound.
+- **Handle hotplug** — on platforms that support it, receive hotplug
+  notifications and dynamically spawn or terminate driver processes. See
+  [`docs/hotplug.md`](docs/hotplug.md).
+
+---
+
+## Capabilities Received
+
+devmgr receives the following capabilities from init during bootstrap. See
+[docs/capability-model.md](../docs/capability-model.md) for capability type
+definitions and [docs/device-management.md](../docs/device-management.md) for
+how devmgr uses them.
+
+| Capability | Rights | Purpose |
+|---|---|---|
+| MMIO Region (per platform resource) | Map | Map device register regions into driver address spaces |
+| Interrupt (per IRQ line) | — | Delegate to drivers for hardware interrupt delivery |
+| IoPortRange (x86-64, per range) | Use | Delegate to drivers requiring port I/O |
+| IommuUnit (per IOMMU) | Map | Configure IOMMU domain mappings for DMA isolation |
+| Frame (firmware tables) | Map (read-only) | Parse ACPI RSDP / Device Tree blob |
+| SchedControl | Elevate | Assign elevated priorities to latency-sensitive drivers |
+
+---
+
+## Relationship to drivers/
+
+devmgr is the sole authority for spawning and supervising device drivers.
+After discovering a device, devmgr requests procmgr to create the driver
+process and then delegates the per-device capability set via IPC. Drivers
+MUST NOT be started independently of devmgr. See
+[`drivers/README.md`](../drivers/README.md) for the driver model.
+
+---
+
+## Relevant Design Documents
+
+| Document | Content |
+|---|---|
+| [docs/device-management.md](../docs/device-management.md) | Full device management design, DMA safety, security boundary |
+| [docs/capability-model.md](../docs/capability-model.md) | Capability types, rights, delegation, revocation |
+| [docs/architecture.md](../docs/architecture.md) | Bootstrap sequence, service roles |
+| [docs/ipc-design.md](../docs/ipc-design.md) | IPC semantics, device registry endpoint |
+| [docs/boot-protocol.md](../docs/boot-protocol.md) | Platform resource descriptors, firmware table passthrough |
+| [docs/coding-standards.md](../docs/coding-standards.md) | Formatting, naming, safety rules |
 
 ---
 

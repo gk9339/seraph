@@ -11,6 +11,20 @@ all other services are started by requesting procmgr via IPC.
 
 ---
 
+## Source Layout
+
+```
+procmgr/
+├── Cargo.toml                  # Workspace member; no_std binary
+├── README.md
+├── src/
+│   └── main.rs                 # _start() entry point, process manager stub
+└── docs/
+    └── ipc-interface.md        # procmgr IPC interface specification
+```
+
+---
+
 ## Responsibilities
 
 - **ELF loading** — parse ELF images from boot modules or filesystem, allocate
@@ -28,13 +42,27 @@ all other services are started by requesting procmgr via IPC.
 
 ## IPC Interface
 
-The procmgr IPC interface is defined here. (Placeholder — full specification
-is deferred until the syscall and IPC layers are implemented.)
+The full procmgr IPC specification is in
+[`docs/ipc-interface.md`](docs/ipc-interface.md). Key operations:
 
-Key operations:
 - `create_process(elf_module_cap, initial_caps[]) → (process_handle, thread_handle)`
 - `exit_process(process_handle)`
 - `query_process(process_handle) → ProcessInfo`
+
+---
+
+## Process Startup ABI
+
+When procmgr creates a new process, it populates a `ProcessInfo` handover
+struct at a well-known virtual address in the new process's address space.
+This struct tells the process where to find its initial capabilities, IPC
+buffer, and startup context. The handover contract is defined in
+[`abi/process-abi`](../abi/process-abi/README.md).
+
+procmgr is the sole producer of `ProcessInfo` for all non-init processes.
+Init and ktest use a different handover path (kernel-produced `InitInfo` from
+[`abi/init-protocol`](../abi/init-protocol/README.md)) but share the same
+`main()` signature defined in `abi/process-abi`.
 
 ---
 
@@ -54,6 +82,7 @@ process is created without going through procmgr.
 | [docs/architecture.md](../docs/architecture.md) | System design, init/procmgr/svcmgr roles |
 | [docs/capability-model.md](../docs/capability-model.md) | CSpace, AddressSpace, Thread caps |
 | [docs/boot-protocol.md](../docs/boot-protocol.md) | Boot module format |
+| [abi/process-abi](../abi/process-abi/README.md) | Process startup ABI: ProcessInfo, StartupInfo, main() |
 | [docs/coding-standards.md](../docs/coding-standards.md) | Formatting, naming, safety rules |
 
 ---

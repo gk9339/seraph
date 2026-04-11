@@ -11,6 +11,20 @@ create a process without going through procmgr.
 
 ---
 
+## Source Layout
+
+```
+svcmgr/
+├── Cargo.toml                  # Workspace member; no_std binary
+├── README.md
+├── src/
+│   └── main.rs                 # _start() entry point, service manager stub
+└── docs/
+    └── restart-protocol.md     # Restart protocol and procmgr fallback
+```
+
+---
+
 ## Responsibilities
 
 - **Service registration** — accept service registrations from init during

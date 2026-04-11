@@ -136,4 +136,4 @@ managed by init's bootstrap sequence (for early boot) and svcmgr (for restarts).
 
 ## Summarized By
 
-[Architecture Overview](architecture.md)
+[Architecture Overview](architecture.md), [devmgr](../devmgr/README.md), [drivers](../drivers/README.md)

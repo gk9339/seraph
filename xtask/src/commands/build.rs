@@ -30,6 +30,7 @@ const MODULES: &[&str] = &["procmgr", "devmgr", "vfsd", "virtio-blk", "fatfs"];
 pub fn run(ctx: &BuildContext, args: &BuildArgs) -> Result<()>
 {
     sysroot::check_arch(ctx, args.arch)?;
+    fmt_workspace(ctx)?;
 
     match args.component
     {
@@ -362,6 +363,14 @@ fn build_modules(ctx: &BuildContext, args: &BuildArgs) -> Result<()>
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+/// Run `cargo fmt` across the entire workspace before compilation.
+fn fmt_workspace(ctx: &BuildContext) -> Result<()>
+{
+    let mut cmd = cargo(&ctx.root);
+    cmd.args(["fmt", "--all"]);
+    run_cmd(&mut cmd)
+}
 
 /// Run `cargo clippy` with the given flags and treat all warnings as errors.
 ///

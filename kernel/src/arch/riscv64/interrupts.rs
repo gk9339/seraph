@@ -100,7 +100,7 @@ unsafe fn plic_write(offset: u64, val: u32)
 #[unsafe(naked)]
 unsafe extern "C" fn trap_entry()
 {
-    // Frame layout: 34 × 8 = 272 bytes (verified by test below).
+    // Frame layout: 35 × 8 = 280 bytes (verified by test below).
     // Offsets: x1=0, x2=8, x3=16, x4=24, x5=32, …, x31=240,
     //          sepc=248, scause=256, stval=264.
     //
@@ -127,11 +127,11 @@ unsafe extern "C" fn trap_entry()
         // Restore t0: swap back so t0 = old_t0, sscratch = 0.
         "csrrw t0, sscratch, t0",
         // Allocate TrapFrame on the kernel stack.
-        "addi sp, sp, -272",
+        "addi sp, sp, -280",
         // Save t0 (x5) before reusing x5 as a temporary.
         "sd x5, 32(sp)",
-        // Record original sp (= current sp + 272, the pre-allocation value).
-        "addi x5, sp, 272",
+        // Record original sp (= current sp + 280, the pre-allocation value).
+        "addi x5, sp, 280",
         "sd x5, 8(sp)",
         // tp (x4) = &PER_CPU in S-mode; save it to the frame before common path.
         "sd x4, 24(sp)",
@@ -149,7 +149,7 @@ unsafe extern "C" fn trap_entry()
         // Load kernel stack top from PerCpuData::kernel_rsp (offset 8 from tp).
         "ld t0, 8(x4)",             // t0 = kernel_stack_top
         // Allocate TrapFrame at the top of the kernel stack.
-        "addi t0, t0, -272",        // t0 = TrapFrame base
+        "addi t0, t0, -280",        // t0 = TrapFrame base
         // Save user sp (x2) into the frame before overwriting sp.
         "sd x2, 8(t0)",
         // Switch to kernel stack.
@@ -203,18 +203,27 @@ unsafe extern "C" fn trap_entry()
         "sd   t0, 256(sp)",
         "csrr t0, stval",
         "sd   t0, 264(sp)",
+        "csrr t0, sstatus",
+        "sd   t0, 272(sp)",
 
         // ── Dispatch ────────────────────────────────────────────────────────────
         // tp (x4) = &PER_CPU throughout dispatch (compiler treats tp as reserved).
         "mv a0, sp",
         "call {dispatch}",
 
-        // ── Restore sepc ────────────────────────────────────────────────────────
+        // ── Restore sepc and sstatus ────────────────────────────────────────────
+        // Restore sstatus FIRST so SPP and SPIE match the saved trap context.
+        // Without this, a context switch during dispatch can leave sstatus.SPP
+        // from a different thread's trap, causing sret to return at the wrong
+        // privilege level.
+        "ld t0, 272(sp)",
+        "csrw sstatus, t0",
         "ld t0, 248(sp)",
         "csrw sepc, t0",
 
         // ── Restore sscratch and tp (privilege-dependent) ────────────────────────
         // Check sstatus.SPP (bit 8): 0 = return to U-mode, 1 = return to S-mode.
+        // Now reads from the restored sstatus, not the stale CSR.
         "csrr t0, sstatus",
         "srli t0, t0, 8",
         "andi t0, t0, 1",
@@ -313,10 +322,31 @@ fn handle_software_interrupt()
 
     if pending & my_bit != 0
     {
-        // TLB shootdown request: flush TLB and acknowledge.
-        // SAFETY: sfence.vma invalidates all TLB entries.
-        unsafe {
-            super::paging::flush_tlb_all();
+        // TLB shootdown request: flush the requested VA and acknowledge.
+        // Per-VA sfence.vma avoids flushing kernel text iTLB entries, which
+        // works around a QEMU TCG bug where full TLB flush (sfence.vma x0, x0)
+        // can leave the instruction TLB in an inconsistent state.
+        let va = crate::mm::tlb_shootdown::TLB_SHOOTDOWN
+            .flush_va
+            .load(core::sync::atomic::Ordering::Acquire);
+        if va == u64::MAX
+        {
+            // Full flush requested.
+            // SAFETY: sfence.vma x0, x0 flushes all TLB entries.
+            unsafe { super::paging::flush_tlb_all(); }
+        }
+        else
+        {
+            // SAFETY: sfence.vma with a specific VA flushes only that
+            // translation. The VA is a user-range address from the
+            // shootdown initiator.
+            unsafe {
+                core::arch::asm!(
+                    "sfence.vma {}, zero",
+                    in(reg) va,
+                    options(nostack, preserves_flags),
+                );
+            }
         }
 
         // Clear our bit to acknowledge completion.
@@ -358,6 +388,7 @@ unsafe fn clear_sip_ssip()
 ///
 /// Called with interrupts disabled (sstatus.SIE is cleared on trap entry).
 #[cfg(not(test))]
+#[allow(clippy::too_many_lines)]
 extern "C" fn trap_dispatch(frame: &mut TrapFrame)
 {
     let scause = frame.scause;
@@ -418,13 +449,75 @@ extern "C" fn trap_dispatch(frame: &mut TrapFrame)
     }
     else
     {
+        let cpu = super::cpu::current_cpu();
+        let satp_val: u64;
+        let sstatus_val: u64;
+        // SAFETY: reading CSRs is safe in S-mode.
+        unsafe {
+            core::arch::asm!("csrr {}, satp", out(reg) satp_val, options(nostack, nomem));
+            core::arch::asm!("csrr {}, sstatus", out(reg) sstatus_val, options(nostack, nomem));
+        }
         crate::kprintln!(
-            "EXCEPTION: scause={:#x} sepc={:#x} stval={:#x}",
-            scause,
-            frame.sepc,
-            frame.stval
+            "EXCEPTION on cpu {}: scause={:#x} sepc={:#x} stval={:#x}",
+            cpu, scause, frame.sepc, frame.stval
+        );
+        crate::kprintln!(
+            "  sstatus={:#x} satp={:#x}",
+            sstatus_val, satp_val
+        );
+        crate::kprintln!(
+            "  ra={:#x}  sp={:#x}  gp={:#x}  tp={:#x}",
+            frame.ra, frame.sp, frame.gp, frame.tp
+        );
+        crate::kprintln!(
+            "  t0={:#x}  t1={:#x}  t2={:#x}  s0={:#x}",
+            frame.t0, frame.t1, frame.t2, frame.s0
+        );
+        crate::kprintln!(
+            "  s1={:#x}  a0={:#x}  a1={:#x}  a2={:#x}",
+            frame.s1, frame.a0, frame.a1, frame.a2
+        );
+        crate::kprintln!(
+            "  a3={:#x}  a4={:#x}  a5={:#x}  a6={:#x}",
+            frame.a3, frame.a4, frame.a5, frame.a6
+        );
+        crate::kprintln!(
+            "  a7={:#x}  s2={:#x}  s3={:#x}  s4={:#x}",
+            frame.a7, frame.s2, frame.s3, frame.s4
+        );
+        crate::kprintln!(
+            "  s5={:#x}  s6={:#x}  s7={:#x}  s8={:#x}",
+            frame.s5, frame.s6, frame.s7, frame.s8
+        );
+        crate::kprintln!(
+            "  s9={:#x}  s10={:#x} s11={:#x} t3={:#x}",
+            frame.s9, frame.s10, frame.s11, frame.t3
+        );
+        crate::kprintln!(
+            "  t4={:#x}  t5={:#x}  t6={:#x}",
+            frame.t4, frame.t5, frame.t6
         );
         crate::fatal("unhandled exception");
+    }
+
+    // Sanity check: if the trap was a U-mode ecall (scause == 8), the
+    // post-dispatch sepc (ecall_pc + 4) must be in user range. A kernel
+    // address here means the TrapFrame was corrupted — sret would jump
+    // to kernel text in U-mode and immediately instruction-page-fault.
+    if frame.scause == 8 && frame.sepc >= 0xFFFF_8000_0000_0000
+    {
+        crate::kprintln!(
+            "BUG: ecall return sepc={:#x} in kernel range on cpu {}",
+            frame.sepc,
+            super::cpu::current_cpu()
+        );
+        crate::kprintln!(
+            "  ra={:#x} sp={:#x} a7={:#x}",
+            frame.ra,
+            frame.sp,
+            frame.a7
+        );
+        crate::fatal("TrapFrame sepc corruption");
     }
 }
 
@@ -823,7 +916,7 @@ mod tests
     #[test]
     fn trap_frame_size()
     {
-        // 31 regs × 8 + sepc + scause + stval = 34 × 8 = 272 bytes.
-        assert_eq!(core::mem::size_of::<TrapFrame>(), 272);
+        // 31 regs × 8 + sepc + scause + stval + sstatus = 35 × 8 = 280 bytes.
+        assert_eq!(core::mem::size_of::<TrapFrame>(), 280);
     }
 }

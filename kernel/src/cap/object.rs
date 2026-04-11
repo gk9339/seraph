@@ -604,6 +604,17 @@ pub unsafe fn dealloc_object(ptr: core::ptr::NonNull<KernelObjectHeader>)
 
             if !as_ptr.is_null()
             {
+                // No CPU should still have this address space loaded in
+                // satp/CR3 when we free its root page table. The scheduler
+                // loads the kernel root on user→idle transitions, so
+                // active_cpus reaching zero guarantees all CPUs have
+                // switched away.
+                debug_assert!(
+                    // SAFETY: as_ptr validated non-null; active_cpu_mask is an Acquire load.
+                    unsafe { (*as_ptr).active_cpu_mask() } == 0,
+                    "dealloc AddressSpace: freeing root while active_cpus != 0"
+                );
+
                 // Free the root page-table frame (one 4 KiB page, order 0).
                 // TODO: walk and free intermediate page-table frames to avoid
                 // leaking them. Requires arch-specific paging teardown logic.

@@ -635,13 +635,23 @@ pub unsafe fn schedule(requeue_current: bool)
                 (*current).magic == thread::TCB_MAGIC,
                 "schedule: current TCB magic corrupt on cpu {cpu}"
             );
-            (*current).state = ThreadState::Ready;
-            let prio = (*current).priority;
-            debug_assert!(
-                (prio as usize) < NUM_PRIORITY_LEVELS,
-                "schedule: current priority {prio} out of range on cpu {cpu}"
-            );
-            sched.enqueue(current, prio);
+            // Do not re-enqueue threads that dealloc_object has already marked
+            // Exited (or that are Stopped). Between dealloc's all-scheduler
+            // lock release and this timer-driven schedule(true), the Exited
+            // state was committed under all locks. Re-enqueuing would overwrite
+            // that state to Ready, creating a dangling run-queue entry that
+            // survives TCB deallocation — a use-after-free.
+            let cur_state = (*current).state;
+            if cur_state != ThreadState::Exited && cur_state != ThreadState::Stopped
+            {
+                (*current).state = ThreadState::Ready;
+                let prio = (*current).priority;
+                debug_assert!(
+                    (prio as usize) < NUM_PRIORITY_LEVELS,
+                    "schedule: current priority {prio} out of range on cpu {cpu}"
+                );
+                sched.enqueue(current, prio);
+            }
         }
     }
 
@@ -765,6 +775,22 @@ pub unsafe fn schedule(requeue_current: bool)
             (*cur_as).mark_inactive_on_cpu(cpu);
         }
 
+        // Case (b): user AS → kernel/idle thread.
+        // Load the kernel root page table so satp/CR3 never points to a
+        // potentially-freeable user page table root. sfence.vma is
+        // deliberately omitted: idle/kernel code accesses only kernel-
+        // mapped addresses whose translations are identical in all page
+        // tables, and avoiding the full TLB flush works around a QEMU TCG
+        // bug where sfence.vma zero, zero can leave the iTLB inconsistent.
+        // The next case-(a) activate flushes stale user entries before any
+        // user code runs.
+        if nxt_as.is_null() && !cur_as.is_null()
+        {
+            crate::arch::current::paging::write_satp_no_fence(
+                crate::mm::paging::kernel_pml4_pa(),
+            );
+        }
+
         // Case (a): full address space switch.
         if !nxt_as.is_null() && nxt_as != cur_as
         {
@@ -776,9 +802,13 @@ pub unsafe fn schedule(requeue_current: bool)
             // space setup is visible before marking active for TLB shootdown purposes.
             (*nxt_as).mark_active_on_cpu(cpu);
 
-            // Activate (load CR3/satp).
-            // SAFETY: activate loads the page table root into CR3/satp; nxt_as is
-            // a valid AddressSpace with a properly initialized root_phys field.
+            // Activate (load CR3/satp) only if satp actually changed.
+            // When returning from idle to the same address space, satp
+            // may still hold the kernel root (from case (b) above on a
+            // previous switch). In that case a full activate is required.
+            // But when satp already matches (e.g., idle transition didn't
+            // change satp, or switching between two different user ASes),
+            // the sfence.vma inside activate is essential.
             (*nxt_as).activate();
         }
     }

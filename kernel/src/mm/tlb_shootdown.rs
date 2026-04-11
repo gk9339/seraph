@@ -42,12 +42,16 @@ use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 /// TLB shootdown request state.
 ///
-/// The initiating CPU stores the target address space root and pending CPU mask,
-/// sends IPIs to all target CPUs, and spins until all acknowledge.
+/// The initiating CPU stores the target address space root, the virtual address
+/// to invalidate, and the pending CPU mask, then sends IPIs and spins until all
+/// acknowledge.
 pub struct TlbShootdownRequest
 {
     /// Physical address of root page table to flush (0 = flush all address spaces).
     pub root_phys: AtomicU64,
+
+    /// Virtual address to invalidate. `u64::MAX` means full flush.
+    pub flush_va: AtomicU64,
 
     /// Bitmask of CPUs that must acknowledge before initiator proceeds.
     /// Bit N set = CPU N must execute invlpg/sfence.vma and clear its bit.
@@ -60,6 +64,7 @@ pub struct TlbShootdownRequest
 /// `SHOOTDOWN_LOCK`).
 pub static TLB_SHOOTDOWN: TlbShootdownRequest = TlbShootdownRequest {
     root_phys: AtomicU64::new(0),
+    flush_va: AtomicU64::new(u64::MAX),
     pending_cpus: AtomicU64::new(0),
 };
 
@@ -112,7 +117,7 @@ fn shootdown_unlock()
 /// Caller must ensure `root_phys` and `cpu_mask` are valid as described above.
 // Used by AddressSpace::map_page, unmap_page, protect_page.
 #[allow(dead_code)]
-pub unsafe fn shootdown(root_phys: u64, cpu_mask: u64)
+pub unsafe fn shootdown(root_phys: u64, cpu_mask: u64, virt: u64)
 {
     if cpu_mask == 0 {
         return; // No remote CPUs active
@@ -141,8 +146,10 @@ pub unsafe fn shootdown(root_phys: u64, cpu_mask: u64)
     // Serialize access to the global shootdown state.
     shootdown_lock();
 
-    // SAFETY: Release ordering ensures root_phys and cpu_mask are visible to remote CPUs
+    // SAFETY: Release ordering ensures root_phys, flush_va, and cpu_mask
+    // are visible to remote CPUs before the IPI arrives.
     TLB_SHOOTDOWN.root_phys.store(root_phys, Ordering::Release);
+    TLB_SHOOTDOWN.flush_va.store(virt, Ordering::Release);
     TLB_SHOOTDOWN.pending_cpus.store(cpu_mask, Ordering::Release);
 
     // Fence: ensure pending_cpus is globally visible before sending IPIs.

@@ -8,10 +8,10 @@
 //! [`TrapFrame`] is saved/restored by the supervisor trap handler on every
 //! U-mode → S-mode transition (ecall, exception, or timer interrupt).
 //!
-//! ## Layout (272 bytes)
+//! ## Layout (280 bytes)
 //!
 //! Registers x1–x31 (31 × 8 = 248 bytes) + sepc (8) + scause (8) + stval (8)
-//! = 272 bytes. x0 (zero) is not stored.
+//! = 280 bytes. x0 (zero) is not stored.
 //!
 //! The layout exactly matches the push sequence in `trap_entry` in
 //! `interrupts.rs` — do not reorder fields.
@@ -27,7 +27,7 @@
 
 /// Full user-mode register snapshot for RISC-V 64-bit.
 ///
-/// `#[repr(C)]` with size 272 bytes and 8-byte alignment. Field offsets
+/// `#[repr(C)]` with size 280 bytes and 8-byte alignment. Field offsets
 /// must match the `trap_entry` store sequence; do not reorder fields.
 #[repr(C)]
 pub struct TrapFrame
@@ -74,6 +74,10 @@ pub struct TrapFrame
     pub scause: u64,
     /// Supervisor trap value (faulting address or instruction).
     pub stval: u64,
+    /// Supervisor status register at trap entry.
+    /// Saved so that SPP and SPIE are correctly restored after a context
+    /// switch, which can change sstatus on the physical CPU.
+    pub sstatus: u64,
 }
 
 // ── Syscall / IPC accessors ───────────────────────────────────────────────────
@@ -148,9 +152,9 @@ mod tests
     use core::mem::{offset_of, size_of};
 
     #[test]
-    fn trap_frame_size_is_272()
+    fn trap_frame_size_is_280()
     {
-        assert_eq!(size_of::<TrapFrame>(), 272);
+        assert_eq!(size_of::<TrapFrame>(), 280);
     }
 
     #[test]

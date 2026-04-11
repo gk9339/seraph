@@ -255,7 +255,7 @@ pub unsafe extern "C" fn return_to_user(tf: *const super::trap_frame::TrapFrame)
     //   a0=72, a1=80, a2=88, a3=96, a4=104, a5=112, a6=120, a7=128,
     //   s2=136, s3=144, s4=152, s5=160, s6=168, s7=176, s8=184,
     //   s9=192, s10=200, s11=208, t3=216, t4=224, t5=232, t6=240,
-    //   sepc=248, scause=256, stval=264
+    //   sepc=248, scause=256, stval=264, sstatus=272
     core::arch::naked_asm!(
         // Set sepc = user entry point.
         "ld t0, 248(a0)",

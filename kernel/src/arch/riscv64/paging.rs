@@ -257,12 +257,41 @@ fn walk_or_alloc(entry: &mut PageTableEntry, pool: &mut PoolState) -> Result<u64
 /// # Safety
 /// The tables must map the currently executing code and active stack.
 #[cfg(not(test))]
+/// Write `satp` to point at `root_phys` without executing `sfence.vma`.
+///
+/// Used when transitioning to idle where stale user TLB entries are harmless
+/// (kernel code only touches kernel-mapped addresses). The caller is
+/// responsible for ensuring the next user-mode transition does a proper
+/// `activate()` which includes `sfence.vma`.
+///
+/// # Safety
+/// `root_phys` must be a valid page table root with correct kernel mappings.
+#[cfg(not(test))]
+pub unsafe fn write_satp_no_fence(root_phys: u64)
+{
+    let satp = (9u64 << 60) | (root_phys >> 12);
+    // SAFETY: satp CSR write is safe in S-mode; root_phys is valid.
+    unsafe {
+        core::arch::asm!(
+            "csrw satp, {}",
+            in(reg) satp,
+            options(nostack),
+        );
+    }
+}
+
+/// Activate the given page table root by writing `satp` and flushing the TLB.
+///
+/// # Safety
+/// `root_phys` must be a valid page table root. The page tables must map
+/// the currently executing code, the kernel stack, and the direct map.
+#[cfg(not(test))]
 pub unsafe fn activate(root_phys: u64)
 {
     let satp = (9u64 << 60) | (root_phys >> 12);
     // SAFETY: satp write switches active Sv48 page table; root_phys is a valid root frame;
     // caller guarantees tables map current code, stack, and direct map. sfence.vma flushes
-    // TLB; RISC-V S-mode architecture primitive.
+    // TLB. RISC-V S-mode architecture primitive.
     unsafe {
         core::arch::asm!(
             "csrw satp, {}",

@@ -484,19 +484,21 @@ extern "C" fn ipi_tlb_shootdown_handler()
         .root_phys
         .load(core::sync::atomic::Ordering::Acquire);
 
-    // Flush TLB for the target address space
-    if root_phys == 0 {
-        // Full TLB flush (all address spaces)
-        // SAFETY: CR3 write invalidates all TLB entries
+    // Flush TLB for the target page.
+    let va = crate::mm::tlb_shootdown::TLB_SHOOTDOWN
+        .flush_va
+        .load(core::sync::atomic::Ordering::Acquire);
+    if va == u64::MAX || root_phys == 0 {
+        // Full TLB flush.
+        // SAFETY: CR3 write invalidates all non-global TLB entries.
         unsafe {
             super::paging::flush_tlb_all();
         }
     } else {
-        // Flush specific address space (if supported; fallback to full flush)
-        // x86-64 doesn't have ASID-specific flush without PCID, so flush all
-        // SAFETY: CR3 write invalidates all non-global TLB entries
+        // Per-VA flush via invlpg.
+        // SAFETY: va is a valid virtual address from the shootdown initiator.
         unsafe {
-            super::paging::flush_tlb_all();
+            super::paging::flush_page(va);
         }
     }
 

@@ -255,6 +255,21 @@ fn walk_or_alloc(entry: &mut PageTableEntry, pool: &mut PoolState) -> Result<u64
 // test builds (they compile fine on x86-64 hosts but must never be called
 // from user-space tests; the cfg gate prevents accidental invocation).
 
+/// Write CR3 without an explicit TLB flush.
+///
+/// On x86-64 without PCID, writing CR3 implicitly flushes the TLB, so this
+/// is functionally identical to [`activate`]. Provided for cross-arch API
+/// compatibility with RISC-V where `satp` can be written without `sfence.vma`.
+///
+/// # Safety
+/// `root_phys` must be a valid PML4 page table root with correct kernel mappings.
+#[cfg(not(test))]
+pub unsafe fn write_satp_no_fence(root_phys: u64)
+{
+    // SAFETY: delegated to activate; root_phys is valid per caller contract.
+    unsafe { activate(root_phys) };
+}
+
 /// Activate the page tables rooted at `root_phys` by writing CR3.
 ///
 /// The CPU immediately begins using the new tables. Any virtual address that

@@ -261,7 +261,7 @@ impl AddressSpace
             // contains only bits for online CPUs (enforced by scheduler).
             // preempt_disable() already called above.
             unsafe {
-                crate::mm::tlb_shootdown::shootdown(self.root_phys, remote_cpus);
+                crate::mm::tlb_shootdown::shootdown(self.root_phys, remote_cpus, virt);
             }
         }
 
@@ -426,7 +426,7 @@ impl AddressSpace
             // contains only bits for online CPUs (enforced by scheduler).
             // preempt_disable() already called above.
             unsafe {
-                crate::mm::tlb_shootdown::shootdown(self.root_phys, remote_cpus);
+                crate::mm::tlb_shootdown::shootdown(self.root_phys, remote_cpus, virt);
             }
         }
 
@@ -483,7 +483,7 @@ impl AddressSpace
             // contains only bits for online CPUs (enforced by scheduler).
             // preempt_disable() already called above.
             unsafe {
-                crate::mm::tlb_shootdown::shootdown(self.root_phys, remote_cpus);
+                crate::mm::tlb_shootdown::shootdown(self.root_phys, remote_cpus, virt);
             }
         }
 

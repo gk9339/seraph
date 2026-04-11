@@ -22,14 +22,12 @@ pub fn run(ctx: &TestContext) -> TestResult
     for _i in 0..ITERATIONS
     {
         let cs = cap_create_cspace(16).map_err(|_| "thread_churn: create_cspace failed")?;
-        let child_done =
-            cap_copy(done, cs, 1 << 7).map_err(|_| "thread_churn: cap_copy failed")?;
+        let child_done = cap_copy(done, cs, 1 << 7).map_err(|_| "thread_churn: cap_copy failed")?;
         let th = cap_create_thread(ctx.aspace_cap, cs)
             .map_err(|_| "thread_churn: create_thread failed")?;
 
         // SAFETY: Sequential execution; only one child uses STRESS_STACKS[0] at a time.
-        let stack_top =
-            ChildStack::top(unsafe { core::ptr::addr_of!(super::STRESS_STACKS[0]) });
+        let stack_top = ChildStack::top(unsafe { core::ptr::addr_of!(super::STRESS_STACKS[0]) });
         thread_configure(
             th,
             churn_entry as *const () as u64,

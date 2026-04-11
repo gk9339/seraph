@@ -378,13 +378,21 @@ pub unsafe fn revoke_subtree(root: SlotId) -> Vec<NonNull<KernelObjectHeader>>
     // and push its children onto the stack.
     while let Some(node_id) = stack.pop()
     {
-        let Some(cs_ptr) = crate::cap::lookup_cspace(node_id.cspace_id) else { continue };
+        let Some(cs_ptr) = crate::cap::lookup_cspace(node_id.cspace_id)
+        else
+        {
+            continue;
+        };
         // SAFETY: cspace registry lookup validated; CSpace pointer lives as long as the registry entry.
         let cs = unsafe { &mut *cs_ptr };
 
         // Snapshot derivation fields and object pointer, then clear.
         let (obj_ptr, first_child) = {
-            let Some(slot) = cs.slot_mut(node_id.index.get()) else { continue };
+            let Some(slot) = cs.slot_mut(node_id.index.get())
+            else
+            {
+                continue;
+            };
             let obj = slot.object;
             let fc = slot.deriv_first_child;
             // Release the borrow on cs so free_slot can be called below.

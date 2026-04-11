@@ -488,13 +488,16 @@ extern "C" fn ipi_tlb_shootdown_handler()
     let va = crate::mm::tlb_shootdown::TLB_SHOOTDOWN
         .flush_va
         .load(core::sync::atomic::Ordering::Acquire);
-    if va == u64::MAX || root_phys == 0 {
+    if va == u64::MAX || root_phys == 0
+    {
         // Full TLB flush.
         // SAFETY: CR3 write invalidates all non-global TLB entries.
         unsafe {
             super::paging::flush_tlb_all();
         }
-    } else {
+    }
+    else
+    {
         // Per-VA flush via invlpg.
         // SAFETY: va is a valid virtual address from the shootdown initiator.
         unsafe {
@@ -513,9 +516,7 @@ extern "C" fn ipi_tlb_shootdown_handler()
 
     // Send EOI to local APIC
     // SAFETY: Vector 250 is the TLB shootdown vector
-    super::interrupts::acknowledge(u32::from(
-        super::interrupts::IPI_VECTOR_TLB_SHOOTDOWN,
-    ));
+    super::interrupts::acknowledge(u32::from(super::interrupts::IPI_VECTOR_TLB_SHOOTDOWN));
 }
 
 /// Wakeup IPI handler (vector 251).

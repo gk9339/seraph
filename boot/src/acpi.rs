@@ -279,7 +279,14 @@ pub unsafe fn parse_acpi_resources(rsdp_addr: u64, out: &mut [PlatformResource])
                 let dsdt_addr = if table_len >= 148
                 {
                     let x_dsdt = read_u64(table, 140);
-                    if x_dsdt != 0 { x_dsdt } else { u64::from(read_u32(table, 40)) }
+                    if x_dsdt != 0
+                    {
+                        x_dsdt
+                    }
+                    else
+                    {
+                        u64::from(read_u32(table, 40))
+                    }
                 }
                 else if table_len > 44
                 {
@@ -296,7 +303,8 @@ pub unsafe fn parse_acpi_resources(rsdp_addr: u64, out: &mut [PlatformResource])
                     // SAFETY: dsdt_addr from FADT; firmware guarantees physical mapping.
                     let dsdt_hdr = unsafe { phys_slice(dsdt_addr, SDT_HDR_LEN) };
                     let dsdt_len = read_u32(dsdt_hdr, SDT_OFF_LENGTH);
-                    #[allow(clippy::cast_possible_truncation)] // SDT_HDR_LEN is 36, always fits u32.
+                    #[allow(clippy::cast_possible_truncation)]
+                    // SDT_HDR_LEN is 36, always fits u32.
                     if dsdt_len >= SDT_HDR_LEN as u32
                     {
                         push!(PlatformResource {

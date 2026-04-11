@@ -482,8 +482,8 @@ pub fn set_priority_31_err(ctx: &TestContext) -> TestResult
 pub fn affinity_bind_cpu1(ctx: &TestContext) -> TestResult
 {
     // Skip if CPU 1 does not exist.
-    let cpus = system_info(SystemInfoType::CpuCount as u64)
-        .map_err(|_| "system_info(CpuCount) failed")?;
+    let cpus =
+        system_info(SystemInfoType::CpuCount as u64).map_err(|_| "system_info(CpuCount) failed")?;
     if cpus < 2
     {
         crate::log("ktest: thread::affinity_bind_cpu1 SKIP (requires SMP)");
@@ -535,8 +535,8 @@ pub fn affinity_bind_cpu1(ctx: &TestContext) -> TestResult
 pub fn affinity_respected(ctx: &TestContext) -> TestResult
 {
     // Skip if CPU 1 does not exist.
-    let cpus = system_info(SystemInfoType::CpuCount as u64)
-        .map_err(|_| "system_info(CpuCount) failed")?;
+    let cpus =
+        system_info(SystemInfoType::CpuCount as u64).map_err(|_| "system_info(CpuCount) failed")?;
     if cpus < 2
     {
         crate::log("ktest: thread::affinity_respected SKIP (requires SMP)");
@@ -590,8 +590,8 @@ pub fn affinity_respected(ctx: &TestContext) -> TestResult
 pub fn default_affinity_bsp(ctx: &TestContext) -> TestResult
 {
     // Skip if CPU 1 does not exist.
-    let cpus = system_info(SystemInfoType::CpuCount as u64)
-        .map_err(|_| "system_info(CpuCount) failed")?;
+    let cpus =
+        system_info(SystemInfoType::CpuCount as u64).map_err(|_| "system_info(CpuCount) failed")?;
     if cpus < 2
     {
         crate::log("ktest: thread::default_affinity_bsp SKIP (requires SMP)");

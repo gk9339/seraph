@@ -74,8 +74,10 @@ pub fn mmio_map(ctx: &TestContext) -> TestResult
     {
         match syscall::mmio_map(ctx.aspace_cap, slot, MMIO_TEST_VA, 0)
         {
-            Err(e) if e == SyscallError::InvalidCapability as i64 => {}
-            Err(_) => {} // Wrong type or other error — keep scanning.
+            Err(e) if e == SyscallError::InvalidCapability as i64 =>
+            {}
+            Err(_) =>
+            {} // Wrong type or other error — keep scanning.
             Ok(()) =>
             {
                 let phys = aspace_query(ctx.aspace_cap, MMIO_TEST_VA)
@@ -108,8 +110,10 @@ pub fn irq_register_ack(ctx: &TestContext) -> TestResult
     {
         match irq_register(slot, irq_sig)
         {
-            Err(e) if e == SyscallError::InvalidCapability as i64 => {}
-            Err(_) => {}
+            Err(e) if e == SyscallError::InvalidCapability as i64 =>
+            {}
+            Err(_) =>
+            {}
             Ok(()) =>
             {
                 irq_ack(slot).map_err(|_| "irq_ack failed")?;
@@ -160,8 +164,10 @@ pub fn ioport_bind(ctx: &TestContext) -> TestResult
         {
             match syscall::ioport_bind(th, slot)
             {
-                Err(e) if e == SyscallError::InvalidCapability as i64 => {}
-                Err(_) => {}
+                Err(e) if e == SyscallError::InvalidCapability as i64 =>
+                {}
+                Err(_) =>
+                {}
                 Ok(()) =>
                 {
                     syscall::cap_delete(th).ok();

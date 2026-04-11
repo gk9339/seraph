@@ -147,7 +147,13 @@ fn arch_setup_x86(args: &mut Vec<String>, run_args: &RunArgs) -> Result<ArchSetu
             )
         })?;
 
-    args.extend(["-machine".into(), "q35".into(), "-enable-kvm".into(), "-cpu".into(), "host".into()]);
+    args.extend([
+        "-machine".into(),
+        "q35".into(),
+        "-enable-kvm".into(),
+        "-cpu".into(),
+        "host".into(),
+    ]);
 
     args.extend([
         "-drive".into(),

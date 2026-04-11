@@ -165,29 +165,26 @@ pub unsafe extern "C" fn switch(
         "sd s9,    88(a0)",
         "sd s10,   96(a0)",
         "sd s11,  104(a0)",
-
         // ── Signal save complete (Release) ────────────────────────────────
         // Set context_saved = 1 so a remote CPU spinning in schedule() can
         // proceed to load this thread's SavedState. The Release fence
         // ensures all prior stores (the register saves above) are globally
         // visible before the flag write.
-        "beqz a2, 1f",             // skip if save_flag is null (boot path)
+        "beqz a2, 1f", // skip if save_flag is null (boot path)
         "li   t0, 1",
-        "fence rw, w",             // Release fence: order saves before flag
-        "sw   t0, 0(a2)",          // *save_flag = 1
+        "fence rw, w",    // Release fence: order saves before flag
+        "sw   t0, 0(a2)", // *save_flag = 1
         "1:",
-
         // ── Release scheduler lock ────────────────────────────────────────
         // Advance now_serving (offset 4 in Spinlock) so other CPUs can
         // acquire this CPU's scheduler lock. Uses fence + plain store
         // since we only need Release ordering and the lock protocol
         // guarantees single-writer (only the holder advances now_serving).
-        "fence rw, w",               // Release fence: order saves before unlock
-        "addi a3, a3, 4",            // a3 = &now_serving
-        "lw   t0, 0(a3)",            // t0 = now_serving
-        "addi t0, t0, 1",            // t0 += 1
-        "sw   t0, 0(a3)",            // now_serving = t0 + 1
-
+        "fence rw, w",    // Release fence: order saves before unlock
+        "addi a3, a3, 4", // a3 = &now_serving
+        "lw   t0, 0(a3)", // t0 = now_serving
+        "addi t0, t0, 1", // t0 += 1
+        "sw   t0, 0(a3)", // now_serving = t0 + 1
         // ── Restore next thread from *a1 ──────────────────────────────────
         "ld ra,     8(a1)", // return address (or entry function)
         "ld sp,     0(a1)",

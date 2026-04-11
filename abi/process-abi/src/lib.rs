@@ -119,7 +119,6 @@ pub struct ProcessInfo
     pub version: u32,
 
     // ── Process identity ─────────────────────────────────────────────
-
     /// `CSpace` slot of the process's own Thread capability (Control right).
     pub self_thread_cap: u32,
 
@@ -130,7 +129,6 @@ pub struct ProcessInfo
     pub self_cspace_cap: u32,
 
     // ── IPC ──────────────────────────────────────────────────────────
-
     /// Virtual address of the pre-mapped IPC buffer page.
     ///
     /// Every thread requires a registered IPC buffer for extended message
@@ -145,7 +143,6 @@ pub struct ProcessInfo
     pub parent_endpoint_cap: u32,
 
     // ── Initial capabilities ─────────────────────────────────────────
-
     /// First `CSpace` slot containing service-specific initial capabilities.
     pub initial_caps_base: u32,
 
@@ -160,7 +157,6 @@ pub struct ProcessInfo
     pub cap_descriptors_offset: u32,
 
     // ── Startup message ──────────────────────────────────────────────
-
     /// Byte offset from the start of this struct to the startup message.
     /// Zero if no startup message is present.
     pub startup_message_offset: u32,
@@ -233,7 +229,9 @@ pub unsafe fn cap_descriptors(info: &ProcessInfo) -> &[CapDescriptor]
     // alignment (8-byte).
     #[allow(clippy::cast_ptr_alignment)]
     unsafe {
-        let ptr = base.add(info.cap_descriptors_offset as usize).cast::<CapDescriptor>();
+        let ptr = base
+            .add(info.cap_descriptors_offset as usize)
+            .cast::<CapDescriptor>();
         core::slice::from_raw_parts(ptr, info.cap_descriptor_count as usize)
     }
 }

@@ -183,7 +183,8 @@ pub fn ipc_buffer_misaligned_err(_ctx: &TestContext) -> TestResult
 /// `ipc_call` on an endpoint cap with only RECV right (no SEND) must fail.
 pub fn send_insufficient_rights_err(_ctx: &TestContext) -> TestResult
 {
-    let ep = cap_create_endpoint().map_err(|_| "cap_create_endpoint for send_rights test failed")?;
+    let ep =
+        cap_create_endpoint().map_err(|_| "cap_create_endpoint for send_rights test failed")?;
 
     // Derive with RECV right only (bit 10), no SEND (bit 4).
     let recv_only =
@@ -209,17 +210,15 @@ pub fn send_insufficient_rights_err(_ctx: &TestContext) -> TestResult
 /// The server receives them and verifies the values.
 pub fn call_with_data_words(ctx: &TestContext) -> TestResult
 {
-    let ep = cap_create_endpoint()
-        .map_err(|_| "cap_create_endpoint for data_words test failed")?;
-    let done =
-        cap_create_signal().map_err(|_| "cap_create_signal for data_words test failed")?;
+    let ep = cap_create_endpoint().map_err(|_| "cap_create_endpoint for data_words test failed")?;
+    let done = cap_create_signal().map_err(|_| "cap_create_signal for data_words test failed")?;
 
     let child_cs =
         cap_create_cspace(16).map_err(|_| "cap_create_cspace for data_words test failed")?;
     let child_ep = cap_copy(ep, child_cs, RIGHTS_SEND_GRANT)
         .map_err(|_| "cap_copy ep for data_words test failed")?;
-    let child_done = cap_copy(done, child_cs, 1 << 7)
-        .map_err(|_| "cap_copy done for data_words test failed")?;
+    let child_done =
+        cap_copy(done, child_cs, 1 << 7).map_err(|_| "cap_copy done for data_words test failed")?;
     let child_arg = u64::from(child_ep) | (u64::from(child_done) << 16);
 
     let child_th = cap_create_thread(ctx.aspace_cap, child_cs)
@@ -235,8 +234,7 @@ pub fn call_with_data_words(ctx: &TestContext) -> TestResult
     thread_start(child_th).map_err(|_| "thread_start for data_words test failed")?;
 
     // Server: receive the call.
-    let (label, _) =
-        ipc_recv(ep).map_err(|_| "ipc_recv for data_words test failed")?;
+    let (label, _) = ipc_recv(ep).map_err(|_| "ipc_recv for data_words test failed")?;
     if label != 0xDA7A
     {
         return Err("ipc_recv returned wrong label for data_words test");
@@ -281,17 +279,15 @@ pub fn call_with_data_words(ctx: &TestContext) -> TestResult
 /// The server receives it and verifies it can use the transferred cap.
 pub fn call_with_cap_transfer(ctx: &TestContext) -> TestResult
 {
-    let ep = cap_create_endpoint()
-        .map_err(|_| "cap_create_endpoint for cap_xfer test failed")?;
-    let done =
-        cap_create_signal().map_err(|_| "cap_create_signal for cap_xfer test failed")?;
+    let ep = cap_create_endpoint().map_err(|_| "cap_create_endpoint for cap_xfer test failed")?;
+    let done = cap_create_signal().map_err(|_| "cap_create_signal for cap_xfer test failed")?;
 
     let child_cs =
         cap_create_cspace(16).map_err(|_| "cap_create_cspace for cap_xfer test failed")?;
     let child_ep = cap_copy(ep, child_cs, RIGHTS_SEND_GRANT)
         .map_err(|_| "cap_copy ep for cap_xfer test failed")?;
-    let child_done = cap_copy(done, child_cs, 1 << 7)
-        .map_err(|_| "cap_copy done for cap_xfer test failed")?;
+    let child_done =
+        cap_copy(done, child_cs, 1 << 7).map_err(|_| "cap_copy done for cap_xfer test failed")?;
     let child_arg = u64::from(child_ep) | (u64::from(child_done) << 16);
 
     let child_th = cap_create_thread(ctx.aspace_cap, child_cs)
@@ -307,8 +303,7 @@ pub fn call_with_cap_transfer(ctx: &TestContext) -> TestResult
     thread_start(child_th).map_err(|_| "thread_start for cap_xfer test failed")?;
 
     // Server: receive the call with cap transfer.
-    let (label, _) =
-        ipc_recv(ep).map_err(|_| "ipc_recv for cap_xfer test failed")?;
+    let (label, _) = ipc_recv(ep).map_err(|_| "ipc_recv for cap_xfer test failed")?;
     if label != 0xCAFE
     {
         return Err("ipc_recv returned wrong label for cap_xfer test");

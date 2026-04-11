@@ -291,16 +291,24 @@ impl CSpace
         if self.free_head == Some(target)
         {
             // Target is the head: pop it.
-            let next = self.slot(target).and_then(super::slot::CapabilitySlot::next_free);
+            let next = self
+                .slot(target)
+                .and_then(super::slot::CapabilitySlot::next_free);
             self.free_head = next;
             self.free_count -= 1;
             return true;
         }
         // Walk the list looking for the predecessor.
-        let Some(mut cur_idx) = self.free_head else { return false };
+        let Some(mut cur_idx) = self.free_head
+        else
+        {
+            return false;
+        };
         loop
         {
-            let Some(next_idx) = self.slot(cur_idx).and_then(super::slot::CapabilitySlot::next_free)
+            let Some(next_idx) = self
+                .slot(cur_idx)
+                .and_then(super::slot::CapabilitySlot::next_free)
             else
             {
                 return false;
@@ -308,7 +316,9 @@ impl CSpace
             if next_idx == target
             {
                 // Splice out: cur.next = target.next
-                let after = self.slot(target).and_then(super::slot::CapabilitySlot::next_free);
+                let after = self
+                    .slot(target)
+                    .and_then(super::slot::CapabilitySlot::next_free);
                 // SAFETY: We validated cur_idx exists when getting next_idx at line 299
                 #[allow(clippy::unwrap_used)]
                 self.slot_mut(cur_idx).unwrap().set_next_free(after);

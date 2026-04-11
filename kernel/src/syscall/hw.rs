@@ -63,7 +63,9 @@ pub fn sys_irq_ack(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         let obj = irq_slot.object.ok_or(SyscallError::InvalidCapability)?;
         // SAFETY: tag confirmed Interrupt; object was allocated as Box<InterruptObject>.
         #[allow(clippy::cast_ptr_alignment)]
-        unsafe { (*obj.as_ptr().cast::<InterruptObject>()).irq_id }
+        unsafe {
+            (*obj.as_ptr().cast::<InterruptObject>()).irq_id
+        }
     };
 
     // Unmask at the interrupt controller to re-enable delivery.
@@ -122,7 +124,9 @@ pub fn sys_irq_register(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         let obj = irq_slot.object.ok_or(SyscallError::InvalidCapability)?;
         // SAFETY: tag confirmed Interrupt; object was allocated as Box<InterruptObject>.
         #[allow(clippy::cast_ptr_alignment)]
-        unsafe { (*obj.as_ptr().cast::<InterruptObject>()).irq_id }
+        unsafe {
+            (*obj.as_ptr().cast::<InterruptObject>()).irq_id
+        }
     };
 
     // Resolve Signal cap.
@@ -133,7 +137,9 @@ pub fn sys_irq_register(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         let obj = sig_slot.object.ok_or(SyscallError::InvalidCapability)?;
         // SAFETY: tag confirmed Signal; object was allocated as Box<SignalObject>.
         #[allow(clippy::cast_ptr_alignment)]
-        unsafe { (*obj.as_ptr().cast::<SignalObject>()).state }
+        unsafe {
+            (*obj.as_ptr().cast::<SignalObject>()).state
+        }
     };
 
     // Register the signal in the IRQ routing table.
@@ -256,7 +262,9 @@ pub fn sys_mmio_map(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         let obj = as_slot.object.ok_or(SyscallError::InvalidCapability)?;
         // SAFETY: tag confirmed AddressSpace; object was allocated as Box<AddressSpaceObject>.
         #[allow(clippy::cast_ptr_alignment)]
-        unsafe { (*obj.as_ptr().cast::<AddressSpaceObject>()).address_space }
+        unsafe {
+            (*obj.as_ptr().cast::<AddressSpaceObject>()).address_space
+        }
     };
 
     // MMIO mappings are never executable.
@@ -349,7 +357,9 @@ pub fn sys_ioport_bind(tf: &mut TrapFrame) -> Result<u64, SyscallError>
             let obj = th_slot.object.ok_or(SyscallError::InvalidCapability)?;
             // SAFETY: tag confirmed Thread; object was allocated as Box<ThreadObject>.
             #[allow(clippy::cast_ptr_alignment)]
-            unsafe { (*obj.as_ptr().cast::<ThreadObject>()).tcb }
+            unsafe {
+                (*obj.as_ptr().cast::<ThreadObject>()).tcb
+            }
         };
         if target_tcb.is_null()
         {
@@ -381,10 +391,21 @@ pub fn sys_ioport_bind(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 
         // Clear the bits for the requested port range (0 = allow).
         // size == 0 encodes the full 64K range (u16 cannot hold 65536).
-        let effective_size = if port_size == 0 { 65536u32 } else { u32::from(port_size) };
+        let effective_size = if port_size == 0
+        {
+            65536u32
+        }
+        else
+        {
+            u32::from(port_size)
+        };
         // SAFETY: iopb is non-null after the allocation above; target_tcb validated.
         unsafe {
-            gdt::permit_port_range_u32(&mut *(*target_tcb).iopb, u32::from(port_base), effective_size);
+            gdt::permit_port_range_u32(
+                &mut *(*target_tcb).iopb,
+                u32::from(port_base),
+                effective_size,
+            );
         }
 
         // If binding to the currently running thread, reload the TSS IOPB
@@ -454,7 +475,9 @@ pub fn sys_dma_grant(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         let obj = frame_slot.object.ok_or(SyscallError::InvalidCapability)?;
         // SAFETY: tag confirmed Frame; object was allocated as Box<FrameObject>.
         #[allow(clippy::cast_ptr_alignment)]
-        unsafe { (*obj.as_ptr().cast::<FrameObject>()).base }
+        unsafe {
+            (*obj.as_ptr().cast::<FrameObject>()).base
+        }
     };
 
     // No IOMMU present: require explicit unsafe acknowledgment.

@@ -267,7 +267,8 @@ impl PerCpuScheduler
         }
         if self.queues[priority].is_empty()
         {
-            self.non_empty.fetch_and(!(1 << priority), Ordering::Relaxed);
+            self.non_empty
+                .fetch_and(!(1 << priority), Ordering::Relaxed);
         }
         self.decrement_load();
         tcb
@@ -484,7 +485,10 @@ mod tests
         sched.enqueue(pa, 7);
         assert_eq!(sched.non_empty.load(Ordering::Relaxed), 1 << 7);
         sched.enqueue(pa, 15);
-        assert_eq!(sched.non_empty.load(Ordering::Relaxed), (1 << 7) | (1 << 15));
+        assert_eq!(
+            sched.non_empty.load(Ordering::Relaxed),
+            (1 << 7) | (1 << 15)
+        );
     }
 
     #[test]

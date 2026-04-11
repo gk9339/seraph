@@ -37,7 +37,9 @@ fn descriptors(info: &InitInfo) -> &[CapDescriptor]
     // immediately follows it at a 4-byte-aligned offset.
     #[allow(clippy::cast_ptr_alignment)]
     unsafe {
-        let ptr = base.add(info.cap_descriptors_offset as usize).cast::<CapDescriptor>();
+        let ptr = base
+            .add(info.cap_descriptors_offset as usize)
+            .cast::<CapDescriptor>();
         core::slice::from_raw_parts(ptr, info.cap_descriptor_count as usize)
     }
 }
@@ -117,7 +119,7 @@ mod arch
         unsafe {
             outb(COM1 + 1, 0x00); // disable all interrupts
             outb(COM1 + 3, 0x80); // DLAB = 1
-            outb(COM1, 0x01);     // divisor low  = 1 → 115200 baud
+            outb(COM1, 0x01); // divisor low  = 1 → 115200 baud
             outb(COM1 + 1, 0x00); // divisor high = 0
             outb(COM1 + 3, 0x03); // DLAB = 0, 8N1
             outb(COM1 + 2, 0xC7); // enable FIFO, clear, 14-byte threshold
@@ -269,11 +271,15 @@ pub unsafe fn init(info: &InitInfo, aspace_cap: u32, thread_cap: u32)
 {
     #[cfg(target_arch = "x86_64")]
     // SAFETY: caller guarantees at-most-once, single-threaded.
-    unsafe { arch::init(info, thread_cap) };
+    unsafe {
+        arch::init(info, thread_cap);
+    }
 
     #[cfg(target_arch = "riscv64")]
     // SAFETY: caller guarantees at-most-once, single-threaded.
-    unsafe { arch::init(info, aspace_cap) };
+    unsafe {
+        arch::init(info, aspace_cap);
+    }
 
     // Suppress unused-variable warnings on the arch that doesn't use each cap.
     #[cfg(target_arch = "x86_64")]

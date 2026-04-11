@@ -325,8 +325,7 @@ pub fn insert_out_of_bounds_err(_ctx: &TestContext) -> TestResult
 {
     let sig = cap_create_signal().map_err(|_| "create_signal for insert_oob test failed")?;
     // CSpace capacity is clamped to [256, 16384]; create the smallest possible.
-    let dest_cs =
-        cap_create_cspace(16).map_err(|_| "create_cspace for insert_oob test failed")?;
+    let dest_cs = cap_create_cspace(16).map_err(|_| "create_cspace for insert_oob test failed")?;
 
     // Slot 99999 is beyond any cspace capacity.
     let err = cap_insert(sig, dest_cs, 99999, !0u64);
@@ -348,8 +347,7 @@ pub fn derive_zero_rights(_ctx: &TestContext) -> TestResult
 {
     let sig = cap_create_signal().map_err(|_| "create_signal for derive_zero_rights failed")?;
 
-    let derived =
-        cap_derive(sig, 0).map_err(|_| "cap_derive(0) failed")?;
+    let derived = cap_derive(sig, 0).map_err(|_| "cap_derive(0) failed")?;
 
     // Derived cap with zero rights cannot send.
     let send_err = signal_send(derived, 0x1);

@@ -333,7 +333,9 @@ fn handle_software_interrupt()
         {
             // Full flush requested.
             // SAFETY: sfence.vma x0, x0 flushes all TLB entries.
-            unsafe { super::paging::flush_tlb_all(); }
+            unsafe {
+                super::paging::flush_tlb_all();
+            }
         }
         else
         {
@@ -427,7 +429,6 @@ extern "C" fn trap_dispatch(frame: &mut TrapFrame)
                 crate::fatal("unhandled interrupt");
             }
         }
-
     }
     else if cause_code == 8
     {
@@ -459,43 +460,66 @@ extern "C" fn trap_dispatch(frame: &mut TrapFrame)
         }
         crate::kprintln!(
             "EXCEPTION on cpu {}: scause={:#x} sepc={:#x} stval={:#x}",
-            cpu, scause, frame.sepc, frame.stval
+            cpu,
+            scause,
+            frame.sepc,
+            frame.stval
         );
-        crate::kprintln!(
-            "  sstatus={:#x} satp={:#x}",
-            sstatus_val, satp_val
-        );
+        crate::kprintln!("  sstatus={:#x} satp={:#x}", sstatus_val, satp_val);
         crate::kprintln!(
             "  ra={:#x}  sp={:#x}  gp={:#x}  tp={:#x}",
-            frame.ra, frame.sp, frame.gp, frame.tp
+            frame.ra,
+            frame.sp,
+            frame.gp,
+            frame.tp
         );
         crate::kprintln!(
             "  t0={:#x}  t1={:#x}  t2={:#x}  s0={:#x}",
-            frame.t0, frame.t1, frame.t2, frame.s0
+            frame.t0,
+            frame.t1,
+            frame.t2,
+            frame.s0
         );
         crate::kprintln!(
             "  s1={:#x}  a0={:#x}  a1={:#x}  a2={:#x}",
-            frame.s1, frame.a0, frame.a1, frame.a2
+            frame.s1,
+            frame.a0,
+            frame.a1,
+            frame.a2
         );
         crate::kprintln!(
             "  a3={:#x}  a4={:#x}  a5={:#x}  a6={:#x}",
-            frame.a3, frame.a4, frame.a5, frame.a6
+            frame.a3,
+            frame.a4,
+            frame.a5,
+            frame.a6
         );
         crate::kprintln!(
             "  a7={:#x}  s2={:#x}  s3={:#x}  s4={:#x}",
-            frame.a7, frame.s2, frame.s3, frame.s4
+            frame.a7,
+            frame.s2,
+            frame.s3,
+            frame.s4
         );
         crate::kprintln!(
             "  s5={:#x}  s6={:#x}  s7={:#x}  s8={:#x}",
-            frame.s5, frame.s6, frame.s7, frame.s8
+            frame.s5,
+            frame.s6,
+            frame.s7,
+            frame.s8
         );
         crate::kprintln!(
             "  s9={:#x}  s10={:#x} s11={:#x} t3={:#x}",
-            frame.s9, frame.s10, frame.s11, frame.t3
+            frame.s9,
+            frame.s10,
+            frame.s11,
+            frame.t3
         );
         crate::kprintln!(
             "  t4={:#x}  t5={:#x}  t6={:#x}",
-            frame.t4, frame.t5, frame.t6
+            frame.t4,
+            frame.t5,
+            frame.t6
         );
         crate::fatal("unhandled exception");
     }
@@ -511,12 +535,7 @@ extern "C" fn trap_dispatch(frame: &mut TrapFrame)
             frame.sepc,
             super::cpu::current_cpu()
         );
-        crate::kprintln!(
-            "  ra={:#x} sp={:#x} a7={:#x}",
-            frame.ra,
-            frame.sp,
-            frame.a7
-        );
+        crate::kprintln!("  ra={:#x} sp={:#x} a7={:#x}", frame.ra, frame.sp, frame.a7);
         crate::fatal("TrapFrame sepc corruption");
     }
 }

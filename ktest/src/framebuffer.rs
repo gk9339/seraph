@@ -60,7 +60,9 @@ fn descriptors(info: &InitInfo) -> &[CapDescriptor]
     // a 4-byte-aligned offset.
     #[allow(clippy::cast_ptr_alignment)]
     unsafe {
-        let ptr = base.add(info.cap_descriptors_offset as usize).cast::<CapDescriptor>();
+        let ptr = base
+            .add(info.cap_descriptors_offset as usize)
+            .cast::<CapDescriptor>();
         core::slice::from_raw_parts(ptr, info.cap_descriptor_count as usize)
     }
 }
@@ -295,7 +297,11 @@ unsafe fn scroll()
 {
     // SAFETY: single-threaded; STATE fields are valid after init.
     let (base, stride, max_rows) = unsafe {
-        (STATE.base as *mut u8, STATE.stride as usize, STATE.max_rows as usize)
+        (
+            STATE.base as *mut u8,
+            STATE.stride as usize,
+            STATE.max_rows as usize,
+        )
     };
     let row_bytes = GLYPH_HEIGHT as usize * stride;
 

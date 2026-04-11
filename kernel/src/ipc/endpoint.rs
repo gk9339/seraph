@@ -187,7 +187,9 @@ pub unsafe fn endpoint_call(
         // See signal.rs signal_wait for the full rationale.
         // SAFETY: caller validated by syscall layer; context_saved is AtomicU32.
         unsafe {
-            (*caller).context_saved.store(0, core::sync::atomic::Ordering::Relaxed);
+            (*caller)
+                .context_saved
+                .store(0, core::sync::atomic::Ordering::Relaxed);
         }
         // SAFETY: caller validated by syscall layer.
         unsafe {
@@ -206,7 +208,9 @@ pub unsafe fn endpoint_call(
     // See signal.rs signal_wait for the full rationale.
     // SAFETY: caller validated by syscall layer; context_saved is AtomicU32.
     unsafe {
-        (*caller).context_saved.store(0, core::sync::atomic::Ordering::Relaxed);
+        (*caller)
+            .context_saved
+            .store(0, core::sync::atomic::Ordering::Relaxed);
     }
     // SAFETY: caller validated by syscall layer.
     unsafe {
@@ -215,7 +219,7 @@ pub unsafe fn endpoint_call(
         (*caller).ipc_state = IpcThreadState::BlockedOnSend;
         #[allow(clippy::cast_ptr_alignment)]
         {
-        (*caller).blocked_on_object = core::ptr::from_mut::<EndpointState>(ep).cast::<u8>();
+            (*caller).blocked_on_object = core::ptr::from_mut::<EndpointState>(ep).cast::<u8>();
         }
         enqueue(&mut ep.send_head, &mut ep.send_tail, caller);
     }
@@ -274,7 +278,9 @@ pub unsafe fn endpoint_recv(
     // See signal.rs signal_wait for the full rationale.
     // SAFETY: server validated by syscall layer; context_saved is AtomicU32.
     unsafe {
-        (*server).context_saved.store(0, core::sync::atomic::Ordering::Relaxed);
+        (*server)
+            .context_saved
+            .store(0, core::sync::atomic::Ordering::Relaxed);
     }
     // SAFETY: server validated by syscall layer.
     unsafe {
@@ -282,7 +288,7 @@ pub unsafe fn endpoint_recv(
         (*server).ipc_state = IpcThreadState::BlockedOnRecv;
         #[allow(clippy::cast_ptr_alignment)]
         {
-        (*server).blocked_on_object = core::ptr::from_mut::<EndpointState>(ep).cast::<u8>();
+            (*server).blocked_on_object = core::ptr::from_mut::<EndpointState>(ep).cast::<u8>();
         }
         enqueue(&mut ep.recv_head, &mut ep.recv_tail, server);
     }

@@ -24,13 +24,13 @@ use syscall_abi::{
     MSG_CAP_SLOTS_MAX, MSG_DATA_WORDS_MAX, SYS_ASPACE_QUERY, SYS_CAP_COPY, SYS_CAP_CREATE_ASPACE,
     SYS_CAP_CREATE_CSPACE, SYS_CAP_CREATE_ENDPOINT, SYS_CAP_CREATE_EVENT_Q, SYS_CAP_CREATE_SIGNAL,
     SYS_CAP_CREATE_THREAD, SYS_CAP_CREATE_WAIT_SET, SYS_CAP_DELETE, SYS_CAP_DERIVE, SYS_CAP_INSERT,
-    SYS_CAP_MOVE, SYS_CAP_REVOKE, SYS_DMA_GRANT, SYS_EVENT_POST, SYS_EVENT_RECV,
-    SYS_FRAME_SPLIT, SYS_IOPORT_BIND, SYS_IPC_BUFFER_SET, SYS_IPC_CALL, SYS_IPC_RECV,
-    SYS_IPC_REPLY, SYS_IRQ_ACK, SYS_IRQ_REGISTER, SYS_MEM_MAP, SYS_MEM_PROTECT, SYS_MEM_UNMAP,
-    SYS_MMIO_MAP, SYS_SIGNAL_SEND, SYS_SIGNAL_WAIT, SYS_SYSTEM_INFO, SYS_THREAD_CONFIGURE,
-    SYS_THREAD_EXIT, SYS_THREAD_READ_REGS, SYS_THREAD_SET_AFFINITY, SYS_THREAD_SET_PRIORITY,
-    SYS_THREAD_START, SYS_THREAD_STOP, SYS_THREAD_WRITE_REGS, SYS_THREAD_YIELD, SYS_WAIT_SET_ADD,
-    SYS_WAIT_SET_REMOVE, SYS_WAIT_SET_WAIT, SYS_SBI_CALL,
+    SYS_CAP_MOVE, SYS_CAP_REVOKE, SYS_DMA_GRANT, SYS_EVENT_POST, SYS_EVENT_RECV, SYS_FRAME_SPLIT,
+    SYS_IOPORT_BIND, SYS_IPC_BUFFER_SET, SYS_IPC_CALL, SYS_IPC_RECV, SYS_IPC_REPLY, SYS_IRQ_ACK,
+    SYS_IRQ_REGISTER, SYS_MEM_MAP, SYS_MEM_PROTECT, SYS_MEM_UNMAP, SYS_MMIO_MAP, SYS_SBI_CALL,
+    SYS_SIGNAL_SEND, SYS_SIGNAL_WAIT, SYS_SYSTEM_INFO, SYS_THREAD_CONFIGURE, SYS_THREAD_EXIT,
+    SYS_THREAD_READ_REGS, SYS_THREAD_SET_AFFINITY, SYS_THREAD_SET_PRIORITY, SYS_THREAD_START,
+    SYS_THREAD_STOP, SYS_THREAD_WRITE_REGS, SYS_THREAD_YIELD, SYS_WAIT_SET_ADD,
+    SYS_WAIT_SET_REMOVE, SYS_WAIT_SET_WAIT,
 };
 
 pub use syscall_abi::{PROT_EXEC, PROT_READ, PROT_WRITE};
@@ -387,7 +387,10 @@ pub fn unpack_cap_slots(packed: u64, count: usize) -> [u32; MSG_CAP_SLOTS_MAX]
     let mut out = [0u32; MSG_CAP_SLOTS_MAX];
     // cast_possible_truncation: each field is masked to 0xFFFF (16 bits), fits in u32.
     #[allow(clippy::cast_possible_truncation)]
-    for (i, slot) in out.iter_mut().take(count.min(MSG_CAP_SLOTS_MAX)).enumerate()
+    for (i, slot) in out
+        .iter_mut()
+        .take(count.min(MSG_CAP_SLOTS_MAX))
+        .enumerate()
     {
         *slot = ((packed >> (i * 16)) & 0xFFFF) as u32;
     }
@@ -416,9 +419,8 @@ pub unsafe fn read_recv_caps(ipc_buf: *const u64) -> (usize, [u32; MSG_CAP_SLOTS
     #[allow(clippy::cast_possible_truncation)]
     // SAFETY: caller guarantees ipc_buf points to registered IPC buffer (4 KiB aligned);
     // offset MSG_DATA_WORDS_MAX is within buffer bounds; volatile read required for kernel-written data.
-    let cap_count =
-        (unsafe { core::ptr::read_volatile(ipc_buf.add(MSG_DATA_WORDS_MAX)) } as usize)
-            .min(MSG_CAP_SLOTS_MAX);
+    let cap_count = (unsafe { core::ptr::read_volatile(ipc_buf.add(MSG_DATA_WORDS_MAX)) } as usize)
+        .min(MSG_CAP_SLOTS_MAX);
     let mut indices = [0u32; MSG_CAP_SLOTS_MAX];
     // cast_possible_truncation: cap slot indices are at most 16-bit values; fits in u32.
     #[allow(clippy::cast_possible_truncation)]
@@ -426,8 +428,7 @@ pub unsafe fn read_recv_caps(ipc_buf: *const u64) -> (usize, [u32; MSG_CAP_SLOTS
     {
         // SAFETY: caller guarantees ipc_buf points to registered IPC buffer; offset is bounded
         // by cap_count <= MSG_CAP_SLOTS_MAX; volatile read required for kernel-written cap indices.
-        *slot =
-            unsafe { core::ptr::read_volatile(ipc_buf.add(MSG_DATA_WORDS_MAX + 1 + i)) } as u32;
+        *slot = unsafe { core::ptr::read_volatile(ipc_buf.add(MSG_DATA_WORDS_MAX + 1 + i)) } as u32;
     }
     (cap_count, indices)
 }
@@ -755,8 +756,13 @@ pub fn cap_create_thread(aspace_cap: u32, cspace_cap: u32) -> Result<u32, i64>
 {
     // SAFETY: syscall2 issues raw syscall instruction; aspace_cap and cspace_cap are cap indices as u64;
     // kernel validates caps, allocates thread, returns slot index.
-    let ret =
-        unsafe { syscall2(SYS_CAP_CREATE_THREAD, u64::from(aspace_cap), u64::from(cspace_cap)) };
+    let ret = unsafe {
+        syscall2(
+            SYS_CAP_CREATE_THREAD,
+            u64::from(aspace_cap),
+            u64::from(cspace_cap),
+        )
+    };
     if ret < 0
     {
         Err(ret)
@@ -1277,8 +1283,7 @@ pub fn event_recv(queue_cap: u32) -> Result<u64, i64>
     // Payload is delivered in the secondary return register.
     // SAFETY: syscall5_ret2 issues raw syscall instruction; queue_cap is cap index as u64;
     // kernel validates cap, blocks until event available, returns payload in secondary register.
-    let (ret, payload) =
-        unsafe { syscall5_ret2(SYS_EVENT_RECV, u64::from(queue_cap), 0, 0, 0, 0) };
+    let (ret, payload) = unsafe { syscall5_ret2(SYS_EVENT_RECV, u64::from(queue_cap), 0, 0, 0, 0) };
     if ret < 0
     {
         Err(ret)
@@ -1331,7 +1336,12 @@ pub fn wait_set_add(ws_cap: u32, source_cap: u32, token: u64) -> Result<(), i64>
     // SAFETY: syscall3 issues raw syscall instruction; all arguments are scalar u64 values
     // (wait set cap, source cap, opaque token); kernel validates caps and registers source.
     let ret = unsafe {
-        syscall3(SYS_WAIT_SET_ADD, u64::from(ws_cap), u64::from(source_cap), token)
+        syscall3(
+            SYS_WAIT_SET_ADD,
+            u64::from(ws_cap),
+            u64::from(source_cap),
+            token,
+        )
     };
     if ret < 0
     {
@@ -1354,7 +1364,11 @@ pub fn wait_set_remove(ws_cap: u32, source_cap: u32) -> Result<(), i64>
     // SAFETY: syscall2 issues raw syscall instruction; ws_cap and source_cap are cap indices as u64;
     // kernel validates caps and unregisters source from wait set.
     let ret = unsafe {
-        syscall2(SYS_WAIT_SET_REMOVE, u64::from(ws_cap), u64::from(source_cap))
+        syscall2(
+            SYS_WAIT_SET_REMOVE,
+            u64::from(ws_cap),
+            u64::from(source_cap),
+        )
     };
     if ret < 0
     {
@@ -1380,8 +1394,7 @@ pub fn wait_set_wait(ws_cap: u32) -> Result<u64, i64>
 {
     // SAFETY: syscall5_ret2 issues raw syscall instruction; ws_cap is cap index as u64;
     // kernel validates cap, blocks until source ready, returns token in secondary register.
-    let (ret, token) =
-        unsafe { syscall5_ret2(SYS_WAIT_SET_WAIT, u64::from(ws_cap), 0, 0, 0, 0) };
+    let (ret, token) = unsafe { syscall5_ret2(SYS_WAIT_SET_WAIT, u64::from(ws_cap), 0, 0, 0, 0) };
     if ret < 0
     {
         Err(ret)
@@ -1486,7 +1499,13 @@ pub fn ioport_bind(thread_cap: u32, ioport_cap: u32) -> Result<(), i64>
 {
     // SAFETY: syscall2 issues raw syscall instruction; thread_cap and ioport_cap are cap indices as u64;
     // kernel validates caps and grants I/O port access (x86-64 only; returns NotSupported on RISC-V).
-    let ret = unsafe { syscall2(SYS_IOPORT_BIND, u64::from(thread_cap), u64::from(ioport_cap)) };
+    let ret = unsafe {
+        syscall2(
+            SYS_IOPORT_BIND,
+            u64::from(thread_cap),
+            u64::from(ioport_cap),
+        )
+    };
     if ret < 0
     {
         Err(ret)
@@ -1594,7 +1613,13 @@ pub fn thread_set_affinity(thread_cap: u32, cpu_id: u32) -> Result<(), i64>
 {
     // SAFETY: syscall2 issues raw syscall instruction; thread_cap and cpu_id are scalar u64 values;
     // kernel validates cap and CPU ID, sets thread affinity.
-    let ret = unsafe { syscall2(SYS_THREAD_SET_AFFINITY, u64::from(thread_cap), u64::from(cpu_id)) };
+    let ret = unsafe {
+        syscall2(
+            SYS_THREAD_SET_AFFINITY,
+            u64::from(thread_cap),
+            u64::from(cpu_id),
+        )
+    };
     if ret < 0
     {
         Err(ret)
@@ -1692,7 +1717,14 @@ pub fn thread_write_regs(thread_cap: u32, buf: *const u8, buf_size: usize) -> Re
 /// Returns a negative `i64` error code if the kernel rejects the call
 /// (e.g., invalid cap, or SBI firmware returns an error).
 #[inline]
-pub fn sbi_call(sbi_cap: u32, extension: u64, function: u64, a0: u64, a1: u64, a2: u64) -> Result<u64, i64>
+pub fn sbi_call(
+    sbi_cap: u32,
+    extension: u64,
+    function: u64,
+    a0: u64,
+    a1: u64,
+    a2: u64,
+) -> Result<u64, i64>
 {
     // SAFETY: syscall6 issues raw syscall instruction; all arguments are plain u64 values.
     let ret = unsafe {

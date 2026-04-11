@@ -50,7 +50,8 @@ pub fn serial_write_byte(byte: u8)
     }
     let p = base as *mut u8;
     // SAFETY: UART MMIO region is mapped at UART_BASE; reading LSR is safe.
-    while unsafe { core::ptr::read_volatile(p.add(5)) } & 0x20 == 0 {}
+    while unsafe { core::ptr::read_volatile(p.add(5)) } & 0x20 == 0
+    {}
     // SAFETY: UART MMIO region is mapped at UART_BASE; writing data register.
     unsafe { core::ptr::write_volatile(p, byte) };
 }

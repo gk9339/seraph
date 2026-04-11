@@ -495,7 +495,15 @@ pub unsafe fn start_ap(
 
     // SAFETY: setup_trampoline called; direct map active.
     unsafe {
-        setup_ap_params(trampoline_pa, cpu_idx, pml4_pa, stack_top, entry_fn, ist1_top, ist2_top);
+        setup_ap_params(
+            trampoline_pa,
+            cpu_idx,
+            pml4_pa,
+            stack_top,
+            entry_fn,
+            ist1_top,
+            ist2_top,
+        );
         super::interrupts::start_ap(apic_id, trampoline_pa);
     }
     true

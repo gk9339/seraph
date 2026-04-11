@@ -64,22 +64,13 @@ pub fn run_all(ctx: &TestContext)
         "cap::copy_into_non_cspace_err",
         cap::copy_into_non_cspace_err(ctx)
     );
-    run_test!(
-        "cap::delete_null_slot_ok",
-        cap::delete_null_slot_ok(ctx)
-    );
+    run_test!("cap::delete_null_slot_ok", cap::delete_null_slot_ok(ctx));
     run_test!(
         "cap::insert_out_of_bounds_err",
         cap::insert_out_of_bounds_err(ctx)
     );
-    run_test!(
-        "cap::derive_zero_rights",
-        cap::derive_zero_rights(ctx)
-    );
-    run_test!(
-        "cap::revoke_null_slot_err",
-        cap::revoke_null_slot_err(ctx)
-    );
+    run_test!("cap::derive_zero_rights", cap::derive_zero_rights(ctx));
+    run_test!("cap::revoke_null_slot_err", cap::revoke_null_slot_err(ctx));
     run_test!(
         "cap::create_event_q_zero_capacity_err",
         cap::create_event_q_zero_capacity_err(ctx)
@@ -209,10 +200,7 @@ pub fn run_all(ctx: &TestContext)
         "ipc::send_insufficient_rights_err",
         ipc::send_insufficient_rights_err(ctx)
     );
-    run_test!(
-        "ipc::call_with_data_words",
-        ipc::call_with_data_words(ctx)
-    );
+    run_test!("ipc::call_with_data_words", ipc::call_with_data_words(ctx));
     run_test!(
         "ipc::call_with_cap_transfer",
         ipc::call_with_cap_transfer(ctx)

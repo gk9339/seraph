@@ -119,7 +119,8 @@ fn shootdown_unlock()
 #[allow(dead_code)]
 pub unsafe fn shootdown(root_phys: u64, cpu_mask: u64, virt: u64)
 {
-    if cpu_mask == 0 {
+    if cpu_mask == 0
+    {
         return; // No remote CPUs active
     }
 
@@ -150,7 +151,9 @@ pub unsafe fn shootdown(root_phys: u64, cpu_mask: u64, virt: u64)
     // are visible to remote CPUs before the IPI arrives.
     TLB_SHOOTDOWN.root_phys.store(root_phys, Ordering::Release);
     TLB_SHOOTDOWN.flush_va.store(virt, Ordering::Release);
-    TLB_SHOOTDOWN.pending_cpus.store(cpu_mask, Ordering::Release);
+    TLB_SHOOTDOWN
+        .pending_cpus
+        .store(cpu_mask, Ordering::Release);
 
     // Fence: ensure pending_cpus is globally visible before sending IPIs.
     // On RISC-V (RVWMO), the Release store orders it after prior stores on
@@ -164,8 +167,10 @@ pub unsafe fn shootdown(root_phys: u64, cpu_mask: u64, virt: u64)
     // Helper: send IPIs to all CPUs with bits set in `mask`.
     let cpu_count = crate::sched::CPU_COUNT.load(Ordering::Relaxed);
     let send_ipis = |mask: u64| {
-        for cpu in 0..cpu_count {
-            if (mask & (1u64 << cpu)) != 0 {
+        for cpu in 0..cpu_count
+        {
+            if (mask & (1u64 << cpu)) != 0
+            {
                 // Translate logical CPU → hardware ID (APIC ID / hart ID).
                 // SAFETY: cpu is in [0, cpu_count), all online CPUs;
                 // apic_id_for returns the hardware ID for the logical CPU.
@@ -191,7 +196,8 @@ pub unsafe fn shootdown(root_phys: u64, cpu_mask: u64, virt: u64)
     // doesn't get scheduled. The IPI re-send on each iteration ensures
     // that a lost SSIP edge is recovered as soon as QEMU switches to
     // the target hart.
-    while TLB_SHOOTDOWN.pending_cpus.load(Ordering::Acquire) != 0 {
+    while TLB_SHOOTDOWN.pending_cpus.load(Ordering::Acquire) != 0
+    {
         core::hint::spin_loop();
         // Re-send to any CPUs that haven't acknowledged.
         send_ipis(TLB_SHOOTDOWN.pending_cpus.load(Ordering::Acquire));

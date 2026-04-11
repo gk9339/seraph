@@ -40,13 +40,13 @@ use crate::elf::{load_init, load_kernel, load_module};
 use crate::error::BootError;
 use crate::firmware::discover_firmware;
 use crate::paging::{build_initial_tables, PageTableBuilder};
+#[cfg(target_arch = "x86_64")]
+use crate::uefi::allocate_pages_max_addr;
 use crate::uefi::{
     allocate_pages, connect_all_controllers, exit_boot_services, file_read, file_size,
     get_loaded_image, get_memory_map, open_esp_volume, open_file, query_gop, EfiHandle,
     EfiSystemTable,
 };
-#[cfg(target_arch = "x86_64")]
-use crate::uefi::allocate_pages_max_addr;
 use boot_protocol::{
     BootInfo, BootModule, MemoryMapEntry, MemoryMapSlice, ModuleSlice, PlatformResource,
     PlatformResourceSlice, BOOT_PROTOCOL_VERSION,
@@ -396,7 +396,9 @@ unsafe fn boot_sequence(image: EfiHandle, st: *mut EfiSystemTable) -> Result<!, 
     // resource_count is bounded by the platform_resources array size (≤ 256), fits in u32.
     #[allow(clippy::cast_possible_truncation)]
     // SAFETY: console initialized.
-    unsafe { crate::console::console_write_dec32(resource_count as u32) };
+    unsafe {
+        crate::console::console_write_dec32(resource_count as u32);
+    }
     bprintln!(" parsed");
 
     // ── Step 6: Pre-allocate boot structures and build page tables ────────────
@@ -569,9 +571,7 @@ unsafe fn boot_sequence(image: EfiHandle, st: *mut EfiSystemTable) -> Result<!, 
     }
     else
     {
-        bprintln!(
-            "[--------] boot: WARNING: cannot allocate AP trampoline page — SMP disabled"
-        );
+        bprintln!("[--------] boot: WARNING: cannot allocate AP trampoline page — SMP disabled");
         0
     };
     #[cfg(not(any(target_arch = "x86_64", target_arch = "riscv64")))]

@@ -24,10 +24,8 @@ pub fn run(ctx: &TestContext) -> TestResult
 {
     for _cycle in 0..CYCLES
     {
-        let ep =
-            cap_create_endpoint().map_err(|_| "concurrent_ipc: create_endpoint failed")?;
-        let done =
-            cap_create_signal().map_err(|_| "concurrent_ipc: create_signal failed")?;
+        let ep = cap_create_endpoint().map_err(|_| "concurrent_ipc: create_endpoint failed")?;
+        let done = cap_create_signal().map_err(|_| "concurrent_ipc: create_signal failed")?;
 
         let mut threads = [0u32; NUM_CALLERS];
         let mut cspaces = [0u32; NUM_CALLERS];
@@ -35,12 +33,11 @@ pub fn run(ctx: &TestContext) -> TestResult
         // Start all callers simultaneously (no yields between starts).
         for i in 0..NUM_CALLERS
         {
-            let cs = cap_create_cspace(16)
-                .map_err(|_| "concurrent_ipc: create_cspace failed")?;
+            let cs = cap_create_cspace(16).map_err(|_| "concurrent_ipc: create_cspace failed")?;
             let child_ep = cap_copy(ep, cs, RIGHTS_SEND_GRANT)
                 .map_err(|_| "concurrent_ipc: cap_copy ep failed")?;
-            let child_done = cap_copy(done, cs, 1 << 7)
-                .map_err(|_| "concurrent_ipc: cap_copy done failed")?;
+            let child_done =
+                cap_copy(done, cs, 1 << 7).map_err(|_| "concurrent_ipc: cap_copy done failed")?;
 
             let th = cap_create_thread(ctx.aspace_cap, cs)
                 .map_err(|_| "concurrent_ipc: create_thread failed")?;
@@ -66,8 +63,7 @@ pub fn run(ctx: &TestContext) -> TestResult
         let mut received_bitmap: u32 = 0;
         for _ in 0..NUM_CALLERS
         {
-            let (label, _) =
-                ipc_recv(ep).map_err(|_| "concurrent_ipc: ipc_recv failed")?;
+            let (label, _) = ipc_recv(ep).map_err(|_| "concurrent_ipc: ipc_recv failed")?;
             // Label values are 1..=NUM_CALLERS; fits in u32. Truncation is safe
             // because we validate idx is in [1, NUM_CALLERS] immediately below.
             #[allow(clippy::cast_possible_truncation)]
@@ -98,8 +94,7 @@ pub fn run(ctx: &TestContext) -> TestResult
         let mut done_bits: u64 = 0;
         while done_bits != all_done
         {
-            let bits =
-                signal_wait(done).map_err(|_| "concurrent_ipc: signal_wait done failed")?;
+            let bits = signal_wait(done).map_err(|_| "concurrent_ipc: signal_wait done failed")?;
             done_bits |= bits;
         }
 

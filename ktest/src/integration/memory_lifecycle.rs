@@ -38,7 +38,8 @@ pub fn run(ctx: &TestContext) -> TestResult
     drop(frame_b);
 
     // ── 2. Map frame_a (one page) at TEST_VA. ────────────────────────────────
-    frame_a.map(TEST_VA)
+    frame_a
+        .map(TEST_VA)
         .map_err(|_| "integration::memory_lifecycle: mem_map failed")?;
 
     // ── 3. Verify the mapping via aspace_query. ───────────────────────────────

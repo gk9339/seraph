@@ -16,8 +16,8 @@ const CYCLES: usize = 200;
 
 pub fn run(_ctx: &TestContext) -> TestResult
 {
-    let eq = event_queue_create(CAPACITY)
-        .map_err(|_| "event_fill_drain: event_queue_create failed")?;
+    let eq =
+        event_queue_create(CAPACITY).map_err(|_| "event_fill_drain: event_queue_create failed")?;
 
     for cycle in 0..CYCLES
     {
@@ -40,8 +40,8 @@ pub fn run(_ctx: &TestContext) -> TestResult
         // Drain and verify FIFO order.
         for i in 0..CAPACITY
         {
-            let val = event_recv(eq)
-                .map_err(|_| "event_fill_drain: event_recv during drain failed")?;
+            let val =
+                event_recv(eq).map_err(|_| "event_fill_drain: event_recv during drain failed")?;
             let expected = base + u64::from(i);
             if val != expected
             {

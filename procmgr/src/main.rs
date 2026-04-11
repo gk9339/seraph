@@ -212,8 +212,15 @@ fn load_elf_page(
 {
     let frame_cap = pool.alloc_page()?;
 
-    syscall::mem_map(frame_cap, self_aspace, TEMP_FRAME_VA, 0, 1, syscall::PROT_WRITE)
-        .ok()?;
+    syscall::mem_map(
+        frame_cap,
+        self_aspace,
+        TEMP_FRAME_VA,
+        0,
+        1,
+        syscall::PROT_WRITE,
+    )
+    .ok()?;
     // SAFETY: TEMP_FRAME_VA mapped writable, one page.
     unsafe { core::ptr::write_bytes(TEMP_FRAME_VA as *mut u8, 0, PAGE_SIZE as usize) };
 
@@ -262,16 +269,21 @@ fn populate_child_info(
 ) -> Option<()>
 {
     let pi_frame = pool.alloc_page()?;
-    syscall::mem_map(pi_frame, self_aspace, TEMP_FRAME_VA, 0, 1, syscall::PROT_WRITE)
-        .ok()?;
+    syscall::mem_map(
+        pi_frame,
+        self_aspace,
+        TEMP_FRAME_VA,
+        0,
+        1,
+        syscall::PROT_WRITE,
+    )
+    .ok()?;
     // SAFETY: TEMP_FRAME_VA mapped writable, one page.
     unsafe { core::ptr::write_bytes(TEMP_FRAME_VA as *mut u8, 0, PAGE_SIZE as usize) };
 
     let child_thread_in_child = syscall::cap_copy(child_thread, child_cspace, !0u64).ok()?;
-    let child_aspace_in_child =
-        syscall::cap_copy(child_aspace, child_cspace, !0u64).ok()?;
-    let child_cspace_in_child =
-        syscall::cap_copy(child_cspace, child_cspace, !0u64).ok()?;
+    let child_aspace_in_child = syscall::cap_copy(child_aspace, child_cspace, !0u64).ok()?;
+    let child_cspace_in_child = syscall::cap_copy(child_cspace, child_cspace, !0u64).ok()?;
 
     // SAFETY: TEMP_FRAME_VA is page-aligned and mapped writable.
     #[allow(clippy::cast_ptr_alignment)]
@@ -398,8 +410,7 @@ fn create_process(
     populate_child_info(pool, self_aspace, child_aspace, child_cspace, child_thread)?;
     map_child_stack_and_ipc(pool, child_aspace)?;
 
-    syscall::thread_configure(child_thread, entry, PROCESS_STACK_TOP, PROCESS_INFO_VADDR)
-        .ok()?;
+    syscall::thread_configure(child_thread, entry, PROCESS_STACK_TOP, PROCESS_INFO_VADDR).ok()?;
     syscall::thread_start(child_thread).ok()?;
 
     let pid = NEXT_PID.fetch_add(1, core::sync::atomic::Ordering::Relaxed);

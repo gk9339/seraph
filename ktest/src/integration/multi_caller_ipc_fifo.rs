@@ -75,8 +75,7 @@ pub fn run(ctx: &TestContext) -> TestResult
     thread_configure(th_b, caller_entry as *const () as u64, stack_b, arg_b)
         .map_err(|_| "multi_caller_ipc_fifo: configure th_b failed")?;
     // Pin to CPU 0 so yield-based FIFO ordering is reliable under SMP.
-    thread_set_affinity(th_b, 0)
-        .map_err(|_| "multi_caller_ipc_fifo: set_affinity th_b failed")?;
+    thread_set_affinity(th_b, 0).map_err(|_| "multi_caller_ipc_fifo: set_affinity th_b failed")?;
     thread_start(th_b).map_err(|_| "multi_caller_ipc_fifo: start th_b failed")?;
     thread_yield().map_err(|_| "multi_caller_ipc_fifo: yield after B failed")?;
 
@@ -93,8 +92,7 @@ pub fn run(ctx: &TestContext) -> TestResult
     thread_configure(th_c, caller_entry as *const () as u64, stack_c, arg_c)
         .map_err(|_| "multi_caller_ipc_fifo: configure th_c failed")?;
     // Pin to CPU 0 so yield-based FIFO ordering is reliable under SMP.
-    thread_set_affinity(th_c, 0)
-        .map_err(|_| "multi_caller_ipc_fifo: set_affinity th_c failed")?;
+    thread_set_affinity(th_c, 0).map_err(|_| "multi_caller_ipc_fifo: set_affinity th_c failed")?;
     thread_start(th_c).map_err(|_| "multi_caller_ipc_fifo: start th_c failed")?;
     thread_yield().map_err(|_| "multi_caller_ipc_fifo: yield after C failed")?;
 

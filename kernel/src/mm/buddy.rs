@@ -108,7 +108,10 @@ impl BuddyAllocator
     /// - No other code will access the region until frames are allocated from it.
     pub unsafe fn add_region(&mut self, start: u64, end: u64)
     {
-        debug_assert!(start.is_multiple_of(PAGE_SIZE as u64), "start not page-aligned");
+        debug_assert!(
+            start.is_multiple_of(PAGE_SIZE as u64),
+            "start not page-aligned"
+        );
         debug_assert!(end.is_multiple_of(PAGE_SIZE as u64), "end not page-aligned");
 
         if start >= end

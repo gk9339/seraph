@@ -13,7 +13,6 @@
 //! operate on a byte slice representing the raw ELF image.
 
 #![no_std]
-
 // cast_possible_truncation: this crate targets 64-bit only (x86-64, riscv64);
 // ELF64 u64 fields fit in usize on these platforms.
 #![allow(clippy::cast_possible_truncation)]
@@ -290,11 +289,11 @@ impl Iterator for LoadSegmentIter<'_>
             }
 
             // Validate that the file data for this segment is in bounds.
-            let seg_end = (phdr.p_offset as usize)
-                .checked_add(phdr.p_filesz as usize);
+            let seg_end = (phdr.p_offset as usize).checked_add(phdr.p_filesz as usize);
             match seg_end
             {
-                Some(end) if end <= self.data.len() => {}
+                Some(end) if end <= self.data.len() =>
+                {}
                 _ => return Some(Err(ElfError::SegmentOverflow)),
             }
 

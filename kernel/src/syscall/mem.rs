@@ -144,7 +144,10 @@ pub fn sys_mem_map(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     }
     else
     {
-        (frame_rights.contains(Rights::WRITE), frame_rights.contains(Rights::EXECUTE))
+        (
+            frame_rights.contains(Rights::WRITE),
+            frame_rights.contains(Rights::EXECUTE),
+        )
     };
     // W^X is enforced at mapping time: no page may be both writable and executable.
     if writable && executable

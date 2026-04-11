@@ -48,8 +48,8 @@ pub fn run(ctx: &TestContext) -> TestResult
     }
 
     // ── 1. Allocate a frame from the pool. ───────────────────────────────────
-    let frame_cap = crate::frame_pool::alloc()
-        .ok_or("integration::tlb_coherency: frame pool exhausted")?;
+    let frame_cap =
+        crate::frame_pool::alloc().ok_or("integration::tlb_coherency: frame pool exhausted")?;
 
     // ── 2. Set up two signals for parent-child coordination. ─────────────────
     //
@@ -113,16 +113,23 @@ pub fn run(ctx: &TestContext) -> TestResult
     for cycle in 0..CYCLES
     {
         // Map the page.
-        mem_map(frame_cap, ctx.aspace_cap, TEST_VA, 0, 1, syscall::PROT_WRITE)
-            .map_err(|_| "integration::tlb_coherency: mem_map failed")?;
+        mem_map(
+            frame_cap,
+            ctx.aspace_cap,
+            TEST_VA,
+            0,
+            1,
+            syscall::PROT_WRITE,
+        )
+        .map_err(|_| "integration::tlb_coherency: mem_map failed")?;
 
         // Signal child on p2c: page is mapped, you may access it.
         signal_send(p2c, 0x2)
             .map_err(|_| "integration::tlb_coherency: signal_send (map) failed")?;
 
         // Wait for child to confirm access on c2p.
-        let ack = signal_wait(c2p)
-            .map_err(|_| "integration::tlb_coherency: signal_wait (ack) failed")?;
+        let ack =
+            signal_wait(c2p).map_err(|_| "integration::tlb_coherency: signal_wait (ack) failed")?;
         if ack != 0x4
         {
             return Err("integration::tlb_coherency: child sent wrong ack bits");
@@ -140,8 +147,7 @@ pub fn run(ctx: &TestContext) -> TestResult
     }
 
     // ── 5. Signal child to exit on p2c. ──────────────────────────────────────
-    signal_send(p2c, 0x80)
-        .map_err(|_| "integration::tlb_coherency: signal_send (exit) failed")?;
+    signal_send(p2c, 0x80).map_err(|_| "integration::tlb_coherency: signal_send (exit) failed")?;
 
     // ── 6. Clean up. ─────────────────────────────────────────────────────────
     cap_delete(th).map_err(|_| "integration::tlb_coherency: cap_delete (th) failed")?;

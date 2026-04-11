@@ -63,9 +63,9 @@ pub const PARAMS_OFFSET: usize = 0x40;
 pub const PARAM_SLOT_SIZE: usize = 32;
 
 // Sub-offsets within each param slot (byte offsets, u64-aligned).
-const PARAM_SATP: usize = 0;    // u64: Sv48 SATP value
-const PARAM_ENTRY: usize = 8;   // u64: kernel_entry_ap virtual address
-const PARAM_STACK: usize = 16;  // u64: kernel idle stack top
+const PARAM_SATP: usize = 0; // u64: Sv48 SATP value
+const PARAM_ENTRY: usize = 8; // u64: kernel_entry_ap virtual address
+const PARAM_STACK: usize = 16; // u64: kernel idle stack top
 const PARAM_CPU_ID: usize = 24; // u64: logical CPU index
 
 // ── SBI HSM ───────────────────────────────────────────────────────────────────
@@ -117,14 +117,14 @@ core::arch::global_asm!(
     ".global _rv_ap_trampoline",
     ".global _rv_ap_trampoline_end",
     "_rv_ap_trampoline:",
-    "    ld   t0,  0(a1)",     // satp value
-    "    ld   t1,  8(a1)",     // kernel_entry_ap VA
-    "    ld   t2, 16(a1)",     // kernel stack top
-    "    ld   a0, 24(a1)",     // cpu_id (overwrite hart_id)
-    "    csrw satp, t0",       // enable Sv48 paging
-    "    sfence.vma x0, x0",   // flush all TLB entries
-    "    mv   sp, t2",         // switch to kernel stack
-    "    jr   t1",             // jump to kernel_entry_ap
+    "    ld   t0,  0(a1)",   // satp value
+    "    ld   t1,  8(a1)",   // kernel_entry_ap VA
+    "    ld   t2, 16(a1)",   // kernel stack top
+    "    ld   a0, 24(a1)",   // cpu_id (overwrite hart_id)
+    "    csrw satp, t0",     // enable Sv48 paging
+    "    sfence.vma x0, x0", // flush all TLB entries
+    "    mv   sp, t2",       // switch to kernel stack
+    "    jr   t1",           // jump to kernel_entry_ap
     "_rv_ap_trampoline_end:",
 );
 
@@ -201,9 +201,8 @@ pub unsafe fn start_ap(
         setup_ap_params(trampoline_pa, cpu_idx, satp, entry_fn, stack_top);
     }
 
-    let params_pa = trampoline_pa
-        + PARAMS_OFFSET as u64
-        + (u64::from(cpu_idx) - 1) * PARAM_SLOT_SIZE as u64;
+    let params_pa =
+        trampoline_pa + PARAMS_OFFSET as u64 + (u64::from(cpu_idx) - 1) * PARAM_SLOT_SIZE as u64;
 
     // SAFETY: trampoline_pa is identity-mapped RWX; params_pa is in the same page.
     unsafe { sbi_hart_start(u64::from(hart_id), trampoline_pa, params_pa) }
@@ -249,6 +248,7 @@ pub unsafe fn setup_ap_params(
         base.add(PARAM_SATP / 8).write_volatile(satp);
         base.add(PARAM_ENTRY / 8).write_volatile(entry_virt);
         base.add(PARAM_STACK / 8).write_volatile(stack_top);
-        base.add(PARAM_CPU_ID / 8).write_volatile(u64::from(cpu_idx));
+        base.add(PARAM_CPU_ID / 8)
+            .write_volatile(u64::from(cpu_idx));
     }
 }

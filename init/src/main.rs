@@ -70,7 +70,9 @@ fn descriptors(info: &InitInfo) -> &[CapDescriptor]
     // populated by the kernel in Phase 9.
     #[allow(clippy::cast_ptr_alignment)]
     unsafe {
-        let ptr = base.add(info.cap_descriptors_offset as usize).cast::<CapDescriptor>();
+        let ptr = base
+            .add(info.cap_descriptors_offset as usize)
+            .cast::<CapDescriptor>();
         core::slice::from_raw_parts(ptr, info.cap_descriptor_count as usize)
     }
 }
@@ -233,8 +235,15 @@ fn load_elf_page(
         return None;
     };
 
-    if syscall::mem_map(frame_cap, init_aspace, ELF_PAGE_TEMP_VA, 0, 1, syscall::PROT_WRITE)
-        .is_err()
+    if syscall::mem_map(
+        frame_cap,
+        init_aspace,
+        ELF_PAGE_TEMP_VA,
+        0,
+        1,
+        syscall::PROT_WRITE,
+    )
+    .is_err()
     {
         log("init: ELF load: temp map failed");
         return None;
@@ -398,11 +407,7 @@ fn populate_procmgr_info(
 }
 
 /// Map stack and IPC buffer pages into the target address space.
-fn map_stack_and_ipc(
-    alloc: &mut FrameAlloc,
-    target_aspace: u32,
-    ipc_buf_va: u64,
-) -> Option<()>
+fn map_stack_and_ipc(alloc: &mut FrameAlloc, target_aspace: u32, ipc_buf_va: u64) -> Option<()>
 {
     let stack_base = PROCESS_STACK_TOP - (PROCESS_STACK_PAGES as u64) * PAGE_SIZE;
     for i in 0..PROCESS_STACK_PAGES
@@ -547,8 +552,15 @@ fn run(info_ptr: u64) -> !
         log("init: FATAL: cannot allocate IPC buffer frame");
         syscall::thread_exit();
     };
-    if syscall::mem_map(ipc_cap, info.aspace_cap, INIT_IPC_BUF_VA, 0, 1, syscall::PROT_WRITE)
-        .is_err()
+    if syscall::mem_map(
+        ipc_cap,
+        info.aspace_cap,
+        INIT_IPC_BUF_VA,
+        0,
+        1,
+        syscall::PROT_WRITE,
+    )
+    .is_err()
     {
         log("init: FATAL: cannot map IPC buffer page");
         syscall::thread_exit();

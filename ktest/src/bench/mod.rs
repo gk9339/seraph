@@ -192,15 +192,39 @@ fn bench_ipc_round_trip(ctx: &crate::TestContext, iters: u32)
     const RIGHTS_SEND_GRANT: u64 = (1 << 4) | (1 << 6);
     let n = u64::from(iters);
 
-    let Ok(ep) = cap_create_endpoint() else { return };
-    let Ok(done) = cap_create_signal() else { return };
+    let Ok(ep) = cap_create_endpoint()
+    else
+    {
+        return;
+    };
+    let Ok(done) = cap_create_signal()
+    else
+    {
+        return;
+    };
 
-    let Ok(cs) = cap_create_cspace(16) else { return };
-    let Ok(child_ep) = cap_copy(ep, cs, RIGHTS_SEND_GRANT) else { return };
-    let Ok(child_done) = cap_copy(done, cs, 1 << 7) else { return };
+    let Ok(cs) = cap_create_cspace(16)
+    else
+    {
+        return;
+    };
+    let Ok(child_ep) = cap_copy(ep, cs, RIGHTS_SEND_GRANT)
+    else
+    {
+        return;
+    };
+    let Ok(child_done) = cap_copy(done, cs, 1 << 7)
+    else
+    {
+        return;
+    };
 
     let arg = u64::from(child_ep) | (u64::from(child_done) << 16) | (n << 32);
-    let Ok(th) = cap_create_thread(ctx.aspace_cap, cs) else { return };
+    let Ok(th) = cap_create_thread(ctx.aspace_cap, cs)
+    else
+    {
+        return;
+    };
     let stack_top = ChildStack::top(core::ptr::addr_of!(BENCH_IPC_STACK));
 
     if thread_configure(th, ipc_caller_entry as *const () as u64, stack_top, arg).is_err()
@@ -269,20 +293,52 @@ fn bench_signal_roundtrip(ctx: &crate::TestContext, iters: u32)
     const RIGHTS_WAIT: u64 = 1 << 8;
     let n = u64::from(iters);
 
-    let Ok(ping) = cap_create_signal() else { return };
-    let Ok(pong) = cap_create_signal() else { return };
-    let Ok(done) = cap_create_signal() else { return };
+    let Ok(ping) = cap_create_signal()
+    else
+    {
+        return;
+    };
+    let Ok(pong) = cap_create_signal()
+    else
+    {
+        return;
+    };
+    let Ok(done) = cap_create_signal()
+    else
+    {
+        return;
+    };
 
-    let Ok(cs) = cap_create_cspace(16) else { return };
-    let Ok(child_ping) = cap_copy(ping, cs, RIGHTS_WAIT) else { return };
-    let Ok(child_pong) = cap_copy(pong, cs, RIGHTS_SIGNAL) else { return };
-    let Ok(child_done) = cap_copy(done, cs, RIGHTS_SIGNAL) else { return };
+    let Ok(cs) = cap_create_cspace(16)
+    else
+    {
+        return;
+    };
+    let Ok(child_ping) = cap_copy(ping, cs, RIGHTS_WAIT)
+    else
+    {
+        return;
+    };
+    let Ok(child_pong) = cap_copy(pong, cs, RIGHTS_SIGNAL)
+    else
+    {
+        return;
+    };
+    let Ok(child_done) = cap_copy(done, cs, RIGHTS_SIGNAL)
+    else
+    {
+        return;
+    };
 
     let arg = u64::from(child_ping)
         | (u64::from(child_pong) << 16)
         | (u64::from(child_done) << 32)
         | (n << 48);
-    let Ok(th) = cap_create_thread(ctx.aspace_cap, cs) else { return };
+    let Ok(th) = cap_create_thread(ctx.aspace_cap, cs)
+    else
+    {
+        return;
+    };
     let stack_top = ChildStack::top(core::ptr::addr_of!(BENCH_SIGNAL_STACK));
 
     if thread_configure(th, signal_pong_entry as *const () as u64, stack_top, arg).is_err()
@@ -331,12 +387,22 @@ fn bench_cap_create_delete(_ctx: &crate::TestContext, iters: u32)
     for _ in 0..n
     {
         let t0 = cycles_now();
-        let Ok(sig) = cap_create_signal() else { break };
+        let Ok(sig) = cap_create_signal()
+        else
+        {
+            break;
+        };
         cap_delete(sig).ok();
         let t1 = cycles_now();
         let delta = t1.saturating_sub(t0);
-        if delta < min { min = delta; }
-        if delta > max { max = delta; }
+        if delta < min
+        {
+            min = delta;
+        }
+        if delta > max
+        {
+            max = delta;
+        }
         total = total.saturating_add(delta);
     }
 
@@ -352,7 +418,11 @@ fn bench_mem_map_unmap(ctx: &crate::TestContext, iters: u32)
     const BENCH_VA: u64 = 0x6000_0000;
 
     let n = u64::from(iters);
-    let Some(frame) = crate::frame_pool::alloc() else { return };
+    let Some(frame) = crate::frame_pool::alloc()
+    else
+    {
+        return;
+    };
 
     let mut min = u64::MAX;
     let mut max = 0u64;
@@ -368,8 +438,14 @@ fn bench_mem_map_unmap(ctx: &crate::TestContext, iters: u32)
         let _ = syscall::mem_unmap(ctx.aspace_cap, BENCH_VA, 1);
         let t1 = cycles_now();
         let delta = t1.saturating_sub(t0);
-        if delta < min { min = delta; }
-        if delta > max { max = delta; }
+        if delta < min
+        {
+            min = delta;
+        }
+        if delta > max
+        {
+            max = delta;
+        }
         total = total.saturating_add(delta);
     }
 
@@ -399,7 +475,11 @@ fn bench_thread_lifecycle(ctx: &crate::TestContext, iters: u32)
     let n = iters.min(100);
     let n64 = u64::from(n);
 
-    let Ok(done) = cap_create_signal() else { return };
+    let Ok(done) = cap_create_signal()
+    else
+    {
+        return;
+    };
     let stack_top = ChildStack::top(core::ptr::addr_of!(BENCH_LIFECYCLE_STACK));
 
     let mut min = u64::MAX;
@@ -410,10 +490,28 @@ fn bench_thread_lifecycle(ctx: &crate::TestContext, iters: u32)
     {
         let t0 = cycles_now();
 
-        let Ok(cs) = cap_create_cspace(16) else { break };
-        let Ok(child_done) = cap_copy(done, cs, 1 << 7) else { break };
-        let Ok(th) = cap_create_thread(ctx.aspace_cap, cs) else { break };
-        if thread_configure(th, lifecycle_entry as *const () as u64, stack_top, u64::from(child_done)).is_err()
+        let Ok(cs) = cap_create_cspace(16)
+        else
+        {
+            break;
+        };
+        let Ok(child_done) = cap_copy(done, cs, 1 << 7)
+        else
+        {
+            break;
+        };
+        let Ok(th) = cap_create_thread(ctx.aspace_cap, cs)
+        else
+        {
+            break;
+        };
+        if thread_configure(
+            th,
+            lifecycle_entry as *const () as u64,
+            stack_top,
+            u64::from(child_done),
+        )
+        .is_err()
             || thread_start(th).is_err()
         {
             break;
@@ -424,8 +522,14 @@ fn bench_thread_lifecycle(ctx: &crate::TestContext, iters: u32)
 
         let t1 = cycles_now();
         let delta = t1.saturating_sub(t0);
-        if delta < min { min = delta; }
-        if delta > max { max = delta; }
+        if delta < min
+        {
+            min = delta;
+        }
+        if delta > max
+        {
+            max = delta;
+        }
         total = total.saturating_add(delta);
     }
 
@@ -442,7 +546,11 @@ fn bench_event_post_recv(_ctx: &crate::TestContext, iters: u32)
 {
     let n = u64::from(iters);
 
-    let Ok(eq) = event_queue_create(4) else { return };
+    let Ok(eq) = event_queue_create(4)
+    else
+    {
+        return;
+    };
 
     let mut min = u64::MAX;
     let mut max = 0u64;
@@ -461,8 +569,14 @@ fn bench_event_post_recv(_ctx: &crate::TestContext, iters: u32)
         }
         let t1 = cycles_now();
         let delta = t1.saturating_sub(t0);
-        if delta < min { min = delta; }
-        if delta > max { max = delta; }
+        if delta < min
+        {
+            min = delta;
+        }
+        if delta > max
+        {
+            max = delta;
+        }
         total = total.saturating_add(delta);
     }
 
@@ -481,7 +595,11 @@ fn bench_wait_set(_ctx: &crate::TestContext, iters: u32)
     // heap allocations that fragment under high churn.
     let n = u64::from(iters.min(100));
 
-    let Ok(sig) = cap_create_signal() else { return };
+    let Ok(sig) = cap_create_signal()
+    else
+    {
+        return;
+    };
 
     let mut min = u64::MAX;
     let mut max = 0u64;
@@ -493,7 +611,11 @@ fn bench_wait_set(_ctx: &crate::TestContext, iters: u32)
         signal_send(sig, 0x1).ok();
 
         let t0 = cycles_now();
-        let Ok(ws) = cap_create_wait_set() else { break };
+        let Ok(ws) = cap_create_wait_set()
+        else
+        {
+            break;
+        };
         if wait_set_add(ws, sig, 42).is_err()
         {
             cap_delete(ws).ok();
@@ -508,8 +630,14 @@ fn bench_wait_set(_ctx: &crate::TestContext, iters: u32)
         signal_wait(sig).ok();
 
         let delta = t1.saturating_sub(t0);
-        if delta < min { min = delta; }
-        if delta > max { max = delta; }
+        if delta < min
+        {
+            min = delta;
+        }
+        if delta > max
+        {
+            max = delta;
+        }
         total = total.saturating_add(delta);
     }
 

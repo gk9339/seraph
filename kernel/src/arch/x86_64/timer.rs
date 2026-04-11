@@ -29,7 +29,11 @@
 // cast_possible_truncation: APIC timer counts fit in u32; TIMER_VECTOR fits in u32.
 // cast_lossless: u32→u64 conversions in TSC math are lossless.
 // inline_always: read_tsc is a tiny asm stub; always-inline is appropriate here.
-#![allow(clippy::cast_possible_truncation, clippy::cast_lossless, clippy::inline_always)]
+#![allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_lossless,
+    clippy::inline_always
+)]
 
 use core::sync::atomic::{AtomicU64, Ordering};
 

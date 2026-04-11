@@ -179,8 +179,8 @@ pub fn send_insufficient_rights(_ctx: &TestContext) -> TestResult
         cap_create_signal().map_err(|_| "create_signal for send_insufficient_rights failed")?;
 
     // Derive a cap with WAIT right only — no SIGNAL (send) right.
-    let wait_only =
-        cap_derive(sig, RIGHTS_WAIT).map_err(|_| "cap_derive for send_insufficient_rights failed")?;
+    let wait_only = cap_derive(sig, RIGHTS_WAIT)
+        .map_err(|_| "cap_derive for send_insufficient_rights failed")?;
 
     let err = signal_send(wait_only, 0x1);
     if err != Err(SyscallError::InsufficientRights as i64)

@@ -425,7 +425,8 @@ pub unsafe fn dealloc_object(ptr: core::ptr::NonNull<KernelObjectHeader>)
                     use crate::sched::thread::ThreadState;
                     let prio = (*tcb).priority;
                     let cpu_count = crate::sched::CPU_COUNT
-                        .load(core::sync::atomic::Ordering::Relaxed) as usize;
+                        .load(core::sync::atomic::Ordering::Relaxed)
+                        as usize;
 
                     // Acquire all scheduler locks in ascending CPU order to
                     // prevent ABBA deadlock.
@@ -499,8 +500,7 @@ pub unsafe fn dealloc_object(ptr: core::ptr::NonNull<KernelObjectHeader>)
                         {
                             IpcThreadState::BlockedOnSignal =>
                             {
-                                let sig =
-                                    blocked_obj.cast::<crate::ipc::signal::SignalState>();
+                                let sig = blocked_obj.cast::<crate::ipc::signal::SignalState>();
                                 // SAFETY: sig is valid; lock serialises with signal_send.
                                 let saved = (*sig).lock.lock_raw();
                                 if (*sig).waiter == tcb
@@ -512,8 +512,7 @@ pub unsafe fn dealloc_object(ptr: core::ptr::NonNull<KernelObjectHeader>)
                             IpcThreadState::BlockedOnSend =>
                             {
                                 let ep =
-                                    &mut *blocked_obj
-                                        .cast::<crate::ipc::endpoint::EndpointState>();
+                                    &mut *blocked_obj.cast::<crate::ipc::endpoint::EndpointState>();
                                 // SAFETY: ep is valid; lock serialises with endpoint ops.
                                 let saved = ep.lock.lock_raw();
                                 crate::ipc::endpoint::unlink_from_wait_queue(
@@ -526,8 +525,7 @@ pub unsafe fn dealloc_object(ptr: core::ptr::NonNull<KernelObjectHeader>)
                             IpcThreadState::BlockedOnRecv =>
                             {
                                 let ep =
-                                    &mut *blocked_obj
-                                        .cast::<crate::ipc::endpoint::EndpointState>();
+                                    &mut *blocked_obj.cast::<crate::ipc::endpoint::EndpointState>();
                                 // SAFETY: ep is valid; lock serialises with endpoint ops.
                                 let saved = ep.lock.lock_raw();
                                 crate::ipc::endpoint::unlink_from_wait_queue(
@@ -539,8 +537,8 @@ pub unsafe fn dealloc_object(ptr: core::ptr::NonNull<KernelObjectHeader>)
                             }
                             IpcThreadState::BlockedOnEventQueue =>
                             {
-                                let eq = blocked_obj
-                                    .cast::<crate::ipc::event_queue::EventQueueState>();
+                                let eq =
+                                    blocked_obj.cast::<crate::ipc::event_queue::EventQueueState>();
                                 // SAFETY: eq is valid; lock serialises with event_queue ops.
                                 let saved = (*eq).lock.lock_raw();
                                 if (*eq).waiter == tcb
@@ -551,15 +549,15 @@ pub unsafe fn dealloc_object(ptr: core::ptr::NonNull<KernelObjectHeader>)
                             }
                             IpcThreadState::BlockedOnWaitSet =>
                             {
-                                let ws = blocked_obj
-                                    .cast::<crate::ipc::wait_set::WaitSetState>();
+                                let ws = blocked_obj.cast::<crate::ipc::wait_set::WaitSetState>();
                                 // WaitSetState has a single waiter field.
                                 if (*ws).waiter == tcb
                                 {
                                     (*ws).waiter = core::ptr::null_mut();
                                 }
                             }
-                            _ => {} // None, BlockedOnReply: no cleanup needed
+                            _ =>
+                            {} // None, BlockedOnReply: no cleanup needed
                         }
                         (*tcb).blocked_on_object = core::ptr::null_mut();
                     }

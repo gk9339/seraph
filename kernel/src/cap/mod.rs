@@ -26,7 +26,6 @@ extern crate alloc;
 
 use alloc::boxed::Box;
 
-
 pub mod cspace;
 pub mod derivation;
 pub mod object;
@@ -573,11 +572,7 @@ fn populate_cspace(
 ///
 /// Updates `layout.module_frame_base`, `layout.module_frame_count`, and
 /// appends [`CapDescriptor`] entries for each module.
-fn mint_module_frame_caps(
-    cspace: &mut CSpace,
-    boot_info: &BootInfo,
-    layout: &mut CSpaceLayout,
-)
+fn mint_module_frame_caps(cspace: &mut CSpace, boot_info: &BootInfo, layout: &mut CSpaceLayout)
 {
     use boot_protocol::BootModule;
     use init_protocol::CapType;

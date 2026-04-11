@@ -98,12 +98,12 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
     // Copy all fields needed beyond Phase 3 out of BootInfo now, while the
     // identity mapping is still live. After Phase 3 activates the kernel page
     // tables, the physical address in `info` is no longer mapped.
-    let boot_cpu_count    = info.cpu_count.max(1);
-    let boot_cpu_ids      = info.cpu_ids;
-    let trampoline_pa     = info.ap_trampoline_page;
-    let init_image        = info.init_image; // InitImage is Copy
-    let cmdline_phys      = info.command_line as u64;
-    let cmdline_len       = info.command_line_len as usize;
+    let boot_cpu_count = info.cpu_count.max(1);
+    let boot_cpu_ids = info.cpu_ids;
+    let trampoline_pa = info.ap_trampoline_page;
+    let init_image = info.init_image; // InitImage is Copy
+    let cmdline_phys = info.command_line as u64;
+    let cmdline_len = info.command_line_len as usize;
 
     // ── Phase 1: early console ──────────────────────────────────────────────
     // SAFETY: called exactly once, from the single kernel boot thread, after
@@ -301,7 +301,7 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
             // SAFETY: init_as_ptr valid (just allocated above); segment data in
             // Loaded memory region accessible via direct physical map (Phase 3).
             unsafe { (*init_as_ptr).map_segment(seg) }
-                .unwrap_or_else(|()|  fatal("Phase 9: failed to map init segment"));
+                .unwrap_or_else(|()| fatal("Phase 9: failed to map init segment"));
         }
 
         // Insert an AddressSpace cap for init's own address space into the root
@@ -326,8 +326,9 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
                 address_space: init_as_ptr,
             });
             // SAFETY: Box::into_raw returns non-null pointer; cast preserves validity.
-            let as_nn =
-                unsafe { NonNull::new_unchecked(Box::into_raw(as_obj).cast::<KernelObjectHeader>()) };
+            let as_nn = unsafe {
+                NonNull::new_unchecked(Box::into_raw(as_obj).cast::<KernelObjectHeader>())
+            };
             let aspace_slot = cs
                 .insert_cap(CapTag::AddressSpace, Rights::MAP | Rights::READ, as_nn)
                 .unwrap_or_else(|_| fatal("Phase 9: cannot insert init AddressSpace cap"));
@@ -350,9 +351,11 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
                     size: seg.size,
                 });
                 // SAFETY: Box::into_raw returns non-null pointer; cast preserves validity.
-                let fo_nn =
-                    unsafe { NonNull::new_unchecked(Box::into_raw(fo).cast::<KernelObjectHeader>()) };
-                let slot = cs.insert_cap(CapTag::Frame, rights, fo_nn)
+                let fo_nn = unsafe {
+                    NonNull::new_unchecked(Box::into_raw(fo).cast::<KernelObjectHeader>())
+                };
+                let slot = cs
+                    .insert_cap(CapTag::Frame, rights, fo_nn)
                     .unwrap_or_else(|_| fatal("Phase 9: cannot insert init segment Frame cap"));
                 if i == 0
                 {
@@ -386,12 +389,19 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
             let descriptors_offset = core::mem::size_of::<InitInfo>() as u32;
 
             // Compute where the command line goes: after the CapDescriptor array.
-            let desc_byte_len_pre =
-                cspace_layout.descriptors.len() * core::mem::size_of::<init_protocol::CapDescriptor>();
+            let desc_byte_len_pre = cspace_layout.descriptors.len()
+                * core::mem::size_of::<init_protocol::CapDescriptor>();
             let cmdline_start = descriptors_offset as usize + desc_byte_len_pre;
             // Truncate if the cmdline doesn't fit in the remaining page space.
             let cmdline_copy_len = cmdline_len.min(mm::PAGE_SIZE.saturating_sub(cmdline_start));
-            let cmdline_off = if cmdline_copy_len > 0 { cmdline_start as u32 } else { 0 };
+            let cmdline_off = if cmdline_copy_len > 0
+            {
+                cmdline_start as u32
+            }
+            else
+            {
+                0
+            };
 
             let info = InitInfo {
                 version: INIT_PROTOCOL_VERSION,
@@ -428,8 +438,7 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
             // is valid for PAGE_SIZE bytes.
             let desc_ptr = unsafe { info_page_virt.add(descriptors_offset as usize) };
             let desc_count = cspace_layout.descriptors.len();
-            let desc_byte_len =
-                desc_count * core::mem::size_of::<init_protocol::CapDescriptor>();
+            let desc_byte_len = desc_count * core::mem::size_of::<init_protocol::CapDescriptor>();
 
             // Verify the descriptors fit within the page.
             if descriptors_offset as usize + desc_byte_len > mm::PAGE_SIZE
@@ -490,7 +499,7 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
                 mm::address_space::INIT_STACK_PAGES,
             )
         }
-        .unwrap_or_else(|()|  fatal("Phase 9: failed to map init stack"));
+        .unwrap_or_else(|()| fatal("Phase 9: failed to map init stack"));
 
         // Allocate init's kernel stack (KERNEL_STACK_PAGES = 4 pages = 16 KiB).
         let init_kstack_phys = allocator
@@ -552,8 +561,9 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
                 tcb: init_tcb,
             });
             // SAFETY: Box::into_raw returns non-null pointer; cast preserves validity.
-            let th_nn =
-                unsafe { NonNull::new_unchecked(Box::into_raw(th_obj).cast::<KernelObjectHeader>()) };
+            let th_nn = unsafe {
+                NonNull::new_unchecked(Box::into_raw(th_obj).cast::<KernelObjectHeader>())
+            };
             // SAFETY: ROOT_CSPACE initialized in Phase 7; single-threaded boot.
             let cs = unsafe { cap::root_cspace_mut() }
                 .unwrap_or_else(|| fatal("Phase 9: ROOT_CSPACE missing for Thread cap"));

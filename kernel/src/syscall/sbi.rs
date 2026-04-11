@@ -53,7 +53,8 @@ pub fn sys_sbi_call(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     // SAFETY: tcb validated non-null; cspace field always valid for initialized TCB.
     let cspace = unsafe { (*tcb).cspace };
     // SAFETY: cspace from current TCB; lookup_cap validates tag and rights.
-    let _slot = unsafe { super::lookup_cap(cspace, sbi_cap_idx, CapTag::SbiControl, Rights::CALL) }?;
+    let _slot =
+        unsafe { super::lookup_cap(cspace, sbi_cap_idx, CapTag::SbiControl, Rights::CALL) }?;
 
     // Forward the SBI call.
     let ret = crate::arch::current::sbi::sbi_call(extension, function, a0, a1, a2);

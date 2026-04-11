@@ -27,9 +27,10 @@ const ACPI_MAP_BASE: u64 = 0x4000_0000;
 pub fn shutdown(info: &InitInfo)
 {
     let fadt = find_acpi_table(info, b"FACP", ACPI_MAP_BASE);
-    let Some((pm1a_cnt_blk, _fadt_phys)) = fadt.and_then(|(slot, phys)| {
-        map_and_read_fadt(info, slot, phys)
-    }) else {
+    let Some((pm1a_cnt_blk, _fadt_phys)) =
+        fadt.and_then(|(slot, phys)| map_and_read_fadt(info, slot, phys))
+    else
+    {
         crate::log("ktest: shutdown failed (FADT not found)");
         return;
     };
@@ -42,14 +43,17 @@ pub fn shutdown(info: &InitInfo)
 
     let dsdt_vaddr = ACPI_MAP_BASE + 0x10_0000;
     let dsdt = find_acpi_table(info, b"DSDT", dsdt_vaddr);
-    let Some(slp_typa) = dsdt.and_then(|(slot, phys)| {
-        map_and_scan_dsdt(info, slot, phys, dsdt_vaddr)
-    }) else {
+    let Some(slp_typa) =
+        dsdt.and_then(|(slot, phys)| map_and_scan_dsdt(info, slot, phys, dsdt_vaddr))
+    else
+    {
         crate::log("ktest: shutdown failed (DSDT not found or \\_S5_ missing)");
         return;
     };
 
-    let Some(ioport_slot) = find_cap_by_type(info, CapType::IoPortRange) else {
+    let Some(ioport_slot) = find_cap_by_type(info, CapType::IoPortRange)
+    else
+    {
         crate::log("ktest: shutdown failed (IoPortRange cap not found)");
         return;
     };
@@ -93,7 +97,15 @@ fn find_acpi_table(info: &InitInfo, sig: &[u8; 4], map_vaddr: u64) -> Option<(u3
         }
 
         // Try to map this Frame cap and check its signature.
-        if syscall::mem_map(desc.slot, info.aspace_cap, map_vaddr, 0, 1, syscall::PROT_READ).is_err()
+        if syscall::mem_map(
+            desc.slot,
+            info.aspace_cap,
+            map_vaddr,
+            0,
+            1,
+            syscall::PROT_READ,
+        )
+        .is_err()
         {
             continue;
         }
@@ -151,7 +163,15 @@ fn map_and_scan_dsdt(info: &InitInfo, slot: u32, phys: u64, vaddr: u64) -> Optio
     if total_pages > 1
     {
         let _ = syscall::mem_unmap(info.aspace_cap, vaddr, 1);
-        if syscall::mem_map(slot, info.aspace_cap, vaddr, 0, total_pages as u64, syscall::PROT_READ).is_err()
+        if syscall::mem_map(
+            slot,
+            info.aspace_cap,
+            vaddr,
+            0,
+            total_pages as u64,
+            syscall::PROT_READ,
+        )
+        .is_err()
         {
             return None;
         }
@@ -247,7 +267,8 @@ fn descriptors(info: &InitInfo) -> &[init_protocol::CapDescriptor]
     #[allow(clippy::cast_ptr_alignment)]
     unsafe {
         core::slice::from_raw_parts(
-            base.add(info.cap_descriptors_offset as usize).cast::<init_protocol::CapDescriptor>(),
+            base.add(info.cap_descriptors_offset as usize)
+                .cast::<init_protocol::CapDescriptor>(),
             info.cap_descriptor_count as usize,
         )
     }

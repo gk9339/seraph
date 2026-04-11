@@ -529,8 +529,15 @@ pub unsafe fn open_file(
 {
     let mut file: *mut EfiFileProtocol = core::ptr::null_mut();
     // SAFETY: root is valid; path is a null-terminated UTF-16 string.
-    let status =
-        unsafe { ((*root).open)(root, core::ptr::addr_of_mut!(file), path, EFI_FILE_MODE_READ, 0) };
+    let status = unsafe {
+        ((*root).open)(
+            root,
+            core::ptr::addr_of_mut!(file),
+            path,
+            EFI_FILE_MODE_READ,
+            0,
+        )
+    };
     if status != EFI_SUCCESS
     {
         return Err(BootError::FileNotFound(name));

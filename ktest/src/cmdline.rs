@@ -112,7 +112,8 @@ fn parse_filter(value: &[u8], config: &mut KtestConfig)
                 b"integration" => config.run_integration = true,
                 b"stress" => config.run_stress = true,
                 b"bench" => config.run_bench = true,
-                _ => {} // Unknown tier name — silently ignored.
+                _ =>
+                {} // Unknown tier name — silently ignored.
             }
             start = i + 1;
         }

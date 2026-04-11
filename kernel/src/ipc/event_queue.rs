@@ -195,7 +195,9 @@ pub unsafe fn event_queue_recv(
     // See signal.rs signal_wait for the full rationale.
     // SAFETY: caller is a valid TCB; context_saved is AtomicU32.
     unsafe {
-        (*caller).context_saved.store(0, core::sync::atomic::Ordering::Relaxed);
+        (*caller)
+            .context_saved
+            .store(0, core::sync::atomic::Ordering::Relaxed);
     }
     eq.waiter = caller;
     // SAFETY: caller is a valid TCB.

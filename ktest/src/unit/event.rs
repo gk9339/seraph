@@ -144,8 +144,8 @@ pub fn post_insufficient_rights(_ctx: &TestContext) -> TestResult
     let eq = event_queue_create(4).map_err(|_| "event_queue_create for post_rights test failed")?;
 
     // Derive with RECV right only (bit 10), no POST (bit 9).
-    let recv_only = syscall::cap_derive(eq, 1 << 10)
-        .map_err(|_| "cap_derive for post_rights test failed")?;
+    let recv_only =
+        syscall::cap_derive(eq, 1 << 10).map_err(|_| "cap_derive for post_rights test failed")?;
 
     let err = event_post(recv_only, 0x42);
     if err != Err(SyscallError::InsufficientRights as i64)
@@ -171,8 +171,8 @@ pub fn recv_insufficient_rights(_ctx: &TestContext) -> TestResult
     event_post(eq, 0x42).map_err(|_| "event_post for recv_rights test failed")?;
 
     // Derive with POST right only (bit 9), no RECV (bit 10).
-    let post_only = syscall::cap_derive(eq, 1 << 9)
-        .map_err(|_| "cap_derive for recv_rights test failed")?;
+    let post_only =
+        syscall::cap_derive(eq, 1 << 9).map_err(|_| "cap_derive for recv_rights test failed")?;
 
     let err = event_recv(post_only);
     if err != Err(SyscallError::InsufficientRights as i64)

@@ -80,7 +80,9 @@ pub unsafe fn register(irq: u32, signal: *mut SignalState)
     debug_assert!((irq as usize) < MAX_IRQ, "irq out of range");
     // SAFETY: index is bounds-checked by debug_assert; Release ordering ensures
     // the stored pointer becomes visible to all CPUs that Acquire-load it.
-    IRQ_TABLE[irq as usize].signal.store(signal, Ordering::Release);
+    IRQ_TABLE[irq as usize]
+        .signal
+        .store(signal, Ordering::Release);
 }
 
 /// Clear the routing entry for `irq` (called when the Interrupt cap is freed).

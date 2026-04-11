@@ -88,7 +88,9 @@ pub fn mem_protect(ctx: &TestContext) -> TestResult
     let mut frame = crate::frame_pool::FrameGuard::new(ctx.aspace_cap)
         .ok_or("mem_protect: frame pool exhausted")?;
 
-    frame.map(TEST_VA).map_err(|_| "mem_map for protect test failed")?;
+    frame
+        .map(TEST_VA)
+        .map_err(|_| "mem_map for protect test failed")?;
 
     // prot = 0: read-only. Always valid regardless of frame rights.
     syscall::mem_protect(frame.cap(), ctx.aspace_cap, TEST_VA, 1, 0)
@@ -103,8 +105,8 @@ pub fn mem_protect(ctx: &TestContext) -> TestResult
 /// `mem_protect` on an unmapped virtual address must return an error.
 pub fn mem_protect_unmapped_err(ctx: &TestContext) -> TestResult
 {
-    let frame = crate::frame_pool::alloc()
-        .ok_or("mem_protect_unmapped_err: frame pool exhausted")?;
+    let frame =
+        crate::frame_pool::alloc().ok_or("mem_protect_unmapped_err: frame pool exhausted")?;
     // 0x1000_0000 is not mapped by ktest.
     let unmapped_va = 0x1000_0000u64;
     let err = syscall::mem_protect(frame, ctx.aspace_cap, unmapped_va, 1, 0);
@@ -127,7 +129,9 @@ pub fn mem_unmap_idempotent(ctx: &TestContext) -> TestResult
     let mut frame = crate::frame_pool::FrameGuard::new(ctx.aspace_cap)
         .ok_or("mem_unmap_idempotent: frame pool exhausted")?;
 
-    frame.map(TEST_VA).map_err(|_| "mem_map for idempotent-unmap test failed")?;
+    frame
+        .map(TEST_VA)
+        .map_err(|_| "mem_map for idempotent-unmap test failed")?;
     mem_unmap(ctx.aspace_cap, TEST_VA, 1).map_err(|_| "first mem_unmap failed")?;
     // Second unmap of the same range must succeed (no-op).
     mem_unmap(ctx.aspace_cap, TEST_VA, 1).map_err(|_| "second mem_unmap (idempotent) failed")?;
@@ -173,8 +177,8 @@ pub fn aspace_query_unmapped_err(ctx: &TestContext) -> TestResult
 /// `mem_map` with a non-page-aligned virtual address must return an error.
 pub fn mem_map_unaligned_vaddr_err(ctx: &TestContext) -> TestResult
 {
-    let frame = crate::frame_pool::alloc()
-        .ok_or("mem_map_unaligned_vaddr_err: frame pool exhausted")?;
+    let frame =
+        crate::frame_pool::alloc().ok_or("mem_map_unaligned_vaddr_err: frame pool exhausted")?;
     let err = mem_map(frame, ctx.aspace_cap, TEST_VA + 1, 0, 1, PROT_WRITE);
 
     // SAFETY: frame was allocated from pool and never successfully mapped.
@@ -192,8 +196,8 @@ pub fn mem_map_unaligned_vaddr_err(ctx: &TestContext) -> TestResult
 /// On both x86-64 and RISC-V Sv48, `0xFFFF_8000_0000_0000` is in the kernel half.
 pub fn mem_map_kernel_half_err(ctx: &TestContext) -> TestResult
 {
-    let frame = crate::frame_pool::alloc()
-        .ok_or("mem_map_kernel_half_err: frame pool exhausted")?;
+    let frame =
+        crate::frame_pool::alloc().ok_or("mem_map_kernel_half_err: frame pool exhausted")?;
     let kernel_va: u64 = 0xFFFF_8000_0000_0000;
     let err = mem_map(frame, ctx.aspace_cap, kernel_va, 0, 1, PROT_WRITE);
 
@@ -212,8 +216,8 @@ pub fn mem_map_kernel_half_err(ctx: &TestContext) -> TestResult
 /// `frame_split` at offset 0 must return an error (left half would be empty).
 pub fn frame_split_at_zero_err(_ctx: &TestContext) -> TestResult
 {
-    let frame = crate::frame_pool::alloc()
-        .ok_or("frame_split_at_zero_err: frame pool exhausted")?;
+    let frame =
+        crate::frame_pool::alloc().ok_or("frame_split_at_zero_err: frame pool exhausted")?;
     let err = syscall::frame_split(frame, 0);
 
     // If split fails (expected), frame cap is still valid, so return it to pool.
@@ -281,8 +285,8 @@ pub fn mem_map_multi_page(ctx: &TestContext) -> TestResult
         .map_err(|_| "mem_map frame_b failed")?;
 
     // Both pages must be queryable.
-    let phys_a = aspace_query(ctx.aspace_cap, MULTI_VA)
-        .map_err(|_| "aspace_query page_a failed")?;
+    let phys_a =
+        aspace_query(ctx.aspace_cap, MULTI_VA).map_err(|_| "aspace_query page_a failed")?;
     let phys_b = aspace_query(ctx.aspace_cap, MULTI_VA + 0x1000)
         .map_err(|_| "aspace_query page_b failed")?;
 
@@ -310,8 +314,7 @@ pub fn mem_map_multi_page(ctx: &TestContext) -> TestResult
 /// `mem_map` with `page_count`=0 must return `InvalidArgument`.
 pub fn mem_map_zero_pages_err(ctx: &TestContext) -> TestResult
 {
-    let frame =
-        crate::frame_pool::alloc().ok_or("mem_map_zero_pages_err: frame pool exhausted")?;
+    let frame = crate::frame_pool::alloc().ok_or("mem_map_zero_pages_err: frame pool exhausted")?;
     let err = mem_map(frame, ctx.aspace_cap, TEST_VA, 0, 0, PROT_WRITE);
 
     // SAFETY: frame allocated from pool and never mapped.
@@ -367,10 +370,15 @@ pub fn mem_protect_wx_err(ctx: &TestContext) -> TestResult
 
     let mut frame = crate::frame_pool::FrameGuard::new(ctx.aspace_cap)
         .ok_or("mem_protect_wx_err: frame pool exhausted")?;
-    frame.map(WX_TEST_VA).map_err(|_| "mem_map for wx test failed")?;
+    frame
+        .map(WX_TEST_VA)
+        .map_err(|_| "mem_map for wx test failed")?;
 
     let err = syscall::mem_protect(
-        frame.cap(), ctx.aspace_cap, WX_TEST_VA, 1,
+        frame.cap(),
+        ctx.aspace_cap,
+        WX_TEST_VA,
+        1,
         PROT_WRITE | syscall::PROT_EXEC,
     );
     if err.is_ok()
@@ -389,7 +397,11 @@ pub fn mem_map_wx_prot_err(ctx: &TestContext) -> TestResult
         .ok_or("mem_map_wx_prot_err: frame pool exhausted")?;
 
     let err = mem_map(
-        frame.cap(), ctx.aspace_cap, 0x4400_0000, 0, 1,
+        frame.cap(),
+        ctx.aspace_cap,
+        0x4400_0000,
+        0,
+        1,
         PROT_WRITE | syscall::PROT_EXEC,
     );
 
@@ -407,8 +419,7 @@ pub fn mem_map_wx_prot_err(ctx: &TestContext) -> TestResult
 /// `frame_split` with offset >= `frame_size` must return an error (right half empty).
 pub fn frame_split_at_end_err(_ctx: &TestContext) -> TestResult
 {
-    let frame =
-        crate::frame_pool::alloc().ok_or("frame_split_at_end_err: frame pool exhausted")?;
+    let frame = crate::frame_pool::alloc().ok_or("frame_split_at_end_err: frame pool exhausted")?;
     // Pool frames are 4 KiB (1 page). Splitting at offset 0x1000 = entire frame
     // leaves right half empty.
     let err = syscall::frame_split(frame, 0x1000);

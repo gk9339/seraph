@@ -150,7 +150,10 @@ unsafe fn write_cap_results(buf: u64, cap_count: usize, indices: &[u32; MSG_CAP_
 fn unpack_cap_slots(packed: u64, count: usize) -> [u32; MSG_CAP_SLOTS_MAX]
 {
     let mut out = [0u32; MSG_CAP_SLOTS_MAX];
-    for (i, item) in out.iter_mut().enumerate().take(count.min(MSG_CAP_SLOTS_MAX))
+    for (i, item) in out
+        .iter_mut()
+        .enumerate()
+        .take(count.min(MSG_CAP_SLOTS_MAX))
     {
         *item = ((packed >> (i * 16)) & 0xFFFF) as u32;
     }
@@ -1097,7 +1100,9 @@ pub fn sys_wait_set_add(tf: &mut TrapFrame) -> Result<u64, SyscallError>
                 let sig = source_ptr.cast::<crate::ipc::signal::SignalState>();
                 (*sig).wait_set = ws_state.cast::<u8>();
                 (*sig).wait_set_member_idx = member_idx;
-                (*sig).has_observer.store(1, core::sync::atomic::Ordering::Relaxed);
+                (*sig)
+                    .has_observer
+                    .store(1, core::sync::atomic::Ordering::Relaxed);
             }
             WaitSetSourceTag::EventQueue =>
             {

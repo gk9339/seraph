@@ -30,8 +30,7 @@ pub fn run(ctx: &TestContext) -> TestResult
     let mut frames = [0u32; NUM_CHILDREN];
     for frame in &mut frames
     {
-        *frame = crate::frame_pool::alloc()
-            .ok_or("concurrent_map_unmap: frame pool exhausted")?;
+        *frame = crate::frame_pool::alloc().ok_or("concurrent_map_unmap: frame pool exhausted")?;
     }
 
     // Spawn children. Each child gets copies of its frame cap and the aspace
@@ -40,10 +39,9 @@ pub fn run(ctx: &TestContext) -> TestResult
     let mut cspaces = [0u32; NUM_CHILDREN];
     for i in 0..NUM_CHILDREN
     {
-        let cs = cap_create_cspace(16)
-            .map_err(|_| "concurrent_map_unmap: create_cspace failed")?;
-        let child_done = cap_copy(done, cs, 1 << 7)
-            .map_err(|_| "concurrent_map_unmap: cap_copy done failed")?;
+        let cs = cap_create_cspace(16).map_err(|_| "concurrent_map_unmap: create_cspace failed")?;
+        let child_done =
+            cap_copy(done, cs, 1 << 7).map_err(|_| "concurrent_map_unmap: cap_copy done failed")?;
         // Copy frame and aspace caps into child's CSpace with full rights.
         let child_frame = cap_copy(frames[i], cs, !0u64)
             .map_err(|_| "concurrent_map_unmap: cap_copy frame failed")?;
@@ -62,8 +60,7 @@ pub fn run(ctx: &TestContext) -> TestResult
             | (done_bit << 48);
 
         // SAFETY: Each child uses a distinct stack index.
-        let stack_top =
-            ChildStack::top(unsafe { core::ptr::addr_of!(super::STRESS_STACKS[i]) });
+        let stack_top = ChildStack::top(unsafe { core::ptr::addr_of!(super::STRESS_STACKS[i]) });
         thread_configure(th, mapper_entry as *const () as u64, stack_top, arg)
             .map_err(|_| "concurrent_map_unmap: thread_configure failed")?;
 
@@ -83,8 +80,7 @@ pub fn run(ctx: &TestContext) -> TestResult
     let mut child_failed = false;
     while done_bits & all_done != all_done
     {
-        let bits =
-            signal_wait(done).map_err(|_| "concurrent_map_unmap: signal_wait failed")?;
+        let bits = signal_wait(done).map_err(|_| "concurrent_map_unmap: signal_wait failed")?;
         done_bits |= bits;
         // Bit 8 is our error indicator (not used by any done_bit since max is 1<<3).
         if bits & (1 << 8) != 0

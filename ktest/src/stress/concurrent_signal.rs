@@ -19,8 +19,8 @@ const SEND_ITERATIONS: u64 = 2000;
 
 /// Each sender ORs its unique bit once per iteration.
 const SENDER_BITS: [u64; NUM_SENDERS] = [
-    0x1, 0x2, 0x4, 0x8, 0x10, 0x20, 0x40, 0x80,
-    0x100, 0x200, 0x400, 0x800, 0x1000, 0x2000, 0x4000, 0x8000,
+    0x1, 0x2, 0x4, 0x8, 0x10, 0x20, 0x40, 0x80, 0x100, 0x200, 0x400, 0x800, 0x1000, 0x2000, 0x4000,
+    0x8000,
 ];
 const ALL_BITS: u64 = 0xFFFF;
 
@@ -35,11 +35,10 @@ pub fn run(ctx: &TestContext) -> TestResult
 
     for i in 0..NUM_SENDERS
     {
-        let cs =
-            cap_create_cspace(16).map_err(|_| "concurrent_signal: create_cspace failed")?;
+        let cs = cap_create_cspace(16).map_err(|_| "concurrent_signal: create_cspace failed")?;
         // Child needs SIGNAL right on target and done.
-        let child_target =
-            cap_copy(target, cs, 1 << 7).map_err(|_| "concurrent_signal: cap_copy target failed")?;
+        let child_target = cap_copy(target, cs, 1 << 7)
+            .map_err(|_| "concurrent_signal: cap_copy target failed")?;
         let child_done =
             cap_copy(done, cs, 1 << 7).map_err(|_| "concurrent_signal: cap_copy done failed")?;
 
@@ -47,13 +46,10 @@ pub fn run(ctx: &TestContext) -> TestResult
             .map_err(|_| "concurrent_signal: create_thread failed")?;
 
         // Pack: bits[15:0]=target_slot, bits[31:16]=done_slot, bits[47:32]=bit_index
-        let arg = u64::from(child_target)
-            | (u64::from(child_done) << 16)
-            | ((i as u64) << 32);
+        let arg = u64::from(child_target) | (u64::from(child_done) << 16) | ((i as u64) << 32);
 
         // SAFETY: Sequential setup; each child gets a unique stack index.
-        let stack_top =
-            ChildStack::top(unsafe { core::ptr::addr_of!(super::STRESS_STACKS[i]) });
+        let stack_top = ChildStack::top(unsafe { core::ptr::addr_of!(super::STRESS_STACKS[i]) });
         thread_configure(th, sender_entry as *const () as u64, stack_top, arg)
             .map_err(|_| "concurrent_signal: thread_configure failed")?;
         thread_start(th).map_err(|_| "concurrent_signal: thread_start failed")?;

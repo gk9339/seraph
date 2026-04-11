@@ -41,7 +41,8 @@ pub fn serial_init(info: &InitInfo, thread_cap: u32)
 pub fn serial_write_byte(byte: u8)
 {
     // SAFETY: reading LSR is a side-effect-free I/O port read on COM1.
-    while unsafe { inb(COM1 + 5) } & 0x20 == 0 {}
+    while unsafe { inb(COM1 + 5) } & 0x20 == 0
+    {}
     // SAFETY: writing one byte to the COM1 data register.
     unsafe { outb(COM1, byte) };
 }

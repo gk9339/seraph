@@ -256,7 +256,8 @@ impl AddressSpace
         let current = crate::arch::current::cpu::current_cpu();
         let remote_cpus = active & !(1u64 << current);
 
-        if remote_cpus != 0 {
+        if remote_cpus != 0
+        {
             // SAFETY: root_phys is a valid page table root; remote_cpus mask
             // contains only bits for online CPUs (enforced by scheduler).
             // preempt_disable() already called above.
@@ -291,10 +292,7 @@ impl AddressSpace
     /// # Safety
     /// `segment` must be a valid, bootloader-provided `InitSegment`.
     #[cfg(not(test))]
-    pub unsafe fn map_segment(
-        &self,
-        segment: &InitSegment,
-    ) -> Result<(), ()>
+    pub unsafe fn map_segment(&self, segment: &InitSegment) -> Result<(), ()>
     {
         let flags = match segment.flags
         {
@@ -329,7 +327,9 @@ impl AddressSpace
         // page_count includes the in-page offset so a segment that crosses a
         // page boundary gets enough pages mapped.
         let in_page_off = (segment.virt_addr & 0xFFF) as usize;
-        let page_count = (in_page_off + segment.size as usize).div_ceil(PAGE_SIZE).max(1);
+        let page_count = (in_page_off + segment.size as usize)
+            .div_ceil(PAGE_SIZE)
+            .max(1);
         let virt_base = segment.virt_addr & !0xFFF_u64; // page-aligned virtual
         let phys_base = segment.phys_addr & !0xFFF_u64; // page-aligned physical frame
         for i in 0..page_count
@@ -352,11 +352,7 @@ impl AddressSpace
     /// # Safety
     /// `stack_top` must be page-aligned and within the user address range.
     #[cfg(not(test))]
-    pub unsafe fn map_stack(
-        &self,
-        stack_top: u64,
-        pages: usize,
-    ) -> Result<(), ()>
+    pub unsafe fn map_stack(&self, stack_top: u64, pages: usize) -> Result<(), ()>
     {
         let rw_flags = crate::mm::paging::PageFlags {
             readable: true,
@@ -370,8 +366,7 @@ impl AddressSpace
             // Allocate one physical frame per page. The frame allocator lock
             // is acquired and released here, independently of map_page's
             // internal lock acquisition for intermediate page table frames.
-            let phys = crate::mm::with_frame_allocator(|alloc| alloc.alloc(0))
-                .ok_or(())?;
+            let phys = crate::mm::with_frame_allocator(|alloc| alloc.alloc(0)).ok_or(())?;
 
             // Zero the frame (stack pages should start clean).
             // SAFETY: phys_to_virt gives a valid kernel virtual address.
@@ -421,7 +416,8 @@ impl AddressSpace
         let current = crate::arch::current::cpu::current_cpu();
         let remote_cpus = active & !(1u64 << current);
 
-        if remote_cpus != 0 {
+        if remote_cpus != 0
+        {
             // SAFETY: root_phys is a valid page table root; remote_cpus mask
             // contains only bits for online CPUs (enforced by scheduler).
             // preempt_disable() already called above.
@@ -478,7 +474,8 @@ impl AddressSpace
         let current = crate::arch::current::cpu::current_cpu();
         let remote_cpus = active & !(1u64 << current);
 
-        if remote_cpus != 0 {
+        if remote_cpus != 0
+        {
             // SAFETY: root_phys is a valid page table root; remote_cpus mask
             // contains only bits for online CPUs (enforced by scheduler).
             // preempt_disable() already called above.

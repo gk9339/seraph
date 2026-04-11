@@ -29,32 +29,19 @@ const MAX_STRESS_THREADS: usize = 16;
 /// are never aliased.
 // SAFETY: Only accessed by one stress test at a time (sequential execution).
 // Each test uses distinct indices.
-static mut STRESS_STACKS: [ChildStack; MAX_STRESS_THREADS] =
-    [ChildStack::ZERO; MAX_STRESS_THREADS];
+static mut STRESS_STACKS: [ChildStack; MAX_STRESS_THREADS] = [ChildStack::ZERO; MAX_STRESS_THREADS];
 
 /// Run all stress tests.
 pub fn run_all(ctx: &TestContext)
 {
-    run_integration_test!(
-        "stress::cap_tree_deep",
-        cap_tree_deep::run(ctx)
-    );
+    run_integration_test!("stress::cap_tree_deep", cap_tree_deep::run(ctx));
     run_integration_test!(
         "stress::event_queue_fill_drain",
         event_queue_fill_drain::run(ctx)
     );
-    run_integration_test!(
-        "stress::thread_churn",
-        thread_churn::run(ctx)
-    );
-    run_integration_test!(
-        "stress::concurrent_signal",
-        concurrent_signal::run(ctx)
-    );
-    run_integration_test!(
-        "stress::concurrent_ipc",
-        concurrent_ipc::run(ctx)
-    );
+    run_integration_test!("stress::thread_churn", thread_churn::run(ctx));
+    run_integration_test!("stress::concurrent_signal", concurrent_signal::run(ctx));
+    run_integration_test!("stress::concurrent_ipc", concurrent_ipc::run(ctx));
     run_integration_test!(
         "stress::cap_revoke_under_use",
         cap_revoke_under_use::run(ctx)

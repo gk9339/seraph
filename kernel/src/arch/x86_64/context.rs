@@ -142,7 +142,6 @@ pub unsafe extern "C" fn switch(
         "pushfq",
         "pop rax",
         "mov [rdi + 72], rax",
-
         // ── Signal save complete + release lock ───────────────────────────
         // On x86-64 TSO, stores are globally visible in program order and
         // the lock was released by release_lock_only() before the call.
@@ -151,7 +150,6 @@ pub unsafe extern "C" fn switch(
         "jz 1f",
         "mov dword ptr [rdx], 1", // *save_flag = 1 (TSO: implicitly ordered)
         "1:",
-
         // ── Restore next thread ───────────────────────────────────────────
         // Restore rflags first so the restored flags take effect early.
         "mov rax, [rsi + 72]",

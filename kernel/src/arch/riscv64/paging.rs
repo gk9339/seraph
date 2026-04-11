@@ -634,10 +634,7 @@ pub unsafe fn flush_tlb_all()
 {
     // SAFETY: sfence.vma with both arguments zero invalidates all TLB entries.
     unsafe {
-        core::arch::asm!(
-            "sfence.vma zero, zero",
-            options(nostack, preserves_flags),
-        );
+        core::arch::asm!("sfence.vma zero, zero", options(nostack, preserves_flags),);
     }
 }
 

@@ -50,5 +50,8 @@ pub fn sbi_call(extension: u64, function: u64, a0: u64, a1: u64, a2: u64) -> Sbi
 #[cfg(test)]
 pub fn sbi_call(_extension: u64, _function: u64, _a0: u64, _a1: u64, _a2: u64) -> SbiRet
 {
-    SbiRet { error: -2, value: 0 } // SBI_ERR_NOT_SUPPORTED
+    SbiRet {
+        error: -2,
+        value: 0,
+    } // SBI_ERR_NOT_SUPPORTED
 }

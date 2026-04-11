@@ -147,11 +147,8 @@ impl SlabCache
     pub fn alloc(&mut self, buddy: &mut BuddyAllocator) -> Option<*mut u8>
     {
         // Find a slab with at least one free slot.
-        let idx = (0..self.slab_count).find(|&i| {
-            self.slabs[i]
-                .as_ref()
-                .is_some_and(|s| s.free_head != 0)
-        });
+        let idx = (0..self.slab_count)
+            .find(|&i| self.slabs[i].as_ref().is_some_and(|s| s.free_head != 0));
 
         let idx = if let Some(i) = idx
         {
@@ -203,7 +200,11 @@ impl SlabCache
         let addr = ptr as u64;
         for i in 0..self.slab_count
         {
-            let Some(slab) = &self.slabs[i] else { continue };
+            let Some(slab) = &self.slabs[i]
+            else
+            {
+                continue;
+            };
             let slab_bytes = (PAGE_SIZE << slab.order) as u64;
             if addr < slab.base || addr >= slab.base + slab_bytes
             {
@@ -214,7 +215,9 @@ impl SlabCache
             // SAFETY: ptr is a valid slot VA; we write the free-list link.
             // cast_ptr_alignment: intentional unaligned write; slot alignment unconstrained.
             #[allow(clippy::cast_ptr_alignment)]
-            unsafe { core::ptr::write_unaligned(ptr.cast::<u64>(), old_head) };
+            unsafe {
+                core::ptr::write_unaligned(ptr.cast::<u64>(), old_head);
+            }
             // SAFETY: We checked self.slabs[i] is Some at line 206
             #[allow(clippy::unwrap_used)]
             let slab = self.slabs[i].as_mut().unwrap();

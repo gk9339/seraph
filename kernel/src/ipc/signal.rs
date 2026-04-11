@@ -131,10 +131,8 @@ pub unsafe fn signal_send(sig: *mut SignalState, bits: u64) -> Option<*mut Threa
 
         let waiter = sig.waiter;
         sig.waiter = core::ptr::null_mut();
-        sig.has_observer.store(
-            u8::from(!sig.wait_set.is_null()),
-            Ordering::Relaxed,
-        );
+        sig.has_observer
+            .store(u8::from(!sig.wait_set.is_null()), Ordering::Relaxed);
         // SAFETY: waiter is a valid TCB pointer placed here by signal_wait.
         unsafe {
             debug_assert!(
@@ -204,7 +202,9 @@ pub unsafe fn signal_wait(sig: *mut SignalState, caller: *mut ThreadControlBlock
     // save the real register state — causing two CPUs to share one stack.
     // SAFETY: caller TCB is valid; context_saved is AtomicU32.
     unsafe {
-        (*caller).context_saved.store(0, core::sync::atomic::Ordering::Relaxed);
+        (*caller)
+            .context_saved
+            .store(0, core::sync::atomic::Ordering::Relaxed);
     }
 
     // Register the waiter and mark the signal as observed. This must happen
@@ -225,13 +225,13 @@ pub unsafe fn signal_wait(sig: *mut SignalState, caller: *mut ThreadControlBlock
         // Bits were available — undo the waiter registration and restore
         // context_saved (thread never actually blocked).
         sig.waiter = core::ptr::null_mut();
-        sig.has_observer.store(
-            u8::from(!sig.wait_set.is_null()),
-            Ordering::Relaxed,
-        );
+        sig.has_observer
+            .store(u8::from(!sig.wait_set.is_null()), Ordering::Relaxed);
         // SAFETY: caller TCB is valid; context_saved is AtomicU32.
         unsafe {
-            (*caller).context_saved.store(1, core::sync::atomic::Ordering::Relaxed);
+            (*caller)
+                .context_saved
+                .store(1, core::sync::atomic::Ordering::Relaxed);
         }
         // SAFETY: paired with lock_raw above.
         unsafe { sig.lock.unlock_raw(saved) };

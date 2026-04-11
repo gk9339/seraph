@@ -34,7 +34,14 @@ pub fn shutdown(info: &InitInfo)
         return;
     }
 
-    let _ = syscall::sbi_call(sbi_cap, SBI_EXT_SRST, SBI_SRST_RESET, SRST_TYPE_SHUTDOWN, SRST_REASON_NONE, 0);
+    let _ = syscall::sbi_call(
+        sbi_cap,
+        SBI_EXT_SRST,
+        SBI_SRST_RESET,
+        SRST_TYPE_SHUTDOWN,
+        SRST_REASON_NONE,
+        0,
+    );
 
     // If we reach here, SRST failed or returned unexpectedly. Halt to prevent
     // partial output leaking to serial.

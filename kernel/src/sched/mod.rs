@@ -121,8 +121,7 @@ pub static CPU_COUNT: core::sync::atomic::AtomicU32 = core::sync::atomic::Atomic
 ///    (defense-in-depth for flags set without a corresponding interrupt).
 ///
 /// On x86-64 this flag is unused because `sti; hlt` is atomic.
-static RESCHEDULE_PENDING: core::sync::atomic::AtomicU64 =
-    core::sync::atomic::AtomicU64::new(0);
+static RESCHEDULE_PENDING: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
 
 /// Signal that the current CPU should reschedule.
 ///
@@ -786,9 +785,7 @@ pub unsafe fn schedule(requeue_current: bool)
         // user code runs.
         if nxt_as.is_null() && !cur_as.is_null()
         {
-            crate::arch::current::paging::write_satp_no_fence(
-                crate::mm::paging::kernel_pml4_pa(),
-            );
+            crate::arch::current::paging::write_satp_no_fence(crate::mm::paging::kernel_pml4_pa());
         }
 
         // Case (a): full address space switch.
@@ -866,7 +863,11 @@ pub unsafe fn schedule(requeue_current: bool)
     if !core::ptr::eq(next, sched.idle) && !next.is_null()
     {
         // SAFETY: next is a valid TCB; context_saved field always valid.
-        while unsafe { (*next).context_saved.load(core::sync::atomic::Ordering::Acquire) } == 0
+        while unsafe {
+            (*next)
+                .context_saved
+                .load(core::sync::atomic::Ordering::Acquire)
+        } == 0
         {
             core::hint::spin_loop();
         }
@@ -945,7 +946,8 @@ pub unsafe fn timer_tick()
     let current = sched.current;
 
     // If no current thread or slice already expired, nothing to do
-    if current.is_null() {
+    if current.is_null()
+    {
         // SAFETY: Paired with lock_raw above
         unsafe { sched.lock.unlock_raw(saved) };
         return;
@@ -962,7 +964,8 @@ pub unsafe fn timer_tick()
     }
     // SAFETY: current validated non-null above; slice_remaining is always valid.
     let remaining = unsafe { (*current).slice_remaining };
-    if remaining == 0 {
+    if remaining == 0
+    {
         // Idle threads have slice_remaining = 0 and should not be preempted.
         // SAFETY: Paired with lock_raw above
         unsafe { sched.lock.unlock_raw(saved) };
@@ -973,7 +976,8 @@ pub unsafe fn timer_tick()
     // SAFETY: current is a valid TCB; slice_remaining field is always valid
     unsafe { (*current).slice_remaining = new_remaining };
 
-    if new_remaining == 0 {
+    if new_remaining == 0
+    {
         // Slice expired - reset counter and reschedule
         // SAFETY: TIME_SLICE_TICKS is a valid u32 constant
         unsafe { (*current).slice_remaining = TIME_SLICE_TICKS };
@@ -984,12 +988,15 @@ pub unsafe fn timer_tick()
         // If preemption is disabled (e.g., during TLB shootdown spin-wait
         // with interrupts temporarily enabled), skip the context switch.
         // The thread will be rescheduled normally on its next timer expiry.
-        if !crate::percpu::preemption_disabled() {
+        if !crate::percpu::preemption_disabled()
+        {
             // SAFETY: schedule() re-acquires the lock and performs a context switch.
             // requeue=true: thread was preempted and should go back in queue.
             unsafe { schedule(true) };
         }
-    } else {
+    }
+    else
+    {
         // Still has time remaining - just unlock and return
         // SAFETY: Paired with lock_raw above
         unsafe { sched.lock.unlock_raw(saved) };

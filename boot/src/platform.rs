@@ -70,7 +70,9 @@ pub unsafe fn parse_platform_resources(
         // cast_possible_truncation: n <= MAX_PLATFORM_RESOURCES (64), fits in u32.
         #[allow(clippy::cast_possible_truncation)]
         // SAFETY: console initialized.
-        unsafe { crate::console::console_write_dec32(n as u32) };
+        unsafe {
+            crate::console::console_write_dec32(n as u32);
+        }
         bprintln!(" resources");
     }
 
@@ -84,7 +86,9 @@ pub unsafe fn parse_platform_resources(
         // cast_possible_truncation: n <= MAX_PLATFORM_RESOURCES (64), fits in u32.
         #[allow(clippy::cast_possible_truncation)]
         // SAFETY: console initialized.
-        unsafe { crate::console::console_write_dec32(n as u32) };
+        unsafe {
+            crate::console::console_write_dec32(n as u32);
+        }
         bprintln!(" resources");
     }
 
@@ -103,26 +107,16 @@ pub unsafe fn parse_platform_resources(
         // SAFETY: desc_phys is a fresh 4096-byte allocation; writes are within bounds.
         unsafe {
             core::ptr::write_bytes(ptr, 0, 4096);
+            core::ptr::copy_nonoverlapping(SFBD_MAGIC.to_le_bytes().as_ptr(), ptr, 4);
+            core::ptr::copy_nonoverlapping(1u32.to_le_bytes().as_ptr(), ptr.add(4), 4);
+            core::ptr::copy_nonoverlapping(fb.physical_base.to_le_bytes().as_ptr(), ptr.add(8), 8);
+            core::ptr::copy_nonoverlapping(fb.width.to_le_bytes().as_ptr(), ptr.add(16), 4);
+            core::ptr::copy_nonoverlapping(fb.height.to_le_bytes().as_ptr(), ptr.add(20), 4);
+            core::ptr::copy_nonoverlapping(fb.stride.to_le_bytes().as_ptr(), ptr.add(24), 4);
             core::ptr::copy_nonoverlapping(
-                SFBD_MAGIC.to_le_bytes().as_ptr(), ptr, 4,
-            );
-            core::ptr::copy_nonoverlapping(
-                1u32.to_le_bytes().as_ptr(), ptr.add(4), 4,
-            );
-            core::ptr::copy_nonoverlapping(
-                fb.physical_base.to_le_bytes().as_ptr(), ptr.add(8), 8,
-            );
-            core::ptr::copy_nonoverlapping(
-                fb.width.to_le_bytes().as_ptr(), ptr.add(16), 4,
-            );
-            core::ptr::copy_nonoverlapping(
-                fb.height.to_le_bytes().as_ptr(), ptr.add(20), 4,
-            );
-            core::ptr::copy_nonoverlapping(
-                fb.stride.to_le_bytes().as_ptr(), ptr.add(24), 4,
-            );
-            core::ptr::copy_nonoverlapping(
-                (fb.pixel_format as u32).to_le_bytes().as_ptr(), ptr.add(28), 4,
+                (fb.pixel_format as u32).to_le_bytes().as_ptr(),
+                ptr.add(28),
+                4,
             );
         }
 

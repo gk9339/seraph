@@ -254,9 +254,17 @@ impl Fdt
                 }
                 FDT_PROP =>
                 {
-                    let Some(prop_len) = self.read_struct_u32(off) else { break };
+                    let Some(prop_len) = self.read_struct_u32(off)
+                    else
+                    {
+                        break;
+                    };
                     off += 4;
-                    let Some(nameoff) = self.read_struct_u32(off) else { break };
+                    let Some(nameoff) = self.read_struct_u32(off)
+                    else
+                    {
+                        break;
+                    };
                     off += 4;
                     let data_off = off;
                     // Advance past prop data (4-byte aligned).
@@ -319,6 +327,9 @@ impl Fdt
     ///
     /// CPU nodes without a `status` property (or with `status = "okay"`) are
     /// counted as enabled. `status = "disabled"` is skipped.
+    // too_many_lines: DTB traversal state machine; splitting would fragment the
+    // node-tracking logic across functions without meaningful abstraction.
+    #[allow(clippy::too_many_lines)]
     pub fn walk_cpu_nodes<F>(&self, mut callback: F)
     where
         F: FnMut(u32) -> bool,
@@ -381,9 +392,17 @@ impl Fdt
                 }
                 FDT_PROP =>
                 {
-                    let Some(prop_len) = self.read_struct_u32(off) else { break };
+                    let Some(prop_len) = self.read_struct_u32(off)
+                    else
+                    {
+                        break;
+                    };
                     off += 4;
-                    let Some(nameoff) = self.read_struct_u32(off) else { break };
+                    let Some(nameoff) = self.read_struct_u32(off)
+                    else
+                    {
+                        break;
+                    };
                     off += 4;
                     let data_off = off;
                     off += (prop_len + 3) & !3;
@@ -507,7 +526,9 @@ fn read_be64(buf: &[u8]) -> u64
 pub unsafe fn parse_cpu_count(dtb_addr: u64) -> (u32, [u32; 64])
 {
     // SAFETY: caller guarantees dtb_addr is identity-mapped DTB.
-    let Some(fdt) = (unsafe { Fdt::from_raw(dtb_addr) }) else {
+    let Some(fdt) = (unsafe { Fdt::from_raw(dtb_addr) })
+    else
+    {
         return (0, [0u32; 64]);
     };
 
@@ -547,7 +568,9 @@ pub unsafe fn parse_cpu_count(dtb_addr: u64) -> (u32, [u32; 64])
 pub unsafe fn parse_dtb_resources(dtb_addr: u64, out: &mut [PlatformResource]) -> usize
 {
     // SAFETY: caller guarantees dtb_addr is identity-mapped DTB.
-    let Some(fdt) = (unsafe { Fdt::from_raw(dtb_addr) }) else {
+    let Some(fdt) = (unsafe { Fdt::from_raw(dtb_addr) })
+    else
+    {
         bprintln!("[--------] boot:     DTB: invalid magic, skipping");
         return 0;
     };

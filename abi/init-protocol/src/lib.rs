@@ -77,7 +77,6 @@ pub struct InitInfo
     pub cap_descriptor_count: u32,
 
     // ── Init's own resources ─────────────────────────────────────────────
-
     /// Slot index of init's own `AddressSpace` capability.
     pub aspace_cap: u32,
 
@@ -85,7 +84,6 @@ pub struct InitInfo
     pub sched_control_cap: u32,
 
     // ── CSpace slot ranges (contiguous) ──────────────────────────────────
-
     /// First slot index of usable physical memory `Frame` capabilities.
     pub memory_frame_base: u32,
     /// Number of usable memory `Frame` capabilities.
@@ -124,7 +122,6 @@ pub struct InitInfo
     pub thread_cap: u32,
 
     // ── Command line (added in protocol version 3) ──────────────────────
-
     /// Byte offset from the start of this struct to the kernel command line.
     ///
     /// The command line is placed after the [`CapDescriptor`] array within the
@@ -135,7 +132,6 @@ pub struct InitInfo
     pub cmdline_len: u32,
 
     // ── RISC-V SBI forwarding (added in protocol version 3) ─────────────
-
     /// Slot index of the `SbiControl` capability (RISC-V only).
     ///
     /// Grants authority to forward SBI calls from userspace through the kernel.
@@ -172,5 +168,10 @@ pub unsafe fn cmdline_bytes(info: &InitInfo) -> &[u8]
     let base = core::ptr::from_ref::<InitInfo>(info).cast::<u8>();
     // SAFETY: caller guarantees the InitInfo page contains valid cmdline data
     // at the specified offset and length, populated by the kernel in Phase 9.
-    unsafe { core::slice::from_raw_parts(base.add(info.cmdline_offset as usize), info.cmdline_len as usize) }
+    unsafe {
+        core::slice::from_raw_parts(
+            base.add(info.cmdline_offset as usize),
+            info.cmdline_len as usize,
+        )
+    }
 }

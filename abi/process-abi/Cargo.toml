@@ -1,0 +1,13 @@
+[package]
+name = "process-abi"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# no_std: this crate defines the process startup ABI and must be usable in
+# both kernel (no_std) and userspace (no_std) contexts.
+[lib]
+doctest = false
+
+[lints]
+workspace = true

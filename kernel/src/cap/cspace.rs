@@ -31,7 +31,7 @@ use alloc::boxed::Box;
 use core::ptr::NonNull;
 
 use super::object::KernelObjectHeader;
-use super::slot::{violates_wx, CSpaceId, CapTag, CapabilitySlot, Rights};
+use super::slot::{CSpaceId, CapTag, CapabilitySlot, Rights};
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -53,7 +53,7 @@ pub enum CapError
     OutOfMemory,
     /// The provided slot index is out of range or unmapped.
     InvalidIndex,
-    /// Rights bitmask violates the W^X constraint.
+    /// Mapping request violates the W^X constraint (both writable and executable).
     WxViolation,
 }
 
@@ -247,8 +247,6 @@ impl CSpace
 
     /// Allocate a slot, populate it with the given capability, and return the
     /// slot index.
-    ///
-    /// Returns [`CapError::WxViolation`] if `rights` has both WRITE and EXECUTE.
     pub fn insert_cap(
         &mut self,
         tag: CapTag,
@@ -256,11 +254,6 @@ impl CSpace
         object: NonNull<KernelObjectHeader>,
     ) -> Result<u32, CapError>
     {
-        if violates_wx(rights)
-        {
-            return Err(CapError::WxViolation);
-        }
-
         let index = self.allocate_slot()?;
 
         // SAFETY: allocate_slot returned a valid index into an allocated page.
@@ -334,7 +327,6 @@ impl CSpace
     /// # Errors
     ///
     /// - [`CapError::InvalidIndex`] — index is 0, out of range, or occupied.
-    /// - [`CapError::WxViolation`] — `rights` has both WRITE and EXECUTE.
     /// - [`CapError::OutOfMemory`] — backing page allocation failed during grow.
     pub fn insert_cap_at(
         &mut self,
@@ -344,10 +336,6 @@ impl CSpace
         object: core::ptr::NonNull<KernelObjectHeader>,
     ) -> Result<(), CapError>
     {
-        if violates_wx(rights)
-        {
-            return Err(CapError::WxViolation);
-        }
         if index == 0
         {
             return Err(CapError::InvalidIndex); // slot 0 is permanently null
@@ -539,14 +527,15 @@ mod tests
     }
 
     #[test]
-    fn wx_violation_rejected()
+    fn write_execute_cap_allowed()
     {
         let mut cs = CSpace::new(0, 16384);
         let obj = dummy_object();
-        let err = cs
+        let slot = cs
             .insert_cap(CapTag::Frame, Rights::WRITE | Rights::EXECUTE, obj)
-            .unwrap_err();
-        assert_eq!(err, CapError::WxViolation);
+            .expect("WRITE|EXECUTE cap should be allowed at cap level");
+        let s = cs.slot(slot).unwrap();
+        assert!(s.rights.contains(Rights::WRITE | Rights::EXECUTE));
     }
 
     #[test]

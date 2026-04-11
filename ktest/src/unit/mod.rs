@@ -133,6 +133,7 @@ pub fn run_all(ctx: &TestContext)
         mm::mem_unmap_unaligned_err(ctx)
     );
     run_test!("mm::mem_protect_wx_err", mm::mem_protect_wx_err(ctx));
+    run_test!("mm::mem_map_wx_prot_err", mm::mem_map_wx_prot_err(ctx));
     run_test!(
         "mm::frame_split_at_end_err",
         mm::frame_split_at_end_err(ctx)

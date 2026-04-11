@@ -119,6 +119,12 @@ checksum = "b05b61dc5112cbb17e4b6cd61790d9845d13888356391624cbe7e41efeac1e75"
 [[package]]
 name = "devmgr"
 version = "0.1.0"
+dependencies = [
+ "process-abi",
+ "runtime",
+ "syscall",
+ "syscall-abi",
+]
 
 [[package]]
 name = "elf"
@@ -150,6 +156,9 @@ dependencies = [
 [[package]]
 name = "init-protocol"
 version = "0.1.0"
+dependencies = [
+ "process-abi",
+]
 
 [[package]]
 name = "is_terminal_polyfill"
@@ -193,6 +202,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "process-abi"
+version = "0.1.0"
+
+[[package]]
 name = "procmgr"
 version = "0.1.0"
 
@@ -203,6 +216,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "21b2ebcf727b7760c461f091f9f0f539b77b8e87f2fd88131e7f1b433b3cece4"
 dependencies = [
  "proc-macro2",
+]
+
+[[package]]
+name = "runtime"
+version = "0.1.0"
+dependencies = [
+ "process-abi",
+ "syscall",
+ "syscall-abi",
 ]
 
 [[package]]

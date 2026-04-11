@@ -33,6 +33,8 @@ use syscall_abi::{
     SYS_WAIT_SET_REMOVE, SYS_WAIT_SET_WAIT, SYS_SBI_CALL,
 };
 
+pub use syscall_abi::{PROT_EXEC, PROT_READ, PROT_WRITE};
+
 // ── Raw syscall entry ─────────────────────────────────────────────────────────
 
 /// Issue a syscall with up to 2 arguments. Returns the primary return value.
@@ -772,10 +774,15 @@ pub fn cap_create_thread(aspace_cap: u32, cspace_cap: u32) -> Result<u32, i64>
 /// - `virt`: virtual address to map at (page-aligned, < `0x0000_8000_0000_0000`).
 /// - `offset_pages`: first page within the frame to map.
 /// - `page_count`: number of pages to map.
+/// - `prot_bits`: explicit permission bits (bit 1 = WRITE, bit 2 = EXECUTE).
+///   Must be a subset of the Frame cap's rights. If zero, permissions are
+///   derived from the Frame cap's rights directly.
+///
+/// W^X is enforced: WRITE and EXECUTE may not both be set.
 ///
 /// # Errors
 /// Returns a negative `i64` error code if either cap is invalid, `virt` is
-/// not page-aligned or out of range, or the frame is too small.
+/// not page-aligned or out of range, the frame is too small, or W^X is violated.
 #[inline]
 pub fn mem_map(
     frame_cap: u32,
@@ -783,18 +790,21 @@ pub fn mem_map(
     virt: u64,
     offset_pages: u64,
     page_count: u64,
+    prot_bits: u64,
 ) -> Result<(), i64>
 {
-    // SAFETY: syscall5 issues raw syscall instruction; all arguments are scalar u64 values
-    // (cap indices, virtual address, page offset, count); kernel validates caps and mappings.
+    // SAFETY: syscall6 issues raw syscall instruction; all arguments are scalar u64 values
+    // (cap indices, virtual address, page offset, count, prot bits); kernel validates
+    // caps, mappings, and permissions.
     let ret = unsafe {
-        syscall5(
+        syscall6(
             SYS_MEM_MAP,
             u64::from(frame_cap),
             u64::from(aspace_cap),
             virt,
             offset_pages,
             page_count,
+            prot_bits,
         )
     };
     if ret < 0

@@ -133,7 +133,7 @@ fn mapper_entry(arg: u64) -> !
 
     for _ in 0..MAP_ITERATIONS
     {
-        if mem_map(frame_cap, aspace, va, 0, 1).is_err()
+        if mem_map(frame_cap, aspace, va, 0, 1, syscall::PROT_WRITE).is_err()
         {
             // Send done_bit | error indicator (bit 8).
             signal_send(done_slot, done_bit | (1 << 8)).ok();

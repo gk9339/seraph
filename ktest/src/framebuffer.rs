@@ -104,7 +104,7 @@ pub unsafe fn init(info: &InitInfo, aspace_cap: u32)
             continue;
         }
 
-        if syscall::mem_map(d.slot, aspace_cap, PROBE_VA, 0, 1).is_err()
+        if syscall::mem_map(d.slot, aspace_cap, PROBE_VA, 0, 1, syscall::PROT_READ).is_err()
         {
             continue;
         }

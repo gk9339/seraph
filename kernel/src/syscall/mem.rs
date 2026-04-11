@@ -25,14 +25,16 @@ use syscall::SyscallError;
 /// arg2 = virtual address of the first page to map (must be page-aligned, user range).
 /// arg3 = offset into the frame in pages (0 = start of frame).
 /// arg4 = number of pages to map.
-///
-/// Page flags are derived from the Frame cap's rights:
-/// - `WRITE` set → writable (exclusive with EXECUTE, W^X enforced).
-/// - `EXECUTE` set → executable (exclusive with WRITE).
-/// - Neither → read-only.
+/// arg5 = protection bits (bit 1 = WRITE, bit 2 = EXECUTE). If zero, permissions
+///         are derived from the Frame cap's rights. If nonzero, must be a subset
+///         of the cap's rights. W^X is enforced: WRITE and EXECUTE may not both
+///         be set.
 ///
 /// Returns 0 on success.
 #[cfg(not(test))]
+// too_many_lines: single validation pass over cap rights, prot bits, and address
+// range; splitting would require threading shared state through helpers.
+#[allow(clippy::too_many_lines)]
 pub fn sys_mem_map(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 {
     use crate::cap::object::{AddressSpaceObject, FrameObject};
@@ -48,6 +50,7 @@ pub fn sys_mem_map(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     let virt_base = tf.arg(2);
     let offset_pages = tf.arg(3) as usize;
     let page_count = tf.arg(4) as usize;
+    let prot_bits = tf.arg(5);
 
     // ── Validation ────────────────────────────────────────────────────────────
 
@@ -122,10 +125,28 @@ pub fn sys_mem_map(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         return Err(SyscallError::InvalidArgument);
     }
 
-    // Derive page permission flags from the Frame cap's rights.
-    let writable = frame_rights.contains(Rights::WRITE);
-    let executable = frame_rights.contains(Rights::EXECUTE);
-    // W^X is enforced at cap creation time, but double-check defensively.
+    // Determine page permissions. If prot_bits is nonzero, use explicit
+    // permissions (must be a subset of the Frame cap's rights). If zero,
+    // derive from the cap's rights directly (backward compatibility).
+    let (writable, executable) = if prot_bits != 0
+    {
+        let w = (prot_bits & 0x2) != 0;
+        let x = (prot_bits & 0x4) != 0;
+        if w && !frame_rights.contains(Rights::WRITE)
+        {
+            return Err(SyscallError::InsufficientRights);
+        }
+        if x && !frame_rights.contains(Rights::EXECUTE)
+        {
+            return Err(SyscallError::InsufficientRights);
+        }
+        (w, x)
+    }
+    else
+    {
+        (frame_rights.contains(Rights::WRITE), frame_rights.contains(Rights::EXECUTE))
+    };
+    // W^X is enforced at mapping time: no page may be both writable and executable.
     if writable && executable
     {
         return Err(SyscallError::WxViolation);

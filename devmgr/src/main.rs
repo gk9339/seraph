@@ -9,44 +9,24 @@
 //! binding drivers to devices. It is started early by init and manages the
 //! lifetime of driver processes throughout the system.
 //!
-//! This stub halts immediately. Full implementation is deferred.
+//! This stub exits immediately. Full implementation is deferred to Tier 3.
 //!
 //! See `devmgr/README.md` for the design and IPC interface.
 
-#![cfg_attr(not(test), no_std)]
-#![cfg_attr(not(test), no_main)]
+#![no_std]
+#![no_main]
 
-#[cfg(not(test))]
-use core::panic::PanicInfo;
+// Link shared/runtime to get _start() and panic_handler.
+extern crate runtime;
 
-#[cfg(not(test))]
+use process_abi::StartupInfo;
+
+/// Device manager entry point.
+///
+/// TODO: real devmgr implementation (Tier 3) — ACPI/DT parsing, PCI
+/// enumeration, driver matching and spawn, device registry IPC endpoint.
 #[no_mangle]
-pub extern "C" fn _start() -> !
+extern "Rust" fn main(_startup: &StartupInfo) -> !
 {
-    halt_loop();
-}
-
-fn halt_loop() -> !
-{
-    loop
-    {
-        #[cfg(target_arch = "x86_64")]
-        // SAFETY: hlt is a privileged x86 instruction; halts CPU until next interrupt.
-        unsafe {
-            core::arch::asm!("hlt", options(nomem, nostack));
-        }
-
-        #[cfg(target_arch = "riscv64")]
-        // SAFETY: wfi is a RISC-V instruction; waits for interrupt.
-        unsafe {
-            core::arch::asm!("wfi", options(nomem, nostack));
-        }
-    }
-}
-
-#[cfg(not(test))]
-#[panic_handler]
-fn panic(_info: &PanicInfo) -> !
-{
-    halt_loop();
+    syscall::thread_exit();
 }

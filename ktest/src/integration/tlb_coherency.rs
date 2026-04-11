@@ -113,7 +113,7 @@ pub fn run(ctx: &TestContext) -> TestResult
     for cycle in 0..CYCLES
     {
         // Map the page.
-        mem_map(frame_cap, ctx.aspace_cap, TEST_VA, 0, 1)
+        mem_map(frame_cap, ctx.aspace_cap, TEST_VA, 0, 1, syscall::PROT_WRITE)
             .map_err(|_| "integration::tlb_coherency: mem_map failed")?;
 
         // Signal child on p2c: page is mapped, you may access it.

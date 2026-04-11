@@ -193,20 +193,24 @@ bitflags! {
 Rights are checked at every syscall that uses a capability. The check is a single
 bitwise AND: `(slot.rights & required) == required`.
 
-W^X enforcement at derivation and mapping time:
+W^X enforcement at mapping time (`mem_map`, `mem_protect`):
 
 ```rust
 fn check_wx(rights: Rights) -> Result<(), SyscallError>
 {
     if rights.contains(Rights::WRITE | Rights::EXECUTE)
     {
-        Err(SyscallError::AccessDenied)
+        Err(SyscallError::WxViolation)
     } else
     {
         Ok(())
     }
 }
 ```
+
+A capability may carry both Write and Execute rights (representing independent
+authorities). W^X is enforced when those rights are exercised on a specific
+mapping — no page may be simultaneously writable and executable.
 
 ### Kernel Object Reference Counting
 

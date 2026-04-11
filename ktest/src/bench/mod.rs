@@ -361,7 +361,7 @@ fn bench_mem_map_unmap(ctx: &crate::TestContext, iters: u32)
     for _ in 0..n
     {
         let t0 = cycles_now();
-        if syscall::mem_map(frame, ctx.aspace_cap, BENCH_VA, 0, 1).is_err()
+        if syscall::mem_map(frame, ctx.aspace_cap, BENCH_VA, 0, 1, syscall::PROT_WRITE).is_err()
         {
             break;
         }

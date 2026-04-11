@@ -9,5 +9,8 @@ publish = false
 [lib]
 doctest = false
 
+[dependencies]
+process-abi = { workspace = true }
+
 [lints]
 workspace = true

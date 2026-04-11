@@ -41,11 +41,13 @@ to a capability are type-specific.
 
 A capability to one or more contiguous physical frames. Rights:
 - **Map** — may map these frames into an address space
-- **Write** — mapped region is writable
-- **Execute** — mapped region is executable
+- **Write** — authority to create writable mappings
+- **Execute** — authority to create executable mappings
 
-W^X is enforced: Write and Execute rights may not both be present on the same
-capability. The kernel rejects any attempt to create such a capability.
+A capability may carry both Write and Execute rights, representing independent
+authorities over the same physical memory. W^X is enforced at mapping time: the
+kernel rejects any `mem_map` or `mem_protect` call that would make a page
+simultaneously writable and executable.
 
 ### Address Space
 

@@ -121,9 +121,9 @@ impl Rights
     // ── Memory frame / address space ──────────────────────────────────────────
     /// May map frames into an address space.
     pub const MAP: Rights = Rights(1 << 0);
-    /// Mapped region is writable. Mutually exclusive with EXECUTE (W^X).
+    /// Authority to create writable mappings from this frame.
     pub const WRITE: Rights = Rights(1 << 1);
-    /// Mapped region is executable. Mutually exclusive with WRITE (W^X).
+    /// Authority to create executable mappings from this frame.
     pub const EXECUTE: Rights = Rights(1 << 2);
     /// May read/inspect mappings (`AddressSpace`).
     pub const READ: Rights = Rights(1 << 3);
@@ -215,8 +215,11 @@ impl core::ops::BitOrAssign for Rights
 
 /// Return `true` if `rights` has both `WRITE` and `EXECUTE` set.
 ///
-/// W^X is enforced: no capability may grant simultaneous write and execute
-/// access. The kernel rejects any attempt to create such a capability.
+/// Used to enforce W^X at mapping time: no page may be simultaneously
+/// writable and executable. A capability may carry both WRITE and EXECUTE
+/// rights (representing independent authorities); this check applies when
+/// those rights are exercised on a specific mapping.
+#[cfg(test)]
 pub fn violates_wx(rights: Rights) -> bool
 {
     rights.contains(Rights::WRITE | Rights::EXECUTE)

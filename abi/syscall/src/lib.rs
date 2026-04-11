@@ -207,6 +207,19 @@ pub const MSG_CAP_SLOTS_MAX: usize = 4;
 /// Words beyond this limit require an IPC buffer in shared memory.
 pub const MSG_REGS_DATA_MAX: usize = 6;
 
+// ── Mapping protection bits ──────────────────────────────────────────────────
+
+/// Mapping protection: writable. Bit 1, matching the kernel `Rights::WRITE` layout.
+pub const PROT_WRITE: u64 = 0x2;
+
+/// Mapping protection: executable. Bit 2, matching the kernel `Rights::EXECUTE` layout.
+pub const PROT_EXEC: u64 = 0x4;
+
+/// Mapping protection: read-only (no WRITE, no EXECUTE).
+///
+/// Passed as `prot_bits` to `SYS_MEM_MAP`; equivalent to 0 but more explicit.
+pub const PROT_READ: u64 = 0;
+
 // ── System info ───────────────────────────────────────────────────────────────
 
 /// Kernel version packed as a single `u64`.

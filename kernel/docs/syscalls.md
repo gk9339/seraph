@@ -526,28 +526,33 @@ If this is the last reference to the underlying object, the object is freed.
 
 ### `SYS_MEM_MAP` (16)
 
-Map a physical frame capability into an address space.
+Map pages from a physical frame capability into an address space.
 
 **Arguments:**
 
 | # | Name | Description |
 |---|---|---|
-| 0 | `aspace_cap` | Address space capability (Map rights) |
-| 1 | `frame_cap` | Frame capability (Map rights) to map |
-| 2 | `virt` | Virtual address to map at (page-aligned) |
-| 3 | `flags` | Mapping flags: readable, writable, executable, user-accessible |
+| 0 | `frame_cap` | Frame capability (Map rights) |
+| 1 | `aspace_cap` | Address space capability (Map rights) |
+| 2 | `virt` | Virtual address to map at (page-aligned, user range) |
+| 3 | `offset_pages` | Page offset into the frame |
+| 4 | `page_count` | Number of pages to map (nonzero) |
+| 5 | `prot_bits` | Protection bits: bit 1 = WRITE, bit 2 = EXECUTE. If zero, derived from frame cap rights |
 
 **Return:** `rax`/`a0`: 0 on success; `SyscallError` on failure.
 
-W^X is enforced: `flags` may not specify both writable and executable. The frame's
-rights are also checked — if `frame_cap` does not have Write rights, the mapping
-cannot be writable.
+If `prot_bits` is nonzero, the requested permissions must be a subset of the frame
+cap's rights. W^X is enforced: WRITE and EXECUTE may not both be set.
 
-**Capability requirements:** `aspace_cap` (Map), `frame_cap` (Map).
+If `prot_bits` is zero, permissions are derived from the frame cap's rights directly.
+This fails with `WxViolation` if the frame cap has both WRITE and EXECUTE rights.
 
-**Errors:** `InvalidCapability`, `AccessDenied` (rights mismatch or W^X violation),
-`InvalidArgument` (unaligned `virt` or non-canonical address), `AlignmentError`,
-`AddressSpaceFull`.
+**Capability requirements:** `frame_cap` (Map), `aspace_cap` (Map).
+
+**Errors:** `InvalidCapability`, `InsufficientRights` (requested prot exceeds cap
+rights), `WxViolation` (both WRITE and EXECUTE requested), `InvalidArgument`
+(unaligned `virt`, non-canonical address, zero page count, or offset beyond frame),
+`OutOfMemory` (page table allocation failure).
 
 ---
 

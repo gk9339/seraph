@@ -14,9 +14,11 @@ members = [
     "fs/fat",
     "abi/boot-protocol",
     "abi/init-protocol",
+    "abi/process-abi",
     "abi/syscall",
     "shared/elf",
     "shared/font",
+    "shared/runtime",
     "shared/syscall",
     "xtask",
 ]
@@ -36,6 +38,8 @@ cast_ptr_alignment               = "warn"
 [workspace.dependencies]
 boot-protocol = { path = "abi/boot-protocol" }
 init-protocol = { path = "abi/init-protocol" }
+process-abi = { path = "abi/process-abi" }
+runtime = { path = "shared/runtime" }
 font = { path = "shared/font" }
 syscall = { path = "abi/syscall", package = "syscall-abi" }
 syscall-abi = { path = "abi/syscall" }

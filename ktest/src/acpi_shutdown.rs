@@ -93,7 +93,7 @@ fn find_acpi_table(info: &InitInfo, sig: &[u8; 4], map_vaddr: u64) -> Option<(u3
         }
 
         // Try to map this Frame cap and check its signature.
-        if syscall::mem_map(desc.slot, info.aspace_cap, map_vaddr, 0, 1).is_err()
+        if syscall::mem_map(desc.slot, info.aspace_cap, map_vaddr, 0, 1, syscall::PROT_READ).is_err()
         {
             continue;
         }
@@ -121,7 +121,7 @@ fn find_acpi_table(info: &InitInfo, sig: &[u8; 4], map_vaddr: u64) -> Option<(u3
 fn map_and_read_fadt(info: &InitInfo, slot: u32, phys: u64) -> Option<(u16, u64)>
 {
     let vaddr = ACPI_MAP_BASE;
-    if syscall::mem_map(slot, info.aspace_cap, vaddr, 0, 1).is_err()
+    if syscall::mem_map(slot, info.aspace_cap, vaddr, 0, 1, syscall::PROT_READ).is_err()
     {
         return None;
     }
@@ -137,7 +137,7 @@ fn map_and_read_fadt(info: &InitInfo, slot: u32, phys: u64) -> Option<(u16, u64)
 fn map_and_scan_dsdt(info: &InitInfo, slot: u32, phys: u64, vaddr: u64) -> Option<u16>
 {
     // Map one page to read the header length.
-    if syscall::mem_map(slot, info.aspace_cap, vaddr, 0, 1).is_err()
+    if syscall::mem_map(slot, info.aspace_cap, vaddr, 0, 1, syscall::PROT_READ).is_err()
     {
         return None;
     }
@@ -151,7 +151,7 @@ fn map_and_scan_dsdt(info: &InitInfo, slot: u32, phys: u64, vaddr: u64) -> Optio
     if total_pages > 1
     {
         let _ = syscall::mem_unmap(info.aspace_cap, vaddr, 1);
-        if syscall::mem_map(slot, info.aspace_cap, vaddr, 0, total_pages as u64).is_err()
+        if syscall::mem_map(slot, info.aspace_cap, vaddr, 0, total_pages as u64, syscall::PROT_READ).is_err()
         {
             return None;
         }

@@ -201,6 +201,10 @@ pub struct CSpaceLayout
     pub hw_cap_base: u32,
     /// Number of hardware resource capabilities.
     pub hw_cap_count: u32,
+    /// First slot index of boot module `Frame` capabilities.
+    pub module_frame_base: u32,
+    /// Number of boot module `Frame` capabilities.
+    pub module_frame_count: u32,
     /// Slot index of the `SchedControl` capability.
     pub sched_control_slot: u32,
     /// Slot index of the `SbiControl` capability (RISC-V only; 0 on x86-64).
@@ -252,7 +256,11 @@ pub fn init_capability_system(
         }
     };
 
-    let layout = populate_cspace(&mut cspace, mmap, platform_resources);
+    let mut layout = populate_cspace(&mut cspace, mmap, platform_resources);
+
+    // Mint Frame caps for boot modules (raw ELF images for early services).
+    // Each module gets a read-only Frame cap so init can map and parse the ELF.
+    mint_module_frame_caps(&mut cspace, info, &mut layout);
 
     // Store in ROOT_CSPACE (kernel runtime only; test builds skip this).
     #[cfg(not(test))]
@@ -290,7 +298,12 @@ fn populate_cspace(
 
     let mut descriptors = alloc::vec::Vec::new();
 
-    // Usable physical memory → Frame caps with MAP | WRITE.
+    // Usable physical memory → Frame caps with MAP | WRITE | EXECUTE.
+    // Init is root authority; it holds the full right set for each frame.
+    // W^X is enforced at mapping time — no page can be simultaneously
+    // writable and executable — but the cap carries both rights so init
+    // can derive attenuated sub-caps (MAP|WRITE for data, MAP|EXECUTE
+    // for code) when loading processes.
     let mut memory_frame_base: u32 = 0;
     let mut memory_frame_count: u32 = 0;
     for entry in mmap
@@ -308,7 +321,7 @@ fn populate_cspace(
         let slot = insert_or_fatal(
             cspace,
             CapTag::Frame,
-            Rights::MAP | Rights::WRITE,
+            Rights::MAP | Rights::WRITE | Rights::EXECUTE,
             ptr,
             "Phase 7: cannot allocate Frame capability for usable memory",
         );
@@ -543,11 +556,85 @@ fn populate_cspace(
         memory_frame_count,
         hw_cap_base,
         hw_cap_count,
+        module_frame_base: 0,
+        module_frame_count: 0,
         sched_control_slot,
         sbi_control_slot,
         total_populated: cspace.populated_count(),
         descriptors,
     }
+}
+
+/// Mint `Frame` capabilities for boot modules into the root `CSpace`.
+///
+/// Each boot module (raw ELF image for an early service) gets a read-only
+/// Frame cap. Module order matches `boot.conf`'s `modules=` line, so init
+/// can identify modules by index (index 0 = procmgr, etc.).
+///
+/// Updates `layout.module_frame_base`, `layout.module_frame_count`, and
+/// appends [`CapDescriptor`] entries for each module.
+fn mint_module_frame_caps(
+    cspace: &mut CSpace,
+    boot_info: &BootInfo,
+    layout: &mut CSpaceLayout,
+)
+{
+    use boot_protocol::BootModule;
+    use init_protocol::CapType;
+
+    let module_count = boot_info.modules.count as usize;
+    if module_count == 0 || boot_info.modules.entries.is_null()
+    {
+        return;
+    }
+
+    // SAFETY: boot_info.modules was validated by the bootloader; entries pointer
+    // is in the direct physical map (active since Phase 3).
+    let modules: &[BootModule] = unsafe {
+        core::slice::from_raw_parts(
+            phys_to_virt(boot_info.modules.entries as u64) as *const BootModule,
+            module_count,
+        )
+    };
+
+    let mut base_slot: u32 = 0;
+    let mut count: u32 = 0;
+
+    for module in modules
+    {
+        // Round size up to page boundary so mem_map can map whole pages.
+        let rounded_size = (module.size + 0xFFF) & !0xFFF;
+
+        let obj = Box::new(FrameObject {
+            header: KernelObjectHeader::new(ObjectType::Frame),
+            base: module.physical_base,
+            size: rounded_size,
+        });
+        let ptr = nonnull_from_box(obj);
+        let slot = insert_or_fatal(
+            cspace,
+            CapTag::Frame,
+            Rights::MAP | Rights::READ,
+            ptr,
+            "Phase 7: cannot allocate Frame capability for boot module",
+        );
+        if count == 0
+        {
+            base_slot = slot;
+        }
+        layout.descriptors.push(CapDescriptor {
+            slot,
+            cap_type: CapType::Frame,
+            pad: [0; 3],
+            aux0: module.physical_base,
+            aux1: module.size,
+        });
+        count += 1;
+    }
+
+    layout.module_frame_base = base_slot;
+    layout.module_frame_count = count;
+    layout.total_populated = cspace.populated_count();
 }
 
 /// Cast `Box<T>` to `NonNull<KernelObjectHeader>` by leaking the box.

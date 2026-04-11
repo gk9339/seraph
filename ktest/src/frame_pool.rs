@@ -290,7 +290,7 @@ impl FrameGuard
     /// Returns the syscall error code if `mem_map` fails.
     pub fn map(&mut self, va: u64) -> Result<(), i64>
     {
-        syscall::mem_map(self.frame_cap, self.aspace_cap, va, 0, 1)?;
+        syscall::mem_map(self.frame_cap, self.aspace_cap, va, 0, 1, syscall::PROT_WRITE)?;
         self.mapped_va = Some(va);
         Ok(())
     }

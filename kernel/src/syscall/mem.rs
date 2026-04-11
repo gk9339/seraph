@@ -38,7 +38,7 @@ pub fn sys_mem_map(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     use crate::cap::object::{AddressSpaceObject, FrameObject};
     use crate::cap::slot::{CapTag, Rights};
     use crate::mm::paging::PageFlags;
-    use crate::mm::{with_frame_allocator, PAGE_SIZE};
+    use crate::mm::PAGE_SIZE;
     use crate::syscall::current_tcb;
 
     const USER_HALF_TOP: u64 = 0x0000_8000_0000_0000;
@@ -157,14 +157,12 @@ pub fn sys_mem_map(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         let virt = virt_base + (i * PAGE_SIZE) as u64;
         let phys = frame_phys + byte_offset + (i * PAGE_SIZE) as u64;
 
-        let result = with_frame_allocator(|alloc| {
-            // SAFETY: virt is in user range (validated above); phys is from a
-            // Frame cap confirmed by the kernel at capability creation.
-            // as_ptr validated non-null; map_page is an AddressSpace method.
-            unsafe { (*as_ptr).map_page(virt, phys, page_flags, alloc) }
-        });
-
-        result.map_err(|()| SyscallError::OutOfMemory)?;
+        // SAFETY: virt is in user range (validated above); phys is from a
+        // Frame cap confirmed by the kernel at capability creation.
+        // as_ptr validated non-null. map_page acquires pt_lock and
+        // FRAME_ALLOC_LOCK internally.
+        unsafe { (*as_ptr).map_page(virt, phys, page_flags) }
+            .map_err(|()| SyscallError::OutOfMemory)?;
     }
 
     Ok(0)

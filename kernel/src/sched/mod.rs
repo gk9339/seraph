@@ -951,9 +951,14 @@ pub unsafe fn timer_tick()
         // SAFETY: Unlock before calling schedule(), which will re-acquire
         unsafe { sched.lock.unlock_raw(saved) };
 
-        // SAFETY: schedule() re-acquires the lock and performs a context switch.
-        // requeue=true: thread was preempted and should go back in queue.
-        unsafe { schedule(true) };
+        // If preemption is disabled (e.g., during TLB shootdown spin-wait
+        // with interrupts temporarily enabled), skip the context switch.
+        // The thread will be rescheduled normally on its next timer expiry.
+        if !crate::percpu::preemption_disabled() {
+            // SAFETY: schedule() re-acquires the lock and performs a context switch.
+            // requeue=true: thread was preempted and should go back in queue.
+            unsafe { schedule(true) };
+        }
     } else {
         // Still has time remaining - just unlock and return
         // SAFETY: Paired with lock_raw above

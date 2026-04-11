@@ -304,7 +304,7 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
             let seg = &init_image.segments[i];
             // SAFETY: init_as_ptr valid (just allocated above); segment data in
             // Loaded memory region accessible via direct physical map (Phase 3).
-            unsafe { (*init_as_ptr).map_segment(seg, allocator) }
+            unsafe { (*init_as_ptr).map_segment(seg) }
                 .unwrap_or_else(|()|  fatal("Phase 9: failed to map init segment"));
         }
 
@@ -473,7 +473,7 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
             };
             // SAFETY: init_as_ptr valid; info_page_phys just allocated; INIT_INFO_VADDR
             // is page-aligned and within the user address range.
-            unsafe { (*init_as_ptr).map_page(INIT_INFO_VADDR, info_page_phys, flags, allocator) }
+            unsafe { (*init_as_ptr).map_page(INIT_INFO_VADDR, info_page_phys, flags) }
                 .unwrap_or_else(|()| fatal("Phase 9: failed to map InitInfo page"));
 
             kprintln!(
@@ -492,7 +492,6 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
             (*init_as_ptr).map_stack(
                 mm::address_space::INIT_STACK_TOP,
                 mm::address_space::INIT_STACK_PAGES,
-                allocator,
             )
         }
         .unwrap_or_else(|()|  fatal("Phase 9: failed to map init stack"));

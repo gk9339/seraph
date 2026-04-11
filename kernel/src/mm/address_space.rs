@@ -19,15 +19,20 @@
 //!
 //! On RISC-V the equivalent root entries are VPN[3] entries 256–511.
 //!
-//! ## Modification notes
-//! - For SMP (WSMP): TLB shootdown is needed on each `map_page` when
-//!   other CPUs may have the same address space loaded.
-//! - For W^X: `map_segment` already enforces no simultaneous W+X.
+//! ## Concurrency
+//!
+//! Page table modifications (`map_page`, `unmap_page`, `protect_page`) are
+//! serialized per address space by `pt_lock`. The lock ordering is:
+//!
+//!   `pt_lock` → `FRAME_ALLOC_LOCK` → `SHOOTDOWN_LOCK`
+//!
+//! `pt_lock` does NOT disable interrupts; shootdown needs interrupts enabled.
+//! Preemption is disabled via `preempt_disable()` while the lock is held.
 
 // cast_possible_truncation: u64→usize page count arithmetic; bounded by address space size.
 #![allow(clippy::cast_possible_truncation)]
 
-use core::sync::atomic::{AtomicU64, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use boot_protocol::{InitSegment, SegmentFlags};
 
@@ -56,15 +61,47 @@ pub struct AddressSpace
     /// Updated on every context switch by the scheduler; queried by TLB
     /// shootdown to determine which CPUs need IPIs.
     active_cpus: AtomicU64,
+    /// Lock serializing page table modifications (map/unmap/protect).
+    ///
+    /// Simple CAS spin lock — does NOT disable interrupts (shootdown needs
+    /// IF=1 to deliver IPIs). Preemption is prevented by caller's
+    /// `preempt_disable()`.
+    pt_lock: AtomicBool,
 }
 
-// SAFETY: AddressSpace is accessed only from the single boot thread in Phase 9.
+// SAFETY: All mutable state is protected by pt_lock (page tables) or atomic
+// operations (active_cpus). Safe to share across threads and CPUs.
 unsafe impl Send for AddressSpace {}
-// SAFETY: AddressSpace is accessed only from the single boot thread; no Sync violation.
+// SAFETY: pt_lock serializes page table modifications; active_cpus is atomic.
 unsafe impl Sync for AddressSpace {}
 
 impl AddressSpace
 {
+    /// Acquire the page table modification lock.
+    #[cfg(not(test))]
+    #[inline]
+    fn pt_lock(&self)
+    {
+        while self
+            .pt_lock
+            .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_err()
+        {
+            while self.pt_lock.load(Ordering::Relaxed)
+            {
+                core::hint::spin_loop();
+            }
+        }
+    }
+
+    /// Release the page table modification lock.
+    #[cfg(not(test))]
+    #[inline]
+    fn pt_unlock(&self)
+    {
+        self.pt_lock.store(false, Ordering::Release);
+    }
+
     /// Allocate a new, empty user address space.
     ///
     /// 1. Allocates one frame from `allocator` for the root page table.
@@ -110,6 +147,7 @@ impl AddressSpace
             root_phys,
             root_virt,
             active_cpus: AtomicU64::new(0),
+            pt_lock: AtomicBool::new(false),
         }
     }
 
@@ -141,28 +179,42 @@ impl AddressSpace
 
     /// Map `virt` → `phys` as a 4 KiB page with the given permission flags.
     ///
-    /// Allocates missing intermediate page table frames from `allocator`.
-    /// If this address space is active on other CPUs, sends TLB shootdown IPIs
-    /// to invalidate any stale TLB entries (some architectures cache negative
-    /// entries for non-present pages).
+    /// Acquires `pt_lock`, allocates missing intermediate page table frames
+    /// from the global frame allocator, and sends TLB shootdown IPIs if this
+    /// address space is active on other CPUs.
     ///
     /// # Safety
     /// `virt` must be in the user half (< `0x8000_0000_0000`). `phys` must be
     /// a valid 4 KiB-aligned physical address.
     #[cfg(not(test))]
     pub unsafe fn map_page(
-        &mut self,
+        &self,
         virt: u64,
         phys: u64,
         flags: crate::mm::paging::PageFlags,
-        allocator: &mut BuddyAllocator,
     ) -> Result<(), ()>
     {
         use crate::arch::current::paging::{flush_page, map_user_page};
 
-        // Perform the actual mapping via arch-specific page table walk.
+        crate::percpu::preempt_disable();
+        self.pt_lock();
+
+        // Allocate intermediate page table frames as needed via the global
+        // frame allocator. FRAME_ALLOC_LOCK is acquired and released inside
+        // with_frame_allocator — not held across the shootdown.
         // SAFETY: contract passed to caller.
-        unsafe { map_user_page(self.root_virt, virt, phys, flags, allocator)? };
+        let result = crate::mm::with_frame_allocator(|alloc| {
+            // SAFETY: contract passed to caller; root_virt is valid; virt is
+            // in user range; phys is a valid 4 KiB-aligned physical address.
+            unsafe { map_user_page(self.root_virt, virt, phys, flags, alloc) }
+        });
+
+        if result.is_err()
+        {
+            self.pt_unlock();
+            crate::percpu::preempt_enable();
+            return Err(());
+        }
 
         // If this address space is active on other CPUs, they need TLB invalidation
         // for the new mapping (some architectures cache negative lookups).
@@ -174,6 +226,7 @@ impl AddressSpace
         if remote_cpus != 0 {
             // SAFETY: root_phys is a valid page table root; remote_cpus mask
             // contains only bits for online CPUs (enforced by scheduler).
+            // preempt_disable() already called above.
             unsafe {
                 crate::mm::tlb_shootdown::shootdown(self.root_phys, remote_cpus);
             }
@@ -185,6 +238,9 @@ impl AddressSpace
         unsafe {
             flush_page(virt);
         }
+
+        self.pt_unlock();
+        crate::percpu::preempt_enable();
 
         Ok(())
     }
@@ -200,13 +256,11 @@ impl AddressSpace
     /// in 4 KiB increments across `segment.size` bytes (rounded up to pages).
     ///
     /// # Safety
-    /// `segment` must be a valid, bootloader-provided `InitSegment`. `allocator`
-    /// must be the kernel's buddy allocator.
+    /// `segment` must be a valid, bootloader-provided `InitSegment`.
     #[cfg(not(test))]
     pub unsafe fn map_segment(
-        &mut self,
+        &self,
         segment: &InitSegment,
-        allocator: &mut BuddyAllocator,
     ) -> Result<(), ()>
     {
         let flags = match segment.flags
@@ -251,7 +305,7 @@ impl AddressSpace
             let phys = phys_base + (i * PAGE_SIZE) as u64;
             // SAFETY: segment is bootloader-provided; caller's safety contract.
             unsafe {
-                self.map_page(virt, phys, flags, allocator)?;
+                self.map_page(virt, phys, flags)?;
             }
         }
         Ok(())
@@ -266,10 +320,9 @@ impl AddressSpace
     /// `stack_top` must be page-aligned and within the user address range.
     #[cfg(not(test))]
     pub unsafe fn map_stack(
-        &mut self,
+        &self,
         stack_top: u64,
         pages: usize,
-        allocator: &mut BuddyAllocator,
     ) -> Result<(), ()>
     {
         let rw_flags = crate::mm::paging::PageFlags {
@@ -281,8 +334,11 @@ impl AddressSpace
 
         for i in 0..pages
         {
-            // Allocate one physical frame per page.
-            let phys = allocator.alloc(0).ok_or(())?;
+            // Allocate one physical frame per page. The frame allocator lock
+            // is acquired and released here, independently of map_page's
+            // internal lock acquisition for intermediate page table frames.
+            let phys = crate::mm::with_frame_allocator(|alloc| alloc.alloc(0))
+                .ok_or(())?;
 
             // Zero the frame (stack pages should start clean).
             // SAFETY: phys_to_virt gives a valid kernel virtual address.
@@ -295,7 +351,7 @@ impl AddressSpace
             let virt = stack_top - ((i + 1) * PAGE_SIZE) as u64;
             // SAFETY: phys is valid and virt is in user range.
             unsafe {
-                self.map_page(virt, phys, rw_flags, allocator)?;
+                self.map_page(virt, phys, rw_flags)?;
             }
         }
 
@@ -315,9 +371,12 @@ impl AddressSpace
     /// `virt` must be in the user half. Caller must not access `virt` after
     /// this call; the TLB entry is invalidated.
     #[cfg(not(test))]
-    pub unsafe fn unmap_page(&mut self, virt: u64)
+    pub unsafe fn unmap_page(&self, virt: u64)
     {
         use crate::arch::current::paging::{flush_page, unmap_user_page};
+
+        crate::percpu::preempt_disable();
+        self.pt_lock();
 
         // Remove the mapping via arch-specific page table walk.
         // SAFETY: root_virt is valid; virt is in user range (caller's contract).
@@ -332,6 +391,7 @@ impl AddressSpace
         if remote_cpus != 0 {
             // SAFETY: root_phys is a valid page table root; remote_cpus mask
             // contains only bits for online CPUs (enforced by scheduler).
+            // preempt_disable() already called above.
             unsafe {
                 crate::mm::tlb_shootdown::shootdown(self.root_phys, remote_cpus);
             }
@@ -343,6 +403,9 @@ impl AddressSpace
         unsafe {
             flush_page(virt);
         }
+
+        self.pt_unlock();
+        crate::percpu::preempt_enable();
     }
 
     /// Change the permission flags on an existing 4 KiB leaf mapping at `virt`.
@@ -355,16 +418,26 @@ impl AddressSpace
     /// `virt` must be in the user half and currently mapped.
     #[cfg(not(test))]
     pub unsafe fn protect_page(
-        &mut self,
+        &self,
         virt: u64,
         flags: crate::mm::paging::PageFlags,
     ) -> Result<(), crate::mm::paging::PagingError>
     {
         use crate::arch::current::paging::{flush_page, protect_user_page};
 
+        crate::percpu::preempt_disable();
+        self.pt_lock();
+
         // Change protection bits via arch-specific page table walk.
         // SAFETY: root_virt is valid; virt is in user range (caller's contract).
-        unsafe { protect_user_page(self.root_virt, virt, flags)? };
+        let result = unsafe { protect_user_page(self.root_virt, virt, flags) };
+
+        if let Err(e) = result
+        {
+            self.pt_unlock();
+            crate::percpu::preempt_enable();
+            return Err(e);
+        }
 
         // Shootdown remote CPUs. The current CPU is excluded from the mask;
         // it will invalidate locally below (no need to IPI ourselves).
@@ -375,6 +448,7 @@ impl AddressSpace
         if remote_cpus != 0 {
             // SAFETY: root_phys is a valid page table root; remote_cpus mask
             // contains only bits for online CPUs (enforced by scheduler).
+            // preempt_disable() already called above.
             unsafe {
                 crate::mm::tlb_shootdown::shootdown(self.root_phys, remote_cpus);
             }
@@ -386,6 +460,9 @@ impl AddressSpace
         unsafe {
             flush_page(virt);
         }
+
+        self.pt_unlock();
+        crate::percpu::preempt_enable();
 
         Ok(())
     }

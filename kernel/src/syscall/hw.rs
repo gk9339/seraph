@@ -196,7 +196,7 @@ pub fn sys_mmio_map(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     use crate::cap::object::{AddressSpaceObject, MmioRegionObject};
     use crate::cap::slot::{CapTag, Rights};
     use crate::mm::paging::PageFlags;
-    use crate::mm::{with_frame_allocator, PAGE_SIZE};
+    use crate::mm::PAGE_SIZE;
     use crate::syscall::current_tcb;
 
     // Virtual address must be page-aligned and in user half.
@@ -277,13 +277,11 @@ pub fn sys_mmio_map(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         let virt = virt_base + (i * PAGE_SIZE) as u64;
         let phys = mmio_phys + (i * PAGE_SIZE) as u64;
 
-        let result = with_frame_allocator(|alloc| {
-            // SAFETY: virt in user range (validated above); phys from a
-            // kernel-provisioned MmioRegion boot object.
-            unsafe { (*as_ptr).map_page(virt, phys, page_flags, alloc) }
-        });
-
-        result.map_err(|()| SyscallError::OutOfMemory)?;
+        // SAFETY: virt in user range (validated above); phys from a
+        // kernel-provisioned MmioRegion boot object. map_page acquires
+        // pt_lock and FRAME_ALLOC_LOCK internally.
+        unsafe { (*as_ptr).map_page(virt, phys, page_flags) }
+            .map_err(|()| SyscallError::OutOfMemory)?;
     }
 
     Ok(0)

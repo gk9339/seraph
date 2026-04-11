@@ -143,6 +143,10 @@ pub const PERCPU_SCRATCH_OFFSET: usize = 24;
 // Used by the syscall_entry naked-asm stub (assembly references by numeric offset).
 #[allow(dead_code)]
 pub const PERCPU_TSS_PTR_OFFSET: usize = 32;
+/// Byte offset of `PerCpuData::preempt_count`. GS-relative: `gs:[40]`.
+// Not accessed from assembly; used by preempt_disable/preempt_enable.
+#[allow(dead_code)]
+pub const PERCPU_PREEMPT_COUNT_OFFSET: usize = 40;
 
 // ── PerCpuData ────────────────────────────────────────────────────────────────
 
@@ -171,6 +175,11 @@ pub struct PerCpuData
     /// x86-64: virtual address of this CPU's TSS. Used by `set_rsp0`
     /// to locate the TSS without a global variable. Zero until Phase 5 init.
     pub tss_ptr: u64,
+    /// Preemption-disable depth counter. When > 0, `timer_tick()` skips
+    /// calling `schedule()`, preventing context switches during critical
+    /// sections such as TLB shootdown spin-waits.
+    pub preempt_count: u32,
+    _pad1: u32,
 }
 
 impl PerCpuData
@@ -184,6 +193,8 @@ impl PerCpuData
             user_rsp: 0,
             scratch: 0,
             tss_ptr: 0,
+            preempt_count: 0,
+            _pad1: 0,
         }
     }
 }
@@ -259,6 +270,53 @@ pub unsafe fn init_ap(cpu_id: u32)
     }
 }
 
+// ── Preemption control ───────────────────────────────────────────────────────
+
+/// Increment the preemption-disable depth on the current CPU.
+///
+/// While `preempt_count > 0`, `timer_tick()` will not call `schedule()`,
+/// preventing context switches. Must be balanced with [`preempt_enable`].
+///
+/// Safe to call with interrupts disabled (the common case — syscall context).
+#[cfg(not(test))]
+#[inline]
+pub fn preempt_disable()
+{
+    let cpu = crate::arch::current::cpu::current_cpu() as usize;
+    // SAFETY: cpu < MAX_CPUS; preempt_count is exclusively owned by this CPU
+    // after init. No concurrent access from other CPUs.
+    unsafe {
+        let ptr = core::ptr::addr_of_mut!(PER_CPU[cpu].preempt_count);
+        *ptr = (*ptr).wrapping_add(1);
+    }
+}
+
+/// Decrement the preemption-disable depth on the current CPU.
+///
+/// Must be paired with a prior [`preempt_disable`] call.
+#[cfg(not(test))]
+#[inline]
+pub fn preempt_enable()
+{
+    let cpu = crate::arch::current::cpu::current_cpu() as usize;
+    // SAFETY: same as preempt_disable — per-CPU exclusive access.
+    unsafe {
+        let ptr = core::ptr::addr_of_mut!(PER_CPU[cpu].preempt_count);
+        debug_assert!(*ptr > 0, "preempt_enable: underflow on cpu {cpu}");
+        *ptr = (*ptr).wrapping_sub(1);
+    }
+}
+
+/// Returns `true` if preemption is disabled on the current CPU.
+#[cfg(not(test))]
+#[inline]
+pub fn preemption_disabled() -> bool
+{
+    let cpu = crate::arch::current::cpu::current_cpu() as usize;
+    // SAFETY: cpu < MAX_CPUS; preempt_count is per-CPU, read-only here.
+    unsafe { PER_CPU[cpu].preempt_count > 0 }
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -298,9 +356,19 @@ mod tests
     }
 
     #[test]
-    fn percpu_size_is_40_bytes()
+    fn percpu_size_is_48_bytes()
     {
-        // cpu_id(4) + _pad0(4) + kernel_rsp(8) + user_rsp(8) + scratch(8) + tss_ptr(8) = 40
-        assert_eq!(core::mem::size_of::<PerCpuData>(), 40);
+        // cpu_id(4) + _pad0(4) + kernel_rsp(8) + user_rsp(8) + scratch(8) + tss_ptr(8)
+        // + preempt_count(4) + _pad1(4) = 48
+        assert_eq!(core::mem::size_of::<PerCpuData>(), 48);
+    }
+
+    #[test]
+    fn percpu_preempt_count_offset_matches_constant()
+    {
+        assert_eq!(
+            offset_of!(PerCpuData, preempt_count),
+            PERCPU_PREEMPT_COUNT_OFFSET
+        );
     }
 }

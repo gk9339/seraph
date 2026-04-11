@@ -75,6 +75,8 @@ fn descriptors(info: &InitInfo) -> &[CapDescriptor]
     }
 }
 
+// dead_code: used by the x86_64 serial module but not riscv64.
+#[allow(dead_code)]
 fn find_cap_by_type(info: &InitInfo, wanted: CapType) -> Option<u32>
 {
     descriptors(info)
@@ -458,7 +460,7 @@ fn bootstrap_procmgr(info: &InitInfo, alloc: &mut FrameAlloc) -> Option<u32>
         unsafe { core::slice::from_raw_parts(TEMP_MAP_BASE as *const u8, module_size as usize) };
 
     let pm_aspace = syscall::cap_create_aspace().ok()?;
-    let pm_cspace = syscall::cap_create_cspace(256).ok()?;
+    let pm_cspace = syscall::cap_create_cspace(1024).ok()?;
     let pm_thread = syscall::cap_create_thread(pm_aspace, pm_cspace).ok()?;
 
     log("init: created procmgr kernel objects");
@@ -472,16 +474,21 @@ fn bootstrap_procmgr(info: &InitInfo, alloc: &mut FrameAlloc) -> Option<u32>
     let endpoint_cap = syscall::cap_create_endpoint().ok()?;
     let pm_ep_slot = syscall::cap_copy(endpoint_cap, pm_cspace, !0u64).ok()?;
 
-    // Delegate memory frame caps to procmgr.
+    // Delegate all remaining memory frame caps to procmgr (derive-twice
+    // pattern: derive intermediary in init's CSpace, copy intermediary into
+    // procmgr's CSpace). Init retains root + intermediary for revocation.
     let pm_initial_caps_base = pm_ep_slot + 1;
     let mut pm_initial_count: u32 = 0;
-    let frames_to_give = 8u32.min(info.memory_frame_count.saturating_sub(alloc.next_idx));
+    let frames_to_give = info.memory_frame_count.saturating_sub(alloc.next_idx);
     for i in 0..frames_to_give
     {
         let src_slot = info.memory_frame_base + alloc.next_idx + i;
-        if syscall::cap_copy(src_slot, pm_cspace, !0u64).is_ok()
+        if let Ok(intermediary) = syscall::cap_derive(src_slot, !0u64)
         {
-            pm_initial_count += 1;
+            if syscall::cap_copy(intermediary, pm_cspace, !0u64).is_ok()
+            {
+                pm_initial_count += 1;
+            }
         }
     }
     alloc.next_idx += frames_to_give;
@@ -565,7 +572,7 @@ fn run(info_ptr: u64) -> !
         syscall::thread_exit();
     };
 
-    // ── Request procmgr to create devmgr ─────────────────────────────────────
+    // ── Request procmgr to create early services ──────────────────────────────
 
     if info.module_frame_count >= 2
     {
@@ -573,7 +580,6 @@ fn run(info_ptr: u64) -> !
 
         log("init: requesting procmgr to create devmgr");
 
-        // Send CREATE_PROCESS IPC with devmgr module frame cap.
         match syscall::ipc_call(endpoint_cap, LABEL_CREATE_PROCESS, 0, &[devmgr_frame_cap])
         {
             Ok((reply_label, _)) =>
@@ -589,7 +595,7 @@ fn run(info_ptr: u64) -> !
             }
             Err(_) =>
             {
-                log("init: IPC call to procmgr failed");
+                log("init: IPC call to procmgr failed for devmgr");
             }
         }
     }
@@ -598,8 +604,43 @@ fn run(info_ptr: u64) -> !
         log("init: no devmgr module available");
     }
 
-    log("init: bootstrap complete, exiting");
-    syscall::thread_exit();
+    if info.module_frame_count >= 3
+    {
+        let vfsd_frame_cap = info.module_frame_base + 2; // Module 2 = vfsd
+
+        log("init: requesting procmgr to create vfsd");
+
+        match syscall::ipc_call(endpoint_cap, LABEL_CREATE_PROCESS, 0, &[vfsd_frame_cap])
+        {
+            Ok((reply_label, _)) =>
+            {
+                if reply_label == 0
+                {
+                    log("init: vfsd created successfully");
+                }
+                else
+                {
+                    log("init: procmgr returned error creating vfsd");
+                }
+            }
+            Err(_) =>
+            {
+                log("init: IPC call to procmgr failed for vfsd");
+            }
+        }
+    }
+    else
+    {
+        log("init: no vfsd module available");
+    }
+
+    // Phase 1 bootstrap complete. Init stays resident for future bootstrap
+    // stages (Tier 3+: hardware cap delegation, real root mount, svcmgr handover).
+    log("init: phase 1 bootstrap complete, waiting");
+    loop
+    {
+        let _ = syscall::thread_yield();
+    }
 }
 
 #[panic_handler]

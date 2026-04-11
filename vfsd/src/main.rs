@@ -9,44 +9,31 @@
 //! It manages filesystem driver instances (fatfs, ext4, tmpfs, …) and routes
 //! VFS IPC requests to the appropriate backing driver.
 //!
-//! This stub halts immediately. Full implementation is deferred.
+//! This stub idles immediately. Full implementation is deferred to Tier 4.
 //!
 //! See `vfsd/README.md` for the design and IPC interface.
 
-#![cfg_attr(not(test), no_std)]
-#![cfg_attr(not(test), no_main)]
+#![no_std]
+#![no_main]
 
-#[cfg(not(test))]
-use core::panic::PanicInfo;
+// Link shared/runtime to get _start() and panic_handler.
+extern crate runtime;
 
-#[cfg(not(test))]
+use process_abi::StartupInfo;
+
+/// VFS daemon entry point.
+///
+/// TODO: real vfsd implementation (Tier 4) — mount table, path resolution,
+/// fs driver lifecycle, namespace IPC endpoint.
 #[no_mangle]
-pub extern "C" fn _start() -> !
+extern "Rust" fn main(startup: &StartupInfo) -> !
 {
-    halt_loop();
-}
+    // Register IPC buffer so future IPC operations work.
+    let _ = syscall::ipc_buffer_set(startup.ipc_buffer as u64);
 
-fn halt_loop() -> !
-{
+    // Idle until real implementation arrives.
     loop
     {
-        #[cfg(target_arch = "x86_64")]
-        // SAFETY: hlt is a privileged x86 instruction; halts CPU until next interrupt.
-        unsafe {
-            core::arch::asm!("hlt", options(nomem, nostack));
-        }
-
-        #[cfg(target_arch = "riscv64")]
-        // SAFETY: wfi is a RISC-V instruction; waits for interrupt.
-        unsafe {
-            core::arch::asm!("wfi", options(nomem, nostack));
-        }
+        let _ = syscall::thread_yield();
     }
-}
-
-#[cfg(not(test))]
-#[panic_handler]
-fn panic(_info: &PanicInfo) -> !
-{
-    halt_loop();
 }

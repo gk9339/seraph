@@ -63,6 +63,7 @@ struct FramePool
     next_idx: u32,
     base: u32,
     count: u32,
+    allocated_pages: u32,
 }
 
 impl FramePool
@@ -74,6 +75,7 @@ impl FramePool
             next_idx: 0,
             base,
             count,
+            allocated_pages: 0,
         }
     }
 
@@ -87,11 +89,13 @@ impl FramePool
                 if let Ok((page, rest)) = syscall::frame_split(self.current_cap, PAGE_SIZE)
                 {
                     self.current_cap = rest;
+                    self.allocated_pages += 1;
                     return Some(page);
                 }
                 // Split failed — current frame is one page or less. Use it directly.
                 let cap = self.current_cap;
                 self.current_cap = 0;
+                self.allocated_pages += 1;
                 return Some(cap);
             }
 
@@ -103,6 +107,51 @@ impl FramePool
             self.current_cap = self.base + self.next_idx;
             self.next_idx += 1;
         }
+    }
+}
+
+// ── Process table ───────────────────────────────────────────────────────────
+
+/// Per-process resource record. Fields read when teardown is implemented.
+#[allow(dead_code)]
+struct ProcessEntry
+{
+    pid: u64,
+    aspace_cap: u32,
+    cspace_cap: u32,
+    thread_cap: u32,
+    frames_allocated: u32,
+}
+
+const MAX_PROCESSES: usize = 32;
+
+struct ProcessTable
+{
+    entries: [Option<ProcessEntry>; MAX_PROCESSES],
+}
+
+impl ProcessTable
+{
+    const fn new() -> Self
+    {
+        // const-compatible None array init.
+        const NONE: Option<ProcessEntry> = None;
+        Self {
+            entries: [NONE; MAX_PROCESSES],
+        }
+    }
+
+    fn insert(&mut self, entry: ProcessEntry) -> bool
+    {
+        for slot in &mut self.entries
+        {
+            if slot.is_none()
+            {
+                *slot = Some(entry);
+                return true;
+            }
+        }
+        false
     }
 }
 
@@ -277,15 +326,18 @@ fn map_child_stack_and_ipc(pool: &mut FramePool, child_aspace: u32) -> Option<()
 
 /// Create a process from an ELF module frame cap received via IPC.
 ///
-/// Returns `(process_id, thread_cap)` on success.
+/// Returns the process ID on success. Records the process in `table`.
 // similar_names: aspace/cspace are intentionally parallel kernel object names.
 #[allow(clippy::similar_names)]
 fn create_process(
     module_frame_cap: u32,
     pool: &mut FramePool,
     self_aspace: u32,
-) -> Option<(u64, u32)>
+    table: &mut ProcessTable,
+) -> Option<u64>
 {
+    let pages_before = pool.allocated_pages;
+
     let module_pages = map_module(module_frame_cap, self_aspace)?;
     let module_size = module_pages * PAGE_SIZE;
 
@@ -352,7 +404,15 @@ fn create_process(
 
     let pid = NEXT_PID.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
 
-    Some((pid, child_thread))
+    table.insert(ProcessEntry {
+        pid,
+        aspace_cap: child_aspace,
+        cspace_cap: child_cspace,
+        thread_cap: child_thread,
+        frames_allocated: pool.allocated_pages - pages_before,
+    });
+
+    Some(pid)
 }
 
 // ── Entry point ──────────────────────────────────────────────────────────────
@@ -375,6 +435,7 @@ extern "Rust" fn main(startup: &StartupInfo) -> !
     #[allow(clippy::cast_ptr_alignment)]
     let proc_info = unsafe { &*(PROCESS_INFO_VADDR as *const ProcessInfo) };
     let mut pool = FramePool::new(proc_info.initial_caps_base, proc_info.initial_caps_count);
+    let mut table = ProcessTable::new();
 
     // IPC receive loop.
     loop
@@ -403,9 +464,9 @@ extern "Rust" fn main(startup: &StartupInfo) -> !
 
             let module_frame_cap = caps[0];
 
-            match create_process(module_frame_cap, &mut pool, self_aspace)
+            match create_process(module_frame_cap, &mut pool, self_aspace, &mut table)
             {
-                Some((_pid, _thread_cap)) =>
+                Some(_pid) =>
                 {
                     // TODO: include pid in reply data once the kernel supports
                     // cross-address-space IPC buffer writes during reply.

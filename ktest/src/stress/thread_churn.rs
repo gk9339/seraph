@@ -13,7 +13,7 @@ use syscall::{
 
 use crate::{ChildStack, TestContext, TestResult};
 
-const ITERATIONS: usize = 20;
+const ITERATIONS: usize = 100;
 
 pub fn run(ctx: &TestContext) -> TestResult
 {

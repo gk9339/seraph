@@ -23,7 +23,7 @@ mod thread_churn;
 use crate::{run_integration_test, ChildStack, TestContext};
 
 /// Maximum concurrent child threads across all stress tests.
-const MAX_STRESS_THREADS: usize = 8;
+const MAX_STRESS_THREADS: usize = 16;
 
 /// Shared child stacks for stress tests. Tests run sequentially so stacks
 /// are never aliased.

@@ -15,7 +15,7 @@ use syscall::{
 
 use crate::{ChildStack, TestContext, TestResult};
 
-const NUM_CHILDREN: usize = 4;
+const NUM_CHILDREN: usize = 16;
 const RIGHTS_SIGNAL: u64 = 1 << 7;
 
 pub fn run(ctx: &TestContext) -> TestResult
@@ -60,7 +60,7 @@ pub fn run(ctx: &TestContext) -> TestResult
     }
 
     // Let children run for a while before revoking.
-    for _ in 0..100
+    for _ in 0..10
     {
         let _ = thread_yield();
     }
@@ -98,7 +98,7 @@ fn sender_loop_entry(arg: u64) -> !
 {
     let sig_slot = (arg & 0xFFFF) as u32;
     let done_slot = ((arg >> 16) & 0xFFFF) as u32;
-    let done_bit = (arg >> 32) & 0xFF;
+    let done_bit = (arg >> 32) & 0xFFFF;
 
     // Send in a tight loop until the cap is revoked.
     loop

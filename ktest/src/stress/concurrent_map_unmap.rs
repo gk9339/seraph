@@ -14,8 +14,8 @@ use syscall::{
 
 use crate::{ChildStack, TestContext, TestResult};
 
-const NUM_CHILDREN: usize = 2;
-const MAP_ITERATIONS: usize = 50;
+const NUM_CHILDREN: usize = 4;
+const MAP_ITERATIONS: usize = 200;
 
 /// Base VA for stress mappings, well above normal test VAs.
 const STRESS_MAP_BASE: u64 = 0x5000_0000;
@@ -112,6 +112,8 @@ pub fn run(ctx: &TestContext) -> TestResult
 
 /// Per-child VA, set by parent before starting each child.
 static VA_PER_CHILD: [core::sync::atomic::AtomicU64; NUM_CHILDREN] = [
+    core::sync::atomic::AtomicU64::new(0),
+    core::sync::atomic::AtomicU64::new(0),
     core::sync::atomic::AtomicU64::new(0),
     core::sync::atomic::AtomicU64::new(0),
 ];

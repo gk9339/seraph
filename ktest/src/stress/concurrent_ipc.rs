@@ -14,8 +14,8 @@ use syscall::{
 
 use crate::{ChildStack, TestContext, TestResult};
 
-const NUM_CALLERS: usize = 4;
-const CYCLES: usize = 10;
+const NUM_CALLERS: usize = 16;
+const CYCLES: usize = 50;
 
 // SEND + GRANT rights.
 const RIGHTS_SEND_GRANT: u64 = (1 << 4) | (1 << 6);
@@ -62,17 +62,17 @@ pub fn run(ctx: &TestContext) -> TestResult
             cspaces[i] = cs;
         }
 
-        // Server: receive and reply to all 4 callers.
+        // Server: receive and reply to all callers.
         let mut received_bitmap: u32 = 0;
         for _ in 0..NUM_CALLERS
         {
             let (label, _) =
                 ipc_recv(ep).map_err(|_| "concurrent_ipc: ipc_recv failed")?;
-            // Label values are 1..=4; fits in u32. Truncation is safe because
-            // we validate idx is in [1, NUM_CALLERS] immediately below.
+            // Label values are 1..=NUM_CALLERS; fits in u32. Truncation is safe
+            // because we validate idx is in [1, NUM_CALLERS] immediately below.
             #[allow(clippy::cast_possible_truncation)]
             let idx = label as u32;
-            if idx == 0 || idx > 4
+            if idx == 0 || idx as usize > NUM_CALLERS
             {
                 return Err("concurrent_ipc: received out-of-range label");
             }

@@ -11,7 +11,7 @@
 //! ## Layout (280 bytes)
 //!
 //! Registers x1–x31 (31 × 8 = 248 bytes) + sepc (8) + scause (8) + stval (8)
-//! = 280 bytes. x0 (zero) is not stored.
+//! + sstatus (8) = 280 bytes. x0 (zero) is not stored.
 //!
 //! The layout exactly matches the push sequence in `trap_entry` in
 //! `interrupts.rs` — do not reorder fields.

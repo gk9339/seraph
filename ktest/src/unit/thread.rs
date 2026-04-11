@@ -38,7 +38,7 @@ const RIGHTS_SIGNAL_WAIT: u64 = (1 << 7) | (1 << 8);
 #[cfg(target_arch = "x86_64")]
 const TRAP_FRAME_BYTES: u64 = 168;
 #[cfg(target_arch = "riscv64")]
-const TRAP_FRAME_BYTES: u64 = 272;
+const TRAP_FRAME_BYTES: u64 = 280;
 
 // Byte offset of the instruction pointer within TrapFrame.
 #[cfg(target_arch = "x86_64")]

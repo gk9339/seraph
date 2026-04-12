@@ -124,6 +124,7 @@ dependencies = [
  "runtime",
  "syscall",
  "syscall-abi",
+ "virtio-core",
 ]
 
 [[package]]
@@ -294,6 +295,10 @@ dependencies = [
 name = "virtio-blk"
 version = "0.1.0"
 dependencies = [
+ "process-abi",
+ "runtime",
+ "syscall",
+ "syscall-abi",
  "virtio-core",
 ]
 

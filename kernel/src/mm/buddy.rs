@@ -309,6 +309,46 @@ impl BuddyAllocator
         Some(addr)
     }
 
+    /// Drain free blocks for userspace Frame caps, keeping at least
+    /// `reserve_pages` pages for kernel-internal use (page tables, heap, stacks).
+    ///
+    /// Pops blocks from highest order downward, writing `(physical_address, order)`
+    /// pairs into `out`. Returns the number of entries written.
+    ///
+    /// Called once during Phase 7 to partition physical memory between the kernel
+    /// buddy allocator and userspace Frame capabilities.
+    pub fn drain_for_usercaps(&mut self, reserve_pages: usize, out: &mut [(u64, usize)]) -> usize
+    {
+        let mut count = 0;
+
+        // Drain from highest order first to produce fewer, larger Frame caps.
+        for order in (0..=MAX_ORDER).rev()
+        {
+            while self.free_pages > reserve_pages && count < out.len()
+            {
+                let pages_in_block = 1usize << order;
+
+                // Don't drain if it would drop below the reserve.
+                if self.free_pages.saturating_sub(pages_in_block) < reserve_pages
+                {
+                    break;
+                }
+
+                if let Some(addr) = self.pop_block(order)
+                {
+                    out[count] = (addr, order);
+                    count += 1;
+                }
+                else
+                {
+                    break;
+                }
+            }
+        }
+
+        count
+    }
+
     /// Remove a specific block address from the free list for `order`.
     ///
     /// Returns `true` if found and removed. O(n) in list length; acceptable

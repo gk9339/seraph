@@ -629,6 +629,58 @@ fn parse_mcfg(table: &[u8], count: &mut usize, out: &mut [PlatformResource])
                 size,
                 id: segment,
             });
+
+            // PCI 32-bit MMIO aperture for BAR assignments.
+            // TODO: parse ACPI _CRS for real hardware; heuristic for QEMU.
+            //
+            // QEMU q35 (x86-64): ECAM at 0xB0000000+, BARs at 0x80000000+.
+            //   Window: 0x8000_0000 – 0xAFFF_FFFF (below ECAM).
+            // QEMU virt (RISC-V): ECAM at 0x30000000, BARs at 0x40000000+.
+            //   Window: 0x4000_0000 – 0x7FFF_FFFF.
+            //
+            // Use ECAM base to select the appropriate window.
+            let (win_base, win_size) = if base < 0x8000_0000
+            {
+                // RISC-V virt: ECAM low, BARs above ECAM.
+                (0x4000_0000u64, 0x4000_0000u64)
+            }
+            else
+            {
+                // x86-64 q35: ECAM high, BARs below ECAM.
+                (0x8000_0000u64, base - 0x8000_0000)
+            };
+
+            push!(PlatformResource {
+                resource_type: ResourceType::MmioRange,
+                flags: 0,
+                base: win_base,
+                size: win_size,
+                id: 0,
+            });
+
+            // PCI 64-bit MMIO aperture for 64-bit BAR assignments.
+            // TODO: parse ACPI _CRS for real hardware; heuristic for QEMU.
+            //
+            // QEMU q35 (x86-64): 64-bit window at 0x3800_0000_0000, 4 GiB.
+            // QEMU virt (RISC-V): 64-bit window at 0x4_0000_0000, 16 GiB.
+            let (hi_base, hi_size) = if base < 0x8000_0000
+            {
+                // RISC-V virt.
+                (0x4_0000_0000u64, 0x4_0000_0000u64)
+            }
+            else
+            {
+                // x86-64 q35.
+                (0x3800_0000_0000u64, 0x1_0000_0000u64)
+            };
+
+            push!(PlatformResource {
+                resource_type: ResourceType::MmioRange,
+                flags: 0,
+                base: hi_base,
+                size: hi_size,
+                id: 0,
+            });
         }
 
         off += MCFG_ENTRY_SIZE;

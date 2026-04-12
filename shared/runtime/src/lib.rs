@@ -21,6 +21,8 @@
 
 #![no_std]
 
+pub mod log;
+
 use process_abi::{ProcessInfo, StartupInfo, PROCESS_ABI_VERSION, PROCESS_INFO_VADDR};
 
 extern "Rust" {

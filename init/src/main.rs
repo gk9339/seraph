@@ -521,33 +521,83 @@ fn bootstrap_procmgr(info: &InitInfo, alloc: &mut FrameAlloc) -> Option<u32>
     Some(endpoint_cap)
 }
 
-// ── Two-phase service creation ───────────────────────────────────────────────
+// ── Hardware cap delegation to devmgr ────────────────────────────────────────
 
-/// Create a service via procmgr and immediately start it (no cap injection).
+/// Temp VA for mapping the devmgr `ProcessInfo` frame for cap descriptor patching.
+const DEVMGR_PI_TEMP_VA: u64 = TEMP_MAP_BASE + 0x2000_0000;
+
+/// Max cap descriptors for devmgr delegation.
+const DEVMGR_MAX_DESCS: usize = 128;
+
+/// Sentinel value in `CapDescriptor.aux0` indicating a log endpoint.
+const LOG_ENDPOINT_SENTINEL: u64 = 0xFFFF_FFFF_FFFF_FFFF;
+
+/// Derive-twice a capability and record a [`CapDescriptor`] for it.
 ///
-/// Used for services that don't need initial caps beyond their identity caps
-/// (e.g., vfsd in Tier 2). Services that need hardware caps (e.g., devmgr in
-/// Tier 3) should use `CREATE_PROCESS` + cap injection + `START_PROCESS`
-/// separately.
-fn create_and_start_service(
-    procmgr_ep: u32,
-    module_frame_cap: u32,
-    ipc_buf: *mut u64,
-    ok_msg: &str,
-    fail_msg: &str,
+/// Derives an intermediary in init's `CSpace` (retained for revocation), copies
+/// into the child `CSpace`. Appends a descriptor to `desc_buf`.
+#[allow(clippy::too_many_arguments)]
+fn inject_cap_desc(
+    src_slot: u32,
+    cap_type: CapType,
+    aux0: u64,
+    aux1: u64,
+    child_cspace: u32,
+    desc_buf: &mut [CapDescriptor],
+    desc_count: &mut usize,
+    first_slot: &mut u32,
 )
 {
-    // Phase 1: CREATE_PROCESS (suspended).
-    let Ok((reply_label, _)) =
-        syscall::ipc_call(procmgr_ep, LABEL_CREATE_PROCESS, 0, &[module_frame_cap])
+    let Ok(intermediary) = syscall::cap_derive(src_slot, !0u64)
     else
     {
-        log(fail_msg);
+        return;
+    };
+    let Ok(child_slot) = syscall::cap_copy(intermediary, child_cspace, !0u64)
+    else
+    {
+        return;
+    };
+    if *desc_count == 0
+    {
+        *first_slot = child_slot;
+    }
+    if *desc_count < desc_buf.len()
+    {
+        desc_buf[*desc_count] = CapDescriptor {
+            slot: child_slot,
+            cap_type,
+            pad: [0; 3],
+            aux0,
+            aux1,
+        };
+        *desc_count += 1;
+    }
+}
+
+/// Create devmgr with full hardware cap delegation.
+///
+/// Two-phase process creation: `CREATE_PROCESS` (suspended), inject hardware
+/// caps and driver module caps, patch `ProcessInfo` with `CapDescriptor`
+/// entries, then `START_PROCESS`.
+// too_many_lines: hardware cap delegation is inherently sequential with many
+// cap operations; splitting would fragment the delegation flow.
+#[allow(clippy::too_many_lines)]
+fn create_devmgr_with_caps(info: &InitInfo, procmgr_ep: u32, log_ep: u32, ipc_buf: *mut u64)
+{
+    let devmgr_frame_cap = info.module_frame_base + 1; // Module 1 = devmgr
+
+    // Phase 1: CREATE_PROCESS (suspended).
+    let Ok((reply_label, _)) =
+        syscall::ipc_call(procmgr_ep, LABEL_CREATE_PROCESS, 0, &[devmgr_frame_cap])
+    else
+    {
+        log("init: devmgr: CREATE_PROCESS ipc_call failed");
         return;
     };
     if reply_label != 0
     {
-        log(fail_msg);
+        log("init: devmgr: CREATE_PROCESS failed");
         return;
     }
 
@@ -555,13 +605,166 @@ fn create_and_start_service(
     // SAFETY: IPC buffer is valid and kernel wrote reply data.
     let pid = unsafe { core::ptr::read_volatile(ipc_buf) };
 
-    // Phase 2: START_PROCESS.
+    // Read child CSpace cap and ProcessInfo frame cap from reply caps.
+    // SAFETY: ipc_buf is the registered IPC buffer.
+    #[allow(clippy::cast_ptr_alignment)]
+    let (cap_count, reply_caps) = unsafe { syscall::read_recv_caps(ipc_buf) };
+    if cap_count < 2
+    {
+        log("init: devmgr: CREATE_PROCESS reply missing caps");
+        return;
+    }
+    let child_cspace = reply_caps[0];
+    let pi_frame = reply_caps[1];
+
+    // Phase 2: Inject hardware caps.
+    // Derive-twice pattern: derive intermediary in init's CSpace, copy into
+    // child's CSpace. Init retains intermediary for revocation authority.
+
+    // We track cap descriptors to write into ProcessInfo later.
+    let mut desc_buf: [CapDescriptor; DEVMGR_MAX_DESCS] = [CapDescriptor {
+        slot: 0,
+        cap_type: CapType::Frame,
+        pad: [0; 3],
+        aux0: 0,
+        aux1: 0,
+    }; DEVMGR_MAX_DESCS];
+    let mut desc_count: usize = 0;
+    let mut first_slot: u32 = 0;
+
+    // Inject all hardware caps from init's cap descriptor table.
+    let init_descs = descriptors(info);
+    for d in init_descs
+    {
+        match d.cap_type
+        {
+            CapType::MmioRegion
+            | CapType::PciEcam
+            | CapType::Interrupt
+            | CapType::IoPortRange
+            | CapType::SchedControl =>
+            {
+                inject_cap_desc(
+                    d.slot,
+                    d.cap_type,
+                    d.aux0,
+                    d.aux1,
+                    child_cspace,
+                    &mut desc_buf,
+                    &mut desc_count,
+                    &mut first_slot,
+                );
+            }
+            // Skip memory frames and SBI control — devmgr doesn't need them.
+            _ =>
+            {}
+        }
+    }
+
+    // Inject procmgr endpoint cap so devmgr can spawn drivers and request frames.
+    // Use Frame cap type with aux0=0 as a sentinel — devmgr identifies the
+    // procmgr endpoint by its position (first non-hardware cap after hw caps).
+    inject_cap_desc(
+        procmgr_ep,
+        CapType::Frame,
+        0, // sentinel: endpoint marker
+        0,
+        child_cspace,
+        &mut desc_buf,
+        &mut desc_count,
+        &mut first_slot,
+    );
+
+    // Inject driver module frame caps (modules 3+: virtio-blk, fatfs, etc.).
+    for i in 3..info.module_frame_count
+    {
+        let module_cap = info.module_frame_base + i;
+        inject_cap_desc(
+            module_cap,
+            CapType::Frame,
+            u64::from(i), // aux0 = module index
+            0,
+            child_cspace,
+            &mut desc_buf,
+            &mut desc_count,
+            &mut first_slot,
+        );
+    }
+
+    // Inject log endpoint cap (sentinel: Frame with aux0=LOG_ENDPOINT_SENTINEL).
+    inject_cap_desc(
+        log_ep,
+        CapType::Frame,
+        LOG_ENDPOINT_SENTINEL,
+        0,
+        child_cspace,
+        &mut desc_buf,
+        &mut desc_count,
+        &mut first_slot,
+    );
+
+    // Phase 3: Patch ProcessInfo page with CapDescriptors.
+    // Map the PI frame writable into init's address space.
+    if syscall::mem_map(
+        pi_frame,
+        info.aspace_cap,
+        DEVMGR_PI_TEMP_VA,
+        0,
+        1,
+        syscall::PROT_WRITE,
+    )
+    .is_err()
+    {
+        log("init: devmgr: cannot map ProcessInfo frame");
+        return;
+    }
+
+    // Write initial_caps_base, initial_caps_count, cap_descriptors.
+    // SAFETY: DEVMGR_PI_TEMP_VA is mapped writable to the ProcessInfo page.
+    #[allow(clippy::cast_ptr_alignment)]
+    let pi = unsafe { &mut *(DEVMGR_PI_TEMP_VA as *mut ProcessInfo) };
+
+    pi.initial_caps_base = first_slot;
+    pi.initial_caps_count = desc_count as u32;
+    pi.cap_descriptor_count = desc_count as u32;
+
+    // CapDescriptors start after the ProcessInfo header.
+    let descs_offset = core::mem::size_of::<ProcessInfo>() as u32;
+    // Align to 8 bytes (CapDescriptor contains u64 fields).
+    let descs_offset_aligned = (descs_offset + 7) & !7;
+    pi.cap_descriptors_offset = descs_offset_aligned;
+
+    // Write CapDescriptor entries.
+    let desc_size = core::mem::size_of::<CapDescriptor>();
+    for (i, desc) in desc_buf.iter().enumerate().take(desc_count)
+    {
+        let byte_offset = descs_offset_aligned as usize + i * desc_size;
+        if byte_offset + desc_size > PAGE_SIZE as usize
+        {
+            break; // Page overflow — shouldn't happen with <128 descriptors.
+        }
+        // SAFETY: byte_offset is within the mapped page; descs_offset_aligned is
+        // 8-byte aligned and CapDescriptor is 24 bytes (multiple of 8), so the
+        // destination pointer satisfies CapDescriptor's alignment.
+        #[allow(clippy::cast_ptr_alignment)]
+        unsafe {
+            let ptr = (DEVMGR_PI_TEMP_VA as *mut u8)
+                .add(byte_offset)
+                .cast::<CapDescriptor>();
+            core::ptr::write(ptr, *desc);
+        }
+    }
+
+    // Unmap the PI frame.
+    let _ = syscall::mem_unmap(info.aspace_cap, DEVMGR_PI_TEMP_VA, 1);
+
+    // Phase 4: START_PROCESS.
     // SAFETY: writing pid to IPC buffer for the START_PROCESS call.
     unsafe { core::ptr::write_volatile(ipc_buf, pid) };
     match syscall::ipc_call(procmgr_ep, LABEL_START_PROCESS, 1, &[])
     {
-        Ok((0, _)) => log(ok_msg),
-        _ => log(fail_msg),
+        Ok((0, _)) => log("init: devmgr created and started with hardware caps"),
+        _ => log("init: devmgr: START_PROCESS failed"),
     }
 }
 
@@ -631,6 +834,19 @@ fn run(info_ptr: u64) -> !
         syscall::thread_exit();
     };
 
+    // ── Create log endpoint ────────────────────────────────────────────────────
+    //
+    // Services send log messages via IPC to this endpoint. Init receives them
+    // and writes to serial, ensuring atomic output with no interleaving.
+
+    let Ok(log_ep) = syscall::cap_create_endpoint()
+    else
+    {
+        log("init: FATAL: cannot create log endpoint");
+        syscall::thread_exit();
+    };
+    log("init: log endpoint created");
+
     // ── Request procmgr to create early services ──────────────────────────────
     //
     // CREATE_PROCESS returns the child in a suspended state. The caller injects
@@ -642,15 +858,8 @@ fn run(info_ptr: u64) -> !
 
     if info.module_frame_count >= 2
     {
-        let devmgr_frame_cap = info.module_frame_base + 1; // Module 1 = devmgr
-        log("init: requesting procmgr to create devmgr");
-        create_and_start_service(
-            endpoint_cap,
-            devmgr_frame_cap,
-            ipc_buf,
-            "init: devmgr created and started",
-            "init: FAILED to create/start devmgr",
-        );
+        log("init: requesting procmgr to create devmgr (with hw caps)");
+        create_devmgr_with_caps(info, endpoint_cap, log_ep, ipc_buf);
     }
     else
     {
@@ -661,9 +870,11 @@ fn run(info_ptr: u64) -> !
     {
         let vfsd_frame_cap = info.module_frame_base + 2; // Module 2 = vfsd
         log("init: requesting procmgr to create vfsd");
-        create_and_start_service(
+        create_and_start_service_with_log(
+            info,
             endpoint_cap,
             vfsd_frame_cap,
+            log_ep,
             ipc_buf,
             "init: vfsd created and started",
             "init: FAILED to create/start vfsd",
@@ -674,12 +885,215 @@ fn run(info_ptr: u64) -> !
         log("init: no vfsd module available");
     }
 
-    // Phase 1 bootstrap complete. Init stays resident for future bootstrap
-    // stages (Tier 3+: hardware cap delegation, real root mount, svcmgr handover).
-    log("init: phase 1 bootstrap complete, waiting");
+    // Phase 1 bootstrap complete. Enter log receive loop.
+    log("init: phase 1 bootstrap complete, serving log endpoint");
+    log_receive_loop(info, log_ep, ipc_buf);
+}
+
+// ── Log receive loop ───────────────────────────────────────────────────────
+
+/// Log label base (bits 0-15). Must match `runtime::log::LOG_LABEL_BASE`.
+const LOG_LABEL_BASE: u64 = 10;
+
+/// Continuation flag (bit 32). Must match `runtime::log::LOG_CONTINUATION`.
+const LOG_CONTINUATION: u64 = 1 << 32;
+
+/// Max bytes per IPC chunk.
+const LOG_CHUNK_SIZE: usize = 6 * 8; // MSG_DATA_WORDS_MAX * 8
+
+/// Maximum assembled log message length (multiple chunks).
+const LOG_MAX_ASSEMBLED: usize = 256;
+
+/// Receive log messages from services and write them to serial.
+///
+/// Handles multi-chunk messages: chunks with the continuation flag set are
+/// accumulated into `assembled_buf`. When the final chunk arrives (no flag),
+/// the complete message is written to serial with CRLF.
+fn log_receive_loop(info: &InitInfo, log_ep: u32, ipc_buf: *mut u64) -> !
+{
+    let _ = info; // reserved for future use
+    let mut assembled_buf = [0u8; LOG_MAX_ASSEMBLED];
+    let mut assembled_len: usize = 0;
+
     loop
     {
-        let _ = syscall::thread_yield();
+        let Ok((label, _data_count)) = syscall::ipc_recv(log_ep)
+        else
+        {
+            continue;
+        };
+
+        let label_id = label & 0xFFFF;
+        let total_len = ((label >> 16) & 0xFFFF) as usize;
+        let has_continuation = label & LOG_CONTINUATION != 0;
+
+        if label_id == LOG_LABEL_BASE
+        {
+            // Read chunk bytes from IPC buffer.
+            let chunk_bytes = LOG_CHUNK_SIZE.min(total_len - assembled_len);
+            let word_count = chunk_bytes.div_ceil(8);
+
+            for i in 0..word_count
+            {
+                // SAFETY: IPC buffer is valid; i < MSG_DATA_WORDS_MAX.
+                let word = unsafe { core::ptr::read_volatile(ipc_buf.add(i)) };
+                let base = i * 8;
+                for j in 0..8
+                {
+                    let idx = assembled_len + base + j;
+                    if idx < LOG_MAX_ASSEMBLED && base + j < chunk_bytes
+                    {
+                        assembled_buf[idx] = ((word >> (j * 8)) & 0xFF) as u8;
+                    }
+                }
+            }
+            assembled_len += chunk_bytes;
+
+            if !has_continuation
+            {
+                // Final chunk — print the complete message.
+                let len = assembled_len.min(total_len).min(LOG_MAX_ASSEMBLED);
+                for &b in &assembled_buf[..len]
+                {
+                    if b == b'\n'
+                    {
+                        arch::serial_write_byte(b'\r');
+                    }
+                    arch::serial_write_byte(b);
+                }
+                arch::serial_write_byte(b'\r');
+                arch::serial_write_byte(b'\n');
+                assembled_len = 0;
+            }
+        }
+
+        // Reply to unblock the sender.
+        let _ = syscall::ipc_reply(0, 0, &[]);
+    }
+}
+
+// ── Service creation with log endpoint ─────────────────────────────────────
+
+/// Create a service via procmgr with a log endpoint cap injected.
+///
+/// Two-phase creation: `CREATE_PROCESS` (suspended), inject log endpoint cap
+/// into child `CSpace`, patch `ProcessInfo` with `CapDescriptor`, then
+/// `START_PROCESS`.
+#[allow(clippy::too_many_arguments)]
+fn create_and_start_service_with_log(
+    info: &InitInfo,
+    procmgr_ep: u32,
+    module_frame_cap: u32,
+    log_ep: u32,
+    ipc_buf: *mut u64,
+    ok_msg: &str,
+    fail_msg: &str,
+)
+{
+    // Phase 1: CREATE_PROCESS (suspended).
+    let Ok((reply_label, _)) =
+        syscall::ipc_call(procmgr_ep, LABEL_CREATE_PROCESS, 0, &[module_frame_cap])
+    else
+    {
+        log(fail_msg);
+        return;
+    };
+    if reply_label != 0
+    {
+        log(fail_msg);
+        return;
+    }
+
+    // Read pid and child caps.
+    // SAFETY: IPC buffer is valid.
+    let pid = unsafe { core::ptr::read_volatile(ipc_buf) };
+    // SAFETY: ipc_buf is the registered IPC buffer.
+    #[allow(clippy::cast_ptr_alignment)]
+    let (cap_count, reply_caps) = unsafe { syscall::read_recv_caps(ipc_buf) };
+    if cap_count < 2
+    {
+        log(fail_msg);
+        return;
+    }
+    let child_cspace = reply_caps[0];
+    let pi_frame = reply_caps[1];
+
+    // Phase 2: Inject log endpoint cap.
+    let mut desc_buf = [CapDescriptor {
+        slot: 0,
+        cap_type: CapType::Frame,
+        pad: [0; 3],
+        aux0: 0,
+        aux1: 0,
+    }; 4];
+    let mut desc_count: usize = 0;
+    let mut first_slot: u32 = 0;
+
+    inject_cap_desc(
+        log_ep,
+        CapType::Frame,
+        LOG_ENDPOINT_SENTINEL,
+        0,
+        child_cspace,
+        &mut desc_buf,
+        &mut desc_count,
+        &mut first_slot,
+    );
+
+    // Phase 3: Patch ProcessInfo.
+    if syscall::mem_map(
+        pi_frame,
+        info.aspace_cap,
+        DEVMGR_PI_TEMP_VA,
+        0,
+        1,
+        syscall::PROT_WRITE,
+    )
+    .is_err()
+    {
+        log(fail_msg);
+        return;
+    }
+
+    // SAFETY: DEVMGR_PI_TEMP_VA is mapped writable to the ProcessInfo page.
+    #[allow(clippy::cast_ptr_alignment)]
+    let pi = unsafe { &mut *(DEVMGR_PI_TEMP_VA as *mut ProcessInfo) };
+
+    pi.initial_caps_base = first_slot;
+    pi.initial_caps_count = desc_count as u32;
+    pi.cap_descriptor_count = desc_count as u32;
+
+    let descs_offset = core::mem::size_of::<ProcessInfo>() as u32;
+    let descs_offset_aligned = (descs_offset + 7) & !7;
+    pi.cap_descriptors_offset = descs_offset_aligned;
+
+    let desc_size = core::mem::size_of::<CapDescriptor>();
+    for (i, desc) in desc_buf.iter().enumerate().take(desc_count)
+    {
+        let byte_offset = descs_offset_aligned as usize + i * desc_size;
+        if byte_offset + desc_size > PAGE_SIZE as usize
+        {
+            break;
+        }
+        // SAFETY: byte_offset is within the mapped page.
+        #[allow(clippy::cast_ptr_alignment)]
+        unsafe {
+            let ptr = (DEVMGR_PI_TEMP_VA as *mut u8)
+                .add(byte_offset)
+                .cast::<CapDescriptor>();
+            core::ptr::write(ptr, *desc);
+        }
+    }
+
+    let _ = syscall::mem_unmap(info.aspace_cap, DEVMGR_PI_TEMP_VA, 1);
+
+    // Phase 4: START_PROCESS.
+    // SAFETY: writing pid to IPC buffer.
+    unsafe { core::ptr::write_volatile(ipc_buf, pid) };
+    match syscall::ipc_call(procmgr_ep, LABEL_START_PROCESS, 1, &[])
+    {
+        Ok((0, _)) => log(ok_msg),
+        _ => log(fail_msg),
     }
 }
 

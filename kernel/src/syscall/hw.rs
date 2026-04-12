@@ -12,6 +12,7 @@
 //! - `SYS_IOPORT_BIND` (35): bind an I/O port range to a thread (`x86_64` only).
 //! - `SYS_DMA_GRANT` (36): return a frame's physical address for DMA use
 //!   (no-IOMMU fallback; requires `FLAG_DMA_UNSAFE`).
+//! - `SYS_MMIO_SPLIT` (45): split an `MmioRegion` cap into two sub-regions.
 //!
 //! # Adding new hardware syscalls
 //! 1. Add a new `pub fn sys_hw_*` in this file.
@@ -491,6 +492,190 @@ pub fn sys_dma_grant(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 
 #[cfg(test)]
 pub fn sys_dma_grant(_tf: &mut TrapFrame) -> Result<u64, SyscallError>
+{
+    Err(SyscallError::NotSupported)
+}
+
+// ── SYS_MMIO_SPLIT ──────────────────────────────────────────────────────────
+
+/// `SYS_MMIO_SPLIT` (45): split an `MmioRegion` cap into two non-overlapping children.
+///
+/// arg0 = `MmioRegion` cap index (must have MAP right).
+/// arg1 = split offset in bytes (page-aligned; must be > 0 and < region size).
+/// arg2 = reserved (must be 0).
+///
+/// Consumes the original cap and creates two new `MmioRegion` caps with the same
+/// rights and flags, covering `[base, base+split_offset)` and
+/// `[base+split_offset, end)`. Both children are reparented to the original
+/// cap's derivation parent (same revocability semantics as sibling caps).
+///
+/// Returns `slot1 | (slot2 << 32)` on success.
+#[cfg(not(test))]
+pub fn sys_mmio_split(tf: &mut TrapFrame) -> Result<u64, SyscallError>
+{
+    extern crate alloc;
+    use alloc::boxed::Box;
+    use core::ptr::NonNull;
+
+    use crate::cap::derivation::{link_child, reparent_children, unlink_node, DERIVATION_LOCK};
+    use crate::cap::object::{dealloc_object, KernelObjectHeader, MmioRegionObject, ObjectType};
+    use crate::cap::slot::{CapTag, Rights, SlotId};
+    use crate::mm::PAGE_SIZE;
+    use crate::syscall::current_tcb;
+
+    let mmio_idx = tf.arg(0) as u32;
+    let split_offset = tf.arg(1);
+    // arg2 is reserved; ignore.
+
+    // ── Validation ────────────────────────────────────────────────────────────
+
+    if split_offset & 0xFFF != 0
+    {
+        return Err(SyscallError::InvalidArgument); // must be page-aligned
+    }
+    if split_offset == 0
+    {
+        return Err(SyscallError::InvalidArgument);
+    }
+
+    // ── Capability lookup ─────────────────────────────────────────────────────
+
+    // SAFETY: current_tcb() returns current thread; interrupt context ensures it is set.
+    let tcb = unsafe { current_tcb() };
+    if tcb.is_null()
+    {
+        return Err(SyscallError::InvalidCapability);
+    }
+    // SAFETY: tcb validated non-null; cspace set at thread creation.
+    let caller_cspace = unsafe { (*tcb).cspace };
+    if caller_cspace.is_null()
+    {
+        return Err(SyscallError::InvalidCapability);
+    }
+
+    let (mmio_phys, mmio_size, mmio_flags, mmio_rights, cspace_id, orig_obj_ptr) = {
+        // SAFETY: caller_cspace validated; lookup_cap checks tag and rights.
+        let slot =
+            unsafe { super::lookup_cap(caller_cspace, mmio_idx, CapTag::MmioRegion, Rights::MAP) }?;
+        let obj_ptr = slot.object.ok_or(SyscallError::InvalidCapability)?;
+        // SAFETY: tag confirmed MmioRegion; pointer is valid MmioRegionObject.
+        #[allow(clippy::cast_ptr_alignment)]
+        let mo = unsafe { &*(obj_ptr.as_ptr().cast::<MmioRegionObject>()) };
+        // SAFETY: caller_cspace validated non-null; id() reads discriminator.
+        let cspace_id = unsafe { (*caller_cspace).id() };
+        (mo.base, mo.size, mo.flags, slot.rights, cspace_id, obj_ptr)
+    };
+
+    // split_offset must be strictly within [1, mmio_size).
+    if split_offset >= mmio_size
+    {
+        return Err(SyscallError::InvalidArgument);
+    }
+    // At least one page must remain on each side.
+    if mmio_size - split_offset < PAGE_SIZE as u64
+    {
+        return Err(SyscallError::InvalidArgument);
+    }
+
+    // ── Create two child MmioRegionObjects ────────────────────────────────────
+
+    // child1: [base, base + split_offset).
+    let child1_obj = Box::new(MmioRegionObject {
+        header: KernelObjectHeader::new(ObjectType::MmioRegion),
+        base: mmio_phys,
+        size: split_offset,
+        flags: mmio_flags,
+        _pad: 0,
+    });
+    let child1_ptr: NonNull<KernelObjectHeader> = {
+        let raw = Box::into_raw(child1_obj).cast::<KernelObjectHeader>();
+        // SAFETY: Box::into_raw returns non-null; MmioRegionObject.header is at offset 0.
+        unsafe { NonNull::new_unchecked(raw) }
+    };
+
+    // child2: [base + split_offset, end).
+    let child2_obj = Box::new(MmioRegionObject {
+        header: KernelObjectHeader::new(ObjectType::MmioRegion),
+        base: mmio_phys + split_offset,
+        size: mmio_size - split_offset,
+        flags: mmio_flags,
+        _pad: 0,
+    });
+    let child2_ptr: NonNull<KernelObjectHeader> = {
+        let raw = Box::into_raw(child2_obj).cast::<KernelObjectHeader>();
+        // SAFETY: Box::into_raw is non-null; header at offset 0.
+        unsafe { NonNull::new_unchecked(raw) }
+    };
+
+    // Insert both children into the caller's CSpace (auto-allocate slots).
+    // SAFETY: caller_cspace validated non-null; CSpace methods handle slot allocation.
+    let cs = unsafe { &mut *caller_cspace };
+    let slot1 = cs
+        .insert_cap(CapTag::MmioRegion, mmio_rights, child1_ptr)
+        .map_err(|_| SyscallError::OutOfMemory)?;
+    let slot2 = cs
+        .insert_cap(CapTag::MmioRegion, mmio_rights, child2_ptr)
+        .map_err(|_| {
+            // Undo slot1 insertion on failure.
+            cs.free_slot(slot1);
+            // SAFETY: child1_ptr just allocated above; ref count is 1.
+            unsafe { dealloc_object(child1_ptr) };
+            SyscallError::OutOfMemory
+        })?;
+
+    // ── Wire derivation tree ──────────────────────────────────────────────────
+    //
+    // Pattern mirrors sys_frame_split: reparent original's children to its
+    // parent, unlink original, then link both new caps to that same parent.
+
+    DERIVATION_LOCK.write_lock();
+
+    let orig_node = SlotId::new(cspace_id, mmio_idx);
+    let child1_id = SlotId::new(cspace_id, slot1);
+    let child2_id = SlotId::new(cspace_id, slot2);
+
+    // Read the original's parent before we modify anything.
+    // SAFETY: caller_cspace validated; mmio_idx within CSpace bounds.
+    let orig_parent = unsafe { (*caller_cspace).slot(mmio_idx).and_then(|s| s.deriv_parent) };
+
+    // Reparent original's existing children (if any) to its parent.
+    // SAFETY: DERIVATION_LOCK held; orig_node/orig_parent valid.
+    unsafe { reparent_children(orig_node, orig_parent) };
+    // Unlink the original node from the tree.
+    // SAFETY: DERIVATION_LOCK held; orig_node valid.
+    unsafe { unlink_node(orig_node) };
+
+    // Link both new caps to the original's parent (if any).
+    if let Some(parent_id) = orig_parent
+    {
+        // SAFETY: DERIVATION_LOCK held; parent_id/child1_id/child2_id valid.
+        unsafe { link_child(parent_id, child1_id) };
+        // SAFETY: DERIVATION_LOCK held; parent_id/child2_id valid.
+        unsafe { link_child(parent_id, child2_id) };
+    }
+
+    DERIVATION_LOCK.write_unlock();
+
+    // ── Consume the original cap ──────────────────────────────────────────────
+
+    // Return original slot to free list (tag becomes Null).
+    // SAFETY: caller_cspace validated; mmio_idx within CSpace bounds.
+    unsafe { (*caller_cspace).free_slot(mmio_idx) };
+
+    // Dec-ref original object; free if no references remain.
+    // SAFETY: orig_obj_ptr from lookup_cap; object still valid (ref > 0 at lookup).
+    let remaining = unsafe { (*orig_obj_ptr.as_ptr()).dec_ref() };
+    if remaining == 0
+    {
+        // SAFETY: ref count reached zero; no other references exist.
+        unsafe { dealloc_object(orig_obj_ptr) };
+    }
+
+    Ok(u64::from(slot1) | (u64::from(slot2) << 32))
+}
+
+#[cfg(test)]
+pub fn sys_mmio_split(_tf: &mut TrapFrame) -> Result<u64, SyscallError>
 {
     Err(SyscallError::NotSupported)
 }

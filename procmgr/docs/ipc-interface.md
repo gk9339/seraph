@@ -109,6 +109,44 @@ Deferred. Not implemented.
 
 Deferred. Not implemented.
 
+### Label 5: `REQUEST_FRAMES`
+
+Allocate page-sized Frame capabilities from the procmgr memory pool and
+transfer them to the caller. Intended for drivers that need DMA-capable
+memory at runtime (virtqueue structures, data buffers).
+
+**Request:**
+
+| Field | Value |
+|---|---|
+| label | 5 |
+| data[0] | Number of pages to allocate (1–4) |
+
+The caller specifies how many 4 KiB pages to allocate. Maximum 4 pages per
+request (limited by the IPC cap slot count). The caller may issue multiple
+requests for larger allocations.
+
+**Reply (success):**
+
+| Field | Value |
+|---|---|
+| label | 0 (success) |
+| data[0] | Number of pages actually allocated |
+| cap[0..N] | Frame capabilities (one per page, MAP\|WRITE rights) |
+
+**Reply (error):**
+
+| Field | Value |
+|---|---|
+| label | Nonzero error code |
+
+**Error codes:**
+
+| Code | Name | Meaning |
+|---|---|---|
+| 6 | `OutOfMemory` | Insufficient frame caps in the memory pool |
+| 7 | `InvalidArgument` | Requested page count is 0 or exceeds 4 |
+
 ---
 
 ## Capability Transfer

@@ -32,6 +32,9 @@ const LABEL_CREATE_PROCESS: u64 = 1;
 /// IPC label for `START_PROCESS`.
 const LABEL_START_PROCESS: u64 = 2;
 
+/// IPC label for `REQUEST_FRAMES`.
+const LABEL_REQUEST_FRAMES: u64 = 5;
+
 /// Temp VA base for mapping module frames during ELF parsing.
 const TEMP_MODULE_VA: u64 = 0x0000_0000_8000_0000; // 2 GiB
 
@@ -175,12 +178,17 @@ impl ProcessTable
 
 // ── Process creation ─────────────────────────────────────────────────────────
 
-/// Map a module frame read-only, probing for the largest mappable page count.
+/// Map a module frame read-only, probing for the exact mappable page count.
 ///
-/// Returns the number of pages successfully mapped, or `None` if unmappable.
+/// Starts from a high estimate and decrements by one page until the mapping
+/// succeeds. Returns the number of pages successfully mapped, or `None` if
+/// unmappable.
 fn map_module(module_frame_cap: u32, self_aspace: u32) -> Option<u64>
 {
-    let mut module_pages: u64 = 64; // Max 256 KiB for Tier 1
+    // Try from 128 pages (512 KiB) down to 1 page, decrementing by 1.
+    // This is slower than binary search but guarantees we find the exact
+    // frame size, which is critical for correct ELF slice bounds.
+    let mut module_pages: u64 = 128;
     while module_pages > 0
     {
         if syscall::mem_map(
@@ -195,7 +203,7 @@ fn map_module(module_frame_cap: u32, self_aspace: u32) -> Option<u64>
         {
             return Some(module_pages);
         }
-        module_pages /= 2;
+        module_pages -= 1;
     }
     None
 }
@@ -256,8 +264,11 @@ fn load_elf_page(
         {
             0
         };
-        let src = &file_data[file_start..file_end];
-        // SAFETY: TEMP_FRAME_VA mapped writable; copy within one page.
+        let avail = PAGE_SIZE as usize - dest_offset;
+        let copy_len = (file_end - file_start).min(avail);
+        let src = &file_data[file_start..file_start + copy_len];
+        // SAFETY: TEMP_FRAME_VA mapped writable; copy stays within one page
+        // because copy_len <= PAGE_SIZE - dest_offset.
         unsafe {
             core::ptr::copy_nonoverlapping(
                 src.as_ptr(),
@@ -497,6 +508,9 @@ fn start_process(pid: u64, table: &mut ProcessTable) -> Result<(), u64>
 
 // ── Entry point ──────────────────────────────────────────────────────────────
 
+// too_many_lines: IPC dispatch loop with inline request handling; splitting each
+// label into a separate function would obscure the sequential flow.
+#[allow(clippy::too_many_lines)]
 #[no_mangle]
 extern "Rust" fn main(startup: &StartupInfo) -> !
 {
@@ -584,6 +598,47 @@ extern "Rust" fn main(startup: &StartupInfo) -> !
                     {
                         let _ = syscall::ipc_reply(code, 0, &[]);
                     }
+                }
+            }
+
+            LABEL_REQUEST_FRAMES =>
+            {
+                // Read requested page count from IPC buffer data[0].
+                // SAFETY: ipc_buf is the registered IPC buffer, kernel wrote data words.
+                let requested = unsafe { core::ptr::read_volatile(ipc_buf) };
+
+                if requested == 0 || requested > 4
+                {
+                    let _ = syscall::ipc_reply(7, 0, &[]); // InvalidArgument
+                    continue;
+                }
+
+                let mut caps = [0u32; 4];
+                let mut granted: u64 = 0;
+
+                for cap_slot in caps.iter_mut().take(requested as usize)
+                {
+                    if let Some(page_cap) = pool.alloc_page()
+                    {
+                        *cap_slot = page_cap;
+                        granted += 1;
+                    }
+                    else
+                    {
+                        break;
+                    }
+                }
+
+                if granted == 0
+                {
+                    let _ = syscall::ipc_reply(6, 0, &[]); // OutOfMemory
+                }
+                else
+                {
+                    // Write granted count to IPC buffer data[0].
+                    // SAFETY: ipc_buf is writable and page-aligned.
+                    unsafe { core::ptr::write_volatile(ipc_buf, granted) };
+                    let _ = syscall::ipc_reply(0, 1, &caps[..granted as usize]);
                 }
             }
 

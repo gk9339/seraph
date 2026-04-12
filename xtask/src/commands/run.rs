@@ -86,7 +86,12 @@ pub fn run(ctx: &BuildContext, args: &RunArgs) -> Result<()>
         "-smp".into(),
         args.cpus.to_string(),
         "-drive".into(),
-        format!("if=virtio,format=raw,file=fat:rw:{}", ctx.sysroot.display()),
+        format!(
+            "if=none,id=hd0,format=raw,file=fat:rw:{}",
+            ctx.sysroot.display()
+        ),
+        "-device".into(),
+        "virtio-blk-pci,drive=hd0,disable-legacy=on".into(),
         "-serial".into(),
         "stdio".into(),
         "-no-reboot".into(),

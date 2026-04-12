@@ -99,6 +99,9 @@ pub enum CapType
     SchedControl = 12,
     /// SBI forwarding authority (RISC-V only). Matches `CapTag::SbiControl = 13`.
     SbiControl = 13,
+    /// PCI ECAM configuration space region. Underlying cap is `MmioRegion`;
+    /// this discriminant lets userspace distinguish ECAM windows from other MMIO.
+    PciEcam = 14,
 }
 
 // ── ProcessInfo ──────────────────────────────────────────────────────────────

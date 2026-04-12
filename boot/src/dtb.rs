@@ -37,6 +37,10 @@ const MAX_DEPTH: usize = 8;
 
 /// Maximum `reg` entries (address+size pairs) extracted per node.
 const MAX_REG_ENTRIES: usize = 8;
+/// Maximum number of `interrupts` values collected per node.
+const MAX_IRQ_ENTRIES: usize = 4;
+/// Maximum number of `ranges` entries collected per node.
+const MAX_RANGES_ENTRIES: usize = 4;
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -68,6 +72,16 @@ pub struct FdtNode
     pub reg_entries: [(u64, u64); MAX_REG_ENTRIES],
     /// Number of valid entries in [`reg_entries`].
     pub reg_count: usize,
+    /// Interrupt specifiers from the `interrupts` property (raw u32 values).
+    pub irq_entries: [u32; MAX_IRQ_ENTRIES],
+    /// Number of valid entries in [`irq_entries`].
+    pub irq_count: usize,
+    /// PCI-style `ranges` entries: `(child_flags, cpu_addr, size)` tuples.
+    /// `child_flags` encodes space type in bits 25:24 (1=I/O, 2=32-bit MMIO,
+    /// 3=64-bit MMIO).
+    pub ranges_entries: [(u32, u64, u64); MAX_RANGES_ENTRIES],
+    /// Number of valid entries in [`ranges_entries`].
+    pub ranges_count: usize,
 }
 
 // ── Per-depth traversal state (private) ───────────────────────────────────────
@@ -79,6 +93,10 @@ struct NodeState
     compatible_matched: bool,
     reg_entries: [(u64, u64); MAX_REG_ENTRIES],
     reg_count: usize,
+    irq_entries: [u32; MAX_IRQ_ENTRIES],
+    irq_count: usize,
+    ranges_entries: [(u32, u64, u64); MAX_RANGES_ENTRIES],
+    ranges_count: usize,
 }
 
 impl NodeState
@@ -89,6 +107,10 @@ impl NodeState
             compatible_matched: false,
             reg_entries: [(0, 0); MAX_REG_ENTRIES],
             reg_count: 0,
+            irq_entries: [0; MAX_IRQ_ENTRIES],
+            irq_count: 0,
+            ranges_entries: [(0, 0, 0); MAX_RANGES_ENTRIES],
+            ranges_count: 0,
         }
     }
 }
@@ -207,6 +229,9 @@ impl Fdt
     /// `compatible` property contains `compat` as one of its strings.
     ///
     /// `callback` returns `true` to continue or `false` to stop early.
+    // too_many_lines: DTB traversal state machine; splitting would fragment the
+    // node-tracking logic across functions without meaningful abstraction.
+    #[allow(clippy::too_many_lines)]
     fn walk_compatible<F>(&self, compat: &[u8], mut callback: F)
     where
         F: FnMut(FdtNode) -> bool,
@@ -245,6 +270,10 @@ impl Fdt
                         let node = FdtNode {
                             reg_entries: s.reg_entries,
                             reg_count: s.reg_count,
+                            irq_entries: s.irq_entries,
+                            irq_count: s.irq_count,
+                            ranges_entries: s.ranges_entries,
+                            ranges_count: s.ranges_count,
                         };
                         if !callback(node)
                         {
@@ -299,6 +328,39 @@ impl Fdt
                             state.reg_entries[state.reg_count] = (addr, size);
                             state.reg_count += 1;
                             i += 16;
+                        }
+                    }
+                    else if name == b"interrupts"
+                    {
+                        // #interrupt-cells=1 (typical for PLIC): each entry = 4 bytes.
+                        let data = self.struct_slice(data_off, prop_len);
+                        let mut i = 0;
+                        while i + 4 <= data.len() && state.irq_count < MAX_IRQ_ENTRIES
+                        {
+                            state.irq_entries[state.irq_count] = read_be32(&data[i..]);
+                            state.irq_count += 1;
+                            i += 4;
+                        }
+                    }
+                    else if name == b"ranges"
+                    {
+                        // PCI ranges: (#address-cells=3, #size-cells=2, parent #address-cells=2)
+                        // Each entry = 28 bytes: child_hi(u32) child_mid(u32) child_lo(u32)
+                        //                        parent_hi(u32) parent_lo(u32)
+                        //                        size_hi(u32) size_lo(u32)
+                        let data = self.struct_slice(data_off, prop_len);
+                        let mut i = 0;
+                        while i + 28 <= data.len() && state.ranges_count < MAX_RANGES_ENTRIES
+                        {
+                            let child_flags = read_be32(&data[i..]);
+                            // child_mid:child_lo form the 64-bit child bus address
+                            // (ignored for resource extraction — we use parent addr).
+                            let parent_addr = read_be64(&data[i + 12..]);
+                            let size = read_be64(&data[i + 20..]);
+                            state.ranges_entries[state.ranges_count] =
+                                (child_flags, parent_addr, size);
+                            state.ranges_count += 1;
+                            i += 28;
                         }
                     }
                 }
@@ -494,6 +556,17 @@ fn prop_contains(data: &[u8], target: &[u8]) -> bool
     false
 }
 
+/// Read a big-endian u32 from the first 4 bytes of `buf`.
+/// Returns 0 if `buf` has fewer than 4 bytes.
+fn read_be32(buf: &[u8]) -> u32
+{
+    if buf.len() < 4
+    {
+        return 0;
+    }
+    u32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]])
+}
+
 /// Read a big-endian u64 from the first 8 bytes of `buf`.
 /// Returns 0 if `buf` has fewer than 8 bytes.
 fn read_be64(buf: &[u8]) -> u64
@@ -557,14 +630,18 @@ pub unsafe fn parse_cpu_count(dtb_addr: u64) -> (u32, [u32; 64])
 /// logs a warning and returns partial results.
 ///
 /// Resources extracted:
-/// - `riscv,plic0` / `sifive,plic-1.0.0` → `MmioRange`
-/// - `riscv,clint0` / `sifive,clint0`     → `MmioRange`
-/// - `pci-host-ecam-generic`               → `PciEcam`
-/// - `ns16550a`                            → `MmioRange`
-/// - DTB blob itself                       → `PlatformTable`
+/// - `riscv,plic0` / `sifive,plic-1.0.0`  → `MmioRange`
+/// - `riscv,clint0` / `sifive,clint0`      → `MmioRange`
+/// - `pci-host-ecam-generic`                → `PciEcam` + `MmioRange` (MMIO windows from `ranges`)
+/// - `virtio,mmio`                          → `MmioRange` + `IrqLine`
+/// - `ns16550a`                             → `MmioRange`
+/// - DTB blob itself                        → `PlatformTable`
 ///
 /// # Safety
 /// `dtb_addr` must be the physical address of a valid, identity-mapped FDT.
+// too_many_lines: resource extraction from multiple compatible strings is
+// inherently sequential; splitting would add indirection without clarity.
+#[allow(clippy::too_many_lines)]
 pub unsafe fn parse_dtb_resources(dtb_addr: u64, out: &mut [PlatformResource]) -> usize
 {
     // SAFETY: caller guarantees dtb_addr is identity-mapped DTB.
@@ -634,6 +711,49 @@ pub unsafe fn parse_dtb_resources(dtb_addr: u64, out: &mut [PlatformResource]) -
                 base: node.reg_entries[0].0,
                 size: node.reg_entries[0].1.max(4096),
                 id: 0,
+            });
+        }
+
+        // PCI MMIO windows from `ranges` property.
+        // child_flags bits 25:24 encode space type: 2 = 32-bit MMIO, 3 = 64-bit MMIO.
+        for i in 0..node.ranges_count
+        {
+            let (flags, cpu_addr, size) = node.ranges_entries[i];
+            let space_type = (flags >> 24) & 0x03;
+            if space_type == 2 || space_type == 3
+            {
+                push_resource!(PlatformResource {
+                    resource_type: ResourceType::MmioRange,
+                    flags: 0,
+                    base: cpu_addr,
+                    size,
+                    id: 0,
+                });
+            }
+        }
+    });
+
+    // VirtIO MMIO devices: virtio,mmio
+    fdt.for_each_compatible(b"virtio,mmio", |node| {
+        if node.reg_count > 0
+        {
+            push_resource!(PlatformResource {
+                resource_type: ResourceType::MmioRange,
+                flags: 0,
+                base: node.reg_entries[0].0,
+                size: node.reg_entries[0].1.max(4096),
+                id: 0,
+            });
+        }
+        // Emit interrupt line for this device.
+        if node.irq_count > 0
+        {
+            push_resource!(PlatformResource {
+                resource_type: ResourceType::IrqLine,
+                flags: 0, // edge/level determined by platform
+                base: 0,
+                size: 0,
+                id: u64::from(node.irq_entries[0]),
             });
         }
     });

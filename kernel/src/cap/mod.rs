@@ -46,7 +46,9 @@ pub use object::{
 #[allow(unused_imports)]
 pub use slot::{CSpaceId, CapTag, CapabilitySlot, Rights, SlotId};
 
-use boot_protocol::{BootInfo, MemoryMapEntry, MemoryType, PlatformResource, ResourceType};
+#[cfg(test)]
+use boot_protocol::MemoryType;
+use boot_protocol::{BootInfo, MemoryMapEntry, PlatformResource, ResourceType};
 use core::ptr::NonNull;
 use core::sync::atomic::{AtomicPtr, AtomicU32, Ordering};
 use init_protocol::CapDescriptor;
@@ -289,7 +291,7 @@ pub fn init_capability_system(
 #[allow(clippy::too_many_lines)]
 fn populate_cspace(
     cspace: &mut CSpace,
-    mmap: &[MemoryMapEntry],
+    #[cfg_attr(not(test), allow(unused))] mmap: &[MemoryMapEntry],
     platform_resources: &[PlatformResource],
 ) -> CSpaceLayout
 {
@@ -303,8 +305,75 @@ fn populate_cspace(
     // writable and executable — but the cap carries both rights so init
     // can derive attenuated sub-caps (MAP|WRITE for data, MAP|EXECUTE
     // for code) when loading processes.
+    //
+    // Frame caps are allocated FROM the buddy allocator so the same
+    // physical pages are not double-booked between the kernel's internal
+    // frame pool and userspace capabilities.
     let mut memory_frame_base: u32 = 0;
     let mut memory_frame_count: u32 = 0;
+
+    #[cfg(not(test))]
+    {
+        use crate::mm::buddy::PAGE_SIZE as BUDDY_PAGE_SIZE;
+
+        // Pages kept in the buddy for kernel-internal use (page tables,
+        // heap slabs, kernel stacks). 16 MiB = 4096 pages.
+        const KERNEL_RESERVE_PAGES: usize = 4096;
+
+        // Maximum number of buddy blocks that drain_for_usercaps can return.
+        // Each order can have at most POOL_SIZE entries; in practice far fewer.
+        const MAX_DRAIN_BLOCKS: usize = 4096;
+
+        let mut drain_buf = alloc::vec![(0u64, 0usize); MAX_DRAIN_BLOCKS];
+
+        let block_count = crate::mm::with_frame_allocator(|alloc| {
+            alloc.drain_for_usercaps(KERNEL_RESERVE_PAGES, &mut drain_buf)
+        });
+
+        let mut drained_pages: usize = 0;
+        for &(addr, order) in &drain_buf[..block_count]
+        {
+            let size = (BUDDY_PAGE_SIZE << order) as u64;
+            drained_pages += 1 << order;
+
+            let obj = Box::new(FrameObject {
+                header: KernelObjectHeader::new(ObjectType::Frame),
+                base: addr,
+                size,
+            });
+            let ptr = nonnull_from_box(obj);
+            let slot = insert_or_fatal(
+                cspace,
+                CapTag::Frame,
+                Rights::MAP | Rights::WRITE | Rights::EXECUTE,
+                ptr,
+                "Phase 7: cannot allocate Frame capability for usable memory",
+            );
+            if memory_frame_count == 0
+            {
+                memory_frame_base = slot;
+            }
+            descriptors.push(CapDescriptor {
+                slot,
+                cap_type: CapType::Frame,
+                pad: [0; 3],
+                aux0: addr,
+                aux1: size,
+            });
+            memory_frame_count += 1;
+        }
+
+        crate::kprintln!(
+            "Phase 7: {} Frame caps ({} pages drained, {} blocks), kernel reserve {} pages",
+            memory_frame_count,
+            drained_pages,
+            block_count,
+            KERNEL_RESERVE_PAGES,
+        );
+    }
+
+    // Test builds: create Frame caps directly from mmap entries (no buddy).
+    #[cfg(test)]
     for entry in mmap
     {
         if entry.memory_type != MemoryType::Usable
@@ -368,9 +437,17 @@ fn populate_cspace(
                 {
                     hw_cap_base = slot;
                 }
+                let desc_cap_type = if res.resource_type == ResourceType::PciEcam
+                {
+                    CapType::PciEcam
+                }
+                else
+                {
+                    CapType::MmioRegion
+                };
                 descriptors.push(CapDescriptor {
                     slot,
-                    cap_type: CapType::MmioRegion,
+                    cap_type: desc_cap_type,
                     pad: [0; 3],
                     aux0: res.base,
                     aux1: res.size,

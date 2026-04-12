@@ -26,10 +26,10 @@ use syscall_abi::{
     SYS_CAP_CREATE_THREAD, SYS_CAP_CREATE_WAIT_SET, SYS_CAP_DELETE, SYS_CAP_DERIVE, SYS_CAP_INSERT,
     SYS_CAP_MOVE, SYS_CAP_REVOKE, SYS_DMA_GRANT, SYS_EVENT_POST, SYS_EVENT_RECV, SYS_FRAME_SPLIT,
     SYS_IOPORT_BIND, SYS_IPC_BUFFER_SET, SYS_IPC_CALL, SYS_IPC_RECV, SYS_IPC_REPLY, SYS_IRQ_ACK,
-    SYS_IRQ_REGISTER, SYS_MEM_MAP, SYS_MEM_PROTECT, SYS_MEM_UNMAP, SYS_MMIO_MAP, SYS_SBI_CALL,
-    SYS_SIGNAL_SEND, SYS_SIGNAL_WAIT, SYS_SYSTEM_INFO, SYS_THREAD_CONFIGURE, SYS_THREAD_EXIT,
-    SYS_THREAD_READ_REGS, SYS_THREAD_SET_AFFINITY, SYS_THREAD_SET_PRIORITY, SYS_THREAD_START,
-    SYS_THREAD_STOP, SYS_THREAD_WRITE_REGS, SYS_THREAD_YIELD, SYS_WAIT_SET_ADD,
+    SYS_IRQ_REGISTER, SYS_MEM_MAP, SYS_MEM_PROTECT, SYS_MEM_UNMAP, SYS_MMIO_MAP, SYS_MMIO_SPLIT,
+    SYS_SBI_CALL, SYS_SIGNAL_SEND, SYS_SIGNAL_WAIT, SYS_SYSTEM_INFO, SYS_THREAD_CONFIGURE,
+    SYS_THREAD_EXIT, SYS_THREAD_READ_REGS, SYS_THREAD_SET_AFFINITY, SYS_THREAD_SET_PRIORITY,
+    SYS_THREAD_START, SYS_THREAD_STOP, SYS_THREAD_WRITE_REGS, SYS_THREAD_YIELD, SYS_WAIT_SET_ADD,
     SYS_WAIT_SET_REMOVE, SYS_WAIT_SET_WAIT,
 };
 
@@ -906,6 +906,35 @@ pub fn frame_split(frame_cap: u32, split_offset: u64) -> Result<(u32, u32), i64>
     // SAFETY: syscall3 issues raw syscall instruction; frame_cap is cap index as u64, split_offset
     // is byte offset; kernel validates cap and offset, returns packed slot indices.
     let ret = unsafe { syscall3(SYS_FRAME_SPLIT, u64::from(frame_cap), split_offset, 0) };
+    if ret < 0
+    {
+        Err(ret)
+    }
+    else
+    {
+        let v = ret as u64;
+        Ok(((v & 0xFFFF_FFFF) as u32, (v >> 32) as u32))
+    }
+}
+
+/// Split `mmio_cap` into two non-overlapping child `MmioRegion` caps.
+///
+/// `split_offset` is in bytes and must be page-aligned, > 0, and < the region
+/// size. The original cap is consumed. Returns `(slot1, slot2)` where slot1
+/// covers `[base, base+split_offset)` and slot2 covers `[base+split_offset, end)`.
+///
+/// # Errors
+/// Returns a negative `i64` error code if the cap is invalid, `split_offset`
+/// is not page-aligned, or is out of range for the region.
+// cast_sign_loss: proven non-negative in Ok branch.
+// cast_possible_truncation: each half of the packed return is a 32-bit slot index.
+#[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+#[inline]
+pub fn mmio_split(mmio_cap: u32, split_offset: u64) -> Result<(u32, u32), i64>
+{
+    // SAFETY: syscall3 issues raw syscall instruction; mmio_cap is cap index as u64, split_offset
+    // is byte offset; kernel validates cap and offset, returns packed slot indices.
+    let ret = unsafe { syscall3(SYS_MMIO_SPLIT, u64::from(mmio_cap), split_offset, 0) };
     if ret < 0
     {
         Err(ret)

@@ -121,6 +121,8 @@ pub const SYS_IPC_BUFFER_SET: u64 = 42;
 pub const SYS_SYSTEM_INFO: u64 = 43;
 /// SBI: forward an SBI call to M-mode firmware (RISC-V only).
 pub const SYS_SBI_CALL: u64 = 44;
+/// Split an `MmioRegion` cap into two non-overlapping children.
+pub const SYS_MMIO_SPLIT: u64 = 45;
 
 // ── Error codes ───────────────────────────────────────────────────────────────
 

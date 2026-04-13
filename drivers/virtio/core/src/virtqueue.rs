@@ -199,12 +199,16 @@ impl SplitVirtqueue
         // Add head to available ring.
         // SAFETY: avail_va is valid; ring entry is within bounds.
         unsafe {
-            let avail = &mut *self.avail_va;
             // cast_ptr_alignment: VirtqAvail is 2-byte aligned; offset 4 from
             // a 2-byte-aligned base maintains u16 alignment.
             #[allow(clippy::cast_ptr_alignment)]
             let ring_base = self.avail_va.cast::<u8>().add(4).cast::<u16>();
-            let ring_idx = avail.idx % self.queue_size;
+
+            // Read avail.idx with read_volatile — the field is shared with the
+            // device and was last updated via write_volatile; a non-volatile
+            // read could return a stale cached value on repeated add_chain calls.
+            let cur_idx = core::ptr::read_volatile(core::ptr::addr_of!((*self.avail_va).idx));
+            let ring_idx = cur_idx % self.queue_size;
             core::ptr::write_volatile(ring_base.add(ring_idx as usize), head);
 
             // Memory barrier: ensure descriptor writes are visible before
@@ -212,8 +216,8 @@ impl SplitVirtqueue
             core::sync::atomic::fence(core::sync::atomic::Ordering::Release);
 
             core::ptr::write_volatile(
-                core::ptr::addr_of_mut!(avail.idx),
-                avail.idx.wrapping_add(1),
+                core::ptr::addr_of_mut!((*self.avail_va).idx),
+                cur_idx.wrapping_add(1),
             );
         }
 

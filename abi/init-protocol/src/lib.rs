@@ -31,7 +31,7 @@
 ///
 /// v3: Added `cmdline_offset`, `cmdline_len`, and `sbi_control_cap` for kernel
 ///     command line passthrough and RISC-V SBI forwarding.
-pub const INIT_PROTOCOL_VERSION: u32 = 3;
+pub const INIT_PROTOCOL_VERSION: u32 = 4;
 
 // ── Address space constants ──────────────────────────────────────────────────
 
@@ -138,10 +138,11 @@ pub struct InitInfo
     /// Zero on x86-64 (no SBI concept).
     pub sbi_control_cap: u32,
 
-    /// Padding to keep `InitInfo` size a multiple of 8 bytes so the
-    /// `CapDescriptor` array that follows is correctly aligned (contains `u64`).
-    #[doc(hidden)]
-    pub _pad: u32,
+    /// Slot index of init's own `CSpace` capability.
+    ///
+    /// Init needs this to create threads bound to its own `CSpace` (e.g. a log
+    /// thread that shares init's capability namespace). Added in protocol v4.
+    pub cspace_cap: u32,
 }
 
 // ── CapDescriptor / CapType (re-exported from process-abi) ───────────────────

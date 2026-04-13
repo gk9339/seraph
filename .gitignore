@@ -1,6 +1,7 @@
 # Build output
 /sysroot/
 /target/
+/disk.img
 
 # rustfmt backup files
 **/*.rs.bk

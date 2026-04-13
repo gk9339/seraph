@@ -60,6 +60,9 @@ const LOG_ENDPOINT_SENTINEL: u64 = 0xFFFF_FFFF_FFFF_FFFF;
 /// Sentinel value in `CapDescriptor.aux0` indicating a service endpoint.
 const SERVICE_ENDPOINT_SENTINEL: u64 = 0xFFFF_FFFF_FFFF_FFFE;
 
+/// Sentinel value in `CapDescriptor.aux0` indicating a registry endpoint.
+const REGISTRY_ENDPOINT_SENTINEL: u64 = 0xFFFF_FFFF_FFFF_FFFD;
+
 /// IPC label for `QUERY_BLOCK_DEVICE` (devmgr registry).
 const LABEL_QUERY_BLOCK_DEVICE: u64 = 1;
 
@@ -86,6 +89,7 @@ struct DevmgrCaps
     irq_count: usize,
     procmgr_ep: u32,
     log_ep: u32,
+    registry_ep: u32,
     self_aspace: u32,
     self_thread: u32,
     driver_module_slots: [u32; 8],
@@ -117,6 +121,7 @@ impl DevmgrCaps
             irq_count: 0,
             procmgr_ep: 0,
             log_ep: 0,
+            registry_ep: 0,
             self_aspace: 0,
             self_thread: 0,
             driver_module_slots: [0; 8],
@@ -181,6 +186,11 @@ fn classify_caps(startup: &StartupInfo, caps: &mut DevmgrCaps)
                 {
                     // Log endpoint sentinel.
                     caps.log_ep = d.slot;
+                }
+                else if d.aux0 == REGISTRY_ENDPOINT_SENTINEL
+                {
+                    // Device registry endpoint (injected by init).
+                    caps.registry_ep = d.slot;
                 }
                 else if hw_caps_seen && !hw_caps_done && !procmgr_ep_found
                 {
@@ -1039,17 +1049,16 @@ extern "Rust" fn main(startup: &StartupInfo) -> !
 
     // ── Device registry IPC ───────────────────────────────────────────
 
-    let Ok(registry_ep) = syscall::cap_create_endpoint()
-    else
+    if caps.registry_ep == 0
     {
-        log("devmgr: failed to create registry endpoint, halting");
+        log("devmgr: no registry endpoint injected, halting");
         halt_loop();
-    };
+    }
 
     log("devmgr: enumeration complete, entering registry loop");
     loop
     {
-        let Ok((label, _)) = syscall::ipc_recv(registry_ep)
+        let Ok((label, _)) = syscall::ipc_recv(caps.registry_ep)
         else
         {
             continue;

@@ -353,29 +353,22 @@ extern "Rust" fn main(startup: &StartupInfo) -> !
         syscall::thread_exit();
     };
 
-    // Build the request at the start of the data page:
-    // [0..16]: VirtioBlkReqHeader (device-readable)
-    // [512..1024]: data buffer for one 512-byte sector (device-writable)
-    // [1024]: status byte (device-writable)
-
     let header_va = DATA_MAP_VA as *mut VirtioBlkReqHeader;
     let data_buf_va = DATA_MAP_VA + 512;
     let status_va = DATA_MAP_VA + 1024;
 
-    // SAFETY: header_va is within the mapped data page, properly aligned
-    // (page-aligned base).
+    let header_phys = data_phys;
+    let data_buf_phys = data_phys + 512;
+    let status_phys = data_phys + 1024;
+
+    // SAFETY: header_va is within the mapped data page, properly aligned.
     unsafe {
         (*header_va).req_type = VIRTIO_BLK_T_IN;
         (*header_va).reserved = 0;
         (*header_va).sector = 0;
     }
-
     // SAFETY: status_va is within the mapped data page.
-    unsafe { core::ptr::write_volatile(status_va as *mut u8, 0xFF) }; // sentinel
-
-    let header_phys = data_phys;
-    let data_buf_phys = data_phys + 512;
-    let status_phys = data_phys + 1024;
+    unsafe { core::ptr::write_volatile(status_va as *mut u8, 0xFF) };
 
     // Submit descriptor chain: header (readable), data (writable), status (writable).
     let chain = [
@@ -505,8 +498,7 @@ extern "Rust" fn main(startup: &StartupInfo) -> !
                     continue;
                 }
 
-                // Copy 512 bytes of sector data into IPC buffer for reply.
-                // IPC buffer has room for 512 bytes in the first 64 u64 words.
+                // Copy sector data (512 bytes = 64 words) into IPC buffer for reply.
                 for i in 0..64u64
                 {
                     // SAFETY: data_buf_va + i*8 is within the mapped page;

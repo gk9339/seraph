@@ -43,16 +43,28 @@ impl Context
         }
     }
 
-    /// Path to `sysroot/EFI/BOOT/` — where the UEFI fallback bootloader lives.
-    pub fn sysroot_efi_boot(&self) -> PathBuf
+    /// Path to `sysroot/esp/` — ESP partition staging area.
+    pub fn sysroot_esp(&self) -> PathBuf
     {
-        self.sysroot.join("EFI").join("BOOT")
+        self.sysroot.join("esp")
     }
 
-    /// Path to `sysroot/EFI/seraph/` — Seraph's vendor directory on the ESP.
+    /// Path to `sysroot/esp/EFI/BOOT/` — UEFI fallback bootloader on the ESP.
+    pub fn sysroot_efi_boot(&self) -> PathBuf
+    {
+        self.sysroot.join("esp").join("EFI").join("BOOT")
+    }
+
+    /// Path to `sysroot/esp/EFI/seraph/` — Seraph vendor directory on the ESP.
     pub fn sysroot_efi_seraph(&self) -> PathBuf
     {
-        self.sysroot.join("EFI").join("seraph")
+        self.sysroot.join("esp").join("EFI").join("seraph")
+    }
+
+    /// Path to the GPT disk image (built from sysroot contents).
+    pub fn disk_image(&self) -> PathBuf
+    {
+        self.root.join("disk.img")
     }
 
     /// Cargo output directory for a given target triple and build profile.

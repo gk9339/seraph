@@ -141,13 +141,31 @@ pub unsafe fn init(info: &InitInfo, aspace_cap: u32)
     }
 
     // Phase 2: find and map the framebuffer MmioRegion.
+    //
+    // The MMIO region cap may cover the entire PCI MMIO window (1+ GiB on
+    // QEMU q35). Mapping all of it would consume a huge VA range and collide
+    // with ktest test addresses. Split the region down to just the
+    // framebuffer pixels (stride × height, page-aligned) before mapping.
     let Some(mmio_slot) = find_cap_by_aux0(info, CapType::MmioRegion, fb_phys)
     else
     {
         return;
     };
 
-    if syscall::mmio_map(aspace_cap, mmio_slot, FB_VA, 0).is_err()
+    let fb_bytes = u64::from(fb_stride) * u64::from(fb_height);
+    let fb_pages_bytes = (fb_bytes + 0xFFF) & !0xFFF; // round up to page
+    let fb_cap = match syscall::mmio_split(mmio_slot, fb_pages_bytes)
+    {
+        Ok((first, _second)) => first,
+        Err(_) =>
+        {
+            // Split failed (region already small enough, or error). Try the
+            // original cap — it will map fine if the region is ≤ fb size.
+            mmio_slot
+        }
+    };
+
+    if syscall::mmio_map(aspace_cap, fb_cap, FB_VA, 0).is_err()
     {
         return;
     }

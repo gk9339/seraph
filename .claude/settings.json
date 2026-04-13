@@ -6,7 +6,8 @@
       "Bash(cargo xtask clean *)",
 
       "Bash(readelf *)",
-      "Bash(nm -C *)",
+      "Bash(nm *)",
+      "Bash(objdump *)",
 
       "Bash(riscv64-linux-gnu-objdump *)",
       "Bash(riscv64-unknown-elf-objdump *)",

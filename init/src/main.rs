@@ -38,6 +38,15 @@ const INIT_IPC_BUF_VA: u64 = 0x0000_0000_C000_0000; // 3 GiB
 /// Virtual address for the IPC buffer in procmgr's address space.
 const PROCMGR_IPC_BUF_VA: u64 = 0x0000_7FFF_FFFE_0000;
 
+/// Virtual address for the log thread's IPC buffer (separate from main thread).
+const LOG_THREAD_IPC_BUF_VA: u64 = 0x0000_0000_C000_1000; // main IPC buf + 1 page
+
+/// Virtual address for the log thread's stack base.
+const LOG_THREAD_STACK_VA: u64 = 0x0000_0000_D000_0000;
+
+/// Number of stack pages for the log thread (16 KiB).
+const LOG_THREAD_STACK_PAGES: u64 = 4;
+
 /// IPC label for `CREATE_PROCESS` (per `procmgr/docs/ipc-interface.md`).
 const LABEL_CREATE_PROCESS: u64 = 1;
 
@@ -50,7 +59,34 @@ const LABEL_START_PROCESS: u64 = 2;
 
 mod arch;
 
+/// Log endpoint cap slot for IPC-based logging (set after log thread starts).
+static mut LOG_EP_SLOT: u32 = 0;
+
+/// IPC buffer pointer for the main thread (set after IPC buffer is mapped).
+static mut MAIN_IPC_BUF: *mut u64 = core::ptr::null_mut();
+
+/// Log a message. Uses direct serial before the log thread is running,
+/// then switches to IPC-based logging through the log thread.
 fn log(s: &str)
+{
+    // SAFETY: LOG_EP_SLOT and MAIN_IPC_BUF are written once by the main thread
+    // before any IPC log calls; log thread only reads its own log_ep argument.
+    let log_ep = unsafe { LOG_EP_SLOT };
+    // SAFETY: see above.
+    let ipc_buf = unsafe { MAIN_IPC_BUF };
+
+    if log_ep != 0 && !ipc_buf.is_null()
+    {
+        ipc_log(log_ep, ipc_buf, s);
+    }
+    else
+    {
+        serial_log(s);
+    }
+}
+
+/// Direct serial output (early boot, before log thread exists).
+fn serial_log(s: &str)
 {
     for &b in s.as_bytes()
     {
@@ -62,6 +98,57 @@ fn log(s: &str)
     }
     arch::serial_write_byte(b'\r');
     arch::serial_write_byte(b'\n');
+}
+
+/// IPC-based logging through the log thread.
+///
+/// Matches the protocol in `runtime::log`: label = `LOG_LABEL_BASE` | (len << 16),
+/// data words = packed bytes, up to 48 bytes per chunk.
+fn ipc_log(log_ep: u32, ipc_buf: *mut u64, s: &str)
+{
+    let bytes = s.as_bytes();
+    let total_len = bytes.len();
+    let chunk_size = 6 * 8; // 48 bytes per chunk (6 data words)
+    let mut offset = 0;
+
+    while offset < total_len || total_len == 0
+    {
+        let remaining = total_len - offset;
+        let chunk_len = remaining.min(chunk_size);
+        let is_last = offset + chunk_len >= total_len;
+
+        // Pack bytes into IPC buffer data words.
+        let word_count = chunk_len.div_ceil(8);
+        for i in 0..word_count
+        {
+            let mut word: u64 = 0;
+            let base = i * 8;
+            for j in 0..8
+            {
+                let idx = offset + base + j;
+                if idx < total_len
+                {
+                    word |= u64::from(bytes[idx]) << (j * 8);
+                }
+            }
+            // SAFETY: IPC buffer is valid.
+            unsafe { core::ptr::write_volatile(ipc_buf.add(i), word) };
+        }
+
+        let mut label = LOG_LABEL_BASE | ((total_len as u64) << 16);
+        if !is_last
+        {
+            label |= LOG_CONTINUATION;
+        }
+
+        let _ = syscall::ipc_call(log_ep, label, word_count, &[]);
+
+        offset += chunk_len;
+        if total_len == 0
+        {
+            break;
+        }
+    }
 }
 
 // ── Cap descriptor helpers ───────────────────────────────────────────────────
@@ -523,14 +610,23 @@ fn bootstrap_procmgr(info: &InitInfo, alloc: &mut FrameAlloc) -> Option<u32>
 
 // ── Hardware cap delegation to devmgr ────────────────────────────────────────
 
-/// Temp VA for mapping the devmgr `ProcessInfo` frame for cap descriptor patching.
-const DEVMGR_PI_TEMP_VA: u64 = TEMP_MAP_BASE + 0x2000_0000;
+/// Temp VA for mapping child `ProcessInfo` frames during cap descriptor patching.
+const CHILD_PI_TEMP_VA: u64 = TEMP_MAP_BASE + 0x2000_0000;
 
 /// Max cap descriptors for devmgr delegation.
 const DEVMGR_MAX_DESCS: usize = 128;
 
+/// Max cap descriptors for vfsd delegation.
+const VFSD_MAX_DESCS: usize = 16;
+
 /// Sentinel value in `CapDescriptor.aux0` indicating a log endpoint.
 const LOG_ENDPOINT_SENTINEL: u64 = 0xFFFF_FFFF_FFFF_FFFF;
+
+/// Sentinel value in `CapDescriptor.aux0` indicating a service endpoint.
+const SERVICE_ENDPOINT_SENTINEL: u64 = 0xFFFF_FFFF_FFFF_FFFE;
+
+/// Sentinel value in `CapDescriptor.aux0` indicating a registry endpoint.
+const REGISTRY_ENDPOINT_SENTINEL: u64 = 0xFFFF_FFFF_FFFF_FFFD;
 
 /// Derive-twice a capability and record a [`CapDescriptor`] for it.
 ///
@@ -583,7 +679,13 @@ fn inject_cap_desc(
 // too_many_lines: hardware cap delegation is inherently sequential with many
 // cap operations; splitting would fragment the delegation flow.
 #[allow(clippy::too_many_lines)]
-fn create_devmgr_with_caps(info: &InitInfo, procmgr_ep: u32, log_ep: u32, ipc_buf: *mut u64)
+fn create_devmgr_with_caps(
+    info: &InitInfo,
+    procmgr_ep: u32,
+    log_ep: u32,
+    registry_ep: u32,
+    ipc_buf: *mut u64,
+)
 {
     let devmgr_frame_cap = info.module_frame_base + 1; // Module 1 = devmgr
 
@@ -675,14 +777,15 @@ fn create_devmgr_with_caps(info: &InitInfo, procmgr_ep: u32, log_ep: u32, ipc_bu
         &mut first_slot,
     );
 
-    // Inject driver module frame caps (modules 3+: virtio-blk, fatfs, etc.).
-    for i in 3..info.module_frame_count
+    // Inject driver module frame cap (module 3 = virtio-blk only; module 4+
+    // are filesystem drivers delegated to vfsd instead).
+    if info.module_frame_count > 3
     {
-        let module_cap = info.module_frame_base + i;
+        let module_cap = info.module_frame_base + 3;
         inject_cap_desc(
             module_cap,
             CapType::Frame,
-            u64::from(i), // aux0 = module index
+            3, // aux0 = module index
             0,
             child_cspace,
             &mut desc_buf,
@@ -703,12 +806,24 @@ fn create_devmgr_with_caps(info: &InitInfo, procmgr_ep: u32, log_ep: u32, ipc_bu
         &mut first_slot,
     );
 
+    // Inject device registry endpoint (sentinel: REGISTRY_ENDPOINT_SENTINEL).
+    inject_cap_desc(
+        registry_ep,
+        CapType::Frame,
+        REGISTRY_ENDPOINT_SENTINEL,
+        0,
+        child_cspace,
+        &mut desc_buf,
+        &mut desc_count,
+        &mut first_slot,
+    );
+
     // Phase 3: Patch ProcessInfo page with CapDescriptors.
     // Map the PI frame writable into init's address space.
     if syscall::mem_map(
         pi_frame,
         info.aspace_cap,
-        DEVMGR_PI_TEMP_VA,
+        CHILD_PI_TEMP_VA,
         0,
         1,
         syscall::PROT_WRITE,
@@ -720,9 +835,9 @@ fn create_devmgr_with_caps(info: &InitInfo, procmgr_ep: u32, log_ep: u32, ipc_bu
     }
 
     // Write initial_caps_base, initial_caps_count, cap_descriptors.
-    // SAFETY: DEVMGR_PI_TEMP_VA is mapped writable to the ProcessInfo page.
+    // SAFETY: CHILD_PI_TEMP_VA is mapped writable to the ProcessInfo page.
     #[allow(clippy::cast_ptr_alignment)]
-    let pi = unsafe { &mut *(DEVMGR_PI_TEMP_VA as *mut ProcessInfo) };
+    let pi = unsafe { &mut *(CHILD_PI_TEMP_VA as *mut ProcessInfo) };
 
     pi.initial_caps_base = first_slot;
     pi.initial_caps_count = desc_count as u32;
@@ -748,7 +863,7 @@ fn create_devmgr_with_caps(info: &InitInfo, procmgr_ep: u32, log_ep: u32, ipc_bu
         // destination pointer satisfies CapDescriptor's alignment.
         #[allow(clippy::cast_ptr_alignment)]
         unsafe {
-            let ptr = (DEVMGR_PI_TEMP_VA as *mut u8)
+            let ptr = (CHILD_PI_TEMP_VA as *mut u8)
                 .add(byte_offset)
                 .cast::<CapDescriptor>();
             core::ptr::write(ptr, *desc);
@@ -756,7 +871,7 @@ fn create_devmgr_with_caps(info: &InitInfo, procmgr_ep: u32, log_ep: u32, ipc_bu
     }
 
     // Unmap the PI frame.
-    let _ = syscall::mem_unmap(info.aspace_cap, DEVMGR_PI_TEMP_VA, 1);
+    let _ = syscall::mem_unmap(info.aspace_cap, CHILD_PI_TEMP_VA, 1);
 
     // Phase 4: START_PROCESS.
     // SAFETY: writing pid to IPC buffer for the START_PROCESS call.
@@ -776,6 +891,8 @@ pub extern "C" fn _start(info_ptr: u64) -> !
     run(info_ptr)
 }
 
+// too_many_lines: bootstrap orchestration is inherently sequential.
+#[allow(clippy::too_many_lines)]
 fn run(info_ptr: u64) -> !
 {
     // SAFETY: kernel maps InitInfo at info_ptr (= INIT_INFO_VADDR).
@@ -847,6 +964,24 @@ fn run(info_ptr: u64) -> !
     };
     log("init: log endpoint created");
 
+    // ── Create inter-service endpoints ──────────────────────────────────────────
+
+    let Ok(devmgr_registry_ep) = syscall::cap_create_endpoint()
+    else
+    {
+        log("init: FATAL: cannot create devmgr registry endpoint");
+        syscall::thread_exit();
+    };
+    log("init: devmgr registry endpoint created");
+
+    let Ok(vfsd_service_ep) = syscall::cap_create_endpoint()
+    else
+    {
+        log("init: FATAL: cannot create vfsd service endpoint");
+        syscall::thread_exit();
+    };
+    log("init: vfsd service endpoint created");
+
     // ── Request procmgr to create early services ──────────────────────────────
     //
     // CREATE_PROCESS returns the child in a suspended state. The caller injects
@@ -859,7 +994,7 @@ fn run(info_ptr: u64) -> !
     if info.module_frame_count >= 2
     {
         log("init: requesting procmgr to create devmgr (with hw caps)");
-        create_devmgr_with_caps(info, endpoint_cap, log_ep, ipc_buf);
+        create_devmgr_with_caps(info, endpoint_cap, log_ep, devmgr_registry_ep, ipc_buf);
     }
     else
     {
@@ -868,16 +1003,14 @@ fn run(info_ptr: u64) -> !
 
     if info.module_frame_count >= 3
     {
-        let vfsd_frame_cap = info.module_frame_base + 2; // Module 2 = vfsd
-        log("init: requesting procmgr to create vfsd");
-        create_and_start_service_with_log(
+        log("init: requesting procmgr to create vfsd (with caps)");
+        create_vfsd_with_caps(
             info,
             endpoint_cap,
-            vfsd_frame_cap,
             log_ep,
+            devmgr_registry_ep,
+            vfsd_service_ep,
             ipc_buf,
-            "init: vfsd created and started",
-            "init: FAILED to create/start vfsd",
         );
     }
     else
@@ -885,12 +1018,525 @@ fn run(info_ptr: u64) -> !
         log("init: no vfsd module available");
     }
 
-    // Phase 1 bootstrap complete. Enter log receive loop.
-    log("init: phase 1 bootstrap complete, serving log endpoint");
-    log_receive_loop(info, log_ep, ipc_buf);
+    // Spawn log thread so services can log while main thread continues.
+    // The log thread needs I/O port access for serial output (x86-64).
+    let ioport_cap = find_cap_by_type(info, init_protocol::CapType::IoPortRange).unwrap_or(0);
+    spawn_log_thread(info, &mut alloc, log_ep, ioport_cap);
+
+    // Switch main thread from direct serial to IPC-based logging through the
+    // log thread. All subsequent log() calls go via IPC — clean, serialized.
+    // SAFETY: single main thread; log thread only reads its own log_ep argument.
+    unsafe {
+        LOG_EP_SLOT = log_ep;
+        MAIN_IPC_BUF = ipc_buf;
+    }
+    log("init: log thread started");
+
+    // Phase 1 bootstrap complete — services are running, log thread active.
+    log("init: phase 1 bootstrap complete");
+
+    // ── Phase 2: mount root filesystem ──────────────────────────────────────
+    //
+    // Parse kernel cmdline for root=UUID=<guid>, send MOUNT to vfsd.
+
+    // SAFETY: InitInfo page is valid and contains cmdline data.
+    let cmdline = unsafe { init_protocol::cmdline_bytes(info) };
+    log("init: phase 2: parsing cmdline");
+
+    let mut root_uuid = [0u8; 16];
+    if !parse_root_uuid(cmdline, &mut root_uuid)
+    {
+        log("init: FATAL: no root=UUID= in cmdline");
+        syscall::thread_exit();
+    }
+
+    log("init: phase 2: mounting root filesystem");
+    if !send_mount(vfsd_service_ep, ipc_buf, &root_uuid, b"/")
+    {
+        log("init: FATAL: root mount failed");
+        syscall::thread_exit();
+    }
+    log("init: phase 2: root mounted at /");
+
+    // ── Phase 2b: read /config/mounts.conf, mount additional filesystems ────
+
+    log("init: phase 2: reading /config/mounts.conf");
+    let mut conf_buf = [0u8; 512];
+    let conf_len = vfs_read_file(
+        vfsd_service_ep,
+        ipc_buf,
+        b"/config/mounts.conf",
+        &mut conf_buf,
+    );
+
+    if conf_len > 0
+    {
+        log("init: phase 2: processing mounts.conf");
+        process_mounts_conf(&conf_buf[..conf_len], vfsd_service_ep, ipc_buf);
+    }
+    else
+    {
+        log("init: phase 2: no mounts.conf or empty");
+    }
+
+    // End-to-end verification: read a file across the multi-mount namespace.
+    // /esp/EFI/seraph/boot.conf goes through the ESP mount at /esp.
+    log("init: phase 2: verifying /esp/EFI/seraph/boot.conf");
+    let mut verify_buf = [0u8; 512];
+    let verify_len = vfs_read_file(
+        vfsd_service_ep,
+        ipc_buf,
+        b"/esp/EFI/seraph/boot.conf",
+        &mut verify_buf,
+    );
+    if verify_len > 0
+    {
+        // Print the first line of boot.conf as proof of end-to-end read.
+        let first_nl = verify_buf[..verify_len]
+            .iter()
+            .position(|&b| b == b'\n')
+            .unwrap_or(verify_len);
+        let line = &verify_buf[..first_nl.min(80)];
+        // SAFETY: boot.conf is ASCII text.
+        let s = unsafe { core::str::from_utf8_unchecked(line) };
+        log(s);
+    }
+    else
+    {
+        log("init: phase 2: boot.conf read FAILED");
+    }
+
+    log("init: phase 2 bootstrap complete, idling");
+
+    loop
+    {
+        let _ = syscall::thread_yield();
+    }
 }
 
 // ── Log receive loop ───────────────────────────────────────────────────────
+
+// ── VFS client helpers ────────────────────────────────────────────────────────
+
+/// VFS IPC labels (must match vfsd).
+const VFS_LABEL_OPEN: u64 = 1;
+const VFS_LABEL_READ: u64 = 2;
+const VFS_LABEL_CLOSE: u64 = 3;
+const VFS_LABEL_MOUNT: u64 = 10;
+
+/// Parse `root=UUID=<uuid>` from kernel cmdline bytes.
+///
+/// UUID format: `12345678-abcd-ef01-2345-6789abcdef01` (36 chars).
+/// Converts to 16-byte mixed-endian GPT format.
+fn parse_root_uuid(cmdline: &[u8], out: &mut [u8; 16]) -> bool
+{
+    // Find "root=UUID=" in the cmdline.
+    let prefix = b"root=UUID=";
+    let mut start = None;
+    for i in 0..cmdline.len().saturating_sub(prefix.len())
+    {
+        if &cmdline[i..i + prefix.len()] == prefix
+        {
+            start = Some(i + prefix.len());
+            break;
+        }
+    }
+
+    let Some(uuid_start) = start
+    else
+    {
+        return false;
+    };
+
+    // Need at least 36 characters for a standard UUID string.
+    if uuid_start + 36 > cmdline.len()
+    {
+        return false;
+    }
+
+    let uuid_str = &cmdline[uuid_start..uuid_start + 36];
+    parse_uuid_to_gpt_bytes(uuid_str, out)
+}
+
+/// Parse a UUID string (36 bytes, e.g. `12345678-abcd-ef01-2345-6789abcdef01`)
+/// into 16-byte mixed-endian GPT format.
+///
+/// GPT stores UUIDs with the first three groups byte-swapped (little-endian)
+/// and the last two groups as-is (big-endian).
+fn parse_uuid_to_gpt_bytes(s: &[u8], out: &mut [u8; 16]) -> bool
+{
+    // Parse hex string, skipping dashes.
+    let mut hex = [0u8; 32];
+    let mut hi = 0;
+    for &b in s
+    {
+        if b == b'-'
+        {
+            continue;
+        }
+        if hi >= 32
+        {
+            return false;
+        }
+        let nibble = match b
+        {
+            b'0'..=b'9' => b - b'0',
+            b'a'..=b'f' => b - b'a' + 10,
+            b'A'..=b'F' => b - b'A' + 10,
+            _ => return false,
+        };
+        hex[hi] = nibble;
+        hi += 1;
+    }
+    if hi != 32
+    {
+        return false;
+    }
+
+    // Assemble bytes from nibble pairs.
+    let mut raw = [0u8; 16];
+    for i in 0..16
+    {
+        raw[i] = (hex[i * 2] << 4) | hex[i * 2 + 1];
+    }
+
+    // Convert to mixed-endian GPT format:
+    // Group 1 (bytes 0-3): little-endian u32
+    out[0] = raw[3];
+    out[1] = raw[2];
+    out[2] = raw[1];
+    out[3] = raw[0];
+    // Group 2 (bytes 4-5): little-endian u16
+    out[4] = raw[5];
+    out[5] = raw[4];
+    // Group 3 (bytes 6-7): little-endian u16
+    out[6] = raw[7];
+    out[7] = raw[6];
+    // Groups 4-5 (bytes 8-15): big-endian (as-is)
+    out[8..16].copy_from_slice(&raw[8..16]);
+
+    true
+}
+
+/// Send a MOUNT IPC request to vfsd.
+///
+/// MOUNT data layout: `data[0..2]` = UUID, `data[2]` = `path_len`,
+/// `data[3..]` = path.
+fn send_mount(vfsd_ep: u32, ipc_buf: *mut u64, uuid: &[u8; 16], path: &[u8]) -> bool
+{
+    // Pack UUID into data[0..2].
+    let w0 = u64::from_le_bytes(uuid[..8].try_into().unwrap_or([0; 8]));
+    let w1 = u64::from_le_bytes(uuid[8..].try_into().unwrap_or([0; 8]));
+    // SAFETY: IPC buffer is valid.
+    unsafe {
+        core::ptr::write_volatile(ipc_buf, w0);
+        core::ptr::write_volatile(ipc_buf.add(1), w1);
+        core::ptr::write_volatile(ipc_buf.add(2), path.len() as u64);
+    }
+
+    // Pack path bytes into data[3..].
+    let word_count = path.len().div_ceil(8).min(8);
+    for i in 0..word_count
+    {
+        let mut word: u64 = 0;
+        let base = i * 8;
+        for j in 0..8
+        {
+            if base + j < path.len()
+            {
+                word |= u64::from(path[base + j]) << (j * 8);
+            }
+        }
+        // SAFETY: IPC buffer is valid.
+        unsafe { core::ptr::write_volatile(ipc_buf.add(3 + i), word) };
+    }
+
+    let total_words = 3 + word_count;
+    let Ok((reply_label, _)) = syscall::ipc_call(vfsd_ep, VFS_LABEL_MOUNT, total_words, &[])
+    else
+    {
+        return false;
+    };
+    reply_label == 0
+}
+
+/// Read a file from the VFS into a buffer. Returns bytes read (0 on error).
+fn vfs_read_file(vfsd_ep: u32, ipc_buf: *mut u64, path: &[u8], buf: &mut [u8; 512]) -> usize
+{
+    // OPEN
+    let word_count = path.len().div_ceil(8).min(6);
+    for i in 0..word_count
+    {
+        let mut word: u64 = 0;
+        let base = i * 8;
+        for j in 0..8
+        {
+            if base + j < path.len()
+            {
+                word |= u64::from(path[base + j]) << (j * 8);
+            }
+        }
+        // SAFETY: IPC buffer is valid.
+        unsafe { core::ptr::write_volatile(ipc_buf.add(i), word) };
+    }
+
+    let open_label = VFS_LABEL_OPEN | ((path.len() as u64) << 16);
+    let Ok((reply_label, _)) = syscall::ipc_call(vfsd_ep, open_label, word_count, &[])
+    else
+    {
+        log("init: vfs_read: OPEN failed");
+        return 0;
+    };
+    if reply_label != 0
+    {
+        log("init: vfs_read: OPEN error (not found?)");
+        return 0;
+    }
+
+    // SAFETY: IPC buffer is valid.
+    let fd = unsafe { core::ptr::read_volatile(ipc_buf) };
+
+    // READ (up to 512 bytes at offset 0)
+    // SAFETY: IPC buffer is valid.
+    unsafe {
+        core::ptr::write_volatile(ipc_buf, fd);
+        core::ptr::write_volatile(ipc_buf.add(1), 0); // offset
+        core::ptr::write_volatile(ipc_buf.add(2), 512); // max_len
+    }
+
+    let Ok((reply_label, data_count)) = syscall::ipc_call(vfsd_ep, VFS_LABEL_READ, 3, &[])
+    else
+    {
+        log("init: vfs_read: READ failed");
+        return 0;
+    };
+    let _ = data_count; // ipc_call always returns data_count=0; unused.
+    if reply_label != 0
+    {
+        log("init: vfs_read: READ error");
+        return 0;
+    }
+
+    // data[0] = bytes_read, data[1..] = content.
+    // Copy BEFORE any log() calls (IPC buffer shared).
+    // SAFETY: IPC buffer is valid.
+    let bytes_read = unsafe { core::ptr::read_volatile(ipc_buf) } as usize;
+    // Derive content word count from bytes_read (ipc_call doesn't return it).
+    let content_words = bytes_read.div_ceil(8);
+    for i in 0..content_words
+    {
+        // SAFETY: IPC buffer is valid.
+        let word = unsafe { core::ptr::read_volatile(ipc_buf.add(1 + i)) };
+        let base = i * 8;
+        for j in 0..8
+        {
+            if base + j < bytes_read && base + j < buf.len()
+            {
+                buf[base + j] = ((word >> (j * 8)) & 0xFF) as u8;
+            }
+        }
+    }
+
+    // CLOSE
+    // SAFETY: IPC buffer is valid.
+    unsafe { core::ptr::write_volatile(ipc_buf, fd) };
+    let _ = syscall::ipc_call(vfsd_ep, VFS_LABEL_CLOSE, 1, &[]);
+
+    bytes_read
+}
+
+/// Parse `mounts.conf` and issue MOUNT requests for each entry.
+///
+/// Format: one mount per line, `UUID=<uuid> <path> <fstype>`.
+/// Lines starting with `#` are comments. Empty lines are skipped.
+fn process_mounts_conf(data: &[u8], vfsd_ep: u32, ipc_buf: *mut u64)
+{
+    let mut offset = 0;
+
+    while offset < data.len()
+    {
+        // Find end of line.
+        let line_end = data[offset..]
+            .iter()
+            .position(|&b| b == b'\n')
+            .map_or(data.len(), |p| offset + p);
+        let line = &data[offset..line_end];
+        offset = line_end + 1;
+
+        // Skip empty lines and comments.
+        if line.is_empty() || line[0] == b'#'
+        {
+            continue;
+        }
+
+        // Trim trailing whitespace.
+        let mut end = line.len();
+        while end > 0 && (line[end - 1] == b' ' || line[end - 1] == b'\r')
+        {
+            end -= 1;
+        }
+        let line = &line[..end];
+
+        // Parse: UUID=<uuid> <path> <fstype>
+        if line.len() < 43 || &line[..5] != b"UUID="
+        {
+            // Unrecognised line — log and skip.
+            log("init: mounts.conf: skipping unrecognised line");
+            continue;
+        }
+
+        let uuid_str = &line[5..41]; // 36 chars
+        let mut uuid = [0u8; 16];
+        if !parse_uuid_to_gpt_bytes(uuid_str, &mut uuid)
+        {
+            log("init: mounts.conf: invalid UUID");
+            continue;
+        }
+
+        // After UUID: " <path> <fstype>"
+        let rest = &line[42..]; // skip "UUID=<36> "
+        let space_pos = rest.iter().position(|&b| b == b' ');
+        let mount_path = if let Some(sp) = space_pos
+        {
+            &rest[..sp]
+        }
+        else
+        {
+            rest // no fstype specified, just path
+        };
+
+        if send_mount(vfsd_ep, ipc_buf, &uuid, mount_path)
+        {
+            log("init: mounts.conf: mount ok");
+        }
+        else
+        {
+            log("init: mounts.conf: mount failed");
+        }
+    }
+}
+
+// ── Log thread ────────────────────────────────────────────────────────────────
+
+/// Spawn a dedicated log-receiving thread so the main thread can continue
+/// bootstrap orchestration (making IPC calls to vfsd etc.) without blocking
+/// service log output.
+fn spawn_log_thread(info: &InitInfo, alloc: &mut FrameAlloc, log_ep: u32, ioport_cap: u32)
+{
+    // Allocate stack pages for the log thread.
+    for i in 0..LOG_THREAD_STACK_PAGES
+    {
+        let Some(frame) = alloc.alloc_page()
+        else
+        {
+            log("init: FATAL: cannot allocate log thread stack");
+            syscall::thread_exit();
+        };
+        let Ok(rw_cap) = syscall::cap_derive(frame, 0x1 | 0x2)
+        else
+        {
+            log("init: FATAL: cannot derive log thread stack cap");
+            syscall::thread_exit();
+        };
+        if syscall::mem_map(
+            rw_cap,
+            info.aspace_cap,
+            LOG_THREAD_STACK_VA + i * PAGE_SIZE,
+            0,
+            1,
+            0,
+        )
+        .is_err()
+        {
+            log("init: FATAL: cannot map log thread stack");
+            syscall::thread_exit();
+        }
+    }
+
+    // Allocate IPC buffer page for the log thread.
+    let Some(ipc_frame) = alloc.alloc_page()
+    else
+    {
+        log("init: FATAL: cannot allocate log thread IPC buffer");
+        syscall::thread_exit();
+    };
+    let Ok(ipc_rw_cap) = syscall::cap_derive(ipc_frame, 0x1 | 0x2)
+    else
+    {
+        log("init: FATAL: cannot derive log thread IPC cap");
+        syscall::thread_exit();
+    };
+    if syscall::mem_map(ipc_rw_cap, info.aspace_cap, LOG_THREAD_IPC_BUF_VA, 0, 1, 0).is_err()
+    {
+        log("init: FATAL: cannot map log thread IPC buffer");
+        syscall::thread_exit();
+    }
+    // Zero the IPC buffer.
+    // SAFETY: LOG_THREAD_IPC_BUF_VA is mapped writable and covers one page.
+    unsafe { core::ptr::write_bytes(LOG_THREAD_IPC_BUF_VA as *mut u8, 0, PAGE_SIZE as usize) };
+
+    // Create the thread bound to init's address space and CSpace.
+    let Ok(thread_cap) = syscall::cap_create_thread(info.aspace_cap, info.cspace_cap)
+    else
+    {
+        log("init: FATAL: cannot create log thread");
+        syscall::thread_exit();
+    };
+
+    // Bind I/O ports to the log thread so it can write to the serial port.
+    // On x86-64, I/O port access is per-thread via the TSS IOPB.
+    if ioport_cap != 0 && syscall::ioport_bind(thread_cap, ioport_cap).is_err()
+    {
+        log("init: log thread: ioport_bind failed");
+    }
+
+    let stack_top = LOG_THREAD_STACK_VA + LOG_THREAD_STACK_PAGES * PAGE_SIZE;
+
+    // Pack log_ep (u32) and IPC buffer VA into the arg passed to the thread.
+    // Low 32 bits = log_ep, high 32 bits unused (IPC buf VA is a known constant).
+    let arg = u64::from(log_ep);
+
+    if syscall::thread_configure(
+        thread_cap,
+        log_thread_entry as *const () as u64,
+        stack_top,
+        arg,
+    )
+    .is_err()
+    {
+        log("init: FATAL: cannot configure log thread");
+        syscall::thread_exit();
+    }
+    if syscall::thread_start(thread_cap).is_err()
+    {
+        log("init: FATAL: cannot start log thread");
+        syscall::thread_exit();
+    }
+}
+
+/// Entry point for the log thread. Registers its own IPC buffer then enters
+/// the log receive loop. Never returns.
+///
+/// Called via `thread_configure` with `arg` = log endpoint cap slot.
+extern "C" fn log_thread_entry(arg: u64) -> !
+{
+    // Register this thread's IPC buffer.
+    if syscall::ipc_buffer_set(LOG_THREAD_IPC_BUF_VA).is_err()
+    {
+        serial_log("init: log thread: ipc_buffer_set failed");
+        syscall::thread_exit();
+    }
+
+    let log_ep = arg as u32;
+
+    // SAFETY: LOG_THREAD_IPC_BUF_VA is the registered IPC buffer, page-aligned.
+    #[allow(clippy::cast_ptr_alignment)]
+    let ipc_buf = LOG_THREAD_IPC_BUF_VA as *mut u64;
+
+    log_receive_loop(log_ep, ipc_buf);
+}
+
+// ── Log receive loop ──────────────────────────────────────────────────────
 
 /// Log label base (bits 0-15). Must match `runtime::log::LOG_LABEL_BASE`.
 const LOG_LABEL_BASE: u64 = 10;
@@ -909,9 +1555,8 @@ const LOG_MAX_ASSEMBLED: usize = 256;
 /// Handles multi-chunk messages: chunks with the continuation flag set are
 /// accumulated into `assembled_buf`. When the final chunk arrives (no flag),
 /// the complete message is written to serial with CRLF.
-fn log_receive_loop(info: &InitInfo, log_ep: u32, ipc_buf: *mut u64) -> !
+fn log_receive_loop(log_ep: u32, ipc_buf: *mut u64) -> !
 {
-    let _ = info; // reserved for future use
     let mut assembled_buf = [0u8; LOG_MAX_ASSEMBLED];
     let mut assembled_len: usize = 0;
 
@@ -979,7 +1624,7 @@ fn log_receive_loop(info: &InitInfo, log_ep: u32, ipc_buf: *mut u64) -> !
 /// Two-phase creation: `CREATE_PROCESS` (suspended), inject log endpoint cap
 /// into child `CSpace`, patch `ProcessInfo` with `CapDescriptor`, then
 /// `START_PROCESS`.
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, dead_code)]
 fn create_and_start_service_with_log(
     info: &InitInfo,
     procmgr_ep: u32,
@@ -1044,7 +1689,7 @@ fn create_and_start_service_with_log(
     if syscall::mem_map(
         pi_frame,
         info.aspace_cap,
-        DEVMGR_PI_TEMP_VA,
+        CHILD_PI_TEMP_VA,
         0,
         1,
         syscall::PROT_WRITE,
@@ -1055,9 +1700,9 @@ fn create_and_start_service_with_log(
         return;
     }
 
-    // SAFETY: DEVMGR_PI_TEMP_VA is mapped writable to the ProcessInfo page.
+    // SAFETY: CHILD_PI_TEMP_VA is mapped writable to the ProcessInfo page.
     #[allow(clippy::cast_ptr_alignment)]
-    let pi = unsafe { &mut *(DEVMGR_PI_TEMP_VA as *mut ProcessInfo) };
+    let pi = unsafe { &mut *(CHILD_PI_TEMP_VA as *mut ProcessInfo) };
 
     pi.initial_caps_base = first_slot;
     pi.initial_caps_count = desc_count as u32;
@@ -1078,14 +1723,14 @@ fn create_and_start_service_with_log(
         // SAFETY: byte_offset is within the mapped page.
         #[allow(clippy::cast_ptr_alignment)]
         unsafe {
-            let ptr = (DEVMGR_PI_TEMP_VA as *mut u8)
+            let ptr = (CHILD_PI_TEMP_VA as *mut u8)
                 .add(byte_offset)
                 .cast::<CapDescriptor>();
             core::ptr::write(ptr, *desc);
         }
     }
 
-    let _ = syscall::mem_unmap(info.aspace_cap, DEVMGR_PI_TEMP_VA, 1);
+    let _ = syscall::mem_unmap(info.aspace_cap, CHILD_PI_TEMP_VA, 1);
 
     // Phase 4: START_PROCESS.
     // SAFETY: writing pid to IPC buffer.
@@ -1094,6 +1739,187 @@ fn create_and_start_service_with_log(
     {
         Ok((0, _)) => log(ok_msg),
         _ => log(fail_msg),
+    }
+}
+
+// ── vfsd creation with full cap delegation ──────────────────────────────────
+
+/// Create vfsd with caps needed for filesystem support.
+///
+/// Two-phase creation: `CREATE_PROCESS` (suspended), inject caps (log,
+/// procmgr, devmgr registry, fatfs module, service endpoint), write
+/// startup message with mount config, then `START_PROCESS`.
+// too_many_lines: cap delegation is inherently sequential; splitting would
+// fragment the delegation flow.
+#[allow(clippy::too_many_lines, clippy::too_many_arguments)]
+fn create_vfsd_with_caps(
+    info: &InitInfo,
+    procmgr_ep: u32,
+    log_ep: u32,
+    registry_ep: u32,
+    vfsd_service_ep: u32,
+    ipc_buf: *mut u64,
+)
+{
+    let vfsd_frame_cap = info.module_frame_base + 2; // Module 2 = vfsd
+
+    // Phase 1: CREATE_PROCESS (suspended).
+    let Ok((reply_label, _)) =
+        syscall::ipc_call(procmgr_ep, LABEL_CREATE_PROCESS, 0, &[vfsd_frame_cap])
+    else
+    {
+        log("init: vfsd: CREATE_PROCESS ipc_call failed");
+        return;
+    };
+    if reply_label != 0
+    {
+        log("init: vfsd: CREATE_PROCESS failed");
+        return;
+    }
+
+    // SAFETY: IPC buffer is valid and kernel wrote reply data.
+    let pid = unsafe { core::ptr::read_volatile(ipc_buf) };
+    // SAFETY: ipc_buf is the registered IPC buffer.
+    #[allow(clippy::cast_ptr_alignment)]
+    let (cap_count, reply_caps) = unsafe { syscall::read_recv_caps(ipc_buf) };
+    if cap_count < 2
+    {
+        log("init: vfsd: CREATE_PROCESS reply missing caps");
+        return;
+    }
+    let child_cspace = reply_caps[0];
+    let pi_frame = reply_caps[1];
+
+    // Phase 2: Inject caps.
+    let mut desc_buf = [CapDescriptor {
+        slot: 0,
+        cap_type: CapType::Frame,
+        pad: [0; 3],
+        aux0: 0,
+        aux1: 0,
+    }; VFSD_MAX_DESCS];
+    let mut desc_count: usize = 0;
+    let mut first_slot: u32 = 0;
+
+    // Log endpoint.
+    inject_cap_desc(
+        log_ep,
+        CapType::Frame,
+        LOG_ENDPOINT_SENTINEL,
+        0,
+        child_cspace,
+        &mut desc_buf,
+        &mut desc_count,
+        &mut first_slot,
+    );
+
+    // procmgr endpoint (sentinel: aux0=0, aux1=0).
+    inject_cap_desc(
+        procmgr_ep,
+        CapType::Frame,
+        0,
+        0,
+        child_cspace,
+        &mut desc_buf,
+        &mut desc_count,
+        &mut first_slot,
+    );
+
+    // devmgr registry endpoint (send cap).
+    inject_cap_desc(
+        registry_ep,
+        CapType::Frame,
+        REGISTRY_ENDPOINT_SENTINEL,
+        0,
+        child_cspace,
+        &mut desc_buf,
+        &mut desc_count,
+        &mut first_slot,
+    );
+
+    // fatfs module frame cap (module 4).
+    if info.module_frame_count > 4
+    {
+        let fatfs_cap = info.module_frame_base + 4;
+        inject_cap_desc(
+            fatfs_cap,
+            CapType::Frame,
+            4, // aux0 = module index
+            0,
+            child_cspace,
+            &mut desc_buf,
+            &mut desc_count,
+            &mut first_slot,
+        );
+    }
+
+    // vfsd service endpoint (receive cap).
+    inject_cap_desc(
+        vfsd_service_ep,
+        CapType::Frame,
+        SERVICE_ENDPOINT_SENTINEL,
+        0,
+        child_cspace,
+        &mut desc_buf,
+        &mut desc_count,
+        &mut first_slot,
+    );
+
+    // Phase 3: Patch ProcessInfo page.
+    if syscall::mem_map(
+        pi_frame,
+        info.aspace_cap,
+        CHILD_PI_TEMP_VA,
+        0,
+        1,
+        syscall::PROT_WRITE,
+    )
+    .is_err()
+    {
+        log("init: vfsd: cannot map ProcessInfo frame");
+        return;
+    }
+
+    // SAFETY: CHILD_PI_TEMP_VA is mapped writable to the ProcessInfo page.
+    #[allow(clippy::cast_ptr_alignment)]
+    let pi = unsafe { &mut *(CHILD_PI_TEMP_VA as *mut ProcessInfo) };
+
+    pi.initial_caps_base = first_slot;
+    pi.initial_caps_count = desc_count as u32;
+    pi.cap_descriptor_count = desc_count as u32;
+
+    let descs_offset = core::mem::size_of::<ProcessInfo>() as u32;
+    let descs_offset_aligned = (descs_offset + 7) & !7;
+    pi.cap_descriptors_offset = descs_offset_aligned;
+
+    // Write CapDescriptor entries.
+    let desc_size = core::mem::size_of::<CapDescriptor>();
+    for (i, desc) in desc_buf.iter().enumerate().take(desc_count)
+    {
+        let byte_offset = descs_offset_aligned as usize + i * desc_size;
+        if byte_offset + desc_size > PAGE_SIZE as usize
+        {
+            break;
+        }
+        // SAFETY: byte_offset is within the mapped page; alignment is correct.
+        #[allow(clippy::cast_ptr_alignment)]
+        unsafe {
+            let ptr = (CHILD_PI_TEMP_VA as *mut u8)
+                .add(byte_offset)
+                .cast::<CapDescriptor>();
+            core::ptr::write(ptr, *desc);
+        }
+    }
+
+    let _ = syscall::mem_unmap(info.aspace_cap, CHILD_PI_TEMP_VA, 1);
+
+    // Phase 4: START_PROCESS.
+    // SAFETY: writing pid to IPC buffer.
+    unsafe { core::ptr::write_volatile(ipc_buf, pid) };
+    match syscall::ipc_call(procmgr_ep, LABEL_START_PROCESS, 1, &[])
+    {
+        Ok((0, _)) => log("init: vfsd created and started with caps"),
+        _ => log("init: vfsd: START_PROCESS failed"),
     }
 }
 

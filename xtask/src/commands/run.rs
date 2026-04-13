@@ -87,8 +87,8 @@ pub fn run(ctx: &BuildContext, args: &RunArgs) -> Result<()>
         args.cpus.to_string(),
         "-drive".into(),
         format!(
-            "if=none,id=hd0,format=raw,file=fat:rw:{}",
-            ctx.sysroot.display()
+            "if=none,id=hd0,format=raw,file={}",
+            ctx.disk_image().display()
         ),
         "-device".into(),
         "virtio-blk-pci,drive=hd0,disable-legacy=on".into(),

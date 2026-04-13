@@ -77,7 +77,8 @@ mod validate;
     clippy::too_many_lines,
     clippy::not_unsafe_ptr_arg_deref,
     clippy::needless_range_loop,
-    clippy::cast_possible_truncation
+    clippy::cast_possible_truncation,
+    clippy::similar_names
 )]
 pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
 {
@@ -421,7 +422,7 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
                 cmdline_offset: cmdline_off,
                 cmdline_len: cmdline_copy_len as u32,
                 sbi_control_cap: cspace_layout.sbi_control_slot,
-                _pad: 0,
+                cspace_cap: 0, // patched below after CSpace cap is minted
             };
 
             // Write InitInfo header.
@@ -573,7 +574,37 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
 
         kprintln!("init: thread cap={}", init_thread_cap_slot);
 
-        // Patch thread_cap in the InitInfo page now that the slot is known.
+        // Mint a CSpace cap so init can create threads bound to its own CSpace
+        // (e.g. a log-serving thread that shares init's capability namespace).
+        let init_cspace_cap_slot = {
+            use alloc::boxed::Box;
+            use cap::object::{CSpaceKernelObject, KernelObjectHeader, ObjectType};
+            use cap::slot::{CapTag, Rights};
+            use core::ptr::NonNull;
+
+            // SAFETY: ROOT_CSPACE initialized in Phase 7; single-threaded boot.
+            let cs = unsafe { cap::root_cspace_mut() }
+                .unwrap_or_else(|| fatal("Phase 9: ROOT_CSPACE missing for CSpace cap"));
+            // Get a raw pointer to the CSpace itself (the one being transferred to
+            // init below). The CSpaceKernelObject wraps this pointer.
+            let cspace_ptr: *mut cap::cspace::CSpace = core::ptr::from_mut(cs);
+            let cs_obj = Box::new(CSpaceKernelObject {
+                header: KernelObjectHeader::new(ObjectType::CSpaceObj),
+                cspace: cspace_ptr,
+            });
+            // SAFETY: Box::into_raw returns non-null pointer; cast preserves validity.
+            let cs_nn = unsafe {
+                NonNull::new_unchecked(Box::into_raw(cs_obj).cast::<KernelObjectHeader>())
+            };
+            cs.insert_cap(
+                CapTag::CSpace,
+                Rights::INSERT | Rights::DELETE | Rights::DERIVE,
+                cs_nn,
+            )
+            .unwrap_or_else(|_| fatal("Phase 9: cannot insert init CSpace cap"))
+        };
+
+        // Patch thread_cap and cspace_cap in the InitInfo page.
         // SAFETY: info_page_virt points to a kernel-writable page (mapped
         // read-only in userspace but writable via the direct physical map);
         // single-threaded boot; the write is within the InitInfo struct bounds.
@@ -582,6 +613,7 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
         unsafe {
             let info_ptr = info_page_virt.cast::<init_protocol::InitInfo>();
             (*info_ptr).thread_cap = init_thread_cap_slot;
+            (*info_ptr).cspace_cap = init_cspace_cap_slot;
         }
 
         // Transfer root CSpace ownership to init.

@@ -110,11 +110,15 @@ impl KernelHeap
 {
     /// Acquire the spin-lock, call `f` with exclusive access to both the heap
     /// inner state and the frame allocator, then release the lock.
+    ///
+    /// Lock order: heap lock → `FRAME_ALLOC_LOCK`. This prevents deadlock
+    /// because `with_frame_allocator` only acquires `FRAME_ALLOC_LOCK` and
+    /// never the heap lock.
     fn with_lock<F, R>(&self, f: F) -> R
     where
         F: FnOnce(&mut KernelHeapInner, &mut BuddyAllocator) -> R,
     {
-        // Spin until we acquire the lock.
+        // Spin until we acquire the heap lock.
         let mut spins = 0u64;
         while self
             .lock
@@ -133,15 +137,21 @@ impl KernelHeap
             core::hint::spin_loop();
         }
 
+        // Acquire FRAME_ALLOC_LOCK to serialise with with_frame_allocator().
+        // Without this, SMP allocations through the heap and through
+        // with_frame_allocator() race on the shared BuddyAllocator.
+        crate::mm::acquire_frame_alloc_lock();
+
         let result = {
-            // SAFETY: we hold the lock; no other thread can be in this block.
+            // SAFETY: we hold both the heap lock and FRAME_ALLOC_LOCK; no
+            // concurrent access to inner or FRAME_ALLOCATOR is possible.
             let inner = unsafe { &mut *self.inner.get() };
-            // SAFETY: FRAME_ALLOCATOR is a static mutable; lock prevents concurrent
-            // access; single-threaded during boot, serialized by lock after SMP.
+            // SAFETY: FRAME_ALLOC_LOCK held; no concurrent buddy access.
             let buddy = unsafe { &mut *core::ptr::addr_of_mut!(crate::mm::FRAME_ALLOCATOR) };
             f(inner, buddy)
         };
 
+        crate::mm::release_frame_alloc_lock();
         self.lock.store(false, Ordering::Release);
         result
     }

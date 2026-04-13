@@ -51,6 +51,7 @@ pub fn run(ctx: &BuildContext, args: &BuildArgs) -> Result<()>
             build_ktest(ctx, args)?;
             build_modules(ctx, args)?;
             sysroot::install_rootfs(ctx)?;
+            crate::disk::create_disk_image(ctx)?;
         }
     }
 

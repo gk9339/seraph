@@ -20,6 +20,7 @@ mod arch;
 mod cli;
 mod commands;
 mod context;
+mod disk;
 mod sysroot;
 mod util;
 

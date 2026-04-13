@@ -36,43 +36,26 @@ use core::sync::atomic::{AtomicBool, Ordering};
 ///
 /// # SMP note
 ///
-/// `with_frame_allocator` and the heap's `KernelHeap::with_lock` each protect
-/// `FRAME_ALLOCATOR` with separate spinlocks. On a single CPU this is safe:
-/// the kernel is not re-entered while a spinlock is held. For SMP (WSMP)
-/// the heap's `with_lock` must also acquire `FRAME_ALLOC_LOCK` before
-/// accessing `FRAME_ALLOCATOR`.
+/// Both `with_frame_allocator` and `KernelHeap::with_lock` acquire
+/// `FRAME_ALLOC_LOCK` before touching the buddy allocator. The heap
+/// additionally holds its own lock (for heap-internal state); lock order
+/// is: heap lock → `FRAME_ALLOC_LOCK`.
 // SAFETY: accessed only from the single boot thread before SMP is enabled,
 // or through with_frame_allocator / KernelHeap spin-lock after Phase 4.
 pub(crate) static mut FRAME_ALLOCATOR: BuddyAllocator = BuddyAllocator::new();
 
-/// Spin-lock protecting direct (non-heap) access to `FRAME_ALLOCATOR`.
+/// Spin-lock protecting all access to `FRAME_ALLOCATOR`.
 ///
-/// Acquired by `with_frame_allocator`. The heap's own lock independently
-/// protects `FRAME_ALLOCATOR` for slab/size-class paths; see the SMP note
-/// on `FRAME_ALLOCATOR` above.
+/// Acquired by `with_frame_allocator` and by `KernelHeap::with_lock`.
+/// Both paths must hold this lock before touching `FRAME_ALLOCATOR` to
+/// prevent SMP races on the shared buddy allocator.
 static FRAME_ALLOC_LOCK: AtomicBool = AtomicBool::new(false);
 
-/// Call `f` with exclusive access to the frame allocator.
-///
-/// Acquires `FRAME_ALLOC_LOCK`, grants `f` a mutable reference to
-/// `FRAME_ALLOCATOR`, then releases the lock. Use this for direct frame
-/// allocation (kernel stack allocation, page table frame allocation) from
-/// syscall handlers or runtime kernel code.
-///
-/// Do NOT call `Box::new` (heap allocation) inside `f` — the heap has its
-/// own lock and calls this allocator internally, which is safe because they
-/// are separate critical sections on a single CPU.
-///
-/// # Safety
-///
-/// Must be called after Phase 2 (frame allocator populated). Must not be
-/// called before the direct physical map is active (Phase 3).
+/// Acquire `FRAME_ALLOC_LOCK`. Used by `KernelHeap::with_lock` to
+/// serialise heap-path buddy access with `with_frame_allocator`.
 #[cfg(not(test))]
-pub(crate) fn with_frame_allocator<F, R>(f: F) -> R
-where
-    F: FnOnce(&mut BuddyAllocator) -> R,
+pub(crate) fn acquire_frame_alloc_lock()
 {
-    // Spin until we acquire the lock.
     let mut spins = 0u64;
     while FRAME_ALLOC_LOCK
         .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
@@ -89,10 +72,39 @@ where
         }
         core::hint::spin_loop();
     }
+}
 
-    // SAFETY: we hold FRAME_ALLOC_LOCK; no concurrent with_frame_allocator call.
+/// Release `FRAME_ALLOC_LOCK`.
+#[cfg(not(test))]
+pub(crate) fn release_frame_alloc_lock()
+{
+    FRAME_ALLOC_LOCK.store(false, Ordering::Release);
+}
+
+/// Call `f` with exclusive access to the frame allocator.
+///
+/// Acquires `FRAME_ALLOC_LOCK`, grants `f` a mutable reference to
+/// `FRAME_ALLOCATOR`, then releases the lock. Use this for direct frame
+/// allocation (kernel stack allocation, page table frame allocation) from
+/// syscall handlers or runtime kernel code.
+///
+/// Do NOT call `Box::new` (heap allocation) inside `f` — the heap acquires
+/// `FRAME_ALLOC_LOCK` internally, which would deadlock.
+///
+/// # Safety
+///
+/// Must be called after Phase 2 (frame allocator populated). Must not be
+/// called before the direct physical map is active (Phase 3).
+#[cfg(not(test))]
+pub(crate) fn with_frame_allocator<F, R>(f: F) -> R
+where
+    F: FnOnce(&mut BuddyAllocator) -> R,
+{
+    acquire_frame_alloc_lock();
+
+    // SAFETY: we hold FRAME_ALLOC_LOCK; no concurrent buddy access possible.
     let result = f(unsafe { &mut *core::ptr::addr_of_mut!(FRAME_ALLOCATOR) });
 
-    FRAME_ALLOC_LOCK.store(false, Ordering::Release);
+    release_frame_alloc_lock();
     result
 }

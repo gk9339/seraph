@@ -21,7 +21,7 @@ use syscall::{MSG_CAP_SLOTS_MAX, MSG_DATA_WORDS_MAX};
 /// # Adding message fields
 /// Increase the `data` or `cap_slots` array bounds (also update the ABI
 /// constants in `abi/syscall/src/lib.rs`) and update all construction sites.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug)]
 pub struct Message
 {
     /// Operation tag — caller-defined; not interpreted by the kernel.
@@ -34,6 +34,20 @@ pub struct Message
     pub cap_slots: [u32; MSG_CAP_SLOTS_MAX],
     /// Actual number of valid entries in `cap_slots`.
     pub cap_count: usize,
+}
+
+impl Default for Message
+{
+    fn default() -> Self
+    {
+        Self {
+            label: 0,
+            data: [0u64; MSG_DATA_WORDS_MAX],
+            data_count: 0,
+            cap_slots: [0u32; MSG_CAP_SLOTS_MAX],
+            cap_count: 0,
+        }
+    }
 }
 
 impl Message

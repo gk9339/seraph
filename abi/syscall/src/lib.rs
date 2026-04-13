@@ -200,7 +200,11 @@ pub const EVENT_QUEUE_MAX_CAPACITY: u32 = 4096;
 // ── Message constants ─────────────────────────────────────────────────────────
 
 /// Maximum number of data words in an IPC message.
-pub const MSG_DATA_WORDS_MAX: usize = 6;
+///
+/// Supports transferring a full 512-byte disk sector (64 words) inline.
+/// Data is read from / written to the sender/receiver's IPC buffer page.
+/// Cap metadata starts at word `MSG_DATA_WORDS_MAX` in the IPC buffer.
+pub const MSG_DATA_WORDS_MAX: usize = 64;
 
 /// Maximum number of capability slots transferable in a single IPC message.
 pub const MSG_CAP_SLOTS_MAX: usize = 4;

@@ -27,6 +27,14 @@ pub fn run(ctx: &BuildContext, args: &CleanArgs) -> Result<()>
         step("Sysroot already clean");
     }
 
+    let disk_img = ctx.disk_image();
+    if disk_img.exists()
+    {
+        step(&format!("Removing disk image: {}", disk_img.display()));
+        std::fs::remove_file(&disk_img)
+            .map_err(|e| anyhow::anyhow!("failed to remove {}: {}", disk_img.display(), e))?;
+    }
+
     if args.all
     {
         step("Removing cargo target/ directory");

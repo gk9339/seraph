@@ -27,10 +27,11 @@ use syscall_abi::{
     SYS_CAP_MOVE, SYS_CAP_REVOKE, SYS_DMA_GRANT, SYS_EVENT_POST, SYS_EVENT_RECV, SYS_FRAME_SPLIT,
     SYS_IOPORT_BIND, SYS_IPC_BUFFER_SET, SYS_IPC_CALL, SYS_IPC_RECV, SYS_IPC_REPLY, SYS_IRQ_ACK,
     SYS_IRQ_REGISTER, SYS_MEM_MAP, SYS_MEM_PROTECT, SYS_MEM_UNMAP, SYS_MMIO_MAP, SYS_MMIO_SPLIT,
-    SYS_SBI_CALL, SYS_SIGNAL_SEND, SYS_SIGNAL_WAIT, SYS_SYSTEM_INFO, SYS_THREAD_CONFIGURE,
-    SYS_THREAD_EXIT, SYS_THREAD_READ_REGS, SYS_THREAD_SET_AFFINITY, SYS_THREAD_SET_PRIORITY,
-    SYS_THREAD_START, SYS_THREAD_STOP, SYS_THREAD_WRITE_REGS, SYS_THREAD_YIELD, SYS_WAIT_SET_ADD,
-    SYS_WAIT_SET_REMOVE, SYS_WAIT_SET_WAIT,
+    SYS_SBI_CALL, SYS_SIGNAL_SEND, SYS_SIGNAL_WAIT, SYS_SYSTEM_INFO, SYS_THREAD_BIND_NOTIFICATION,
+    SYS_THREAD_CONFIGURE, SYS_THREAD_EXIT, SYS_THREAD_READ_REGS, SYS_THREAD_SET_AFFINITY,
+    SYS_THREAD_SET_PRIORITY, SYS_THREAD_SLEEP, SYS_THREAD_START, SYS_THREAD_STOP,
+    SYS_THREAD_WRITE_REGS, SYS_THREAD_YIELD, SYS_WAIT_SET_ADD, SYS_WAIT_SET_REMOVE,
+    SYS_WAIT_SET_WAIT,
 };
 
 pub use syscall_abi::{PROT_EXEC, PROT_READ, PROT_WRITE};
@@ -1774,6 +1775,56 @@ pub fn sbi_call(
     else
     {
         Ok(ret.cast_unsigned())
+    }
+}
+
+/// Sleep the calling thread for `ms` milliseconds.
+///
+/// The thread is blocked and woken by the kernel's timer tick handler when
+/// the deadline expires.
+///
+/// # Errors
+/// Returns a negative `i64` error code on failure.
+#[inline]
+pub fn thread_sleep(ms: u64) -> Result<(), i64>
+{
+    // SAFETY: syscall2 issues raw syscall instruction; ms is a plain u64.
+    let ret = unsafe { syscall2(SYS_THREAD_SLEEP, ms, 0) };
+    if ret < 0
+    {
+        Err(ret)
+    }
+    else
+    {
+        Ok(())
+    }
+}
+
+/// Bind a death notification `EventQueue` to a thread.
+///
+/// When the target thread exits (clean or fault), the kernel posts the exit
+/// reason to the bound `EventQueue`.
+///
+/// # Errors
+/// Returns a negative `i64` error code if the caps are invalid.
+#[inline]
+pub fn thread_bind_notification(thread_cap: u32, event_queue_cap: u32) -> Result<(), i64>
+{
+    // SAFETY: syscall2 issues raw syscall instruction; cap indices are plain u64.
+    let ret = unsafe {
+        syscall2(
+            SYS_THREAD_BIND_NOTIFICATION,
+            u64::from(thread_cap),
+            u64::from(event_queue_cap),
+        )
+    };
+    if ret < 0
+    {
+        Err(ret)
+    }
+    else
+    {
+        Ok(())
     }
 }
 

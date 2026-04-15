@@ -19,6 +19,8 @@
 //! - Bits 16-31: total message length in bytes
 //! - Bit 32: continuation flag (1 = more chunks follow, 0 = final chunk)
 
+use core::fmt;
+
 use syscall_abi::MSG_DATA_WORDS_MAX;
 
 /// Base label ID for log messages (bits 0-15).
@@ -116,6 +118,58 @@ pub fn log(msg: &str)
     send_bytes(ep, buf, msg.as_bytes());
 }
 
+/// Stack buffer for formatting a log message before sending it via IPC.
+///
+/// Implements [`fmt::Write`] so that [`core::fmt::write`] can render a
+/// format string into it. Bytes beyond 256 are silently dropped.
+struct LogBuffer
+{
+    buf: [u8; 256],
+    pos: usize,
+}
+
+impl LogBuffer
+{
+    fn new() -> Self
+    {
+        Self {
+            buf: [0u8; 256],
+            pos: 0,
+        }
+    }
+}
+
+impl fmt::Write for LogBuffer
+{
+    fn write_str(&mut self, s: &str) -> fmt::Result
+    {
+        let bytes = s.as_bytes();
+        let available = self.buf.len().saturating_sub(self.pos);
+        let to_copy = bytes.len().min(available);
+        self.buf[self.pos..self.pos + to_copy].copy_from_slice(&bytes[..to_copy]);
+        self.pos += to_copy;
+        Ok(())
+    }
+}
+
+/// Format a log message and send it as a single IPC call to the log endpoint.
+///
+/// Called by the [`log!`] macro. If [`log_init`] has not been called
+/// (endpoint is 0), the call is a no-op.
+pub fn _log_fmt(args: fmt::Arguments)
+{
+    // SAFETY: reading statics set during single-threaded init.
+    let (ep, buf) = unsafe { (LOG_ENDPOINT, LOG_IPC_BUF) };
+    if ep == 0 || buf.is_null()
+    {
+        return;
+    }
+    let mut log_buf = LogBuffer::new();
+    // Ignore formatting errors — best-effort logging; send whatever was written.
+    let _ = fmt::write(&mut log_buf, args);
+    send_bytes(ep, buf, &log_buf.buf[..log_buf.pos]);
+}
+
 /// Send a log message with a hex value suffix.
 ///
 /// Outputs `prefix` followed by the hex representation of `val`.
@@ -164,4 +218,25 @@ pub fn log_hex(prefix: &str, val: u64)
     }
 
     send_bytes(ep, buf, &msg_buf[..pos]);
+}
+
+/// Send a formatted log message via IPC to the log endpoint.
+///
+/// Accepts the same format string syntax as [`println!`]. The entire
+/// formatted message is assembled in a 256-byte stack buffer and sent as
+/// a single IPC call, so it appears as one line on the receiving end.
+///
+/// If [`log_init`] has not been called, the call is a no-op.
+///
+/// # Examples
+///
+/// ```ignore
+/// runtime::log!("device found: {}", name);
+/// runtime::log!("base address: {:#x}", addr);
+/// ```
+#[macro_export]
+macro_rules! log {
+    ($($arg:tt)*) => {
+        $crate::log::_log_fmt(core::format_args!($($arg)*))
+    };
 }

@@ -73,8 +73,13 @@ const PIT_HZ: u64 = 1_193_182;
 /// Monotonically increasing tick counter; incremented by the timer ISR.
 static TICK_COUNT: AtomicU64 = AtomicU64::new(0);
 
-/// APIC ticks per second (computed during calibration).
-static TICKS_PER_SEC: AtomicU64 = AtomicU64::new(0);
+/// Raw APIC hardware ticks per second (computed during calibration).
+/// Used for initial-count computation; NOT the interrupt rate.
+static APIC_TICKS_PER_SEC: AtomicU64 = AtomicU64::new(0);
+
+/// Timer interrupt rate (interrupts per second) matching `TICK_COUNT`.
+/// Set to `1_000_000 / period_us` during init.
+static INTERRUPT_RATE: AtomicU64 = AtomicU64::new(0);
 
 // ── High-resolution time state ────────────────────────────────────────────────
 
@@ -265,7 +270,8 @@ pub unsafe fn init(period_us: u64)
     // Calibrate: measure APIC ticks per second.
     // SAFETY: ring 0, single-threaded; PIT and APIC hardware are accessible.
     let tps = unsafe { calibrate_apic_timer() };
-    TICKS_PER_SEC.store(tps, Ordering::Relaxed);
+    APIC_TICKS_PER_SEC.store(tps, Ordering::Relaxed);
+    INTERRUPT_RATE.store(1_000_000 / period_us.max(1), Ordering::Relaxed);
 
     // Compute initial count for the requested period.
     // Formula: initial_count = tps * period_us / 1_000_000 / divide_ratio.
@@ -293,7 +299,7 @@ pub unsafe fn init(_period_us: u64) {}
 
 /// Initialise the APIC timer on an AP using the BSP's calibrated tick rate.
 ///
-/// The BSP must have called [`init`] first to populate [`TICKS_PER_SEC`].
+/// The BSP must have called [`init`] first to populate [`APIC_TICKS_PER_SEC`].
 /// Configures periodic timer at `period_us` on this AP's local APIC.
 /// Enables interrupts (`sti`) after programming the timer.
 ///
@@ -302,7 +308,7 @@ pub unsafe fn init(_period_us: u64) {}
 #[cfg(not(test))]
 pub unsafe fn init_ap(period_us: u64)
 {
-    let tps = TICKS_PER_SEC.load(Ordering::Relaxed);
+    let tps = APIC_TICKS_PER_SEC.load(Ordering::Relaxed);
     if tps == 0
     {
         // BSP calibration not yet done — skip. This path should not occur in
@@ -381,11 +387,11 @@ pub fn current_tick() -> u64
     TICK_COUNT.load(Ordering::Relaxed)
 }
 
-/// Return the number of APIC ticks per second (calibrated at boot).
+/// Return the timer interrupt rate (interrupts per second, matching `current_tick()`).
 #[allow(dead_code)] // Required by arch interface: kernel/docs/arch-interface.md
 pub fn ticks_per_second() -> u64
 {
-    TICKS_PER_SEC.load(Ordering::Relaxed)
+    INTERRUPT_RATE.load(Ordering::Relaxed)
 }
 
 /// Return microseconds elapsed since timer calibration, or `None` if the

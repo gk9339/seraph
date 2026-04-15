@@ -1,0 +1,18 @@
+[package]
+name = "crasher"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "crasher"
+path = "src/main.rs"
+test = false
+
+[dependencies]
+process-abi = { path = "../../abi/process-abi" }
+runtime = { path = "../../shared/runtime" }
+syscall = { path = "../../shared/syscall" }
+
+[lints]
+workspace = true

@@ -255,6 +255,7 @@ pub fn sys_cap_create_cspace(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 /// provided address space and `CSpace`. Inserts a cap with `CONTROL | OBSERVE`
 /// rights into the caller's `CSpace`. Returns the Thread cap slot index.
 #[cfg(not(test))]
+#[allow(clippy::too_many_lines)]
 pub fn sys_cap_create_thread(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 {
     use crate::arch::current::trap_frame::TrapFrame as ArchTF;
@@ -378,6 +379,8 @@ pub fn sys_cap_create_thread(tf: &mut TrapFrame) -> Result<u64, SyscallError>
         blocked_on_object: core::ptr::null_mut(),
         thread_id: alloc_thread_id(),
         context_saved: core::sync::atomic::AtomicU32::new(1),
+        death_notification: core::ptr::null_mut(),
+        sleep_deadline: 0,
         magic: crate::sched::thread::TCB_MAGIC,
     }));
 

@@ -123,6 +123,10 @@ pub const SYS_SYSTEM_INFO: u64 = 43;
 pub const SYS_SBI_CALL: u64 = 44;
 /// Split an `MmioRegion` cap into two non-overlapping children.
 pub const SYS_MMIO_SPLIT: u64 = 45;
+/// Sleep the calling thread for a specified number of milliseconds.
+pub const SYS_THREAD_SLEEP: u64 = 46;
+/// Bind a death notification `EventQueue` to a thread.
+pub const SYS_THREAD_BIND_NOTIFICATION: u64 = 47;
 
 // ── Error codes ───────────────────────────────────────────────────────────────
 

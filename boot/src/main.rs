@@ -544,7 +544,7 @@ unsafe fn boot_sequence(image: EfiHandle, st: *mut EfiSystemTable) -> Result<!, 
         // SAFETY: bs is valid; requesting low-memory page for x86-64 real-mode trampoline.
         if let Ok(phys) = unsafe { allocate_pages_max_addr(bs, 0xFFFFF, 1) }
         {
-            bprint!("[--------] boot: AP trampoline page: 0x");
+            bprint!("[--------] boot: AP trampoline page: ");
             // SAFETY: console initialized.
             unsafe { crate::console::console_write_hex64(phys) };
             bprintln!("");

@@ -53,6 +53,21 @@ const LABEL_CREATE_PROCESS: u64 = 1;
 /// IPC label for `START_PROCESS` (per `procmgr/docs/ipc-interface.md`).
 const LABEL_START_PROCESS: u64 = 2;
 
+/// IPC label for `CREATE_PROCESS_FROM_VFS` (per `procmgr/docs/ipc-interface.md`).
+const LABEL_CREATE_FROM_VFS: u64 = 6;
+
+/// IPC label for `SET_VFSD_ENDPOINT` (per `procmgr/docs/ipc-interface.md`).
+const LABEL_SET_VFSD_EP: u64 = 7;
+
+/// IPC label for `REGISTER_SERVICE` (per `svcmgr/docs/ipc-interface.md`).
+const LABEL_REGISTER_SERVICE: u64 = 1;
+
+/// IPC label for `HANDOVER_COMPLETE` (per `svcmgr/docs/ipc-interface.md`).
+const LABEL_HANDOVER_COMPLETE: u64 = 2;
+
+/// Sentinel value in `CapDescriptor.aux0` indicating a procmgr endpoint.
+const PROCMGR_ENDPOINT_SENTINEL: u64 = 0xFFFF_FFFF_FFFF_FFFB;
+
 // (IPC buffer is explicitly mapped at INIT_IPC_BUF_VA using a fresh frame.)
 
 // ── Architecture-specific code (serial output, ELF machine type) ─────────────
@@ -555,7 +570,7 @@ fn bootstrap_procmgr(info: &InitInfo, alloc: &mut FrameAlloc) -> Option<u32>
         unsafe { core::slice::from_raw_parts(TEMP_MAP_BASE as *const u8, module_size as usize) };
 
     let pm_aspace = syscall::cap_create_aspace().ok()?;
-    let pm_cspace = syscall::cap_create_cspace(1024).ok()?;
+    let pm_cspace = syscall::cap_create_cspace(8192).ok()?;
     let pm_thread = syscall::cap_create_thread(pm_aspace, pm_cspace).ok()?;
 
     log("init: created procmgr kernel objects");
@@ -1106,8 +1121,489 @@ fn run(info_ptr: u64) -> !
         log("init: phase 2: boot.conf read FAILED");
     }
 
-    log("init: phase 2 bootstrap complete, idling");
+    log("init: phase 2 bootstrap complete");
 
+    // ── Phase 3: svcmgr, service registration, handover ────────────────────
+
+    phase3_svcmgr_handover(info, endpoint_cap, log_ep, vfsd_service_ep, ipc_buf);
+}
+
+// ── Phase 3: svcmgr creation, service registration, handover ──────────────
+
+/// Send `SET_VFSD_ENDPOINT` to procmgr so it can do VFS-based ELF loading.
+fn send_vfsd_endpoint_to_procmgr(procmgr_ep: u32, vfsd_ep: u32)
+{
+    let Ok(vfsd_copy) = syscall::cap_derive(vfsd_ep, !0u64)
+    else
+    {
+        log("init: phase 3: failed to derive vfsd endpoint");
+        return;
+    };
+    match syscall::ipc_call(procmgr_ep, LABEL_SET_VFSD_EP, 0, &[vfsd_copy])
+    {
+        Ok((0, _)) => log("init: phase 3: vfsd endpoint sent to procmgr"),
+        _ => log("init: phase 3: SET_VFSD_ENDPOINT failed"),
+    }
+}
+
+/// Create svcmgr from VFS (`/bin/svcmgr`) via `CREATE_PROCESS_FROM_VFS`.
+///
+/// Returns `(pid, child_cspace, pi_frame, thread_cap)` on success.
+fn create_svcmgr_from_vfs(procmgr_ep: u32, ipc_buf: *mut u64) -> Option<(u64, u32, u32, u32)>
+{
+    let path = b"/bin/svcmgr";
+    let path_len = path.len();
+
+    // Pack path into IPC buffer data words.
+    let word_count = path_len.div_ceil(8);
+    for w in 0..word_count
+    {
+        let mut word: u64 = 0;
+        for b in 0..8
+        {
+            let idx = w * 8 + b;
+            if idx < path_len
+            {
+                word |= u64::from(path[idx]) << (b * 8);
+            }
+        }
+        // SAFETY: ipc_buf is the registered IPC buffer.
+        unsafe { core::ptr::write_volatile(ipc_buf.add(w), word) };
+    }
+
+    let label = LABEL_CREATE_FROM_VFS | ((path_len as u64) << 16);
+    let Ok((reply_label, _)) = syscall::ipc_call(procmgr_ep, label, word_count, &[])
+    else
+    {
+        log("init: phase 3: CREATE_PROCESS_FROM_VFS ipc_call failed");
+        return None;
+    };
+    if reply_label != 0
+    {
+        log("init: phase 3: CREATE_PROCESS_FROM_VFS failed");
+        return None;
+    }
+
+    // SAFETY: ipc_buf is the registered IPC buffer.
+    let pid = unsafe { core::ptr::read_volatile(ipc_buf) };
+    // SAFETY: ipc_buf is the registered IPC buffer, page-aligned.
+    #[allow(clippy::cast_ptr_alignment)]
+    let (cap_count, reply_caps) = unsafe { syscall::read_recv_caps(ipc_buf) };
+    if cap_count < 3
+    {
+        log("init: phase 3: svcmgr reply missing caps");
+        return None;
+    }
+
+    Some((pid, reply_caps[0], reply_caps[1], reply_caps[2]))
+}
+
+/// Inject caps into svcmgr's `CSpace` and patch `ProcessInfo`, then start it.
+#[allow(clippy::too_many_arguments)]
+fn setup_and_start_svcmgr(
+    info: &InitInfo,
+    procmgr_ep: u32,
+    log_ep: u32,
+    svcmgr_service_ep: u32,
+    pid: u64,
+    child_cspace: u32,
+    pi_frame: u32,
+    ipc_buf: *mut u64,
+)
+{
+    let mut desc_buf = [CapDescriptor {
+        slot: 0,
+        cap_type: CapType::Frame,
+        pad: [0; 3],
+        aux0: 0,
+        aux1: 0,
+    }; 8];
+    let mut desc_count: usize = 0;
+    let mut first_slot: u32 = 0;
+
+    // Log endpoint.
+    inject_cap_desc(
+        log_ep,
+        CapType::Frame,
+        LOG_ENDPOINT_SENTINEL,
+        0,
+        child_cspace,
+        &mut desc_buf,
+        &mut desc_count,
+        &mut first_slot,
+    );
+
+    // Service endpoint (svcmgr receives registrations on this).
+    inject_cap_desc(
+        svcmgr_service_ep,
+        CapType::Frame,
+        SERVICE_ENDPOINT_SENTINEL,
+        0,
+        child_cspace,
+        &mut desc_buf,
+        &mut desc_count,
+        &mut first_slot,
+    );
+
+    // procmgr endpoint (svcmgr uses this for restarting services).
+    inject_cap_desc(
+        procmgr_ep,
+        CapType::Frame,
+        PROCMGR_ENDPOINT_SENTINEL,
+        0,
+        child_cspace,
+        &mut desc_buf,
+        &mut desc_count,
+        &mut first_slot,
+    );
+
+    // Patch ProcessInfo.
+    if syscall::mem_map(
+        pi_frame,
+        info.aspace_cap,
+        CHILD_PI_TEMP_VA,
+        0,
+        1,
+        syscall::PROT_WRITE,
+    )
+    .is_err()
+    {
+        log("init: phase 3: cannot map svcmgr ProcessInfo");
+        return;
+    }
+
+    // SAFETY: CHILD_PI_TEMP_VA is mapped writable to the ProcessInfo page.
+    #[allow(clippy::cast_ptr_alignment)]
+    let pi = unsafe { &mut *(CHILD_PI_TEMP_VA as *mut ProcessInfo) };
+
+    pi.initial_caps_base = first_slot;
+    pi.initial_caps_count = desc_count as u32;
+    pi.cap_descriptor_count = desc_count as u32;
+
+    let descs_offset = core::mem::size_of::<ProcessInfo>() as u32;
+    let descs_offset_aligned = (descs_offset + 7) & !7;
+    pi.cap_descriptors_offset = descs_offset_aligned;
+
+    let desc_size = core::mem::size_of::<CapDescriptor>();
+    for (i, desc) in desc_buf.iter().enumerate().take(desc_count)
+    {
+        let byte_offset = descs_offset_aligned as usize + i * desc_size;
+        if byte_offset + desc_size > PAGE_SIZE as usize
+        {
+            break;
+        }
+        // SAFETY: byte_offset is within the mapped page.
+        #[allow(clippy::cast_ptr_alignment)]
+        unsafe {
+            let ptr = (CHILD_PI_TEMP_VA as *mut u8)
+                .add(byte_offset)
+                .cast::<CapDescriptor>();
+            core::ptr::write(ptr, *desc);
+        }
+    }
+
+    let _ = syscall::mem_unmap(info.aspace_cap, CHILD_PI_TEMP_VA, 1);
+
+    // START_PROCESS.
+    // SAFETY: writing pid to IPC buffer.
+    unsafe { core::ptr::write_volatile(ipc_buf, pid) };
+    match syscall::ipc_call(procmgr_ep, LABEL_START_PROCESS, 1, &[])
+    {
+        Ok((0, _)) => log("init: phase 3: svcmgr started"),
+        _ => log("init: phase 3: svcmgr START_PROCESS failed"),
+    }
+}
+
+/// Create crasher from its boot module (suspended). Returns `(pid, thread_cap, module_cap)`.
+fn create_crasher_suspended(
+    info: &InitInfo,
+    procmgr_ep: u32,
+    log_ep: u32,
+    ipc_buf: *mut u64,
+) -> Option<(u64, u32, u32)>
+{
+    // Crasher is module index 5 (procmgr=0, devmgr=1, vfsd=2, virtio-blk=3, fatfs=4, crasher=5).
+    if info.module_frame_count < 6
+    {
+        log("init: phase 3: no crasher module available");
+        return None;
+    }
+
+    let crasher_frame_cap = info.module_frame_base + 5;
+
+    // Derive a copy for procmgr's CREATE_PROCESS (IPC moves caps).
+    // Keep the original for svcmgr's restart recipe.
+    let Ok(frame_for_procmgr) = syscall::cap_derive(crasher_frame_cap, !0u64)
+    else
+    {
+        log("init: phase 3: cannot derive crasher module cap");
+        return None;
+    };
+
+    let Ok((reply_label, _)) =
+        syscall::ipc_call(procmgr_ep, LABEL_CREATE_PROCESS, 0, &[frame_for_procmgr])
+    else
+    {
+        log("init: phase 3: crasher CREATE_PROCESS failed");
+        return None;
+    };
+    if reply_label != 0
+    {
+        log("init: phase 3: crasher CREATE_PROCESS error");
+        return None;
+    }
+
+    // SAFETY: ipc_buf is the registered IPC buffer.
+    let pid = unsafe { core::ptr::read_volatile(ipc_buf) };
+    // SAFETY: ipc_buf is the registered IPC buffer, page-aligned.
+    #[allow(clippy::cast_ptr_alignment)]
+    let (cap_count, reply_caps) = unsafe { syscall::read_recv_caps(ipc_buf) };
+    if cap_count < 3
+    {
+        log("init: phase 3: crasher reply missing caps");
+        return None;
+    }
+    let child_cspace = reply_caps[0];
+    let pi_frame = reply_caps[1];
+    let thread_cap = reply_caps[2];
+
+    // Inject log endpoint into crasher.
+    let mut desc_buf = [CapDescriptor {
+        slot: 0,
+        cap_type: CapType::Frame,
+        pad: [0; 3],
+        aux0: 0,
+        aux1: 0,
+    }; 4];
+    let mut desc_count: usize = 0;
+    let mut first_slot: u32 = 0;
+
+    inject_cap_desc(
+        log_ep,
+        CapType::Frame,
+        LOG_ENDPOINT_SENTINEL,
+        0,
+        child_cspace,
+        &mut desc_buf,
+        &mut desc_count,
+        &mut first_slot,
+    );
+
+    // Patch ProcessInfo.
+    if syscall::mem_map(
+        pi_frame,
+        info.aspace_cap,
+        CHILD_PI_TEMP_VA,
+        0,
+        1,
+        syscall::PROT_WRITE,
+    )
+    .is_err()
+    {
+        log("init: phase 3: cannot map crasher ProcessInfo");
+        return None;
+    }
+
+    // SAFETY: CHILD_PI_TEMP_VA is mapped writable to the ProcessInfo page.
+    #[allow(clippy::cast_ptr_alignment)]
+    let pi = unsafe { &mut *(CHILD_PI_TEMP_VA as *mut ProcessInfo) };
+
+    pi.initial_caps_base = first_slot;
+    pi.initial_caps_count = desc_count as u32;
+    pi.cap_descriptor_count = desc_count as u32;
+
+    let descs_offset = core::mem::size_of::<ProcessInfo>() as u32;
+    let descs_offset_aligned = (descs_offset + 7) & !7;
+    pi.cap_descriptors_offset = descs_offset_aligned;
+
+    let desc_size = core::mem::size_of::<CapDescriptor>();
+    for (i, desc) in desc_buf.iter().enumerate().take(desc_count)
+    {
+        let byte_offset = descs_offset_aligned as usize + i * desc_size;
+        if byte_offset + desc_size > PAGE_SIZE as usize
+        {
+            break;
+        }
+        // SAFETY: byte_offset is within the mapped page.
+        #[allow(clippy::cast_ptr_alignment)]
+        unsafe {
+            let ptr = (CHILD_PI_TEMP_VA as *mut u8)
+                .add(byte_offset)
+                .cast::<CapDescriptor>();
+            core::ptr::write(ptr, *desc);
+        }
+    }
+
+    let _ = syscall::mem_unmap(info.aspace_cap, CHILD_PI_TEMP_VA, 1);
+
+    // Do NOT start — svcmgr must bind death notification before crasher runs.
+    log("init: phase 3: crasher created (suspended)");
+    Some((pid, thread_cap, crasher_frame_cap))
+}
+
+/// Register a service with svcmgr via `REGISTER_SERVICE`.
+///
+/// Sends name, policy, criticality in data words and up to 3 caps
+/// (thread, module, `log_ep`) in cap slots.
+#[allow(clippy::too_many_arguments)]
+fn register_service(
+    svcmgr_ep: u32,
+    ipc_buf: *mut u64,
+    name: &[u8],
+    restart_policy: u8,
+    criticality: u8,
+    thread_cap: u32,
+    module_cap: u32,
+    log_ep: u32,
+)
+{
+    // data[0] = restart_policy, data[1] = criticality, data[2..] = name packed.
+    // SAFETY: ipc_buf is the registered IPC buffer.
+    unsafe { core::ptr::write_volatile(ipc_buf, u64::from(restart_policy)) };
+    // SAFETY: ipc_buf offset 1.
+    unsafe { core::ptr::write_volatile(ipc_buf.add(1), u64::from(criticality)) };
+
+    let name_words = name.len().div_ceil(8);
+    for w in 0..name_words
+    {
+        let mut word: u64 = 0;
+        for b in 0..8
+        {
+            let idx = w * 8 + b;
+            if idx < name.len()
+            {
+                word |= u64::from(name[idx]) << (b * 8);
+            }
+        }
+        // SAFETY: ipc_buf is valid; writing name word at offset 2+w.
+        unsafe { core::ptr::write_volatile(ipc_buf.add(2 + w), word) };
+    }
+
+    let data_count = 2 + name_words;
+    let label = LABEL_REGISTER_SERVICE | ((name.len() as u64) << 16);
+
+    // Build cap list. For Fatal services, module_cap and log_ep may be 0.
+    let mut caps = [0u32; 3];
+    let mut cap_count = 0;
+    if thread_cap != 0
+    {
+        caps[cap_count] = thread_cap;
+        cap_count += 1;
+    }
+    if module_cap != 0
+    {
+        caps[cap_count] = module_cap;
+        cap_count += 1;
+    }
+    if log_ep != 0 && module_cap != 0
+    {
+        // Only send log_ep if service is restartable (has module_cap).
+        if let Ok(derived) = syscall::cap_derive(log_ep, !0u64)
+        {
+            caps[cap_count] = derived;
+            cap_count += 1;
+        }
+    }
+
+    match syscall::ipc_call(svcmgr_ep, label, data_count, &caps[..cap_count])
+    {
+        Ok((0, _)) =>
+        {}
+        _ => log("init: phase 3: REGISTER_SERVICE failed"),
+    }
+}
+
+/// Phase 3: create svcmgr from VFS, register services, start crasher, handover.
+#[allow(clippy::too_many_lines)]
+fn phase3_svcmgr_handover(
+    info: &InitInfo,
+    procmgr_ep: u32,
+    log_ep: u32,
+    vfsd_service_ep: u32,
+    ipc_buf: *mut u64,
+) -> !
+{
+    // 1. Send vfsd endpoint to procmgr for VFS-based ELF loading.
+    send_vfsd_endpoint_to_procmgr(procmgr_ep, vfsd_service_ep);
+
+    // 2. Create svcmgr service endpoint.
+    let Ok(svcmgr_service_ep) = syscall::cap_create_endpoint()
+    else
+    {
+        log("init: phase 3: cannot create svcmgr endpoint");
+        idle_loop();
+    };
+
+    // 3. Create svcmgr from VFS.
+    log("init: phase 3: loading svcmgr from /bin/svcmgr");
+    let Some((svcmgr_pid, svcmgr_cspace, svcmgr_pi, _svcmgr_thread)) =
+        create_svcmgr_from_vfs(procmgr_ep, ipc_buf)
+    else
+    {
+        log("init: phase 3: failed to create svcmgr, idling");
+        idle_loop();
+    };
+
+    // 4. Inject caps and start svcmgr.
+    setup_and_start_svcmgr(
+        info,
+        procmgr_ep,
+        log_ep,
+        svcmgr_service_ep,
+        svcmgr_pid,
+        svcmgr_cspace,
+        svcmgr_pi,
+        ipc_buf,
+    );
+
+    // 5. Create crasher (suspended — don't start until svcmgr is monitoring).
+    let crasher = create_crasher_suspended(info, procmgr_ep, log_ep, ipc_buf);
+
+    // 6. Register services with svcmgr.
+    log("init: phase 3: registering services with svcmgr");
+
+    // procmgr: Fatal, Never restart. Thread cap not available from bootstrap_procmgr
+    // (it was created via raw syscalls, not procmgr IPC). Skip for now — procmgr
+    // crash is unrecoverable regardless.
+
+    // crasher: Normal, Always restart.
+    if let Some((_, crasher_thread, crasher_module)) = crasher
+    {
+        register_service(
+            svcmgr_service_ep,
+            ipc_buf,
+            b"crasher",
+            0, // POLICY_ALWAYS
+            1, // CRITICALITY_NORMAL
+            crasher_thread,
+            crasher_module,
+            log_ep,
+        );
+
+        // 7. Start crasher now that svcmgr is monitoring.
+        // SAFETY: writing pid to IPC buffer.
+        unsafe { core::ptr::write_volatile(ipc_buf, crasher.unwrap().0) };
+        match syscall::ipc_call(procmgr_ep, LABEL_START_PROCESS, 1, &[])
+        {
+            Ok((0, _)) => log("init: phase 3: crasher started"),
+            _ => log("init: phase 3: crasher START_PROCESS failed"),
+        }
+    }
+
+    // 8. HANDOVER_COMPLETE.
+    match syscall::ipc_call(svcmgr_service_ep, LABEL_HANDOVER_COMPLETE, 0, &[])
+    {
+        Ok((0, _)) => log("init: phase 3: handover complete"),
+        _ => log("init: phase 3: handover failed"),
+    }
+
+    log("init: main thread exiting, log thread continues");
+    syscall::thread_exit();
+}
+
+/// Idle loop fallback when Phase 3 cannot proceed.
+fn idle_loop() -> !
+{
     loop
     {
         let _ = syscall::thread_yield();

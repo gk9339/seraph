@@ -699,7 +699,7 @@ mod tests
 
     /// Reserved entries (e.g. PCIe MMIO BARs reported by OVMF under TCG) must
     /// not inflate max_phys. This is the scenario that causes pool exhaustion
-    /// when running under QEMU with --gdb (which forces TCG over KVM).
+    /// when running under QEMU with TCG (e.g. `--no-kvm`).
     #[test]
     fn max_phys_reserved_entries_are_excluded()
     {

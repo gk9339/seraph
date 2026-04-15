@@ -72,6 +72,7 @@ pub enum BuildComponent
     Vfsd,
     VirtioBlk,
     Fatfs,
+    Crasher,
     All,
 }
 
@@ -89,9 +90,6 @@ pub struct RunArgs
     pub release: bool,
 
     /// Start QEMU with a GDB server on localhost:1234 (QEMU pauses at startup).
-    ///
-    /// KVM is disabled in GDB mode so register reads and breakpoints work correctly.
-    /// TCG is ~5–10x slower; expect ~30s to reach the bootloader instead of ~5s.
     #[arg(long)]
     pub gdb: bool,
 

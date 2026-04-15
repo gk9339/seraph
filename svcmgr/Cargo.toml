@@ -10,6 +10,9 @@ path = "src/main.rs"
 test = false
 
 [dependencies]
+process-abi = { path = "../abi/process-abi" }
+runtime = { path = "../shared/runtime" }
+syscall = { path = "../shared/syscall" }
 
 [lints]
 workspace = true

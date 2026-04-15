@@ -97,7 +97,7 @@ impl PciTransport
     /// Set queue size for the selected queue.
     pub fn queue_set_size(&self, size: u16)
     {
-        self.write_common_u16(0x1A, size);
+        self.write_common_u16(0x18, size);
     }
 
     /// Read the notification offset for the selected queue.

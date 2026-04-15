@@ -202,6 +202,15 @@ pub struct ThreadControlBlock
     /// on RISC-V RVWMO.
     pub context_saved: core::sync::atomic::AtomicU32,
 
+    // === Death notification ===
+    /// Pointer to the `EventQueueState` to post when this thread exits or faults.
+    /// Set by `SYS_THREAD_BIND_NOTIFICATION`; null means no notification.
+    pub death_notification: *mut crate::ipc::event_queue::EventQueueState,
+
+    // === Sleep ===
+    /// Tick deadline for `SYS_THREAD_SLEEP`. 0 = not sleeping.
+    pub sleep_deadline: u64,
+
     // === Use-after-free detection ===
     /// Magic cookie for use-after-free detection. Must be `TCB_MAGIC` when valid.
     pub magic: u64,

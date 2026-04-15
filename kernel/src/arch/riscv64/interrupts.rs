@@ -458,70 +458,118 @@ extern "C" fn trap_dispatch(frame: &mut TrapFrame)
             core::arch::asm!("csrr {}, satp", out(reg) satp_val, options(nostack, nomem));
             core::arch::asm!("csrr {}, sstatus", out(reg) sstatus_val, options(nostack, nomem));
         }
-        crate::kprintln!(
-            "EXCEPTION on cpu {}: scause={:#x} sepc={:#x} stval={:#x}",
-            cpu,
-            scause,
-            frame.sepc,
-            frame.stval
-        );
-        crate::kprintln!("  sstatus={:#x} satp={:#x}", sstatus_val, satp_val);
-        crate::kprintln!(
-            "  ra={:#x}  sp={:#x}  gp={:#x}  tp={:#x}",
-            frame.ra,
-            frame.sp,
-            frame.gp,
-            frame.tp
-        );
-        crate::kprintln!(
-            "  t0={:#x}  t1={:#x}  t2={:#x}  s0={:#x}",
-            frame.t0,
-            frame.t1,
-            frame.t2,
-            frame.s0
-        );
-        crate::kprintln!(
-            "  s1={:#x}  a0={:#x}  a1={:#x}  a2={:#x}",
-            frame.s1,
-            frame.a0,
-            frame.a1,
-            frame.a2
-        );
-        crate::kprintln!(
-            "  a3={:#x}  a4={:#x}  a5={:#x}  a6={:#x}",
-            frame.a3,
-            frame.a4,
-            frame.a5,
-            frame.a6
-        );
-        crate::kprintln!(
-            "  a7={:#x}  s2={:#x}  s3={:#x}  s4={:#x}",
-            frame.a7,
-            frame.s2,
-            frame.s3,
-            frame.s4
-        );
-        crate::kprintln!(
-            "  s5={:#x}  s6={:#x}  s7={:#x}  s8={:#x}",
-            frame.s5,
-            frame.s6,
-            frame.s7,
-            frame.s8
-        );
-        crate::kprintln!(
-            "  s9={:#x}  s10={:#x} s11={:#x} t3={:#x}",
-            frame.s9,
-            frame.s10,
-            frame.s11,
-            frame.t3
-        );
-        crate::kprintln!(
-            "  t4={:#x}  t5={:#x}  t6={:#x}",
-            frame.t4,
-            frame.t5,
-            frame.t6
-        );
-        crate::fatal("unhandled exception");
+
+        // Check if the fault came from U-mode (SPP bit 8 = 0) or S-mode (SPP = 1).
+        let is_userspace = (sstatus_val & (1 << 8)) == 0;
+
+        if is_userspace
+        {
+            crate::kprintln!(
+                "USERSPACE FAULT on cpu {}: scause={:#x} sepc={:#x} stval={:#x}",
+                cpu,
+                scause,
+                frame.sepc,
+                frame.stval
+            );
+
+            // SAFETY: current_tcb() returns this CPU's running thread; valid
+            // in exception context because we entered from a running user thread.
+            let tcb = unsafe { crate::syscall::current_tcb() };
+            if !tcb.is_null()
+            {
+                // SAFETY: tcb validated non-null; state field always valid.
+                unsafe {
+                    (*tcb).state = crate::sched::thread::ThreadState::Exited;
+                }
+
+                // Post death notification if bound (exit_reason = cause_code + 1).
+                // SAFETY: tcb is valid; post_death_notification handles null check.
+                unsafe {
+                    crate::sched::post_death_notification(tcb, cause_code + 1);
+                }
+            }
+
+            // SAFETY: schedule(false) context-switches away; the exited thread
+            // is never re-enqueued.
+            unsafe {
+                crate::sched::schedule(false);
+            }
+            // Unreachable for an exited thread, but guard against schedule returning.
+            loop
+            {
+                // SAFETY: wfi is a RISC-V instruction; waits for interrupt.
+                unsafe {
+                    core::arch::asm!("wfi", options(nomem, nostack));
+                }
+            }
+        }
+        else
+        {
+            crate::kprintln!(
+                "EXCEPTION on cpu {}: scause={:#x} sepc={:#x} stval={:#x}",
+                cpu,
+                scause,
+                frame.sepc,
+                frame.stval
+            );
+            crate::kprintln!("  sstatus={:#x} satp={:#x}", sstatus_val, satp_val);
+            crate::kprintln!(
+                "  ra={:#x}  sp={:#x}  gp={:#x}  tp={:#x}",
+                frame.ra,
+                frame.sp,
+                frame.gp,
+                frame.tp
+            );
+            crate::kprintln!(
+                "  t0={:#x}  t1={:#x}  t2={:#x}  s0={:#x}",
+                frame.t0,
+                frame.t1,
+                frame.t2,
+                frame.s0
+            );
+            crate::kprintln!(
+                "  s1={:#x}  a0={:#x}  a1={:#x}  a2={:#x}",
+                frame.s1,
+                frame.a0,
+                frame.a1,
+                frame.a2
+            );
+            crate::kprintln!(
+                "  a3={:#x}  a4={:#x}  a5={:#x}  a6={:#x}",
+                frame.a3,
+                frame.a4,
+                frame.a5,
+                frame.a6
+            );
+            crate::kprintln!(
+                "  a7={:#x}  s2={:#x}  s3={:#x}  s4={:#x}",
+                frame.a7,
+                frame.s2,
+                frame.s3,
+                frame.s4
+            );
+            crate::kprintln!(
+                "  s5={:#x}  s6={:#x}  s7={:#x}  s8={:#x}",
+                frame.s5,
+                frame.s6,
+                frame.s7,
+                frame.s8
+            );
+            crate::kprintln!(
+                "  s9={:#x}  s10={:#x} s11={:#x} t3={:#x}",
+                frame.s9,
+                frame.s10,
+                frame.s11,
+                frame.t3
+            );
+            crate::kprintln!(
+                "  t4={:#x}  t5={:#x}  t6={:#x}",
+                frame.t4,
+                frame.t5,
+                frame.t6
+            );
+            crate::fatal("unhandled exception");
+        }
     }
 
     // Sanity check: if the trap was a U-mode ecall (scause == 8), the

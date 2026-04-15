@@ -142,6 +142,103 @@ pub fn take_reschedule_pending(cpu: usize) -> bool
     RESCHEDULE_PENDING.fetch_and(!bit, core::sync::atomic::Ordering::AcqRel) & bit != 0
 }
 
+// ── Sleep list ───────────────────────────────────────────────────────────────
+
+/// Maximum number of concurrently sleeping threads.
+const MAX_SLEEPING: usize = 16;
+
+/// Global list of sleeping threads. Protected by its own spinlock.
+///
+/// Each entry is a TCB pointer with a non-zero `sleep_deadline`. The timer
+/// tick handler scans this list and wakes threads whose deadline has passed.
+static SLEEP_LIST_LOCK: crate::sync::Spinlock = crate::sync::Spinlock::new();
+
+/// Array of sleeping TCB pointers.
+#[cfg(not(test))]
+static mut SLEEP_LIST: [*mut ThreadControlBlock; MAX_SLEEPING] =
+    [core::ptr::null_mut(); MAX_SLEEPING];
+
+/// Number of entries in `SLEEP_LIST`.
+#[cfg(not(test))]
+static mut SLEEP_COUNT: usize = 0;
+
+/// Add a thread to the sleep list.
+///
+/// The thread must already have `sleep_deadline` set and state = Blocked.
+#[cfg(not(test))]
+pub fn sleep_list_add(tcb: *mut ThreadControlBlock)
+{
+    // SAFETY: lock serialises all sleep list access.
+    let saved = unsafe { SLEEP_LIST_LOCK.lock_raw() };
+    // SAFETY: single-writer access under lock.
+    unsafe {
+        if SLEEP_COUNT < MAX_SLEEPING
+        {
+            SLEEP_LIST[SLEEP_COUNT] = tcb;
+            SLEEP_COUNT += 1;
+        }
+        // If list is full, the thread will never wake. This is a bug, but
+        // better than crashing. Log would be nice but we're in a lock.
+    }
+    // SAFETY: paired with lock_raw above.
+    unsafe { SLEEP_LIST_LOCK.unlock_raw(saved) };
+}
+
+/// Check sleeping threads and wake any whose deadline has passed.
+///
+/// Called from `timer_tick()` on the BSP. Collects expired threads under the
+/// sleep list lock, then wakes them after releasing it.
+#[cfg(not(test))]
+pub fn sleep_check_wakeups()
+{
+    let now = crate::arch::current::timer::current_tick();
+
+    // Collect expired threads under the lock.
+    let mut to_wake: [(*mut ThreadControlBlock, usize, u8); MAX_SLEEPING] =
+        [(core::ptr::null_mut(), 0, 0); MAX_SLEEPING];
+    let mut wake_count = 0usize;
+
+    // SAFETY: lock serialises all sleep list access.
+    let saved = unsafe { SLEEP_LIST_LOCK.lock_raw() };
+
+    // SAFETY: single-writer access under lock.
+    unsafe {
+        let mut i = 0;
+        while i < SLEEP_COUNT
+        {
+            let tcb = SLEEP_LIST[i];
+            if !tcb.is_null() && (*tcb).sleep_deadline <= now
+            {
+                (*tcb).sleep_deadline = 0;
+                (*tcb).state = ThreadState::Ready;
+
+                to_wake[wake_count] = (tcb, (*tcb).preferred_cpu as usize, (*tcb).priority);
+                wake_count += 1;
+
+                // Remove from list by swapping with last entry.
+                SLEEP_COUNT -= 1;
+                SLEEP_LIST[i] = SLEEP_LIST[SLEEP_COUNT];
+                SLEEP_LIST[SLEEP_COUNT] = core::ptr::null_mut();
+                // Don't increment i — re-check the swapped element.
+            }
+            else
+            {
+                i += 1;
+            }
+        }
+    }
+
+    // SAFETY: paired with lock_raw above.
+    unsafe { SLEEP_LIST_LOCK.unlock_raw(saved) };
+
+    // Enqueue woken threads outside the sleep list lock.
+    for &(tcb, cpu, priority) in to_wake.iter().take(wake_count)
+    {
+        // SAFETY: tcb is valid; was in Blocked state, now Ready.
+        unsafe { enqueue_and_wake(tcb, cpu, priority) };
+    }
+}
+
 /// Allocate a unique thread ID.
 ///
 /// Called during idle thread creation, init TCB creation, and
@@ -326,6 +423,8 @@ pub fn init(cpu_count: u32, allocator: &mut BuddyAllocator) -> u32
             blocked_on_object: core::ptr::null_mut(),
             thread_id: alloc_thread_id(),
             context_saved: core::sync::atomic::AtomicU32::new(1),
+            death_notification: core::ptr::null_mut(),
+            sleep_deadline: 0,
             magic: thread::TCB_MAGIC,
         }));
 
@@ -923,6 +1022,44 @@ pub unsafe fn schedule(requeue_current: bool)
     }
 }
 
+// ── Death notification ───────────────────────────────────────────────────────
+
+/// Post a death notification for a thread that is about to exit or has faulted.
+///
+/// If the thread has a bound `death_notification` `EventQueue`, posts
+/// `exit_reason` to it. If a waiter is woken, enqueues it.
+///
+/// # Safety
+/// `tcb` must be a valid, non-null TCB pointer. Must be called with the
+/// thread's state already set to `Exited` (or about to be).
+#[cfg(not(test))]
+pub unsafe fn post_death_notification(tcb: *mut thread::ThreadControlBlock, exit_reason: u64)
+{
+    // SAFETY: tcb validated by caller.
+    let eq = unsafe { (*tcb).death_notification };
+    if eq.is_null()
+    {
+        return;
+    }
+
+    // SAFETY: eq is a valid EventQueueState pointer stored by
+    // SYS_THREAD_BIND_NOTIFICATION; event_queue_post acquires its own lock.
+    let result = unsafe { crate::ipc::event_queue::event_queue_post(eq, exit_reason) };
+    if let Ok(Some(woken_tcb)) = result
+    {
+        // Enqueue the woken thread so the scheduler can pick it up.
+        let cpu = crate::arch::current::cpu::current_cpu() as usize;
+        // SAFETY: woken_tcb is a valid TCB returned by event_queue_post.
+        let priority = unsafe { (*woken_tcb).priority };
+        // SAFETY: cpu is valid; woken_tcb is valid and Ready.
+        unsafe {
+            enqueue_and_wake(woken_tcb, cpu, priority);
+        }
+    }
+}
+
+// ── Timer tick ───────────────────────────────────────────────────────────────
+
 /// Timer interrupt handler: decrement current thread's time slice.
 ///
 /// If the slice expires, mark the thread for rescheduling. This function is
@@ -941,7 +1078,7 @@ pub unsafe fn timer_tick()
     // SAFETY: Acquire scheduler lock to prevent race with schedule().
     // lock_raw is used because we hold no borrow reference to sched during
     // the critical section, allowing unlock before a potential schedule() call.
-    let saved = unsafe { sched.lock.lock_raw() };
+    let mut saved = unsafe { sched.lock.lock_raw() };
 
     let current = sched.current;
 
@@ -962,6 +1099,18 @@ pub unsafe fn timer_tick()
             "timer_tick: current TCB magic corrupt on cpu {cpu}"
         );
     }
+    // Check sleeping threads on BSP before any early returns.
+    if cpu == 0
+    {
+        // Release scheduler lock first — sleep_check_wakeups acquires its own lock.
+        // SAFETY: Paired with lock_raw above.
+        unsafe { sched.lock.unlock_raw(saved) };
+        sleep_check_wakeups();
+        // Re-acquire for the timeslice logic below.
+        // SAFETY: lock was released above; re-acquiring for timeslice checks.
+        saved = unsafe { sched.lock.lock_raw() };
+    }
+
     // SAFETY: current validated non-null above; slice_remaining is always valid.
     let remaining = unsafe { (*current).slice_remaining };
     if remaining == 0

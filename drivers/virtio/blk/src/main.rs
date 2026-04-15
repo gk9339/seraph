@@ -48,8 +48,6 @@ const LOG_ENDPOINT_SENTINEL: u64 = 0xFFFF_FFFF_FFFF_FFFF;
 /// Sentinel value in `CapDescriptor.aux0` indicating a service endpoint.
 const SERVICE_ENDPOINT_SENTINEL: u64 = 0xFFFF_FFFF_FFFF_FFFE;
 
-use runtime::log::{log, log_hex};
-
 // ── VirtIO block request header (VirtIO 1.2 §5.2.6) ───────────────────────
 
 /// Block request type: read.
@@ -174,15 +172,15 @@ extern "Rust" fn main(startup: &StartupInfo) -> !
         unsafe { runtime::log::log_init(caps.log_ep, startup.ipc_buffer) };
     }
 
-    log("virtio-blk: starting");
+    runtime::log!("virtio-blk: starting");
     if caps.bar_mmio_slot == 0
     {
-        log("virtio-blk: no BAR MMIO cap");
+        runtime::log!("virtio-blk: no BAR MMIO cap");
         syscall::thread_exit();
     }
     if caps.procmgr_ep == 0
     {
-        log("virtio-blk: no procmgr endpoint");
+        runtime::log!("virtio-blk: no procmgr endpoint");
         syscall::thread_exit();
     }
 
@@ -190,14 +188,14 @@ extern "Rust" fn main(startup: &StartupInfo) -> !
     let Some(pci_info) = VirtioPciStartupInfo::from_bytes(startup.startup_message)
     else
     {
-        log("virtio-blk: no VirtIO PCI startup info");
+        runtime::log!("virtio-blk: no VirtIO PCI startup info");
         syscall::thread_exit();
     };
 
     // Map BAR MMIO.
     if syscall::mmio_map(caps.self_aspace, caps.bar_mmio_slot, BAR_MAP_VA, 0).is_err()
     {
-        log("virtio-blk: BAR mmio_map failed");
+        runtime::log!("virtio-blk: BAR mmio_map failed");
         syscall::thread_exit();
     }
 
@@ -221,13 +219,13 @@ extern "Rust" fn main(startup: &StartupInfo) -> !
     });
     if features.is_none()
     {
-        log("virtio-blk: feature negotiation failed");
+        runtime::log!("virtio-blk: feature negotiation failed");
         syscall::thread_exit();
     }
 
     // Read device capacity (sectors) from device config.
     let capacity = transport.config_read_u64(0);
-    log_hex("virtio-blk: capacity (sectors)=", capacity);
+    runtime::log!("virtio-blk: capacity (sectors)={:#018x}", capacity);
 
     // 5. Setup virtqueue 0 (requestq).
     transport.queue_select(0);
@@ -240,7 +238,7 @@ extern "Rust" fn main(startup: &StartupInfo) -> !
     let Some(ring_frame) = request_frames(caps.procmgr_ep, ring_pages, ipc_buf)
     else
     {
-        log("virtio-blk: failed to allocate ring frames");
+        runtime::log!("virtio-blk: failed to allocate ring frames");
         syscall::thread_exit();
     };
 
@@ -255,7 +253,7 @@ extern "Rust" fn main(startup: &StartupInfo) -> !
     )
     .is_err()
     {
-        log("virtio-blk: ring mem_map failed");
+        runtime::log!("virtio-blk: ring mem_map failed");
         syscall::thread_exit();
     }
 
@@ -269,21 +267,21 @@ extern "Rust" fn main(startup: &StartupInfo) -> !
     let Ok(ring_phys) = syscall::dma_grant(ring_frame, 0, syscall_abi::FLAG_DMA_UNSAFE)
     else
     {
-        log("virtio-blk: ring dma_grant failed");
+        runtime::log!("virtio-blk: ring dma_grant failed");
         syscall::thread_exit();
     };
 
-    // Layout: descriptors | avail ring | used ring, contiguous in physical memory.
+    // Layout: descriptors | avail ring | [pad] | used ring (4-byte aligned).
     let desc_size = virtqueue::desc_table_size(queue_size);
-    let avail_size = virtqueue::avail_ring_size(queue_size);
+    let used_off = virtqueue::used_ring_offset(queue_size);
 
     let desc_phys = ring_phys;
     let avail_phys = ring_phys + desc_size as u64;
-    let used_phys = avail_phys + avail_size as u64;
+    let used_phys = ring_phys + used_off as u64;
 
     let desc_va = RING_MAP_VA;
     let avail_va = RING_MAP_VA + desc_size as u64;
-    let used_va = avail_va + avail_size as u64;
+    let used_va = RING_MAP_VA + used_off as u64;
 
     // Program queue addresses.
     transport.queue_set_desc_lo(desc_phys as u32);
@@ -302,7 +300,7 @@ extern "Rust" fn main(startup: &StartupInfo) -> !
     // 6. DRIVER_OK.
     transport
         .set_status(STATUS_ACKNOWLEDGE | STATUS_DRIVER | STATUS_FEATURES_OK | STATUS_DRIVER_OK);
-    log("virtio-blk: device ready");
+    runtime::log!("virtio-blk: device ready");
 
     // Create virtqueue manager.
     // SAFETY: ring memory is zeroed, properly sized, and exclusively owned.
@@ -324,7 +322,7 @@ extern "Rust" fn main(startup: &StartupInfo) -> !
     let Some(data_frame) = request_frames(caps.procmgr_ep, 1, ipc_buf)
     else
     {
-        log("virtio-blk: failed to allocate data frame");
+        runtime::log!("virtio-blk: failed to allocate data frame");
         syscall::thread_exit();
     };
 
@@ -338,7 +336,7 @@ extern "Rust" fn main(startup: &StartupInfo) -> !
     )
     .is_err()
     {
-        log("virtio-blk: data mem_map failed");
+        runtime::log!("virtio-blk: data mem_map failed");
         syscall::thread_exit();
     }
 
@@ -349,7 +347,7 @@ extern "Rust" fn main(startup: &StartupInfo) -> !
     let Ok(data_phys) = syscall::dma_grant(data_frame, 0, syscall_abi::FLAG_DMA_UNSAFE)
     else
     {
-        log("virtio-blk: data dma_grant failed");
+        runtime::log!("virtio-blk: data dma_grant failed");
         syscall::thread_exit();
     };
 
@@ -380,14 +378,14 @@ extern "Rust" fn main(startup: &StartupInfo) -> !
     let Some(_head) = vq.add_chain(&chain)
     else
     {
-        log("virtio-blk: failed to submit read request");
+        runtime::log!("virtio-blk: failed to submit read request");
         syscall::thread_exit();
     };
 
     // Notify device.
     transport.notify(0, queue_notify_off);
 
-    log("virtio-blk: sector 0 read submitted, polling...");
+    runtime::log!("virtio-blk: sector 0 read submitted, polling...");
 
     // Poll for completion (no IRQ setup yet — simple busy-wait).
     let mut attempts = 0u32;
@@ -400,7 +398,7 @@ extern "Rust" fn main(startup: &StartupInfo) -> !
         attempts += 1;
         if attempts > 10_000_000
         {
-            log("virtio-blk: read timed out");
+            runtime::log!("virtio-blk: read timed out");
             syscall::thread_exit();
         }
         core::hint::spin_loop();
@@ -411,24 +409,27 @@ extern "Rust" fn main(startup: &StartupInfo) -> !
     let status = unsafe { core::ptr::read_volatile(status_va as *const u8) };
     if status != 0
     {
-        log_hex("virtio-blk: read failed, status=", u64::from(status));
+        runtime::log!(
+            "virtio-blk: read failed, status={:#018x}",
+            u64::from(status)
+        );
         syscall::thread_exit();
     }
 
-    log("virtio-blk: sector 0 read OK");
+    runtime::log!("virtio-blk: sector 0 read OK");
 
     // ── Service endpoint receive loop ─────────────────────────────────
 
     if caps.service_ep == 0
     {
-        log("virtio-blk: no service endpoint, entering idle loop");
+        runtime::log!("virtio-blk: no service endpoint, entering idle loop");
         loop
         {
             let _ = syscall::thread_yield();
         }
     }
 
-    log("virtio-blk: ready, entering service loop");
+    runtime::log!("virtio-blk: ready, entering service loop");
     loop
     {
         let Ok((label, _)) = syscall::ipc_recv(caps.service_ep)

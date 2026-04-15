@@ -20,7 +20,6 @@
 extern crate runtime;
 
 use process_abi::{CapDescriptor, CapType, ProcessInfo, StartupInfo};
-use runtime::log::log;
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -268,7 +267,7 @@ fn spawn_fatfs_driver(caps: &VfsdCaps, blk_ep: u32, ipc_buf: *mut u64) -> Option
     let Ok(module_copy) = syscall::cap_derive(caps.fatfs_module_cap, !0u64)
     else
     {
-        log("vfsd: cannot derive fatfs module cap");
+        runtime::log!("vfsd: cannot derive fatfs module cap");
         return None;
     };
 
@@ -277,12 +276,12 @@ fn spawn_fatfs_driver(caps: &VfsdCaps, blk_ep: u32, ipc_buf: *mut u64) -> Option
         syscall::ipc_call(caps.procmgr_ep, LABEL_CREATE_PROCESS, 0, &[module_copy])
     else
     {
-        log("vfsd: fatfs CREATE_PROCESS ipc_call failed");
+        runtime::log!("vfsd: fatfs CREATE_PROCESS ipc_call failed");
         return None;
     };
     if reply_label != 0
     {
-        log("vfsd: fatfs CREATE_PROCESS failed");
+        runtime::log!("vfsd: fatfs CREATE_PROCESS failed");
         return None;
     }
 
@@ -293,7 +292,7 @@ fn spawn_fatfs_driver(caps: &VfsdCaps, blk_ep: u32, ipc_buf: *mut u64) -> Option
     let (cap_count, reply_caps) = unsafe { syscall::read_recv_caps(ipc_buf) };
     if cap_count < 2
     {
-        log("vfsd: fatfs CREATE_PROCESS reply missing caps");
+        runtime::log!("vfsd: fatfs CREATE_PROCESS reply missing caps");
         return None;
     }
     let child_cspace = reply_caps[0];
@@ -314,7 +313,7 @@ fn spawn_fatfs_driver(caps: &VfsdCaps, blk_ep: u32, ipc_buf: *mut u64) -> Option
     let Ok(driver_ep) = syscall::cap_create_endpoint()
     else
     {
-        log("vfsd: failed to create fatfs driver endpoint");
+        runtime::log!("vfsd: failed to create fatfs driver endpoint");
         return None;
     };
 
@@ -379,7 +378,7 @@ fn spawn_fatfs_driver(caps: &VfsdCaps, blk_ep: u32, ipc_buf: *mut u64) -> Option
     )
     .is_err()
     {
-        log("vfsd: cannot map fatfs ProcessInfo");
+        runtime::log!("vfsd: cannot map fatfs ProcessInfo");
         return None;
     }
 
@@ -420,11 +419,11 @@ fn spawn_fatfs_driver(caps: &VfsdCaps, blk_ep: u32, ipc_buf: *mut u64) -> Option
     unsafe { core::ptr::write_volatile(ipc_buf, pid) };
     if let Ok((0, _)) = syscall::ipc_call(caps.procmgr_ep, LABEL_START_PROCESS, 1, &[])
     {
-        log("vfsd: fatfs driver started");
+        runtime::log!("vfsd: fatfs driver started");
     }
     else
     {
-        log("vfsd: fatfs START_PROCESS failed");
+        runtime::log!("vfsd: fatfs START_PROCESS failed");
         return None;
     }
 
@@ -525,7 +524,7 @@ extern "Rust" fn main(startup: &StartupInfo) -> !
         unsafe { runtime::log::log_init(caps.log_ep, startup.ipc_buffer) };
     }
 
-    log("vfsd: starting");
+    runtime::log!("vfsd: starting");
 
     // SAFETY: IPC buffer is page-aligned.
     #[allow(clippy::cast_ptr_alignment)]
@@ -533,22 +532,22 @@ extern "Rust" fn main(startup: &StartupInfo) -> !
 
     if caps.service_ep == 0 || caps.registry_ep == 0
     {
-        log("vfsd: missing required endpoints");
+        runtime::log!("vfsd: missing required endpoints");
         idle_loop();
     }
 
     // Query devmgr for the block device endpoint.
-    log("vfsd: querying devmgr for block device");
+    runtime::log!("vfsd: querying devmgr for block device");
     let Ok((reply_label, _)) =
         syscall::ipc_call(caps.registry_ep, LABEL_QUERY_BLOCK_DEVICE, 0, &[])
     else
     {
-        log("vfsd: QUERY_BLOCK_DEVICE ipc_call failed");
+        runtime::log!("vfsd: QUERY_BLOCK_DEVICE ipc_call failed");
         idle_loop();
     };
     if reply_label != 0
     {
-        log("vfsd: no block device available");
+        runtime::log!("vfsd: no block device available");
         idle_loop();
     }
 
@@ -557,11 +556,11 @@ extern "Rust" fn main(startup: &StartupInfo) -> !
     let (cap_count, reply_caps) = unsafe { syscall::read_recv_caps(ipc_buf) };
     if cap_count == 0
     {
-        log("vfsd: QUERY_BLOCK_DEVICE returned no caps");
+        runtime::log!("vfsd: QUERY_BLOCK_DEVICE returned no caps");
         idle_loop();
     }
     let blk_ep = reply_caps[0];
-    log("vfsd: block device endpoint acquired");
+    runtime::log!("vfsd: block device endpoint acquired");
 
     // Parse GPT partition table — stored for UUID lookups on MOUNT requests.
     let mut gpt_parts = [
@@ -576,7 +575,7 @@ extern "Rust" fn main(startup: &StartupInfo) -> !
     ];
     let _gpt_count = parse_gpt(blk_ep, ipc_buf, &mut gpt_parts);
 
-    log("vfsd: entering service loop");
+    runtime::log!("vfsd: entering service loop");
     service_loop(caps.service_ep, ipc_buf, &caps, blk_ep, &gpt_parts);
 }
 
@@ -628,14 +627,14 @@ fn parse_gpt(blk_ep: u32, ipc_buf: *mut u64, parts: &mut [GptEntry; MAX_GPT_PART
     // Read GPT header at LBA 1.
     if !read_block_sector(blk_ep, 1, &mut sector, ipc_buf)
     {
-        log("vfsd: GPT: failed to read header");
+        runtime::log!("vfsd: GPT: failed to read header");
         return 0;
     }
 
     // Validate signature "EFI PART".
     if &sector[0..8] != b"EFI PART"
     {
-        log("vfsd: GPT: invalid signature");
+        runtime::log!("vfsd: GPT: invalid signature");
         return 0;
     }
 
@@ -645,7 +644,7 @@ fn parse_gpt(blk_ep: u32, ipc_buf: *mut u64, parts: &mut [GptEntry; MAX_GPT_PART
 
     if entry_size == 0 || entry_size > 512
     {
-        log("vfsd: GPT: invalid entry size");
+        runtime::log!("vfsd: GPT: invalid entry size");
         return 0;
     }
 
@@ -690,13 +689,13 @@ fn parse_gpt(blk_ep: u32, ipc_buf: *mut u64, parts: &mut [GptEntry; MAX_GPT_PART
                 first_lba,
                 active: true,
             };
-            runtime::log::log_hex("vfsd: GPT: partition at LBA ", first_lba);
+            runtime::log!("vfsd: GPT: partition at LBA {:#018x}", first_lba);
             found += 1;
             entries_checked += 1;
         }
     }
 
-    runtime::log::log_hex("vfsd: GPT: partitions found: ", found as u64);
+    runtime::log!("vfsd: GPT: partitions found: {}", found);
     found
 }
 
@@ -815,7 +814,7 @@ fn handle_mount_request(
     let path_len = unsafe { core::ptr::read_volatile(ipc_buf.add(2)) } as usize;
     if path_len == 0 || path_len > 64
     {
-        log("vfsd: MOUNT: invalid path length");
+        runtime::log!("vfsd: MOUNT: invalid path length");
         let _ = syscall::ipc_reply(1, 0, &[]);
         return;
     }
@@ -841,16 +840,16 @@ fn handle_mount_request(
     let partition_lba = lookup_partition_by_uuid(&uuid, gpt_parts);
     if partition_lba == 0
     {
-        log("vfsd: MOUNT: partition UUID not found");
+        runtime::log!("vfsd: MOUNT: partition UUID not found");
         let _ = syscall::ipc_reply(2, 0, &[]);
         return;
     }
-    runtime::log::log_hex("vfsd: MOUNT: partition LBA=", partition_lba);
+    runtime::log!("vfsd: MOUNT: partition LBA={:#018x}", partition_lba);
 
     // Spawn fatfs driver for this partition.
     if caps.fatfs_module_cap == 0
     {
-        log("vfsd: MOUNT: no fatfs module cap");
+        runtime::log!("vfsd: MOUNT: no fatfs module cap");
         let _ = syscall::ipc_reply(3, 0, &[]);
         return;
     }
@@ -858,7 +857,7 @@ fn handle_mount_request(
     let Some(driver_ep) = spawn_fatfs_driver(caps, blk_ep, ipc_buf)
     else
     {
-        log("vfsd: MOUNT: failed to spawn fatfs");
+        runtime::log!("vfsd: MOUNT: failed to spawn fatfs");
         let _ = syscall::ipc_reply(4, 0, &[]);
         return;
     };
@@ -868,11 +867,11 @@ fn handle_mount_request(
     unsafe { core::ptr::write_volatile(ipc_buf, partition_lba) };
     if let Ok((0, _)) = syscall::ipc_call(driver_ep, LABEL_FS_MOUNT, 1, &[])
     {
-        log("vfsd: MOUNT: fatfs mounted successfully");
+        runtime::log!("vfsd: MOUNT: fatfs mounted successfully");
     }
     else
     {
-        log("vfsd: MOUNT: fatfs FS_MOUNT failed");
+        runtime::log!("vfsd: MOUNT: fatfs FS_MOUNT failed");
         let _ = syscall::ipc_reply(5, 0, &[]);
         return;
     }
@@ -891,7 +890,7 @@ fn handle_mount_request(
     let Some(idx) = slot
     else
     {
-        log("vfsd: MOUNT: mount table full");
+        runtime::log!("vfsd: MOUNT: mount table full");
         let _ = syscall::ipc_reply(6, 0, &[]);
         return;
     };
@@ -901,7 +900,7 @@ fn handle_mount_request(
     mounts[idx].driver_ep = driver_ep;
     mounts[idx].active = true;
 
-    log("vfsd: MOUNT: registered");
+    runtime::log!("vfsd: MOUNT: registered");
     let _ = syscall::ipc_reply(0, 0, &[]);
 }
 
@@ -1063,14 +1062,15 @@ fn handle_stat(ipc_buf: *mut u64, mounts: &[MountEntry; MAX_MOUNTS], fds: &[FdEn
     // SAFETY: writing driver_fd to IPC buffer.
     unsafe { core::ptr::write_volatile(ipc_buf, driver_fd) };
 
-    let Ok((drv_reply, drv_data_count)) = syscall::ipc_call(driver_ep, LABEL_STAT, 1, &[])
+    let Ok((drv_reply, _)) = syscall::ipc_call(driver_ep, LABEL_STAT, 1, &[])
     else
     {
         let _ = syscall::ipc_reply(5, 0, &[]); // IoError
         return;
     };
 
-    let _ = syscall::ipc_reply(drv_reply, drv_data_count, &[]);
+    // STAT reply: data[0]=file_size, data[1]=flags. Forward 2 words.
+    let _ = syscall::ipc_reply(drv_reply, 2, &[]);
 }
 
 fn handle_readdir(ipc_buf: *mut u64, mounts: &[MountEntry; MAX_MOUNTS], fds: &[FdEntry; MAX_FDS])

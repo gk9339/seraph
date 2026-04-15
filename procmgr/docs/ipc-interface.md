@@ -47,12 +47,14 @@ identity caps. The thread is **not** started.
 | data[0] | Process ID (procmgr-assigned identifier) |
 | cap[0] | Child `CSpace` capability (full rights) |
 | cap[1] | `ProcessInfo` frame capability (MAP\|WRITE rights) |
+| cap[2] | Child `Thread` capability (Control right) |
 
 The `CSpace` cap allows the caller to inject capabilities into the child's
 capability space via `cap_copy`. The `ProcessInfo` frame cap allows the
 caller to map the page writable and patch `initial_caps_base`,
 `initial_caps_count`, `cap_descriptor_count`, `cap_descriptors_offset`,
-and startup message fields.
+and startup message fields. The `Thread` cap allows the caller to bind
+death notifications or stop/configure the thread.
 
 **Reply (error):**
 
@@ -147,6 +149,71 @@ requests for larger allocations.
 | 6 | `OutOfMemory` | Insufficient frame caps in the memory pool |
 | 7 | `InvalidArgument` | Requested page count is 0 or exceeds 4 |
 
+### Label 6: `CREATE_PROCESS_FROM_VFS`
+
+Create a new process by loading an ELF binary from the virtual filesystem.
+Requires that a vfsd endpoint has been configured via `SET_VFSD_ENDPOINT`.
+The process is created in a **suspended** state, identical to `CREATE_PROCESS`.
+
+**Request:**
+
+| Field | Value |
+|---|---|
+| label | `6 \| (path_len << 16)` |
+| data[0..] | File path bytes packed into u64 words (up to 48 bytes) |
+
+procmgr opens the file via vfsd, reads the ELF binary into an internal
+buffer, parses and loads it using the same pipeline as `CREATE_PROCESS`,
+then returns a suspended process.
+
+**Reply (success):**
+
+Same as `CREATE_PROCESS`:
+
+| Field | Value |
+|---|---|
+| label | 0 (success) |
+| data[0] | Process ID |
+| cap[0] | Child `CSpace` capability (full rights) |
+| cap[1] | `ProcessInfo` frame capability (MAP\|WRITE rights) |
+| cap[2] | Child `Thread` capability (Control right) |
+
+**Reply (error):**
+
+| Field | Value |
+|---|---|
+| label | Nonzero error code |
+
+**Error codes:**
+
+| Code | Name | Meaning |
+|---|---|---|
+| 1 | `InvalidElf` | ELF validation failed |
+| 2 | `OutOfMemory` | Insufficient frame caps |
+| 3 | `CSpaceFull` | Cannot allocate kernel objects |
+| 8 | `NoVfsEndpoint` | No vfsd endpoint configured |
+| 9 | `FileNotFound` | vfsd OPEN failed for the given path |
+| 10 | `IoError` | vfsd READ or STAT failed |
+
+### Label 7: `SET_VFSD_ENDPOINT`
+
+Configure the vfsd Send endpoint for VFS-based process creation. Init sends
+this after vfsd is running and the root filesystem is mounted. One-time
+configuration; subsequent calls overwrite the stored endpoint.
+
+**Request:**
+
+| Field | Value |
+|---|---|
+| label | 7 |
+| cap[0] | vfsd Send endpoint capability |
+
+**Reply (success):**
+
+| Field | Value |
+|---|---|
+| label | 0 (success) |
+
 ---
 
 ## Capability Transfer
@@ -156,9 +223,9 @@ message). On `CREATE_PROCESS`, the caller's Frame cap is moved into procmgr's
 CSpace atomically with the message delivery. procmgr consumes the cap during
 process creation and does not return it.
 
-On reply, procmgr transfers derived copies of the child's `CSpace` and
-`ProcessInfo` frame capabilities to the caller. procmgr retains the original
-caps for process lifecycle management.
+On reply, procmgr transfers derived copies of the child's `CSpace`,
+`ProcessInfo` frame, and `Thread` capabilities to the caller. procmgr retains
+the original caps for process lifecycle management.
 
 ---
 

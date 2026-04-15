@@ -191,6 +191,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
 
 [[package]]
+name = "crasher"
+version = "0.1.0"
+dependencies = [
+ "process-abi",
+ "runtime",
+ "syscall",
+]
+
+[[package]]
 name = "crc"
 version = "3.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -590,6 +599,11 @@ checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
 [[package]]
 name = "svcmgr"
 version = "0.1.0"
+dependencies = [
+ "process-abi",
+ "runtime",
+ "syscall",
+]
 
 [[package]]
 name = "syn"

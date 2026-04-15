@@ -330,3 +330,90 @@ pub fn load_segments<'a>(ehdr: &Elf64Ehdr, data: &'a [u8]) -> LoadSegmentIter<'a
         index: 0,
     }
 }
+
+// ── Header-only segment metadata ────────────────────────────────────────────
+
+/// Iterator over `PT_LOAD` segments using only the ELF header page.
+///
+/// Like [`LoadSegmentIter`], but validates segment file bounds against a
+/// declared `file_size` instead of requiring the full file data in memory.
+/// This enables streaming ELF loading where only the header page is mapped.
+pub struct LoadSegmentMetaIter<'a>
+{
+    header_data: &'a [u8],
+    file_size: u64,
+    phdr_base: usize,
+    phdr_count: usize,
+    index: usize,
+}
+
+impl Iterator for LoadSegmentMetaIter<'_>
+{
+    type Item = Result<LoadSegment, ElfError>;
+
+    fn next(&mut self) -> Option<Self::Item>
+    {
+        while self.index < self.phdr_count
+        {
+            let offset = self.phdr_base + self.index * size_of::<Elf64Phdr>();
+            self.index += 1;
+
+            // SAFETY: validate() confirmed the entire program header table
+            // fits within header_data. Each entry is at a known offset.
+            // cast_ptr_alignment: see validate() — ELF data is page-aligned.
+            #[allow(clippy::cast_ptr_alignment)]
+            let phdr = unsafe { &*self.header_data.as_ptr().add(offset).cast::<Elf64Phdr>() };
+
+            if phdr.p_type != PT_LOAD
+            {
+                continue;
+            }
+
+            // Validate that the file data for this segment is within the file.
+            let seg_end = phdr.p_offset.checked_add(phdr.p_filesz);
+            match seg_end
+            {
+                Some(end) if end <= self.file_size =>
+                {}
+                _ => return Some(Err(ElfError::SegmentOverflow)),
+            }
+
+            return Some(Ok(LoadSegment {
+                vaddr: phdr.p_vaddr,
+                offset: phdr.p_offset,
+                filesz: phdr.p_filesz,
+                memsz: phdr.p_memsz,
+                writable: phdr.p_flags & PF_W != 0,
+                executable: phdr.p_flags & PF_X != 0,
+            }));
+        }
+        None
+    }
+}
+
+/// Return an iterator over `PT_LOAD` segments from the ELF header page only.
+///
+/// `ehdr` must have been returned by a successful [`validate`] call on
+/// `header_data`. Segment file bounds are checked against `file_size`
+/// rather than the buffer length, allowing the caller to hold only the
+/// first page of the ELF file.
+///
+/// # Errors
+///
+/// Individual segments may yield `Err(`[`ElfError::SegmentOverflow`]`)` if
+/// their file data extends beyond `file_size`.
+#[must_use]
+pub fn load_segments_metadata<'a>(
+    ehdr: &Elf64Ehdr,
+    header_data: &'a [u8],
+    file_size: u64,
+) -> LoadSegmentMetaIter<'a>
+{
+    LoadSegmentMetaIter {
+        header_data,
+        file_size,
+        phdr_base: ehdr.e_phoff as usize,
+        phdr_count: ehdr.e_phnum as usize,
+        index: 0,
+    }
+}

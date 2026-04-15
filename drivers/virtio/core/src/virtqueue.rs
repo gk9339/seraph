@@ -152,10 +152,13 @@ impl SplitVirtqueue
     /// Return a descriptor to the free list.
     fn free_desc(&mut self, idx: u16)
     {
-        // SAFETY: idx is a valid descriptor index within the table.
-        let desc = unsafe { &mut *self.desc_va.add(idx as usize) };
-        desc.flags = 0;
-        desc.next = self.free_head;
+        // SAFETY: idx is a valid descriptor index; desc_va is within the DMA
+        // descriptor table. Volatile: DMA-shared with the device.
+        unsafe {
+            let desc = self.desc_va.add(idx as usize);
+            core::ptr::write_volatile(core::ptr::addr_of_mut!((*desc).flags), 0);
+            core::ptr::write_volatile(core::ptr::addr_of_mut!((*desc).next), self.free_head);
+        }
         self.free_head = idx;
         self.num_free += 1;
     }
@@ -179,19 +182,29 @@ impl SplitVirtqueue
         for (i, &(addr, len, writable)) in bufs.iter().enumerate()
         {
             let idx = if i == 0 { head } else { self.alloc_desc()? };
-            // SAFETY: idx is a valid allocated descriptor index.
-            let desc = unsafe { &mut *self.desc_va.add(idx as usize) };
-            desc.addr = addr;
-            desc.len = len;
-            desc.flags = if writable { VRING_DESC_F_WRITE } else { 0 };
+            // SAFETY: idx and prev are valid descriptor indices; desc_va is the
+            // DMA descriptor table. Volatile: prevents dead-store elimination
+            // across free_desc/add_chain and ensures device sees writes in order.
+            unsafe {
+                let desc = self.desc_va.add(idx as usize);
+                core::ptr::write_volatile(core::ptr::addr_of_mut!((*desc).addr), addr);
+                core::ptr::write_volatile(core::ptr::addr_of_mut!((*desc).len), len);
+                core::ptr::write_volatile(
+                    core::ptr::addr_of_mut!((*desc).flags),
+                    if writable { VRING_DESC_F_WRITE } else { 0 },
+                );
 
-            if i > 0
-            {
-                // Link previous descriptor to this one.
-                // SAFETY: prev is a valid descriptor index.
-                let prev_desc = unsafe { &mut *self.desc_va.add(prev as usize) };
-                prev_desc.flags |= VRING_DESC_F_NEXT;
-                prev_desc.next = idx;
+                if i > 0
+                {
+                    let prev_desc = self.desc_va.add(prev as usize);
+                    let old_flags =
+                        core::ptr::read_volatile(core::ptr::addr_of!((*prev_desc).flags));
+                    core::ptr::write_volatile(
+                        core::ptr::addr_of_mut!((*prev_desc).flags),
+                        old_flags | VRING_DESC_F_NEXT,
+                    );
+                    core::ptr::write_volatile(core::ptr::addr_of_mut!((*prev_desc).next), idx);
+                }
             }
             prev = idx;
         }
@@ -299,27 +312,45 @@ pub const fn desc_table_size(queue_size: u16) -> usize
 }
 
 /// Calculate the total bytes needed for an available ring.
+///
+/// `VirtIO` 1.2 §2.7.13: Driver Area size = `6 + 2 * Queue Size`.
+/// The extra 2 bytes are the `used_event` field (present in the layout
+/// regardless of `VIRTIO_F_EVENT_IDX` negotiation).
 #[must_use]
 pub const fn avail_ring_size(queue_size: u16) -> usize
 {
-    4 + 2 * queue_size as usize
+    6 + 2 * queue_size as usize
 }
 
 /// Calculate the total bytes needed for a used ring.
+///
+/// `VirtIO` 1.2 §2.7.13: Device Area size = `6 + 8 * Queue Size`.
+/// The extra 2 bytes are the `avail_event` field (present in the layout
+/// regardless of `VIRTIO_F_EVENT_IDX` negotiation).
 #[must_use]
 pub const fn used_ring_size(queue_size: u16) -> usize
 {
-    4 + 8 * queue_size as usize
+    6 + 8 * queue_size as usize
+}
+
+/// Byte offset of the used ring from the start of ring memory.
+///
+/// The used ring must be 4-byte aligned (`VirtIO` 1.2 §2.7). This rounds
+/// up past the descriptor table + available ring to the next 4-byte boundary.
+#[must_use]
+pub const fn used_ring_offset(queue_size: u16) -> usize
+{
+    let raw = desc_table_size(queue_size) + avail_ring_size(queue_size);
+    (raw + 3) & !3 // round up to 4-byte alignment
 }
 
 /// Calculate total pages needed for all virtqueue ring memory.
 ///
 /// Descriptor table, available ring, and used ring are packed into
-/// contiguous pages.
+/// contiguous pages with the used ring 4-byte aligned.
 #[must_use]
 pub const fn ring_pages(queue_size: u16) -> usize
 {
-    let total =
-        desc_table_size(queue_size) + avail_ring_size(queue_size) + used_ring_size(queue_size);
+    let total = used_ring_offset(queue_size) + used_ring_size(queue_size);
     total.div_ceil(4096)
 }

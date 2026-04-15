@@ -135,7 +135,9 @@ pub struct ExceptionFrame
 
 /// Called from all exception stubs with a pointer to the exception frame.
 ///
-/// Prints diagnostics and calls `fatal()`. Never returns.
+/// If the fault originated in userspace (CPL != 0), the faulting thread is
+/// terminated and a death notification is posted (if bound). If the fault
+/// originated in the kernel, diagnostics are printed and the system halts.
 ///
 /// # Safety
 /// `frame` must point to a valid `ExceptionFrame` on the current stack.
@@ -158,16 +160,70 @@ unsafe extern "C" fn common_exception_handler(frame: *const ExceptionFrame) -> !
     {
         0
     };
-    crate::kprintln!(
-        "EXCEPTION: vector={} error_code={:#x} rip={:#x} cs={:#x} rflags={:#x} cr2={:#x}",
-        f.vector,
-        f.error_code,
-        f.rip,
-        f.cs,
-        f.rflags,
-        cr2,
-    );
-    fatal("unhandled exception");
+
+    // Check if the fault came from userspace (CPL 3) or kernel (CPL 0).
+    let is_userspace = (f.cs & 3) != 0;
+
+    if is_userspace
+    {
+        // SAFETY: current_tcb() returns this CPU's running thread; valid in
+        // exception context because we entered from a running user thread.
+        let tcb = unsafe { crate::syscall::current_tcb() };
+        let tid = if tcb.is_null()
+        {
+            0
+        }
+        else
+        {
+            // SAFETY: tcb validated non-null.
+            unsafe { (*tcb).thread_id }
+        };
+        // Disable interrupts before printing to prevent serial interleaving.
+        // SAFETY: ring 0 context; this is a crash path so stopping other CPUs is acceptable.
+        unsafe { core::arch::asm!("cli", options(nomem, nostack)) };
+        crate::kprintln!(
+            "USERSPACE FAULT: tid={} vec={} err={:#x} rip={:#x} cr2={:#x} rsp={:#x}",
+            tid,
+            f.vector,
+            f.error_code,
+            f.rip,
+            cr2,
+            f.rsp,
+        );
+        if !tcb.is_null()
+        {
+            // SAFETY: tcb validated non-null; state field always valid.
+            unsafe {
+                (*tcb).state = crate::sched::thread::ThreadState::Exited;
+            }
+
+            // Post death notification if bound (exit_reason = vector + 1).
+            // SAFETY: tcb is valid; post_death_notification handles null check.
+            unsafe {
+                crate::sched::post_death_notification(tcb, f.vector + 1);
+            }
+        }
+
+        // SAFETY: schedule(false) context-switches away; the exited thread
+        // is never re-enqueued.
+        unsafe {
+            crate::sched::schedule(false);
+        }
+        crate::arch::current::cpu::halt_loop();
+    }
+    else
+    {
+        crate::kprintln!(
+            "EXCEPTION: vector={} error_code={:#x} rip={:#x} cs={:#x} rflags={:#x} cr2={:#x}",
+            f.vector,
+            f.error_code,
+            f.rip,
+            f.cs,
+            f.rflags,
+            cr2,
+        );
+        fatal("unhandled exception");
+    }
 }
 
 // ── ISR stub macro ────────────────────────────────────────────────────────────

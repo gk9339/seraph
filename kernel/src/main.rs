@@ -545,6 +545,8 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
                 cspace: core::ptr::null_mut(),
                 thread_id: 1, // 0 = idle BSP, 1 = init
                 context_saved: core::sync::atomic::AtomicU32::new(1),
+                death_notification: core::ptr::null_mut(),
+                sleep_deadline: 0,
                 magic: sched::thread::TCB_MAGIC,
             },
         ));

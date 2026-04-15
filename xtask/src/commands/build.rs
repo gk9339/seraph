@@ -24,7 +24,14 @@ use crate::util::{find_llvm_objcopy, run_cmd, step};
 // TODO: rework to support per-module configuration (different output paths,
 // target triples, sysroot destinations, extra build flags). For now every
 // module uses the same kernel target and flags.
-const MODULES: &[&str] = &["procmgr", "devmgr", "vfsd", "virtio-blk", "fatfs"];
+const MODULES: &[&str] = &[
+    "procmgr",
+    "devmgr",
+    "vfsd",
+    "virtio-blk",
+    "fatfs",
+    "crasher",
+];
 
 /// Entry point for `cargo xtask build`.
 pub fn run(ctx: &BuildContext, args: &BuildArgs) -> Result<()>
@@ -43,6 +50,7 @@ pub fn run(ctx: &BuildContext, args: &BuildArgs) -> Result<()>
         BuildComponent::Vfsd => build_module(ctx, args, "vfsd")?,
         BuildComponent::VirtioBlk => build_module(ctx, args, "virtio-blk")?,
         BuildComponent::Fatfs => build_module(ctx, args, "fatfs")?,
+        BuildComponent::Crasher => build_module(ctx, args, "crasher")?,
         BuildComponent::All =>
         {
             build_boot(ctx, args)?;
@@ -50,6 +58,7 @@ pub fn run(ctx: &BuildContext, args: &BuildArgs) -> Result<()>
             build_init(ctx, args)?;
             build_ktest(ctx, args)?;
             build_modules(ctx, args)?;
+            build_rootfs_binaries(ctx, args)?;
             sysroot::install_rootfs(ctx)?;
             crate::disk::create_disk_image(ctx)?;
         }
@@ -360,6 +369,73 @@ fn build_modules(ctx: &BuildContext, args: &BuildArgs) -> Result<()>
     {
         build_module(ctx, args, name)?;
     }
+    Ok(())
+}
+
+/// Binaries installed to the root partition (loaded from VFS, not boot modules).
+const ROOTFS_BINARIES: &[&str] = &["svcmgr"];
+
+/// Build binaries that are installed to the root filesystem (not boot modules).
+///
+/// These are loaded by procmgr via VFS at runtime, not by the bootloader.
+fn build_rootfs_binaries(ctx: &BuildContext, args: &BuildArgs) -> Result<()>
+{
+    for &name in ROOTFS_BINARIES
+    {
+        build_rootfs_binary(ctx, args, name)?;
+    }
+    Ok(())
+}
+
+/// Build a binary and install it to the sysroot root partition at `/bin/<name>`.
+fn build_rootfs_binary(ctx: &BuildContext, args: &BuildArgs, name: &str) -> Result<()>
+{
+    step(&format!(
+        "Building {} (rootfs) for {} ({})",
+        name,
+        args.arch,
+        profile_name(args.release)
+    ));
+
+    let triple = args.arch.kernel_target_triple();
+    let mut flags = vec![
+        "-p",
+        name,
+        "--bin",
+        name,
+        "--target",
+        triple,
+        "-Zbuild-std=core,compiler_builtins",
+        "-Zbuild-std-features=compiler-builtins-mem",
+    ];
+    if args.release
+    {
+        flags.push("--release");
+    }
+
+    clippy_check(ctx, &flags)?;
+
+    let mut cmd = cargo(&ctx.root);
+    cmd.arg("build").args(&flags);
+    run_cmd(&mut cmd)?;
+
+    let cargo_out = ctx.cargo_output_dir(triple, args.release).join(name);
+    if !cargo_out.exists()
+    {
+        bail!(
+            "expected {} binary not found: {}",
+            name,
+            cargo_out.display()
+        );
+    }
+
+    // Install to sysroot/bin/ (root partition, not ESP).
+    let bin_dir = ctx.sysroot.join("bin");
+    fs::create_dir_all(&bin_dir).with_context(|| format!("creating {}", bin_dir.display()))?;
+    let dst = bin_dir.join(name);
+    copy_file(&cargo_out, &dst)?;
+    step(&format!("{} (rootfs): {}", name, dst.display()));
+
     Ok(())
 }
 

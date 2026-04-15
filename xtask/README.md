@@ -41,16 +41,12 @@ cargo xtask run [--arch x86_64|riscv64] [--release] [--gdb] [--headless] [--verb
 | `--headless` | Run without a display window (`-display none`) |
 | `--verbose` | Show all serial output; by default output is filtered until `seraph-boot` appears |
 
-**x86-64** uses KVM acceleration (TCG when `--gdb` is set). Requires OVMF
-firmware (`dnf install edk2-ovmf` / `apt install ovmf`).
+**x86-64** uses KVM acceleration. Requires OVMF firmware
+(`dnf install edk2-ovmf` / `apt install ovmf`).
 
 **RISC-V** uses TCG emulation with edk2 UEFI firmware and OpenSBI (loaded
 automatically by QEMU's `virt` machine). Requires edk2 RISC-V firmware
 (`dnf install edk2-riscv64` / `apt install qemu-efi-riscv64`).
-
-GDB note: KVM is disabled when `--gdb` is set. TCG is ~5–10× slower than KVM;
-expect ~30s to reach the bootloader instead of ~5s. This is required for correct
-register visibility — KVM freezes all vCPUs at the reset vector in gdbserver mode.
 
 ---
 

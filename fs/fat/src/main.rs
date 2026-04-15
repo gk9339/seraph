@@ -16,7 +16,6 @@
 extern crate runtime;
 
 use process_abi::{CapType, StartupInfo};
-use runtime::log::{log, log_hex};
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -215,7 +214,7 @@ fn parse_bpb(sector_data: &[u8; SECTOR_SIZE], state: &mut FatState) -> bool
     // Validate boot signature.
     if sector_data[510] != 0x55 || sector_data[511] != 0xAA
     {
-        log("fatfs: invalid boot signature");
+        runtime::log!("fatfs: invalid boot signature");
         return false;
     }
 
@@ -228,7 +227,7 @@ fn parse_bpb(sector_data: &[u8; SECTOR_SIZE], state: &mut FatState) -> bool
     // Validate fields used as divisors to prevent division by zero.
     if state.bytes_per_sector == 0 || state.sectors_per_cluster == 0
     {
-        log("fatfs: invalid BPB: bytes_per_sector or sectors_per_cluster is zero");
+        runtime::log!("fatfs: invalid BPB: bytes_per_sector or sectors_per_cluster is zero");
         return false;
     }
 
@@ -288,22 +287,22 @@ fn parse_bpb(sector_data: &[u8; SECTOR_SIZE], state: &mut FatState) -> bool
     if total_clusters < 65525
     {
         state.fat_type = FatType::Fat16;
-        log("fatfs: detected FAT16");
+        runtime::log!("fatfs: detected FAT16");
     }
     else
     {
         state.fat_type = FatType::Fat32;
-        log("fatfs: detected FAT32");
+        runtime::log!("fatfs: detected FAT32");
     }
 
-    log_hex(
-        "fatfs: sectors_per_cluster=",
-        u64::from(state.sectors_per_cluster),
+    runtime::log!(
+        "fatfs: sectors_per_cluster={:#018x}",
+        u64::from(state.sectors_per_cluster)
     );
-    log_hex("fatfs: total_clusters=", u64::from(total_clusters));
-    log_hex(
-        "fatfs: data_start_sector=",
-        u64::from(state.data_start_sector),
+    runtime::log!("fatfs: total_clusters={:#018x}", u64::from(total_clusters));
+    runtime::log!(
+        "fatfs: data_start_sector={:#018x}",
+        u64::from(state.data_start_sector)
     );
 
     true
@@ -982,7 +981,7 @@ extern "Rust" fn main(startup: &StartupInfo) -> !
         unsafe { runtime::log::log_init(caps.log_sink, startup.ipc_buffer) };
     }
 
-    log("fatfs: starting");
+    runtime::log!("fatfs: starting");
 
     // SAFETY: IPC buffer is page-aligned.
     #[allow(clippy::cast_ptr_alignment)]
@@ -990,7 +989,7 @@ extern "Rust" fn main(startup: &StartupInfo) -> !
 
     if caps.block_dev == 0 || caps.service == 0
     {
-        log("fatfs: missing required caps");
+        runtime::log!("fatfs: missing required caps");
         idle_loop();
     }
 
@@ -1068,7 +1067,7 @@ fn handle_mount(block_dev: u32, state: &mut FatState, ipc_buf: *mut u64)
     // Read sector 0 of the partition (BPB), not sector 0 of the disk.
     if !read_sector(block_dev, 0, &mut sector_buf, ipc_buf, partition_offset)
     {
-        log("fatfs: failed to read partition sector 0");
+        runtime::log!("fatfs: failed to read partition sector 0");
         let _ = syscall::ipc_reply(2, 0, &[]); // IoError
         return;
     }
@@ -1079,7 +1078,7 @@ fn handle_mount(block_dev: u32, state: &mut FatState, ipc_buf: *mut u64)
         return;
     }
 
-    log("fatfs: filesystem mounted");
+    runtime::log!("fatfs: filesystem mounted");
     let _ = syscall::ipc_reply(0, 0, &[]);
 }
 

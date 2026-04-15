@@ -66,8 +66,6 @@ const REGISTRY_ENDPOINT_SENTINEL: u64 = 0xFFFF_FFFF_FFFF_FFFD;
 /// IPC label for `QUERY_BLOCK_DEVICE` (devmgr registry).
 const LABEL_QUERY_BLOCK_DEVICE: u64 = 1;
 
-use runtime::log::{log, log_hex};
-
 // ── Cap classification ──────────────────────────────────────────────────────
 
 struct PciMmioWindow
@@ -632,12 +630,12 @@ fn spawn_driver(
         syscall::ipc_call(procmgr_ep, LABEL_CREATE_PROCESS, 0, &[module_cap])
     else
     {
-        log("devmgr: driver CREATE_PROCESS ipc_call failed");
+        runtime::log!("devmgr: driver CREATE_PROCESS ipc_call failed");
         return;
     };
     if reply_label != 0
     {
-        log("devmgr: driver CREATE_PROCESS failed");
+        runtime::log!("devmgr: driver CREATE_PROCESS failed");
         return;
     }
 
@@ -648,7 +646,7 @@ fn spawn_driver(
     let (cap_count, reply_caps) = unsafe { syscall::read_recv_caps(ipc_buf) };
     if cap_count < 2
     {
-        log("devmgr: driver CREATE_PROCESS reply missing caps");
+        runtime::log!("devmgr: driver CREATE_PROCESS reply missing caps");
         return;
     }
     let child_cspace = reply_caps[0];
@@ -797,7 +795,7 @@ fn spawn_driver(
     )
     .is_err()
     {
-        log("devmgr: cannot map driver ProcessInfo");
+        runtime::log!("devmgr: cannot map driver ProcessInfo");
         return;
     }
 
@@ -856,8 +854,8 @@ fn spawn_driver(
     unsafe { core::ptr::write_volatile(ipc_buf, pid) };
     match syscall::ipc_call(procmgr_ep, LABEL_START_PROCESS, 1, &[])
     {
-        Ok((0, _)) => log("devmgr: driver started"),
-        _ => log("devmgr: driver START_PROCESS failed"),
+        Ok((0, _)) => runtime::log!("devmgr: driver started"),
+        _ => runtime::log!("devmgr: driver START_PROCESS failed"),
     }
 }
 
@@ -892,7 +890,7 @@ extern "Rust" fn main(startup: &StartupInfo) -> !
     // x86-64 and RISC-V).
     if caps.ecam_slot == 0
     {
-        log("devmgr: no PCI ECAM capability, halting");
+        runtime::log!("devmgr: no PCI ECAM capability, halting");
         halt_loop();
     }
 
@@ -900,12 +898,15 @@ extern "Rust" fn main(startup: &StartupInfo) -> !
     let ecam_pages = caps.ecam_size.div_ceil(PAGE_SIZE);
     if syscall::mmio_map(caps.self_aspace, caps.ecam_slot, MMIO_MAP_VA, 0).is_err()
     {
-        log("devmgr: failed to map ECAM region");
+        runtime::log!("devmgr: failed to map ECAM region");
         halt_loop();
     }
-    log("devmgr: ECAM mapped ok");
-    log_hex("devmgr: ECAM base=", caps.ecam_base);
-    log_hex("devmgr: ECAM size=", caps.ecam_size);
+    runtime::log!("devmgr: ECAM mapped ok");
+    runtime::log!(
+        "devmgr: ECAM base={:#018x} size={:#018x}",
+        caps.ecam_base,
+        caps.ecam_size
+    );
 
     let start_bus = 0u8;
     let end_bus = ((caps.ecam_size / (256 * 4096)).min(256) - 1) as u8;
@@ -928,7 +929,7 @@ extern "Rust" fn main(startup: &StartupInfo) -> !
     // SAFETY: MMIO_MAP_VA is a valid ECAM mapping.
     let dev_count = unsafe { pci_enumerate(MMIO_MAP_VA, start_bus, end_bus, &mut devices) };
 
-    log_hex("devmgr: PCI devices found: ", dev_count as u64);
+    runtime::log!("devmgr: PCI devices found: {:#018x}", dev_count as u64);
 
     // Unmap ECAM.
     let _ = syscall::mem_unmap(caps.self_aspace, MMIO_MAP_VA, ecam_pages);
@@ -937,7 +938,7 @@ extern "Rust" fn main(startup: &StartupInfo) -> !
     let blk_ep = syscall::cap_create_endpoint().unwrap_or(0);
     if blk_ep == 0
     {
-        log("devmgr: failed to create block device endpoint");
+        runtime::log!("devmgr: failed to create block device endpoint");
     }
 
     // Track whether we successfully spawned a block device driver.
@@ -951,12 +952,14 @@ extern "Rust" fn main(startup: &StartupInfo) -> !
             continue;
         }
 
-        log("devmgr: found virtio-blk PCI device");
-        log_hex("devmgr: IRQ line=", u64::from(pci_dev.irq_line));
+        runtime::log!(
+            "devmgr: found virtio-blk PCI device IRQ line={:#018x}",
+            u64::from(pci_dev.irq_line)
+        );
 
         if caps.driver_module_count == 0
         {
-            log("devmgr: no driver modules available");
+            runtime::log!("devmgr: no driver modules available");
             break;
         }
 
@@ -974,8 +977,11 @@ extern "Rust" fn main(startup: &StartupInfo) -> !
             {
                 continue;
             }
-            log_hex("devmgr: VirtIO BAR phys=", pci_dev.bar_phys[b]);
-            log_hex("devmgr: VirtIO BAR size=", pci_dev.bar_size[b]);
+            runtime::log!(
+                "devmgr: VirtIO BAR phys={:#018x} size={:#018x}",
+                pci_dev.bar_phys[b],
+                pci_dev.bar_size[b]
+            );
 
             // Try each PCI MMIO window to find one containing this BAR.
             for w in 0..caps.pci_mmio_window_count
@@ -1004,8 +1010,10 @@ extern "Rust" fn main(startup: &StartupInfo) -> !
         }
         if bar_cap_count == 0
         {
-            log("devmgr: VirtIO BAR not found in PCI windows");
-            log_hex("devmgr:   virtio_bar_idx=", u64::from(virtio_bar_idx));
+            runtime::log!(
+                "devmgr: VirtIO BAR not found in PCI windows virtio_bar_idx={:#018x}",
+                u64::from(virtio_bar_idx)
+            );
         }
 
         // Find matching IRQ cap.
@@ -1051,11 +1059,11 @@ extern "Rust" fn main(startup: &StartupInfo) -> !
 
     if caps.registry_ep == 0
     {
-        log("devmgr: no registry endpoint injected, halting");
+        runtime::log!("devmgr: no registry endpoint injected, halting");
         halt_loop();
     }
 
-    log("devmgr: enumeration complete, entering registry loop");
+    runtime::log!("devmgr: enumeration complete, entering registry loop");
     loop
     {
         let Ok((label, _)) = syscall::ipc_recv(caps.registry_ep)

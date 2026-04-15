@@ -42,10 +42,11 @@ use syscall::{
     SYS_CAP_REVOKE, SYS_DMA_GRANT, SYS_EVENT_POST, SYS_EVENT_RECV, SYS_FRAME_SPLIT,
     SYS_IOPORT_BIND, SYS_IPC_BUFFER_SET, SYS_IPC_CALL, SYS_IPC_RECV, SYS_IPC_REPLY, SYS_IRQ_ACK,
     SYS_IRQ_REGISTER, SYS_MEM_MAP, SYS_MEM_PROTECT, SYS_MEM_UNMAP, SYS_MMIO_MAP, SYS_MMIO_SPLIT,
-    SYS_SBI_CALL, SYS_SIGNAL_SEND, SYS_SIGNAL_WAIT, SYS_SYSTEM_INFO, SYS_THREAD_CONFIGURE,
-    SYS_THREAD_EXIT, SYS_THREAD_READ_REGS, SYS_THREAD_SET_AFFINITY, SYS_THREAD_SET_PRIORITY,
-    SYS_THREAD_START, SYS_THREAD_STOP, SYS_THREAD_WRITE_REGS, SYS_THREAD_YIELD, SYS_WAIT_SET_ADD,
-    SYS_WAIT_SET_REMOVE, SYS_WAIT_SET_WAIT,
+    SYS_SBI_CALL, SYS_SIGNAL_SEND, SYS_SIGNAL_WAIT, SYS_SYSTEM_INFO, SYS_THREAD_BIND_NOTIFICATION,
+    SYS_THREAD_CONFIGURE, SYS_THREAD_EXIT, SYS_THREAD_READ_REGS, SYS_THREAD_SET_AFFINITY,
+    SYS_THREAD_SET_PRIORITY, SYS_THREAD_SLEEP, SYS_THREAD_START, SYS_THREAD_STOP,
+    SYS_THREAD_WRITE_REGS, SYS_THREAD_YIELD, SYS_WAIT_SET_ADD, SYS_WAIT_SET_REMOVE,
+    SYS_WAIT_SET_WAIT,
 };
 
 // ── TrapFrame accessor shims ──────────────────────────────────────────────────
@@ -121,6 +122,8 @@ pub unsafe fn dispatch(tf: *mut TrapFrame)
         SYS_DMA_GRANT => hw::sys_dma_grant(tf),
         SYS_MMIO_SPLIT => hw::sys_mmio_split(tf),
         SYS_SBI_CALL => sbi::sys_sbi_call(tf),
+        SYS_THREAD_SLEEP => sys_thread_sleep(tf),
+        SYS_THREAD_BIND_NOTIFICATION => sys_thread_bind_notification(tf),
         _ => Err(SyscallError::UnknownSyscall),
     };
 
@@ -169,6 +172,12 @@ fn sys_exit(_tf: &mut TrapFrame) -> Result<u64, SyscallError>
         unsafe {
             (*tcb).state = ThreadState::Exited;
         }
+
+        // Post death notification if bound (exit_reason 0 = clean exit).
+        // SAFETY: tcb is valid; post_death_notification handles null eq check.
+        unsafe {
+            crate::sched::post_death_notification(tcb, 0);
+        }
     }
     // Switch to the next runnable thread. The exited thread must not be
     // re-enqueued.
@@ -179,6 +188,114 @@ fn sys_exit(_tf: &mut TrapFrame) -> Result<u64, SyscallError>
     // schedule() returns here if the same thread is re-selected (shouldn't
     // happen for an Exited thread, but halt as a safety net).
     crate::arch::current::cpu::halt_loop();
+}
+
+// ── SYS_THREAD_SLEEP ─────────────────────────────────────────────────────────
+
+/// `SYS_THREAD_SLEEP` (46): sleep the calling thread for `arg0` milliseconds.
+///
+/// The thread is added to a global sleep list and removed from the run queue.
+/// The timer tick handler wakes it when `current_tick() >= deadline`.
+#[cfg(not(test))]
+fn sys_thread_sleep(tf: &mut TrapFrame) -> Result<u64, SyscallError>
+{
+    let ms = tf.arg(0);
+    if ms == 0
+    {
+        return Ok(0);
+    }
+
+    let tps = crate::arch::current::timer::ticks_per_second();
+    let now = crate::arch::current::timer::current_tick();
+    let deadline = now.saturating_add(ms.saturating_mul(tps) / 1000);
+
+    // SAFETY: current_tcb() returns this CPU's running thread.
+    let tcb = unsafe { current_tcb() };
+    if tcb.is_null()
+    {
+        return Err(SyscallError::InvalidCapability);
+    }
+
+    // SAFETY: tcb validated non-null; fields always valid for initialized TCB.
+    unsafe {
+        (*tcb).sleep_deadline = deadline;
+        (*tcb).state = crate::sched::thread::ThreadState::Blocked;
+    }
+
+    crate::sched::sleep_list_add(tcb);
+
+    // SAFETY: called from syscall handler on valid kernel stack.
+    unsafe {
+        crate::sched::schedule(false);
+    }
+
+    // Woken up by timer_tick — return success.
+    Ok(0)
+}
+
+// ── SYS_THREAD_BIND_NOTIFICATION ─────────────────────────────────────────────
+
+/// `SYS_THREAD_BIND_NOTIFICATION` (47): bind a death notification `EventQueue`
+/// to a thread.
+///
+/// arg0 = Thread cap slot (CONTROL right required).
+/// arg1 = `EventQueue` cap slot (POST right required).
+///
+/// When the target thread exits or faults, the kernel posts the exit reason
+/// to the bound `EventQueue`.
+#[cfg(not(test))]
+#[allow(clippy::cast_possible_truncation)]
+fn sys_thread_bind_notification(tf: &mut TrapFrame) -> Result<u64, SyscallError>
+{
+    use crate::cap::slot::{CapTag, Rights};
+
+    let thread_cap_idx = tf.arg(0) as u32;
+    let eq_cap_idx = tf.arg(1) as u32;
+
+    // SAFETY: current_tcb valid in syscall context.
+    let caller = unsafe { current_tcb() };
+    if caller.is_null()
+    {
+        return Err(SyscallError::InvalidCapability);
+    }
+    // SAFETY: caller validated non-null.
+    let cspace = unsafe { (*caller).cspace };
+
+    // Look up the Thread cap (CONTROL right required).
+    // SAFETY: cspace from current thread; lookup_cap validates index, tag, rights.
+    let thread_slot =
+        unsafe { lookup_cap(cspace, thread_cap_idx, CapTag::Thread, Rights::CONTROL) }?;
+
+    // Extract target TCB from the Thread cap.
+    // SAFETY: slot validated as Thread cap; header at offset 0.
+    let obj = thread_slot.object.ok_or(SyscallError::InvalidCapability)?;
+    // cast_ptr_alignment: header at offset 0 of ThreadObject; allocator guarantees alignment.
+    // SAFETY: tag confirmed Thread; pointer is valid ThreadObject.
+    #[allow(clippy::cast_ptr_alignment)]
+    let target_tcb = unsafe { (*obj.as_ptr().cast::<crate::cap::object::ThreadObject>()).tcb };
+
+    // Look up the EventQueue cap (POST right required).
+    // SAFETY: cspace from current thread; lookup_cap validates.
+    let eq_slot = unsafe { lookup_cap(cspace, eq_cap_idx, CapTag::EventQueue, Rights::POST) }?;
+
+    let eq_obj = eq_slot.object.ok_or(SyscallError::InvalidCapability)?;
+    // cast_ptr_alignment: header at offset 0 of EventQueueObject; allocator guarantees alignment.
+    // SAFETY: tag confirmed EventQueue; pointer is valid EventQueueObject.
+    #[allow(clippy::cast_ptr_alignment)]
+    let eq_state = unsafe {
+        (*eq_obj
+            .as_ptr()
+            .cast::<crate::cap::object::EventQueueObject>())
+        .state
+    };
+
+    // Bind the notification.
+    // SAFETY: target_tcb is a valid TCB from a validated Thread cap.
+    unsafe {
+        (*target_tcb).death_notification = eq_state;
+    }
+
+    Ok(0)
 }
 
 // ── Scheduler / IPC helpers ───────────────────────────────────────────────────

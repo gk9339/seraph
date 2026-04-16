@@ -101,7 +101,7 @@ pub fn recv_blocks_until_post(ctx: &TestContext) -> TestResult
 
     let cs = cap_create_cspace(16).map_err(|_| "cap_create_cspace failed")?;
     // Pass all rights for the queue; SIGNAL right for the sync signal.
-    let child_eq = cap_copy(eq, cs, !0u64).map_err(|_| "cap_copy eq failed")?;
+    let child_eq = cap_copy(eq, cs, syscall::RIGHTS_ALL).map_err(|_| "cap_copy eq failed")?;
     let child_sync = cap_copy(sync, cs, 1 << 7).map_err(|_| "cap_copy sync failed")?;
     let child_arg = u64::from(child_eq) | (u64::from(child_sync) << 16);
 

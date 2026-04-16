@@ -131,6 +131,11 @@ are never reassigned or reused.
 19  SYS_THREAD_START          41  SYS_ASPACE_QUERY
 20  SYS_THREAD_STOP           42  SYS_IPC_BUFFER_SET
 21  SYS_THREAD_YIELD          43  SYS_SYSTEM_INFO
+                                44  SYS_SBI_CALL
+                                45  SYS_MMIO_SPLIT
+                                46  SYS_THREAD_SLEEP
+                                47  SYS_THREAD_BIND_NOTIFICATION
+                                48  SYS_CAP_DERIVE_TOKEN
 ```
 
 **W6 implementation status:** Handlers implemented as of W6: 0–9 (IPC,
@@ -270,11 +275,15 @@ Wait for a call on an endpoint. Blocks until a caller arrives.
 
 - `rax`/`a0`: 0 on success; `SyscallError` on failure
 - `rdx`/`a1`: label from the incoming message
+- `rsi`/`a2`: token from the sender's endpoint capability (0 if untokened)
 
 Data words up to `MSG_REGS_DATA_MAX` are returned in registers. Extended payload
 (when the sender set `flags` bit 0) is written to the receiver's IPC buffer page.
 The kernel places a reply capability into a per-thread slot (`reply_cap_slot`);
 this capability is retrieved implicitly by `SYS_IPC_REPLY`.
+
+The token is the value attached to the sender's endpoint capability via
+`SYS_CAP_DERIVE_TOKEN`. It identifies the caller without a forgeable PID.
 
 **Capability requirement:** `endpoint_cap` must have Receive rights.
 
@@ -482,6 +491,39 @@ in the global derivation tree for revocation tracking.
 
 **Errors:** `InvalidCapability` (source invalid or null), `AccessDenied` (requested
 rights exceed those held in source), `OutOfMemory` (no free CSpace slot).
+
+If the source capability has a non-zero token, the derived capability inherits it.
+
+---
+
+### `SYS_CAP_DERIVE_TOKEN` (48)
+
+Derive a new capability with an attached token value.
+
+**Arguments:**
+
+| # | Name | Description |
+|---|---|---|
+| 0 | `source_cap` | Source capability descriptor |
+| 1 | `rights_mask` | Rights bitmask for the derived capability (subset of source) |
+| 2 | `token` | Token value to attach (must be non-zero) |
+
+**Return:** `rax`/`a0`: new capability descriptor on success; `SyscallError` on failure.
+
+The token is an immutable `u64` value stored in the capability slot. When the
+tokened capability is used for IPC (via `SYS_IPC_CALL`), the kernel delivers
+the token to the receiver as the third return value of `SYS_IPC_RECV`.
+
+Tokens are generic — any capability type can carry a token, not just endpoints.
+For non-endpoint types, the token is stored but not delivered via any kernel
+mechanism; userspace can use it for bookkeeping.
+
+The source capability must have `token == 0`. Re-tokening (setting a new token
+on an already-tokened cap) returns `InvalidArgument`. Derivation via
+`SYS_CAP_DERIVE` inherits the source's token.
+
+**Errors:** `InvalidCapability`, `InvalidArgument` (token is zero or source
+already tokened), `OutOfMemory`.
 
 ---
 

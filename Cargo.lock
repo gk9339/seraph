@@ -218,6 +218,7 @@ checksum = "19d374276b40fb8bbdee95aef7c7fa6b5316ec764510eb64b8dd0e2ed0d7e7f5"
 name = "devmgr"
 version = "0.1.0"
 dependencies = [
+ "ipc",
  "process-abi",
  "runtime",
  "syscall",
@@ -239,6 +240,7 @@ checksum = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f"
 name = "fatfs"
 version = "0.1.0"
 dependencies = [
+ "ipc",
  "process-abi",
  "runtime",
  "syscall",
@@ -367,6 +369,7 @@ version = "0.1.0"
 dependencies = [
  "elf",
  "init-protocol",
+ "ipc",
  "process-abi",
  "syscall",
  "syscall-abi",
@@ -377,6 +380,14 @@ name = "init-protocol"
 version = "0.1.0"
 dependencies = [
  "process-abi",
+]
+
+[[package]]
+name = "ipc"
+version = "0.1.0"
+dependencies = [
+ "process-abi",
+ "syscall",
 ]
 
 [[package]]
@@ -494,6 +505,7 @@ name = "procmgr"
 version = "0.1.0"
 dependencies = [
  "elf",
+ "ipc",
  "process-abi",
  "runtime",
  "syscall",
@@ -600,9 +612,11 @@ checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
 name = "svcmgr"
 version = "0.1.0"
 dependencies = [
+ "ipc",
  "process-abi",
  "runtime",
  "syscall",
+ "syscall-abi",
 ]
 
 [[package]]
@@ -660,6 +674,7 @@ dependencies = [
 name = "vfsd"
 version = "0.1.0"
 dependencies = [
+ "ipc",
  "process-abi",
  "runtime",
  "syscall",
@@ -670,6 +685,7 @@ dependencies = [
 name = "virtio-blk"
 version = "0.1.0"
 dependencies = [
+ "ipc",
  "process-abi",
  "runtime",
  "syscall",

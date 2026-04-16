@@ -1,0 +1,183 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 George Kottler <mail@kottlerg.com>
+
+// fs/fat/src/bpb.rs
+
+//! BIOS Parameter Block parsing and FAT filesystem state.
+//!
+//! Reads sector 0 of a FAT partition, validates the boot signature, and
+//! populates a [`FatState`] with geometry fields needed by the rest of the
+//! driver (cluster size, FAT start, data region start, FAT type).
+
+/// Sector size in bytes (fixed at 512 for block device IPC).
+pub const SECTOR_SIZE: usize = 512;
+
+/// FAT variant detected from cluster count.
+#[derive(Clone, Copy)]
+pub enum FatType
+{
+    Fat16,
+    Fat32,
+}
+
+/// Parsed FAT filesystem geometry and cached FAT sector.
+pub struct FatState
+{
+    pub fat_type: FatType,
+    pub bytes_per_sector: u16,
+    pub sectors_per_cluster: u8,
+    pub reserved_sectors: u16,
+    pub num_fats: u8,
+    /// Root directory entry count (FAT16 only).
+    pub root_entry_count: u16,
+    /// Sectors per FAT table.
+    pub fat_size: u32,
+    /// Root cluster number (FAT32 only).
+    pub root_cluster: u32,
+    /// First sector of the data region.
+    pub data_start_sector: u32,
+    /// LBA offset of the partition on the raw disk.
+    /// Added to all sector numbers before issuing block reads.
+    pub partition_offset: u64,
+    /// Cached FAT sector number (avoids re-reads for sequential access).
+    pub cached_fat_sector: u32,
+    /// Cached FAT sector data.
+    pub cached_fat_data: [u8; SECTOR_SIZE],
+}
+
+impl FatState
+{
+    /// Create a default state (pre-mount).
+    pub fn new() -> Self
+    {
+        Self {
+            fat_type: FatType::Fat32,
+            bytes_per_sector: 512,
+            sectors_per_cluster: 1,
+            reserved_sectors: 0,
+            num_fats: 2,
+            root_entry_count: 0,
+            fat_size: 0,
+            root_cluster: 2,
+            data_start_sector: 0,
+            partition_offset: 0,
+            cached_fat_sector: u32::MAX,
+            cached_fat_data: [0; SECTOR_SIZE],
+        }
+    }
+
+    /// First sector of a given cluster.
+    pub fn cluster_to_sector(&self, cluster: u32) -> u32
+    {
+        self.data_start_sector + (cluster - 2) * u32::from(self.sectors_per_cluster)
+    }
+
+    /// Bytes per cluster.
+    pub fn cluster_size(&self) -> u32
+    {
+        u32::from(self.sectors_per_cluster) * u32::from(self.bytes_per_sector)
+    }
+}
+
+/// Parse the BIOS Parameter Block from sector 0.
+#[allow(clippy::too_many_lines)]
+// Justification: linear field extraction from a fixed binary format; splitting
+// would scatter related validation without improving clarity.
+pub fn parse_bpb(sector_data: &[u8; SECTOR_SIZE], state: &mut FatState) -> bool
+{
+    // Validate boot signature.
+    if sector_data[510] != 0x55 || sector_data[511] != 0xAA
+    {
+        runtime::log!("fatfs: invalid boot signature");
+        return false;
+    }
+
+    state.bytes_per_sector = u16::from_le_bytes([sector_data[11], sector_data[12]]);
+    state.sectors_per_cluster = sector_data[13];
+    state.reserved_sectors = u16::from_le_bytes([sector_data[14], sector_data[15]]);
+    state.num_fats = sector_data[16];
+    state.root_entry_count = u16::from_le_bytes([sector_data[17], sector_data[18]]);
+
+    // Validate fields used as divisors to prevent division by zero.
+    if state.bytes_per_sector == 0 || state.sectors_per_cluster == 0
+    {
+        runtime::log!("fatfs: invalid BPB: bytes_per_sector or sectors_per_cluster is zero");
+        return false;
+    }
+
+    let total_sectors_16 = u16::from_le_bytes([sector_data[19], sector_data[20]]);
+    let fat_size_16 = u16::from_le_bytes([sector_data[22], sector_data[23]]);
+    let total_sectors_32 = u32::from_le_bytes([
+        sector_data[32],
+        sector_data[33],
+        sector_data[34],
+        sector_data[35],
+    ]);
+
+    // FAT32 extended BPB.
+    let fat_size_32 = u32::from_le_bytes([
+        sector_data[36],
+        sector_data[37],
+        sector_data[38],
+        sector_data[39],
+    ]);
+    state.root_cluster = u32::from_le_bytes([
+        sector_data[44],
+        sector_data[45],
+        sector_data[46],
+        sector_data[47],
+    ]);
+
+    state.fat_size = if fat_size_16 != 0
+    {
+        u32::from(fat_size_16)
+    }
+    else
+    {
+        fat_size_32
+    };
+
+    let total_sectors = if total_sectors_16 != 0
+    {
+        u32::from(total_sectors_16)
+    }
+    else
+    {
+        total_sectors_32
+    };
+
+    // Root directory sectors (FAT16 only).
+    let root_dir_sectors =
+        (u32::from(state.root_entry_count) * 32).div_ceil(u32::from(state.bytes_per_sector));
+
+    state.data_start_sector = u32::from(state.reserved_sectors)
+        + u32::from(state.num_fats) * state.fat_size
+        + root_dir_sectors;
+
+    let data_sectors = total_sectors.saturating_sub(state.data_start_sector);
+    let total_clusters = data_sectors / u32::from(state.sectors_per_cluster);
+
+    // FAT type determination per Microsoft specification.
+    if total_clusters < 65525
+    {
+        state.fat_type = FatType::Fat16;
+        runtime::log!("fatfs: detected FAT16");
+    }
+    else
+    {
+        state.fat_type = FatType::Fat32;
+        runtime::log!("fatfs: detected FAT32");
+    }
+
+    runtime::log!(
+        "fatfs: sectors_per_cluster={:#018x}",
+        u64::from(state.sectors_per_cluster)
+    );
+    runtime::log!("fatfs: total_clusters={:#018x}", u64::from(total_clusters));
+    runtime::log!(
+        "fatfs: data_start_sector={:#018x}",
+        u64::from(state.data_start_sector)
+    );
+
+    true
+}

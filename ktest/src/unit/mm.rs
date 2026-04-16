@@ -16,7 +16,7 @@
 //! `frame_split` consumes the RODATA frame (`aspace_cap + 2`). TEXT and BSS
 //! frames are left intact for the tests that use them directly.
 
-use syscall::{aspace_query, mem_map, mem_unmap, PROT_READ, PROT_WRITE};
+use syscall::{aspace_query, mem_map, mem_unmap, MAP_READONLY, MAP_WRITABLE};
 
 use crate::{TestContext, TestResult};
 
@@ -179,7 +179,7 @@ pub fn mem_map_unaligned_vaddr_err(ctx: &TestContext) -> TestResult
 {
     let frame =
         crate::frame_pool::alloc().ok_or("mem_map_unaligned_vaddr_err: frame pool exhausted")?;
-    let err = mem_map(frame, ctx.aspace_cap, TEST_VA + 1, 0, 1, PROT_WRITE);
+    let err = mem_map(frame, ctx.aspace_cap, TEST_VA + 1, 0, 1, MAP_WRITABLE);
 
     // SAFETY: frame was allocated from pool and never successfully mapped.
     unsafe { crate::frame_pool::free(frame) };
@@ -199,7 +199,7 @@ pub fn mem_map_kernel_half_err(ctx: &TestContext) -> TestResult
     let frame =
         crate::frame_pool::alloc().ok_or("mem_map_kernel_half_err: frame pool exhausted")?;
     let kernel_va: u64 = 0xFFFF_8000_0000_0000;
-    let err = mem_map(frame, ctx.aspace_cap, kernel_va, 0, 1, PROT_WRITE);
+    let err = mem_map(frame, ctx.aspace_cap, kernel_va, 0, 1, MAP_WRITABLE);
 
     // SAFETY: frame was allocated from pool and never successfully mapped.
     unsafe { crate::frame_pool::free(frame) };
@@ -249,11 +249,18 @@ pub fn mem_protect_exceeds_cap_rights_err(ctx: &TestContext) -> TestResult
     // Use the TEXT segment frame which has MAP|EXECUTE but no WRITE.
     let text_frame = ctx.aspace_cap + 1;
 
-    mem_map(text_frame, ctx.aspace_cap, PROTECT_TEST_VA, 0, 1, PROT_READ)
-        .map_err(|_| "mem_map for protect-rights test failed")?;
+    mem_map(
+        text_frame,
+        ctx.aspace_cap,
+        PROTECT_TEST_VA,
+        0,
+        1,
+        MAP_READONLY,
+    )
+    .map_err(|_| "mem_map for protect-rights test failed")?;
 
     // TEXT cap has MAP|EXECUTE but no WRITE — requesting WRITE must fail.
-    let err = syscall::mem_protect(text_frame, ctx.aspace_cap, PROTECT_TEST_VA, 1, PROT_WRITE);
+    let err = syscall::mem_protect(text_frame, ctx.aspace_cap, PROTECT_TEST_VA, 1, MAP_WRITABLE);
 
     // Always unmap regardless of protect result.
     mem_unmap(ctx.aspace_cap, PROTECT_TEST_VA, 1).ok();
@@ -279,10 +286,17 @@ pub fn mem_map_multi_page(ctx: &TestContext) -> TestResult
     let frame_b = crate::frame_pool::alloc().ok_or("mem_map_multi_page: frame_b exhausted")?;
 
     // Map each frame at consecutive pages.
-    mem_map(frame_a, ctx.aspace_cap, MULTI_VA, 0, 1, PROT_WRITE)
+    mem_map(frame_a, ctx.aspace_cap, MULTI_VA, 0, 1, MAP_WRITABLE)
         .map_err(|_| "mem_map frame_a failed")?;
-    mem_map(frame_b, ctx.aspace_cap, MULTI_VA + 0x1000, 0, 1, PROT_WRITE)
-        .map_err(|_| "mem_map frame_b failed")?;
+    mem_map(
+        frame_b,
+        ctx.aspace_cap,
+        MULTI_VA + 0x1000,
+        0,
+        1,
+        MAP_WRITABLE,
+    )
+    .map_err(|_| "mem_map frame_b failed")?;
 
     // Both pages must be queryable.
     let phys_a =
@@ -315,7 +329,7 @@ pub fn mem_map_multi_page(ctx: &TestContext) -> TestResult
 pub fn mem_map_zero_pages_err(ctx: &TestContext) -> TestResult
 {
     let frame = crate::frame_pool::alloc().ok_or("mem_map_zero_pages_err: frame pool exhausted")?;
-    let err = mem_map(frame, ctx.aspace_cap, TEST_VA, 0, 0, PROT_WRITE);
+    let err = mem_map(frame, ctx.aspace_cap, TEST_VA, 0, 0, MAP_WRITABLE);
 
     // SAFETY: frame allocated from pool and never mapped.
     unsafe { crate::frame_pool::free(frame) };
@@ -336,7 +350,7 @@ pub fn mem_map_offset_beyond_frame_err(ctx: &TestContext) -> TestResult
         .ok_or("mem_map_offset_beyond_frame_err: frame pool exhausted")?;
     // Pool frames are single-page (4 KiB). offset_pages=1 means byte offset 0x1000,
     // which is at the end of the frame — mapping 1 page from there overflows.
-    let err = mem_map(frame, ctx.aspace_cap, TEST_VA, 1, 1, PROT_WRITE);
+    let err = mem_map(frame, ctx.aspace_cap, TEST_VA, 1, 1, MAP_WRITABLE);
 
     // SAFETY: frame allocated from pool and never mapped.
     unsafe { crate::frame_pool::free(frame) };
@@ -379,7 +393,7 @@ pub fn mem_protect_wx_err(ctx: &TestContext) -> TestResult
         ctx.aspace_cap,
         WX_TEST_VA,
         1,
-        PROT_WRITE | syscall::PROT_EXEC,
+        MAP_WRITABLE | syscall::MAP_EXECUTABLE,
     );
     if err.is_ok()
     {
@@ -402,7 +416,7 @@ pub fn mem_map_wx_prot_err(ctx: &TestContext) -> TestResult
         0x4400_0000,
         0,
         1,
-        PROT_WRITE | syscall::PROT_EXEC,
+        MAP_WRITABLE | syscall::MAP_EXECUTABLE,
     );
 
     if err.is_ok()

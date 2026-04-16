@@ -1,0 +1,17 @@
+[package]
+name = "ipc"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# no_std: shared IPC helpers for bare-metal userspace services.
+[lib]
+test = false
+doctest = false
+
+[dependencies]
+process-abi = { path = "../../abi/process-abi" }
+syscall = { path = "../syscall" }
+
+[lints]
+workspace = true

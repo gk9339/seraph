@@ -107,21 +107,41 @@ struct Idtr
 
 // ── ExceptionFrame ────────────────────────────────────────────────────────────
 
-/// Register state saved on the stack by the ISR stubs.
+/// Full register state saved on the stack by the ISR trampoline.
 ///
-/// Layout (from lowest address / first pushed):
+/// The trampoline pushes all GPRs before calling the exception handler, so
+/// fault diagnostics can dump the complete register snapshot. Layout:
+///
 /// ```text
-/// [rsp+0]  vector        (pushed by stub)
-/// [rsp+8]  error_code    (hardware or dummy 0)
-/// [rsp+16] rip           (hardware)
-/// [rsp+24] cs            (hardware)
-/// [rsp+32] rflags        (hardware)
-/// [rsp+40] rsp           (hardware; pushed on CPL change only)
-/// [rsp+48] ss            (hardware; pushed on CPL change only)
+/// [rsp+0..120]  GPRs: rax rbx rcx rdx rsi rdi rbp r8-r15
+/// [rsp+120]     vector        (pushed by ISR stub)
+/// [rsp+128]     error_code    (hardware or dummy 0)
+/// [rsp+136]     rip           (hardware)
+/// [rsp+144]     cs            (hardware)
+/// [rsp+152]     rflags        (hardware)
+/// [rsp+160]     rsp           (hardware; pushed on CPL change only)
+/// [rsp+168]     ss            (hardware; pushed on CPL change only)
 /// ```
 #[repr(C)]
 pub struct ExceptionFrame
 {
+    // GPRs pushed by trampoline (lowest addresses).
+    pub rax: u64,
+    pub rbx: u64,
+    pub rcx: u64,
+    pub rdx: u64,
+    pub rsi: u64,
+    pub rdi: u64,
+    pub rbp: u64,
+    pub r8: u64,
+    pub r9: u64,
+    pub r10: u64,
+    pub r11: u64,
+    pub r12: u64,
+    pub r13: u64,
+    pub r14: u64,
+    pub r15: u64,
+    // Hardware + stub fields (higher addresses).
     pub vector: u64,
     pub error_code: u64,
     pub rip: u64,
@@ -164,6 +184,10 @@ unsafe extern "C" fn common_exception_handler(frame: *const ExceptionFrame) -> !
     // Check if the fault came from userspace (CPL 3) or kernel (CPL 0).
     let is_userspace = (f.cs & 3) != 0;
 
+    // Disable interrupts before printing to prevent serial interleaving.
+    // SAFETY: ring 0 context; this is a crash path.
+    unsafe { core::arch::asm!("cli", options(nomem, nostack)) };
+
     if is_userspace
     {
         // SAFETY: current_tcb() returns this CPU's running thread; valid in
@@ -178,18 +202,19 @@ unsafe extern "C" fn common_exception_handler(frame: *const ExceptionFrame) -> !
             // SAFETY: tcb validated non-null.
             unsafe { (*tcb).thread_id }
         };
-        // Disable interrupts before printing to prevent serial interleaving.
-        // SAFETY: ring 0 context; this is a crash path so stopping other CPUs is acceptable.
-        unsafe { core::arch::asm!("cli", options(nomem, nostack)) };
-        crate::kprintln!(
-            "USERSPACE FAULT: tid={} vec={} err={:#x} rip={:#x} cr2={:#x} rsp={:#x}",
+
+        let cpu = super::cpu::current_cpu();
+        crate::kprintln_serial!(
+            "USERSPACE FAULT: tid={} cpu={} cause={} (vec={} err={:#x})",
             tid,
+            cpu,
+            x86_exception_name(f.vector),
             f.vector,
             f.error_code,
-            f.rip,
-            cr2,
-            f.rsp,
         );
+        crate::kprintln_serial!("  rip={:#018x}  cr2={:#018x}", f.rip, cr2);
+        dump_x86_regs(f);
+
         if !tcb.is_null()
         {
             // SAFETY: tcb validated non-null; state field always valid.
@@ -197,10 +222,11 @@ unsafe extern "C" fn common_exception_handler(frame: *const ExceptionFrame) -> !
                 (*tcb).state = crate::sched::thread::ThreadState::Exited;
             }
 
-            // Post death notification if bound (exit_reason = vector + 1).
+            // Post death notification if bound (exit_reason = EXIT_FAULT_BASE + vector).
+            // EXIT_FAULT_BASE = 0x1000 (matches syscall_abi::EXIT_FAULT_BASE).
             // SAFETY: tcb is valid; post_death_notification handles null check.
             unsafe {
-                crate::sched::post_death_notification(tcb, f.vector + 1);
+                crate::sched::post_death_notification(tcb, 0x1000 + f.vector);
             }
         }
 
@@ -213,17 +239,116 @@ unsafe extern "C" fn common_exception_handler(frame: *const ExceptionFrame) -> !
     }
     else
     {
+        let cpu = super::cpu::current_cpu();
         crate::kprintln!(
-            "EXCEPTION: vector={} error_code={:#x} rip={:#x} cs={:#x} rflags={:#x} cr2={:#x}",
+            "KERNEL EXCEPTION: cpu={} cause={} (vec={} err={:#x})",
+            cpu,
+            x86_exception_name(f.vector),
             f.vector,
             f.error_code,
-            f.rip,
-            f.cs,
-            f.rflags,
-            cr2,
         );
-        fatal("unhandled exception");
+        crate::kprintln!("  rip={:#018x}  cr2={:#018x}", f.rip, cr2);
+        crate::kprintln!("  cs={:#x}  rflags={:#018x}", f.cs, f.rflags,);
+        dump_x86_regs_console(f);
+        fatal("unhandled kernel exception");
     }
+}
+
+// ── Fault diagnostics ────────────────────────────────────────────────────────
+
+/// Human-readable name for an x86-64 exception vector.
+fn x86_exception_name(vector: u64) -> &'static str
+{
+    match vector
+    {
+        0 => "#DE divide error",
+        1 => "#DB debug",
+        2 => "NMI",
+        3 => "#BP breakpoint",
+        4 => "#OF overflow",
+        5 => "#BR bound range",
+        6 => "#UD invalid opcode",
+        7 => "#NM device not available",
+        8 => "#DF double fault",
+        10 => "#TS invalid TSS",
+        11 => "#NP segment not present",
+        12 => "#SS stack fault",
+        13 => "#GP general protection",
+        14 => "#PF page fault",
+        16 => "#MF x87 FP error",
+        17 => "#AC alignment check",
+        18 => "#MC machine check",
+        19 => "#XM SIMD FP error",
+        20 => "#VE virtualization",
+        21 => "#CP control protection",
+        _ => "unknown",
+    }
+}
+
+/// Dump all general-purpose registers from an x86-64 exception frame (serial only).
+fn dump_x86_regs(f: &ExceptionFrame)
+{
+    crate::kprintln_serial!(
+        "  rax={:#018x}  rbx={:#018x}  rcx={:#018x}  rdx={:#018x}",
+        f.rax,
+        f.rbx,
+        f.rcx,
+        f.rdx
+    );
+    crate::kprintln_serial!(
+        "  rsi={:#018x}  rdi={:#018x}  rbp={:#018x}  rsp={:#018x}",
+        f.rsi,
+        f.rdi,
+        f.rbp,
+        f.rsp
+    );
+    crate::kprintln_serial!(
+        "   r8={:#018x}   r9={:#018x}  r10={:#018x}  r11={:#018x}",
+        f.r8,
+        f.r9,
+        f.r10,
+        f.r11
+    );
+    crate::kprintln_serial!(
+        "  r12={:#018x}  r13={:#018x}  r14={:#018x}  r15={:#018x}",
+        f.r12,
+        f.r13,
+        f.r14,
+        f.r15
+    );
+}
+
+/// Dump all general-purpose registers to both serial and framebuffer (for kernel faults).
+fn dump_x86_regs_console(f: &ExceptionFrame)
+{
+    crate::kprintln!(
+        "  rax={:#018x}  rbx={:#018x}  rcx={:#018x}  rdx={:#018x}",
+        f.rax,
+        f.rbx,
+        f.rcx,
+        f.rdx
+    );
+    crate::kprintln!(
+        "  rsi={:#018x}  rdi={:#018x}  rbp={:#018x}  rsp={:#018x}",
+        f.rsi,
+        f.rdi,
+        f.rbp,
+        f.rsp
+    );
+    crate::kprintln!(
+        "   r8={:#018x}   r9={:#018x}  r10={:#018x}  r11={:#018x}",
+        f.r8,
+        f.r9,
+        f.r10,
+        f.r11
+    );
+    crate::kprintln!(
+        "  r12={:#018x}  r13={:#018x}  r14={:#018x}  r15={:#018x}",
+        f.r12,
+        f.r13,
+        f.r14,
+        f.r15
+    );
 }
 
 // ── ISR stub macro ────────────────────────────────────────────────────────────
@@ -267,25 +392,33 @@ macro_rules! isr_stub {
     };
 }
 
-/// Common trampoline: adjusts the stack and calls `common_exception_handler`.
+/// Common trampoline: saves GPRs and calls `common_exception_handler`.
 ///
-/// At entry, the stack holds:
-/// ```text
-/// [rsp+0]  vector
-/// [rsp+8]  error_code
-/// [rsp+16] rip
-/// [rsp+24] cs
-/// [rsp+32] rflags
-/// [rsp+40] rsp (if CPL change)
-/// [rsp+48] ss  (if CPL change)
-/// ```
-/// We pass `rsp` as the first argument (pointer to `ExceptionFrame`).
+/// At entry, the stack holds the ISR stub frame (vector + error code) and
+/// hardware frame (rip, cs, rflags, rsp, ss). We push all GPRs to create
+/// a full [`ExceptionFrame`], then pass a pointer to it.
 #[cfg(not(test))]
 #[unsafe(naked)]
 unsafe extern "C" fn common_exception_trampoline()
 {
     core::arch::naked_asm!(
-        // rsp now points at the vector field — that is our ExceptionFrame.
+        // Save all GPRs (must match ExceptionFrame field order).
+        "push r15",
+        "push r14",
+        "push r13",
+        "push r12",
+        "push r11",
+        "push r10",
+        "push r9",
+        "push r8",
+        "push rbp",
+        "push rdi",
+        "push rsi",
+        "push rdx",
+        "push rcx",
+        "push rbx",
+        "push rax",
+        // rsp now points at the full ExceptionFrame.
         "mov rdi, rsp",
         "call {handler}",
         // common_exception_handler never returns; ud2 guards against it.

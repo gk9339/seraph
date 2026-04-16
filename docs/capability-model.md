@@ -174,6 +174,23 @@ capability slots across all processes, enabling correct revocation.
 
 ---
 
+## Tokens
+
+A capability may carry an immutable **token** — a `u64` value attached at derivation
+time via `SYS_CAP_DERIVE_TOKEN`. Tokens serve as unforgeable caller identifiers:
+when a tokened endpoint capability is used for IPC, the kernel delivers the token
+to the receiver alongside the message label.
+
+Tokens are generic: any capability type may carry one. For endpoints, the kernel
+delivers the token on `ipc_recv`. For other types, the token is stored but not
+automatically delivered — userspace may use it for bookkeeping.
+
+A token is set once and cannot be changed. Deriving from a tokened capability
+inherits the token. Attempting to set a new token on an already-tokened capability
+returns an error.
+
+---
+
 ## Transfer
 
 A capability may be transferred via IPC (see [ipc-design.md](ipc-design.md)). Transfer

@@ -296,7 +296,7 @@ impl FrameGuard
             va,
             0,
             1,
-            syscall::PROT_WRITE,
+            syscall::MAP_WRITABLE,
         )?;
         self.mapped_va = Some(va);
         Ok(())

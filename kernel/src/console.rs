@@ -162,6 +162,55 @@ pub unsafe fn console_write_fmt(args: core::fmt::Arguments)
     CONSOLE_LOCK.store(false, Ordering::Release);
 }
 
+/// Write a formatted string to the serial port only.
+///
+/// Acquires `CONSOLE_LOCK` normally (spin-waits) but writes only to serial,
+/// skipping the framebuffer. Used for userspace fault diagnostics that should
+/// not overwrite whatever is on the display.
+///
+/// # Safety
+/// `console::init` must have been called before this function.
+#[cfg(not(test))]
+pub unsafe fn serial_write_fmt(args: core::fmt::Arguments)
+{
+    use core::fmt::Write;
+
+    struct SerialWriter;
+    impl core::fmt::Write for SerialWriter
+    {
+        fn write_str(&mut self, s: &str) -> core::fmt::Result
+        {
+            // SAFETY: serial was initialised by console::init.
+            unsafe {
+                for byte in s.bytes()
+                {
+                    if byte == b'\n'
+                    {
+                        serial_write_byte(b'\r');
+                    }
+                    serial_write_byte(byte);
+                }
+            }
+            Ok(())
+        }
+    }
+
+    while CONSOLE_LOCK
+        .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+        .is_err()
+    {
+        core::hint::spin_loop();
+    }
+
+    let _ = SerialWriter.write_fmt(args);
+
+    CONSOLE_LOCK.store(false, Ordering::Release);
+}
+
+/// No-op stub for test builds.
+#[cfg(test)]
+pub unsafe fn serial_write_fmt(_args: core::fmt::Arguments) {}
+
 /// Write a formatted string to the serial port only, for use inside panic handlers.
 ///
 /// Unlike `console_write_fmt`, this function:
@@ -288,6 +337,58 @@ pub fn print_timestamp()
 #[cfg(test)]
 pub fn print_timestamp() {}
 
+/// Serial-only variant of [`print_timestamp`].
+#[cfg(not(test))]
+pub fn print_serial_timestamp()
+{
+    use crate::arch::current::timer;
+
+    let Some(us) = timer::elapsed_us()
+    else
+    {
+        // SAFETY: console is initialised.
+        unsafe {
+            serial_write_fmt(format_args!("[--------] "));
+        }
+        return;
+    };
+
+    let sec = us / 1_000_000;
+    let us_frac = us % 1_000_000;
+
+    let mut sec_buf = [0u8; 20];
+    let sec_str = {
+        let mut n = sec;
+        let mut len = 0usize;
+        if n == 0
+        {
+            sec_buf[0] = b'0';
+            len = 1;
+        }
+        else
+        {
+            while n > 0
+            {
+                sec_buf[len] = b'0' + (n % 10) as u8;
+                n /= 10;
+                len += 1;
+            }
+            sec_buf[..len].reverse();
+        }
+        // SAFETY: buf contains only ASCII digit bytes.
+        unsafe { core::str::from_utf8_unchecked(&sec_buf[..len]) }
+    };
+
+    // SAFETY: console is initialised.
+    unsafe {
+        serial_write_fmt(format_args!("[{sec_str}.{us_frac:06}] "));
+    }
+}
+
+/// No-op stub for test builds.
+#[cfg(test)]
+pub fn print_serial_timestamp() {}
+
 /// Print a formatted string to the kernel console.
 ///
 /// Accepts the same format arguments as `std::print!`. Requires
@@ -302,6 +403,35 @@ macro_rules! kprint {
         unsafe {
             $crate::console::console_write_fmt(_args);
         }
+    }};
+}
+
+/// Print a formatted string to serial only (no framebuffer).
+///
+/// Used for userspace fault diagnostics that should not disturb the display.
+#[macro_export]
+macro_rules! kprint_serial {
+    ($($arg:tt)*) => {{
+        let _args = format_args!($($arg)*);
+        // SAFETY: console is initialized before any macro usage.
+        unsafe {
+            $crate::console::serial_write_fmt(_args);
+        }
+    }};
+}
+
+/// Print a formatted string followed by `\n` to serial only.
+///
+/// Prepends a `[S.NNNNNN] kernel: ` timestamp prefix (via serial only).
+/// Used for userspace fault diagnostics.
+#[macro_export]
+macro_rules! kprintln_serial {
+    () => {
+        $crate::kprint_serial!("\n")
+    };
+    ($($arg:tt)*) => {{
+        $crate::console::print_serial_timestamp();
+        $crate::kprint_serial!("kernel: {}\n", format_args!($($arg)*))
     }};
 }
 

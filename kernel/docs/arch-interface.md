@@ -487,6 +487,11 @@ impl TrapFrame
     /// On RISC-V:  primary → a0,  label → a1.
     pub fn set_ipc_return(&mut self, primary: u64, label: u64);
 
+    /// Write IPC return values with token: primary, label, and token.
+    /// On x86-64: primary → rax, label → rdx, token → rsi.
+    /// On RISC-V:  primary → a0,  label → a1,  token → a2.
+    pub fn set_ipc_return_with_token(&mut self, primary: u64, label: u64, token: u64);
+
     /// Initialise the frame for first entry to user mode.
     ///
     /// Sets the user entry point and user stack pointer. All other fields

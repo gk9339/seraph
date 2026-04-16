@@ -1,7 +1,8 @@
 # VFS IPC Interface
 
-IPC interface exposed by vfsd to applications and services: open, read, close,
-stat, and readdir operations on the unified filesystem namespace.
+IPC interface exposed by vfsd to applications and services: namespace resolution
+(open) and mount management. After opening a file, clients receive a per-file
+capability and perform file operations directly on the filesystem driver.
 
 ---
 
@@ -16,13 +17,15 @@ capabilities are delegated to any process that needs filesystem access.
 ## Messages
 
 All requests use `SYS_IPC_CALL` (synchronous call/reply). The message label
-field identifies the operation. Data words and capability slots carry arguments;
-the reply carries results.
+field identifies the operation.
 
 ### Label 1: `OPEN`
 
-Open a file or directory by path. Returns a file descriptor for subsequent
-operations.
+Open a file or directory by path. vfsd resolves the mount point, forwards
+`FS_OPEN` to the filesystem driver, and relays the per-file capability back
+to the client. After this call, the client holds a direct tokened capability
+to the driver and performs all file operations (read, close, stat, readdir)
+without further vfsd involvement.
 
 **Request:**
 
@@ -40,7 +43,11 @@ longer paths are not supported in this version.
 | Field | Value |
 |---|---|
 | label | 0 (success) |
-| data[0] | File descriptor (u64, vfsd-assigned) |
+| cap[0] | Per-file capability (tokened Send endpoint to the filesystem driver) |
+
+The client uses this capability for all subsequent file operations. See
+[fs/docs/fs-driver-protocol.md](../../fs/docs/fs-driver-protocol.md) for the
+file operation protocol (read, close, stat, readdir).
 
 **Reply (error):**
 
@@ -52,58 +59,25 @@ longer paths are not supported in this version.
 
 | Code | Name | Meaning |
 |---|---|---|
-| 1 | `NotFound` | Path does not resolve to an existing entry |
+| 1 | `NotFound` | Driver could not resolve the path within the filesystem |
 | 2 | `NoMount` | No filesystem mounted at the resolved prefix |
-| 3 | `TooManyOpen` | File descriptor table is full |
+| 3 | `TooManyOpen` | Driver's open file table is full |
+| 5 | `IoError` | Driver communication failed |
 
-### Label 2: `READ`
+### Label 10: `MOUNT`
 
-Read bytes from an open file at a given offset.
-
-**Request:**
-
-| Field | Value |
-|---|---|
-| label | 2 |
-| data[0] | File descriptor |
-| data[1] | Byte offset into the file |
-| data[2] | Maximum bytes to read (capped at 512) |
-
-**Reply (success):**
-
-| Field | Value |
-|---|---|
-| label | 0 (success) |
-| data[0] | Bytes actually read (may be less than requested at EOF) |
-| data[1..] | File data packed into data words |
-
-Up to 512 bytes of file data are returned in the IPC buffer (64 u64 words in
-the extended payload region). The caller reads `data[0]` bytes starting from
-`data[1]`.
-
-**Reply (error):**
-
-| Field | Value |
-|---|---|
-| label | Nonzero error code |
-
-**Error codes:**
-
-| Code | Name | Meaning |
-|---|---|---|
-| 4 | `InvalidFd` | File descriptor is not open or out of range |
-| 5 | `IoError` | Underlying driver returned an error |
-
-### Label 3: `CLOSE`
-
-Close an open file descriptor and release associated resources.
+Mount a filesystem by partition UUID. vfsd looks up the UUID in the GPT
+partition table, spawns a filesystem driver, sends `FS_MOUNT` to initialize
+it, and registers the mount in the namespace table.
 
 **Request:**
 
 | Field | Value |
 |---|---|
-| label | 3 |
-| data[0] | File descriptor |
+| label | 10 |
+| data[0..1] | Partition UUID (16 bytes, mixed-endian GPT format) |
+| data[2] | Mount path length |
+| data[3..] | Mount path bytes (packed into u64 words) |
 
 **Reply (success):**
 
@@ -121,89 +95,25 @@ Close an open file descriptor and release associated resources.
 
 | Code | Name | Meaning |
 |---|---|---|
-| 4 | `InvalidFd` | File descriptor is not open or out of range |
-
-### Label 4: `STAT`
-
-Query metadata for an open file descriptor.
-
-**Request:**
-
-| Field | Value |
-|---|---|
-| label | 4 |
-| data[0] | File descriptor |
-
-**Reply (success):**
-
-| Field | Value |
-|---|---|
-| label | 0 (success) |
-| data[0] | File size in bytes |
-| data[1] | Flags: bit 0 = directory, bit 1 = read-only |
-
-**Reply (error):**
-
-| Field | Value |
-|---|---|
-| label | Nonzero error code |
-
-**Error codes:**
-
-| Code | Name | Meaning |
-|---|---|---|
-| 4 | `InvalidFd` | File descriptor is not open or out of range |
-
-### Label 5: `READDIR`
-
-Read a directory entry by index from an open directory descriptor.
-
-**Request:**
-
-| Field | Value |
-|---|---|
-| label | 5 |
-| data[0] | File descriptor (must refer to a directory) |
-| data[1] | Entry index (0-based) |
-
-**Reply (success):**
-
-| Field | Value |
-|---|---|
-| label | 0 (success) |
-| data[0] | Entry name length in bytes |
-| data[1] | File size (0 for directories) |
-| data[2] | Flags: bit 0 = directory |
-| data[3..] | Entry name bytes (8.3 format, up to 12 bytes) |
-
-**Reply (end of directory):**
-
-| Field | Value |
-|---|---|
-| label | 6 (`EndOfDir`) |
-
-**Reply (error):**
-
-| Field | Value |
-|---|---|
-| label | Nonzero error code |
-
-**Error codes:**
-
-| Code | Name | Meaning |
-|---|---|---|
-| 4 | `InvalidFd` | File descriptor is not open or not a directory |
+| 1 | `InvalidPath` | Path length is 0 or too long |
+| 2 | `UuidNotFound` | Partition UUID not in GPT table |
+| 3 | `NoModule` | FAT filesystem driver module not available |
+| 4 | `SpawnFailed` | Failed to spawn filesystem driver process |
+| 5 | `MountFailed` | Driver's `FS_MOUNT` returned an error |
+| 6 | `TableFull` | Mount table is full |
 
 ---
 
-## File Descriptors
+## File Operations
 
-vfsd maintains a global file descriptor table. Each descriptor maps to a
-(mount index, driver-side fd) pair. The table has a fixed capacity of 16
-entries. Descriptors are allocated on `OPEN` and freed on `CLOSE`.
+After `OPEN`, the client holds a per-file capability — a tokened Send endpoint
+to the filesystem driver. The token identifies the open file to the driver.
 
-File descriptors are opaque integers. Clients MUST NOT assume any relationship
-between descriptor values and internal state.
+File operations (read, close, stat, readdir) are sent directly to the driver
+using this capability, not through vfsd. The protocol is defined in
+[fs/docs/fs-driver-protocol.md](../../fs/docs/fs-driver-protocol.md).
+
+vfsd is not involved in any file operation after the initial `OPEN`.
 
 ---
 
@@ -212,8 +122,9 @@ between descriptor values and internal state.
 | Document | Content |
 |---|---|
 | [docs/ipc-design.md](../../docs/ipc-design.md) | IPC message format, cap transfer protocol |
-| [fs/docs/fs-driver-protocol.md](../../fs/docs/fs-driver-protocol.md) | vfsd-to-driver IPC |
+| [fs/docs/fs-driver-protocol.md](../../fs/docs/fs-driver-protocol.md) | Per-file capability protocol |
 | [docs/architecture.md](../../docs/architecture.md) | vfsd role in the system |
+| [docs/capability-model.md](../../docs/capability-model.md) | Tokens and capability derivation |
 
 ---
 

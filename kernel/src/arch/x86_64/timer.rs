@@ -371,7 +371,14 @@ pub fn delay_us(_us: u64) {}
 #[cfg(not(test))]
 pub extern "C" fn timer_isr()
 {
-    TICK_COUNT.fetch_add(1, Ordering::Relaxed);
+    // Only the BSP increments the global tick counter. All CPUs fire this ISR
+    // via their local APIC timers, but TICK_COUNT must advance at the single-CPU
+    // interrupt rate so that sleep deadline math (ms * ticks_per_second / 1000)
+    // produces correct wall-clock durations.
+    if crate::arch::current::cpu::current_cpu() == 0
+    {
+        TICK_COUNT.fetch_add(1, Ordering::Relaxed);
+    }
     // EOI must be sent before calling schedule() to avoid masking the APIC.
     interrupts::acknowledge(TIMER_VECTOR as u32);
     // SAFETY: called from interrupt handler on a valid kernel stack.

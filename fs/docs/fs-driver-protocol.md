@@ -1,7 +1,14 @@
 # Filesystem Driver Protocol
 
-IPC protocol between vfsd and filesystem drivers. vfsd creates a per-driver
-endpoint and sends operations on it; the driver receives and replies.
+IPC protocol for filesystem drivers. Two communication channels exist:
+
+1. **Service endpoint** (untokened): vfsd sends `FS_MOUNT` and `FS_OPEN` on
+   the driver's service endpoint. The driver holds the Receive-side capability.
+
+2. **Per-file capabilities** (tokened): On `FS_OPEN`, the driver derives a
+   tokened Send cap from its service endpoint and returns it. Clients send
+   file operations (`FS_READ`, `FS_CLOSE`, `FS_STAT`, `FS_READDIR`) directly
+   on this cap. The token delivered by `ipc_recv` identifies the open file.
 
 ---
 
@@ -15,25 +22,28 @@ capability, injected into the driver's CSpace during two-phase process creation.
 
 ## Messages
 
-All operations use `SYS_IPC_CALL` (synchronous call/reply). Labels mirror the
-vfsd namespace interface where applicable. The driver processes one request at a
-time (single-threaded service loop).
+All operations use `SYS_IPC_CALL` (synchronous call/reply). The driver
+dispatches based on the token from `ipc_recv`:
+
+- **token == 0**: service-level request from vfsd (`FS_MOUNT`, `FS_OPEN`)
+- **token != 0**: per-file request from a client, identified by the token
 
 ### Label 10: `FS_MOUNT`
 
-Initialize the filesystem. Sent once after the driver starts. The driver reads
-superblock/BPB metadata from the block device and prepares internal state.
+Initialize the filesystem. Sent once after the driver starts, via the
+untokened service endpoint. The driver reads superblock/BPB metadata from the
+block device and prepares internal state.
 
 The block device endpoint is injected into the driver's CSpace at creation
 time (identified by `CapDescriptor` with `CapType::Frame` and
-`aux0 = BLOCK_ENDPOINT_SENTINEL`). No capabilities are transferred in this
-message.
+`aux0 = BLOCK_ENDPOINT_SENTINEL`).
 
 **Request:**
 
 | Field | Value |
 |---|---|
 | label | 10 |
+| data[0] | Partition LBA offset |
 
 **Reply (success):**
 
@@ -56,7 +66,15 @@ message.
 
 ### Label 1: `FS_OPEN`
 
-Open a file or directory by path within this filesystem.
+Open a file or directory by path within this filesystem. Sent via the
+untokened service endpoint by vfsd.
+
+On success, the driver:
+1. Resolves the path to a directory entry
+2. Allocates an internal file slot and assigns a monotonic token value
+3. Derives a tokened Send cap from its service endpoint via
+   `SYS_CAP_DERIVE_TOKEN`
+4. Returns the tokened cap in the reply
 
 **Request:**
 
@@ -70,7 +88,7 @@ Open a file or directory by path within this filesystem.
 | Field | Value |
 |---|---|
 | label | 0 (success) |
-| data[0] | Driver-assigned file descriptor |
+| cap[0] | Per-file capability (tokened Send endpoint) |
 
 **Reply (error):**
 
@@ -83,20 +101,21 @@ Open a file or directory by path within this filesystem.
 | Code | Name | Meaning |
 |---|---|---|
 | 1 | `NotFound` | Path does not resolve to an existing entry |
-| 3 | `TooManyOpen` | Driver fd table is full |
+| 2 | `OutOfMemory` | Cap derivation failed |
+| 3 | `TooManyOpen` | Open file table is full |
 
 ### Label 2: `FS_READ`
 
-Read bytes from an open file at a given offset.
+Read bytes from an open file. Sent by the client directly on the per-file
+capability; the token identifies the file.
 
 **Request:**
 
 | Field | Value |
 |---|---|
 | label | 2 |
-| data[0] | Driver file descriptor |
-| data[1] | Byte offset |
-| data[2] | Maximum bytes to read (capped at 512) |
+| data[0] | Byte offset |
+| data[1] | Maximum bytes to read (capped at 512) |
 
 **Reply (success):**
 
@@ -116,19 +135,21 @@ Read bytes from an open file at a given offset.
 
 | Code | Name | Meaning |
 |---|---|---|
-| 4 | `InvalidFd` | Descriptor not open or out of range |
-| 5 | `IoError` | Block device read failed |
+| 4 | `InvalidToken` | No open file for this token |
 
 ### Label 3: `FS_CLOSE`
 
-Close a driver-side file descriptor.
+Close an open file. Sent by the client on the per-file capability; the token
+identifies the file. The client should call `SYS_CAP_DELETE` on the per-file
+capability after this call.
 
 **Request:**
 
 | Field | Value |
 |---|---|
 | label | 3 |
-| data[0] | Driver file descriptor |
+
+No data words required — the file is identified by the token.
 
 **Reply (success):**
 
@@ -136,16 +157,30 @@ Close a driver-side file descriptor.
 |---|---|
 | label | 0 (success) |
 
+**Reply (error):**
+
+| Field | Value |
+|---|---|
+| label | Nonzero error code |
+
+**Error codes:**
+
+| Code | Name | Meaning |
+|---|---|---|
+| 4 | `InvalidToken` | No open file for this token |
+
 ### Label 4: `FS_STAT`
 
-Query metadata for an open file.
+Query metadata for an open file. Sent on the per-file capability; the token
+identifies the file.
 
 **Request:**
 
 | Field | Value |
 |---|---|
 | label | 4 |
-| data[0] | Driver file descriptor |
+
+No data words required — the file is identified by the token.
 
 **Reply (success):**
 
@@ -155,17 +190,29 @@ Query metadata for an open file.
 | data[0] | File size in bytes |
 | data[1] | Flags: bit 0 = directory, bit 1 = read-only |
 
+**Reply (error):**
+
+| Field | Value |
+|---|---|
+| label | Nonzero error code |
+
+**Error codes:**
+
+| Code | Name | Meaning |
+|---|---|---|
+| 4 | `InvalidToken` | No open file for this token |
+
 ### Label 5: `FS_READDIR`
 
-Read a directory entry by index.
+Read a directory entry by index. Sent on the per-file capability; the token
+identifies the directory.
 
 **Request:**
 
 | Field | Value |
 |---|---|
 | label | 5 |
-| data[0] | Driver file descriptor (must be a directory) |
-| data[1] | Entry index (0-based) |
+| data[0] | Entry index (0-based) |
 
 **Reply (success):**
 
@@ -182,6 +229,18 @@ Read a directory entry by index.
 | Field | Value |
 |---|---|
 | label | 6 (`EndOfDir`) |
+
+**Reply (error):**
+
+| Field | Value |
+|---|---|
+| label | Nonzero error code |
+
+**Error codes:**
+
+| Code | Name | Meaning |
+|---|---|---|
+| 4 | `InvalidToken` | No open file for this token, or not a directory |
 
 ---
 
@@ -219,6 +278,7 @@ sentinel identification).
 |---|---|
 | [docs/ipc-design.md](../../docs/ipc-design.md) | IPC message format, cap transfer protocol |
 | [vfsd/docs/vfs-ipc-interface.md](../../vfsd/docs/vfs-ipc-interface.md) | Client-facing namespace IPC |
+| [docs/capability-model.md](../../docs/capability-model.md) | Tokens and capability derivation |
 | [docs/device-management.md](../../docs/device-management.md) | Block device endpoint origin |
 
 ---

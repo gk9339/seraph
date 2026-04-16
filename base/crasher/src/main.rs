@@ -5,7 +5,7 @@
 
 //! Deliberate-crash test service for svcmgr monitoring validation.
 //!
-//! Logs a startup message, sleeps for 10 seconds, then triggers a fault
+//! Logs a startup message, sleeps for 2 seconds, then triggers a fault
 //! (null pointer write). svcmgr should detect the death via `EventQueue`
 //! notification and restart the service per its restart policy.
 
@@ -21,9 +21,7 @@ extern "Rust" fn main(_startup: &StartupInfo) -> !
 {
     runtime::log!("crasher: alive");
 
-    // Sleep for 10 seconds (no busy spin).
-    // black_box prevents the optimizer from eliminating the sleep syscall.
-    let _ = core::hint::black_box(syscall::thread_sleep(10_000));
+    let _ = syscall::thread_sleep(2_000);
 
     runtime::log!("crasher: triggering fault");
 
@@ -35,9 +33,6 @@ extern "Rust" fn main(_startup: &StartupInfo) -> !
         core::ptr::write_volatile(core::ptr::null_mut::<u8>(), 0x42);
     }
 
-    // Unreachable — the fault kills this thread.
-    loop
-    {
-        let _ = syscall::thread_yield();
-    }
+    // SAFETY: unreachable — the write above faults and the kernel kills this thread.
+    unsafe { core::hint::unreachable_unchecked() }
 }

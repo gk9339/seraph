@@ -43,9 +43,9 @@ pub fn run(ctx: &TestContext) -> TestResult
         let child_done =
             cap_copy(done, cs, 1 << 7).map_err(|_| "concurrent_map_unmap: cap_copy done failed")?;
         // Copy frame and aspace caps into child's CSpace with full rights.
-        let child_frame = cap_copy(frames[i], cs, !0u64)
+        let child_frame = cap_copy(frames[i], cs, syscall::RIGHTS_ALL)
             .map_err(|_| "concurrent_map_unmap: cap_copy frame failed")?;
-        let child_aspace = cap_copy(ctx.aspace_cap, cs, !0u64)
+        let child_aspace = cap_copy(ctx.aspace_cap, cs, syscall::RIGHTS_ALL)
             .map_err(|_| "concurrent_map_unmap: cap_copy aspace failed")?;
 
         let th = cap_create_thread(ctx.aspace_cap, cs)
@@ -129,7 +129,7 @@ fn mapper_entry(arg: u64) -> !
 
     for _ in 0..MAP_ITERATIONS
     {
-        if mem_map(frame_cap, aspace, va, 0, 1, syscall::PROT_WRITE).is_err()
+        if mem_map(frame_cap, aspace, va, 0, 1, syscall::MAP_WRITABLE).is_err()
         {
             // Send done_bit | error indicator (bit 8).
             signal_send(done_slot, done_bit | (1 << 8)).ok();

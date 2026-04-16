@@ -43,6 +43,23 @@ is the filesystem driver's responsibility.
 
 ---
 
+## Design Status
+
+The global mount namespace is a bootstrap-phase design. All processes share a
+single, flat namespace managed by vfsd, and all mount operations are issued by
+init during boot. This is sufficient for the current single-user, early-boot
+service architecture but does not scale to multi-tenant or sandboxed workloads.
+
+The long-term direction is per-process namespace capabilities: each process
+receives a namespace cap that determines its filesystem view. A process could
+hold a restricted namespace that omits sensitive mount points, or a completely
+isolated namespace for containerized services. This requires no kernel changes
+— the capability model already supports it — but requires vfsd to manage
+multiple namespace objects and the process creation protocol to bind namespace
+caps at creation time.
+
+---
+
 ## Summarized By
 
 None

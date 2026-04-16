@@ -44,17 +44,20 @@ identity caps. The thread is **not** started.
 | Field | Value |
 |---|---|
 | label | 0 (success) |
-| data[0] | Process ID (procmgr-assigned identifier) |
-| cap[0] | Child `CSpace` capability (full rights) |
-| cap[1] | `ProcessInfo` frame capability (MAP\|WRITE rights) |
-| cap[2] | Child `Thread` capability (Control right) |
+| cap[0] | Process handle (tokened endpoint identifying this process) |
+| cap[1] | Child `CSpace` capability (full rights) |
+| cap[2] | `ProcessInfo` frame capability (MAP\|WRITE rights) |
+| cap[3] | Child `Thread` capability (Control right) |
 
-The `CSpace` cap allows the caller to inject capabilities into the child's
-capability space via `cap_copy`. The `ProcessInfo` frame cap allows the
-caller to map the page writable and patch `initial_caps_base`,
-`initial_caps_count`, `cap_descriptor_count`, `cap_descriptors_offset`,
-and startup message fields. The `Thread` cap allows the caller to bind
-death notifications or stop/configure the thread.
+The process handle is a tokened endpoint capability. The caller uses it
+to send `START_PROCESS` (and future per-process operations) — the token
+identifies the process without a forgeable PID. The `CSpace` cap allows
+the caller to inject capabilities into the child's capability space via
+`cap_copy`. The `ProcessInfo` frame cap allows the caller to map the page
+writable and patch `initial_caps_base`, `initial_caps_count`,
+`cap_descriptor_count`, `cap_descriptors_offset`, and startup message
+fields. The `Thread` cap allows the caller to bind death notifications or
+stop/configure the thread.
 
 **Reply (error):**
 
@@ -77,12 +80,19 @@ Start a previously created (suspended) process. The caller must have
 completed any capability injection and `ProcessInfo` patching before
 calling this operation.
 
+The call is sent to the **process handle** (tokened endpoint) returned by
+`CREATE_PROCESS`, not to the main procmgr endpoint. The token identifies
+which process to start.
+
 **Request:**
 
 | Field | Value |
 |---|---|
+| endpoint | Process handle (tokened endpoint from `CREATE_PROCESS` reply cap[0]) |
 | label | 2 |
-| data[0] | Process ID (from `CREATE_PROCESS` reply) |
+
+No data words are required — the process is identified by the token
+embedded in the endpoint capability.
 
 **Reply (success):**
 
@@ -100,7 +110,7 @@ calling this operation.
 
 | Code | Name | Meaning |
 |---|---|---|
-| 4 | `InvalidPid` | No process with the given PID exists |
+| 4 | `InvalidToken` | No process with the given token exists |
 | 5 | `AlreadyStarted` | Process was already started |
 
 ### Label 3: `EXIT_PROCESS`
@@ -173,10 +183,10 @@ Same as `CREATE_PROCESS`:
 | Field | Value |
 |---|---|
 | label | 0 (success) |
-| data[0] | Process ID |
-| cap[0] | Child `CSpace` capability (full rights) |
-| cap[1] | `ProcessInfo` frame capability (MAP\|WRITE rights) |
-| cap[2] | Child `Thread` capability (Control right) |
+| cap[0] | Process handle (tokened endpoint) |
+| cap[1] | Child `CSpace` capability (full rights) |
+| cap[2] | `ProcessInfo` frame capability (MAP\|WRITE rights) |
+| cap[3] | Child `Thread` capability (Control right) |
 
 **Reply (error):**
 
@@ -223,9 +233,10 @@ message). On `CREATE_PROCESS`, the caller's Frame cap is moved into procmgr's
 CSpace atomically with the message delivery. procmgr consumes the cap during
 process creation and does not return it.
 
-On reply, procmgr transfers derived copies of the child's `CSpace`,
-`ProcessInfo` frame, and `Thread` capabilities to the caller. procmgr retains
-the original caps for process lifecycle management.
+On reply, procmgr transfers a tokened process handle endpoint (for
+subsequent per-process operations) and derived copies of the child's
+`CSpace`, `ProcessInfo` frame, and `Thread` capabilities to the caller.
+procmgr retains the original caps for process lifecycle management.
 
 ---
 

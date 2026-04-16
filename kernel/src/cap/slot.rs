@@ -6,7 +6,7 @@
 //! Capability slot foundation types.
 //!
 //! [`CapabilitySlot`] is the fixed-size record stored in `CSpace` pages.
-//! The layout is `#[repr(C)]` and exactly 48 bytes.
+//! The layout is `#[repr(C)]` and exactly 56 bytes.
 //!
 //! ## Intrusive free list
 //!
@@ -229,37 +229,44 @@ pub fn violates_wx(rights: Rights) -> bool
 
 /// A single capability slot in a `CSpace` page.
 ///
-/// Fixed at 48 bytes (`#[repr(C)]`). Slot 0 in every `CSpace` is permanently
+/// Fixed at 56 bytes (`#[repr(C)]`). Slot 0 in every `CSpace` is permanently
 /// null. Non-null slots hold a typed reference to a kernel object and an
 /// associated rights bitmask.
 ///
-/// ## Layout (48 bytes)
+/// ## Layout (56 bytes)
 ///
 /// ```text
 ///  offset  size  field
 ///       0     1  tag
 ///       1     3  pad   (aligns rights to offset 4)
 ///       4     4  rights
-///       8     8  object (naturally 8-byte aligned at offset 8)
-///      16     8  deriv_parent   (next_free index when tag == Null)
-///      24     8  deriv_first_child
-///      32     8  deriv_next_sibling
-///      40     8  deriv_prev_sibling
-/// total: 48 bytes
+///       8     8  token  (caller-identifying label; 0 = untokened)
+///      16     8  object (naturally 8-byte aligned at offset 16)
+///      24     8  deriv_parent   (next_free index when tag == Null)
+///      32     8  deriv_first_child
+///      40     8  deriv_next_sibling
+///      48     8  deriv_prev_sibling
+/// total: 56 bytes
 /// ```
 ///
 /// Without explicit `pad`, `#[repr(C)]` would insert 2 bytes before `rights`
-/// (to satisfy 4-byte alignment) and 6 bytes before `object` (8-byte alignment),
-/// yielding 56 bytes. The 3-byte pad absorbs both gaps.
+/// (to satisfy 4-byte alignment) and 6 bytes before `token` (8-byte alignment),
+/// yielding 64 bytes. The 3-byte pad absorbs both gaps.
 #[repr(C)]
 pub struct CapabilitySlot
 {
     /// Capability type; `Null` means the slot is empty.
     pub tag: CapTag,
-    /// Explicit padding: aligns `rights` to offset 4 and `object` to offset 8.
+    /// Explicit padding: aligns `rights` to offset 4 and `token` to offset 8.
     pad: [u8; 3],
     /// Rights bitmask (type-specific).
     pub rights: Rights,
+    /// Caller-identifying token, set via `SYS_CAP_DERIVE_TOKEN`. Zero means
+    /// untokened. Immutable once set — re-tokening a capability that already
+    /// has a non-zero token returns an error. Inherited by derivation and copy.
+    /// For endpoint caps, the kernel delivers the token to the receiver on
+    /// `ipc_recv`.
+    pub token: u64,
     /// Pointer to the kernel object (None when tag == Null).
     pub object: Option<NonNull<KernelObjectHeader>>,
     /// Derivation parent, or next-free index when tag == Null.
@@ -288,6 +295,7 @@ impl CapabilitySlot
             tag: CapTag::Null,
             pad: [0; 3],
             rights: Rights::NONE,
+            token: 0,
             object: None,
             deriv_parent: None,
             deriv_first_child: None,
@@ -324,6 +332,7 @@ impl CapabilitySlot
         self.tag = CapTag::Null;
         self.pad = [0; 3];
         self.rights = Rights::NONE;
+        self.token = 0;
         self.object = None;
         self.deriv_first_child = None;
         self.deriv_next_sibling = None;
@@ -356,9 +365,9 @@ mod tests
     use core::mem::size_of;
 
     #[test]
-    fn capability_slot_is_48_bytes()
+    fn capability_slot_is_56_bytes()
     {
-        assert_eq!(size_of::<CapabilitySlot>(), 48);
+        assert_eq!(size_of::<CapabilitySlot>(), 56);
     }
 
     #[test]

@@ -41,15 +41,29 @@ const PLIC_BASE_PHYS: u64 = 0x0C00_0000;
 
 /// PLIC priority register base: base + 4 * `source_id` (source 1..=127).
 const PLIC_PRIORITY_BASE: u64 = 0x0000;
-/// PLIC enable register base for hart 0 S-mode context (context 1):
-///   base + 0x2000 + context*0x80 + word*4.
-/// context=1 → offset = 0x2080.
-const PLIC_ENABLE_BASE: u64 = 0x2080;
-/// PLIC threshold for hart 0 S-mode context (context 1): base + `0x20_0000` + context*0x1000.
-/// context=1 → offset = `0x20_1000`.
-const PLIC_THRESHOLD: u64 = 0x0020_1000;
-/// PLIC claim/complete register for hart 0 S-mode context.
-const PLIC_CLAIM_COMPLETE: u64 = 0x0020_1004;
+
+/// Compute the PLIC enable register base for the current hart's S-mode context.
+///
+/// PLIC context = `hart_id * 2 + 1` (S-mode context for each hart).
+/// Enable base = PLIC base + 0x2000 + context * 0x80.
+fn plic_enable_base() -> u64
+{
+    let ctx = u64::from(super::cpu::current_cpu()) * 2 + 1;
+    0x2000 + ctx * 0x80
+}
+
+/// Compute the PLIC threshold register offset for the current hart's S-mode context.
+fn plic_threshold_offset() -> u64
+{
+    let ctx = u64::from(super::cpu::current_cpu()) * 2 + 1;
+    0x0020_0000 + ctx * 0x1000
+}
+
+/// Compute the PLIC claim/complete register offset for the current hart's S-mode context.
+fn plic_claim_complete_offset() -> u64
+{
+    plic_threshold_offset() + 4
+}
 
 /// Number of PLIC interrupt sources supported on the QEMU virt machine.
 const PLIC_NUM_SOURCES: u32 = 127;
@@ -413,7 +427,7 @@ extern "C" fn trap_dispatch(frame: &mut TrapFrame)
                 // dispatch_external -> dispatch_device_irq calls acknowledge(irq),
                 // which writes the PLIC claim/complete register. Do NOT write it
                 // again here.
-                let irq = plic_read(PLIC_CLAIM_COMPLETE);
+                let irq = plic_read(plic_claim_complete_offset());
                 if irq != 0
                 {
                     dispatch_external(irq);
@@ -464,17 +478,29 @@ extern "C" fn trap_dispatch(frame: &mut TrapFrame)
 
         if is_userspace
         {
-            crate::kprintln!(
-                "USERSPACE FAULT on cpu {}: scause={:#x} sepc={:#x} stval={:#x}",
-                cpu,
-                scause,
-                frame.sepc,
-                frame.stval
-            );
-
             // SAFETY: current_tcb() returns this CPU's running thread; valid
             // in exception context because we entered from a running user thread.
             let tcb = unsafe { crate::syscall::current_tcb() };
+            let tid = if tcb.is_null()
+            {
+                0u32
+            }
+            else
+            {
+                // SAFETY: tcb validated non-null.
+                unsafe { (*tcb).thread_id }
+            };
+
+            crate::kprintln_serial!(
+                "USERSPACE FAULT: tid={} cpu={} cause={} (scause={:#x})",
+                tid,
+                cpu,
+                riscv_exception_name(cause_code),
+                scause
+            );
+            crate::kprintln_serial!("  sepc={:#018x}  stval={:#018x}", frame.sepc, frame.stval);
+            dump_riscv_regs(frame);
+
             if !tcb.is_null()
             {
                 // SAFETY: tcb validated non-null; state field always valid.
@@ -482,10 +508,11 @@ extern "C" fn trap_dispatch(frame: &mut TrapFrame)
                     (*tcb).state = crate::sched::thread::ThreadState::Exited;
                 }
 
-                // Post death notification if bound (exit_reason = cause_code + 1).
+                // Post death notification if bound (exit_reason = EXIT_FAULT_BASE + cause_code).
+                // EXIT_FAULT_BASE = 0x1000 (matches syscall_abi::EXIT_FAULT_BASE).
                 // SAFETY: tcb is valid; post_death_notification handles null check.
                 unsafe {
-                    crate::sched::post_death_notification(tcb, cause_code + 1);
+                    crate::sched::post_death_notification(tcb, 0x1000 + cause_code);
                 }
             }
 
@@ -506,69 +533,15 @@ extern "C" fn trap_dispatch(frame: &mut TrapFrame)
         else
         {
             crate::kprintln!(
-                "EXCEPTION on cpu {}: scause={:#x} sepc={:#x} stval={:#x}",
+                "KERNEL EXCEPTION: cpu={} cause={} (scause={:#x})",
                 cpu,
-                scause,
-                frame.sepc,
-                frame.stval
+                riscv_exception_name(cause_code),
+                scause
             );
-            crate::kprintln!("  sstatus={:#x} satp={:#x}", sstatus_val, satp_val);
-            crate::kprintln!(
-                "  ra={:#x}  sp={:#x}  gp={:#x}  tp={:#x}",
-                frame.ra,
-                frame.sp,
-                frame.gp,
-                frame.tp
-            );
-            crate::kprintln!(
-                "  t0={:#x}  t1={:#x}  t2={:#x}  s0={:#x}",
-                frame.t0,
-                frame.t1,
-                frame.t2,
-                frame.s0
-            );
-            crate::kprintln!(
-                "  s1={:#x}  a0={:#x}  a1={:#x}  a2={:#x}",
-                frame.s1,
-                frame.a0,
-                frame.a1,
-                frame.a2
-            );
-            crate::kprintln!(
-                "  a3={:#x}  a4={:#x}  a5={:#x}  a6={:#x}",
-                frame.a3,
-                frame.a4,
-                frame.a5,
-                frame.a6
-            );
-            crate::kprintln!(
-                "  a7={:#x}  s2={:#x}  s3={:#x}  s4={:#x}",
-                frame.a7,
-                frame.s2,
-                frame.s3,
-                frame.s4
-            );
-            crate::kprintln!(
-                "  s5={:#x}  s6={:#x}  s7={:#x}  s8={:#x}",
-                frame.s5,
-                frame.s6,
-                frame.s7,
-                frame.s8
-            );
-            crate::kprintln!(
-                "  s9={:#x}  s10={:#x} s11={:#x} t3={:#x}",
-                frame.s9,
-                frame.s10,
-                frame.s11,
-                frame.t3
-            );
-            crate::kprintln!(
-                "  t4={:#x}  t5={:#x}  t6={:#x}",
-                frame.t4,
-                frame.t5,
-                frame.t6
-            );
-            crate::fatal("unhandled exception");
+            crate::kprintln!("  sepc={:#x}  stval={:#x}", frame.sepc, frame.stval);
+            crate::kprintln!("  sstatus={:#x}  satp={:#x}", sstatus_val, satp_val);
+            dump_riscv_regs_console(frame);
+            crate::fatal("unhandled kernel exception");
         }
     }
 
@@ -588,13 +561,7 @@ extern "C" fn trap_dispatch(frame: &mut TrapFrame)
     }
 }
 
-/// Enable PLIC source `source` for hart 0 S-mode context.
-///
-/// Each source has one bit in a 32-bit enable word. Context 1 (hart 0 S-mode)
-/// enable registers start at `PLIC_ENABLE_BASE` in 4-byte words.
-///
-/// # Safety
-/// Direct map must be active; PLIC MMIO must be accessible.
+/// Enable PLIC source `source` for the current hart's S-mode context.
 #[cfg(not(test))]
 pub fn plic_enable(source: u32)
 {
@@ -604,16 +571,13 @@ pub fn plic_enable(source: u32)
     }
     let word_idx = source / 32;
     let bit_idx = source % 32;
-    let offset = PLIC_ENABLE_BASE + (u64::from(word_idx) * 4);
+    let offset = plic_enable_base() + (u64::from(word_idx) * 4);
     let current = plic_read(offset);
     // SAFETY: direct map active; PLIC MMIO is accessible.
     unsafe { plic_write(offset, current | (1 << bit_idx)) };
 }
 
-/// Disable PLIC source `source` for hart 0 S-mode context.
-///
-/// # Safety
-/// Direct map must be active; PLIC MMIO must be accessible.
+/// Disable PLIC source `source` for the current hart's S-mode context.
 #[cfg(not(test))]
 pub fn plic_disable(source: u32)
 {
@@ -623,7 +587,7 @@ pub fn plic_disable(source: u32)
     }
     let word_idx = source / 32;
     let bit_idx = source % 32;
-    let offset = PLIC_ENABLE_BASE + (u64::from(word_idx) * 4);
+    let offset = plic_enable_base() + (u64::from(word_idx) * 4);
     let current = plic_read(offset);
     // SAFETY: direct map active; PLIC MMIO is accessible.
     unsafe { plic_write(offset, current & !(1 << bit_idx)) };
@@ -758,7 +722,11 @@ pub unsafe fn init()
 
     // Initialise PLIC:
     // - Set priority 1 for all sources (0 = disabled, 1 = lowest priority).
-    // - Set threshold to 0 for hart 0 S-mode context (accept all sources ≥ 1).
+    // - Disable all source enables for BSP context (firmware may have enabled UART etc.).
+    // - Set threshold to 0 for BSP S-mode context (accept all sources ≥ 1).
+    //
+    // Uses hardcoded BSP context (hart 0 S-mode = context 1) because percpu
+    // data is not yet available at this point in Phase 5.
     // SAFETY: direct map active; PLIC MMIO region accessible; plic_write performs
     // volatile stores to valid PLIC register offsets.
     unsafe {
@@ -766,7 +734,15 @@ pub unsafe fn init()
         {
             plic_write(PLIC_PRIORITY_BASE + (u64::from(src) * 4), 1);
         }
-        plic_write(PLIC_THRESHOLD, 0);
+        // BSP context 1: enable base = 0x2000 + 1*0x80 = 0x2080
+        let bsp_enable_base: u64 = 0x2080;
+        let enable_words = PLIC_NUM_SOURCES.div_ceil(32);
+        for w in 0..enable_words
+        {
+            plic_write(bsp_enable_base + u64::from(w) * 4, 0);
+        }
+        // BSP context 1: threshold = 0x200000 + 1*0x1000 = 0x201000
+        plic_write(0x0020_1000, 0);
     }
 }
 
@@ -812,6 +788,21 @@ pub unsafe fn init_ap()
             cy = in(reg) 1u64,
             options(nostack, nomem),
         );
+    }
+
+    // Set PLIC threshold to 0 for this hart's S-mode context and disable
+    // all sources. Firmware may have left sources enabled (e.g. UART),
+    // which would cause unhandled interrupt storms on secondary harts.
+    // SAFETY: direct map active; PLIC MMIO accessible; per-hart context.
+    unsafe {
+        plic_write(plic_threshold_offset(), 0);
+        // Disable all source enable words for this hart's context.
+        let enable_base = plic_enable_base();
+        let enable_words = PLIC_NUM_SOURCES.div_ceil(32);
+        for w in 0..enable_words
+        {
+            plic_write(enable_base + u64::from(w) * 4, 0);
+        }
     }
 }
 
@@ -875,7 +866,7 @@ pub fn acknowledge(irq: u32)
     // SAFETY: plic_write performs volatile store to PLIC claim/complete register;
     // irq value claimed from PLIC; EOI protocol requires writing back the IRQ number.
     unsafe {
-        plic_write(PLIC_CLAIM_COMPLETE, irq);
+        plic_write(plic_claim_complete_offset(), irq);
     }
 }
 
@@ -955,6 +946,108 @@ unsafe fn sbi_call_2(ext_id: u64, fid: u64, arg0: u64, arg1: u64) -> u64
     ret
 }
 
+// ── Fault diagnostics ────────────────────────────────────────────────────────
+
+/// Human-readable name for a RISC-V exception cause code.
+fn riscv_exception_name(cause: u64) -> &'static str
+{
+    match cause
+    {
+        0 => "instruction address misaligned",
+        1 => "instruction access fault",
+        2 => "illegal instruction",
+        3 => "breakpoint",
+        4 => "load address misaligned",
+        5 => "load access fault",
+        6 => "store address misaligned",
+        7 => "store access fault",
+        8 => "ecall from U-mode",
+        9 => "ecall from S-mode",
+        12 => "instruction page fault",
+        13 => "load page fault",
+        15 => "store/AMO page fault",
+        _ => "unknown",
+    }
+}
+
+/// Dump all general-purpose registers from a RISC-V trap frame (serial only).
+fn dump_riscv_regs(f: &super::trap_frame::TrapFrame)
+{
+    dump_riscv_regs_to(f, false);
+}
+
+/// Dump all general-purpose registers to both serial and framebuffer (kernel faults).
+fn dump_riscv_regs_console(f: &super::trap_frame::TrapFrame)
+{
+    dump_riscv_regs_to(f, true);
+}
+
+/// Inner register dump; `console` selects serial-only vs serial+framebuffer.
+fn dump_riscv_regs_to(f: &super::trap_frame::TrapFrame, console: bool)
+{
+    macro_rules! out {
+        ($($arg:tt)*) => {
+            if console { crate::kprintln!($($arg)*); }
+            else { crate::kprintln_serial!($($arg)*); }
+        };
+    }
+    out!(
+        "  ra={:#018x}  sp={:#018x}  gp={:#018x}  tp={:#018x}",
+        f.ra,
+        f.sp,
+        f.gp,
+        f.tp
+    );
+    out!(
+        "  t0={:#018x}  t1={:#018x}  t2={:#018x}  s0={:#018x}",
+        f.t0,
+        f.t1,
+        f.t2,
+        f.s0
+    );
+    out!(
+        "  s1={:#018x}  a0={:#018x}  a1={:#018x}  a2={:#018x}",
+        f.s1,
+        f.a0,
+        f.a1,
+        f.a2
+    );
+    out!(
+        "  a3={:#018x}  a4={:#018x}  a5={:#018x}  a6={:#018x}",
+        f.a3,
+        f.a4,
+        f.a5,
+        f.a6
+    );
+    out!(
+        "  a7={:#018x}  s2={:#018x}  s3={:#018x}  s4={:#018x}",
+        f.a7,
+        f.s2,
+        f.s3,
+        f.s4
+    );
+    out!(
+        "  s5={:#018x}  s6={:#018x}  s7={:#018x}  s8={:#018x}",
+        f.s5,
+        f.s6,
+        f.s7,
+        f.s8
+    );
+    out!(
+        "  s9={:#018x}  s10={:#018x} s11={:#018x}",
+        f.s9,
+        f.s10,
+        f.s11
+    );
+    out!(
+        "  t3={:#018x}  t4={:#018x}  t5={:#018x}  t6={:#018x}",
+        f.t3,
+        f.t4,
+        f.t5,
+        f.t6
+    );
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -971,13 +1064,13 @@ mod tests
     #[test]
     fn plic_threshold_offset()
     {
-        assert_eq!(PLIC_THRESHOLD, 0x0020_1000);
+        assert_eq!(plic_threshold_offset(), 0x0020_1000);
     }
 
     #[test]
     fn plic_claim_complete_offset()
     {
-        assert_eq!(PLIC_CLAIM_COMPLETE, 0x0020_1004);
+        assert_eq!(plic_claim_complete_offset(), 0x0020_1004);
     }
 
     #[test]

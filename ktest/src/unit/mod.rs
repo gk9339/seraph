@@ -79,6 +79,23 @@ pub fn run_all(ctx: &TestContext)
         "cap::create_event_q_over_max_err",
         cap::create_event_q_over_max_err(ctx)
     );
+    run_test!("cap::derive_token", cap::derive_token(ctx));
+    run_test!(
+        "cap::derive_token_zero_err",
+        cap::derive_token_zero_err(ctx)
+    );
+    run_test!(
+        "cap::derive_token_retoken_err",
+        cap::derive_token_retoken_err(ctx)
+    );
+    run_test!(
+        "cap::derive_inherits_token",
+        cap::derive_inherits_token(ctx)
+    );
+    run_test!(
+        "cap::derive_token_on_signal",
+        cap::derive_token_on_signal(ctx)
+    );
 
     // ── Memory management syscalls ────────────────────────────────────────────
     run_test!("mm::frame_split", mm::frame_split(ctx));
@@ -204,6 +221,11 @@ pub fn run_all(ctx: &TestContext)
     run_test!(
         "ipc::call_with_cap_transfer",
         ipc::call_with_cap_transfer(ctx)
+    );
+    run_test!("ipc::recv_delivers_token", ipc::recv_delivers_token(ctx));
+    run_test!(
+        "ipc::recv_untokened_returns_zero",
+        ipc::recv_untokened_returns_zero(ctx)
     );
 
     // ── Thread syscalls ───────────────────────────────────────────────────────

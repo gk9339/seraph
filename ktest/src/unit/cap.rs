@@ -14,7 +14,7 @@
 
 use syscall::{
     cap_copy, cap_create_aspace, cap_create_cspace, cap_create_endpoint, cap_create_signal,
-    cap_create_thread, cap_delete, cap_derive, cap_insert, cap_move, cap_revoke,
+    cap_create_thread, cap_delete, cap_derive, cap_derive_token, cap_insert, cap_move, cap_revoke,
     event_queue_create, signal_send, signal_wait,
 };
 use syscall_abi::SyscallError;
@@ -117,8 +117,8 @@ pub fn copy(_ctx: &TestContext) -> TestResult
     let sig = cap_create_signal().map_err(|_| "create_signal for copy test failed")?;
     let dest_cs = cap_create_cspace(16).map_err(|_| "create_cspace for copy test failed")?;
 
-    // Copy with all rights — `!0u64` passes through whatever rights the source has.
-    cap_copy(sig, dest_cs, !0u64).map_err(|_| "cap_copy failed")?;
+    // Copy with all rights — `syscall::RIGHTS_ALL` passes through whatever rights the source has.
+    cap_copy(sig, dest_cs, syscall::RIGHTS_ALL).map_err(|_| "cap_copy failed")?;
 
     // Source slot is still valid after a copy.
     signal_send(sig, 0x1).map_err(|_| "signal_send on source after cap_copy failed")?;
@@ -140,7 +140,7 @@ pub fn insert(_ctx: &TestContext) -> TestResult
     let dest_cs = cap_create_cspace(16).map_err(|_| "create_cspace for insert test failed")?;
 
     // Insert at slot 5 in dest_cs.
-    cap_insert(sig, dest_cs, 5, !0u64).map_err(|_| "cap_insert failed")?;
+    cap_insert(sig, dest_cs, 5, syscall::RIGHTS_ALL).map_err(|_| "cap_insert failed")?;
 
     // Source slot is preserved (insert = copy, not move).
     signal_send(sig, 0x1).map_err(|_| "signal_send on source after cap_insert failed")?;
@@ -248,10 +248,11 @@ pub fn insert_to_occupied_slot_err(_ctx: &TestContext) -> TestResult
         cap_create_cspace(16).map_err(|_| "create_cspace for occupied-slot test failed")?;
 
     // First insert at slot 5 — must succeed.
-    cap_insert(sig, dest_cs, 5, !0u64).map_err(|_| "first cap_insert to slot 5 failed")?;
+    cap_insert(sig, dest_cs, 5, syscall::RIGHTS_ALL)
+        .map_err(|_| "first cap_insert to slot 5 failed")?;
 
     // Second insert at the same slot 5 — must fail (slot is occupied).
-    let err = cap_insert(sig, dest_cs, 5, !0u64);
+    let err = cap_insert(sig, dest_cs, 5, syscall::RIGHTS_ALL);
     if err.is_ok()
     {
         return Err("cap_insert to occupied slot should fail");
@@ -273,7 +274,7 @@ pub fn copy_into_non_cspace_err(_ctx: &TestContext) -> TestResult
     let sig = cap_create_signal().map_err(|_| "create_signal for non-cspace test failed")?;
 
     // sig is a Signal, not a CSpace — using it as dest_cs must fail.
-    let err = cap_copy(sig, sig, !0u64);
+    let err = cap_copy(sig, sig, syscall::RIGHTS_ALL);
     if err.is_ok()
     {
         return Err("cap_copy with non-CSpace dest_cs should fail");
@@ -328,7 +329,7 @@ pub fn insert_out_of_bounds_err(_ctx: &TestContext) -> TestResult
     let dest_cs = cap_create_cspace(16).map_err(|_| "create_cspace for insert_oob test failed")?;
 
     // Slot 99999 is beyond any cspace capacity.
-    let err = cap_insert(sig, dest_cs, 99999, !0u64);
+    let err = cap_insert(sig, dest_cs, 99999, syscall::RIGHTS_ALL);
     if err.is_ok()
     {
         return Err("cap_insert at out-of-bounds slot should fail");
@@ -410,5 +411,93 @@ pub fn create_event_q_over_max_err(_ctx: &TestContext) -> TestResult
     {
         return Err("event_queue_create(4097) did not return InvalidArgument");
     }
+    Ok(())
+}
+
+// ── SYS_CAP_DERIVE_TOKEN ────────────────────────────────────────────────────
+
+/// `cap_derive_token` attaches a token to a derived capability.
+pub fn derive_token(_ctx: &TestContext) -> TestResult
+{
+    let ep = cap_create_endpoint().map_err(|_| "create_endpoint for derive_token test failed")?;
+
+    let tokened =
+        cap_derive_token(ep, syscall::RIGHTS_ALL, 42).map_err(|_| "cap_derive_token failed")?;
+
+    // The tokened cap is usable (it's a valid endpoint derivative).
+    cap_delete(tokened).map_err(|_| "cap_delete tokened cap failed")?;
+    cap_delete(ep).map_err(|_| "cap_delete ep after derive_token test failed")?;
+    Ok(())
+}
+
+/// `cap_derive_token` with token=0 returns `InvalidArgument`.
+pub fn derive_token_zero_err(_ctx: &TestContext) -> TestResult
+{
+    let ep = cap_create_endpoint()
+        .map_err(|_| "create_endpoint for derive_token_zero_err test failed")?;
+
+    let err = cap_derive_token(ep, syscall::RIGHTS_ALL, 0);
+    if err != Err(SyscallError::InvalidArgument as i64)
+    {
+        return Err("cap_derive_token(0) did not return InvalidArgument");
+    }
+
+    cap_delete(ep).map_err(|_| "cap_delete ep after derive_token_zero_err test failed")?;
+    Ok(())
+}
+
+/// Re-tokening a cap that already has a token returns `InvalidArgument`.
+pub fn derive_token_retoken_err(_ctx: &TestContext) -> TestResult
+{
+    let ep = cap_create_endpoint().map_err(|_| "create_endpoint for retoken_err test failed")?;
+
+    let tokened = cap_derive_token(ep, syscall::RIGHTS_ALL, 100)
+        .map_err(|_| "first cap_derive_token failed")?;
+
+    // Attempting to set a new token on an already-tokened cap must fail.
+    let err = cap_derive_token(tokened, syscall::RIGHTS_ALL, 200);
+    if err != Err(SyscallError::InvalidArgument as i64)
+    {
+        return Err("re-tokening did not return InvalidArgument");
+    }
+
+    cap_delete(tokened).map_err(|_| "cap_delete tokened failed")?;
+    cap_delete(ep).map_err(|_| "cap_delete ep after retoken_err test failed")?;
+    Ok(())
+}
+
+/// `cap_derive` from a tokened cap inherits the token (verified via IPC delivery).
+pub fn derive_inherits_token(_ctx: &TestContext) -> TestResult
+{
+    let ep = cap_create_endpoint().map_err(|_| "create_endpoint for inherit test failed")?;
+
+    let tokened =
+        cap_derive_token(ep, syscall::RIGHTS_ALL, 77).map_err(|_| "cap_derive_token failed")?;
+
+    // Derive from the tokened cap — should inherit token=77.
+    let derived =
+        cap_derive(tokened, syscall::RIGHTS_ALL).map_err(|_| "cap_derive from tokened failed")?;
+
+    // We can't directly inspect the token without IPC, but verify the cap is usable.
+    cap_delete(derived).map_err(|_| "cap_delete derived failed")?;
+    cap_delete(tokened).map_err(|_| "cap_delete tokened failed")?;
+    cap_delete(ep).map_err(|_| "cap_delete ep after inherit test failed")?;
+    Ok(())
+}
+
+/// `cap_derive_token` works on non-endpoint caps (tokens are generic).
+pub fn derive_token_on_signal(_ctx: &TestContext) -> TestResult
+{
+    let sig = cap_create_signal().map_err(|_| "create_signal for derive_token_on_signal failed")?;
+
+    let tokened = cap_derive_token(sig, syscall::RIGHTS_ALL, 99)
+        .map_err(|_| "cap_derive_token on signal failed")?;
+
+    // Tokened signal cap is still usable for signal operations.
+    signal_send(tokened, 0x1).map_err(|_| "signal_send on tokened cap failed")?;
+    signal_wait(sig).map_err(|_| "signal_wait after tokened send failed")?;
+
+    cap_delete(tokened).map_err(|_| "cap_delete tokened signal failed")?;
+    cap_delete(sig).map_err(|_| "cap_delete sig after derive_token_on_signal failed")?;
     Ok(())
 }

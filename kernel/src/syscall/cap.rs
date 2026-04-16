@@ -439,7 +439,7 @@ pub fn sys_cap_copy(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     let caller_cspace_id = unsafe { (*caller_cspace).id() };
 
     // Resolve source slot (any non-null tag, any rights — just non-null).
-    let (src_tag, src_rights, src_object) = {
+    let (src_tag, src_rights, src_object, src_token) = {
         // SAFETY: caller_cspace validated non-null above.
         let cs = unsafe { &*caller_cspace };
         let slot = cs.slot(src_idx).ok_or(SyscallError::InvalidCapability)?;
@@ -451,6 +451,7 @@ pub fn sys_cap_copy(tf: &mut TrapFrame) -> Result<u64, SyscallError>
             slot.tag,
             slot.rights,
             slot.object.ok_or(SyscallError::InvalidCapability)?,
+            slot.token,
         )
     };
 
@@ -503,6 +504,16 @@ pub fn sys_cap_copy(tf: &mut TrapFrame) -> Result<u64, SyscallError>
             }
         })?;
 
+    // Inherit token from source.
+    if src_token != 0
+    {
+        // SAFETY: dest_cs_ptr validated; new_idx just allocated.
+        if let Some(new_slot) = unsafe { (*dest_cs_ptr).slot_mut(new_idx) }
+        {
+            new_slot.token = src_token;
+        }
+    }
+
     // Wire derivation tree: new slot is a child of the source slot.
     let parent = crate::cap::slot::SlotId::new(caller_cspace_id, src_idx);
     let child = crate::cap::slot::SlotId::new(dest_cs_id, new_idx);
@@ -550,7 +561,7 @@ pub fn sys_cap_derive(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     let cspace_id = unsafe { (*caller_cspace).id() };
 
     // Resolve source slot.
-    let (src_tag, src_rights, src_object) = {
+    let (src_tag, src_rights, src_object, src_token) = {
         // SAFETY: caller_cspace validated non-null above.
         let cs = unsafe { &*caller_cspace };
         let slot = cs.slot(src_idx).ok_or(SyscallError::InvalidCapability)?;
@@ -562,6 +573,7 @@ pub fn sys_cap_derive(tf: &mut TrapFrame) -> Result<u64, SyscallError>
             slot.tag,
             slot.rights,
             slot.object.ok_or(SyscallError::InvalidCapability)?,
+            slot.token,
         )
     };
 
@@ -586,6 +598,122 @@ pub fn sys_cap_derive(tf: &mut TrapFrame) -> Result<u64, SyscallError>
                 _ => SyscallError::OutOfMemory,
             }
         })?;
+
+    // Inherit token from source.
+    if src_token != 0
+    {
+        // SAFETY: caller_cspace validated; new_idx just allocated.
+        if let Some(new_slot) = unsafe { (*caller_cspace).slot_mut(new_idx) }
+        {
+            new_slot.token = src_token;
+        }
+    }
+
+    // Wire derivation link.
+    let parent = crate::cap::slot::SlotId::new(cspace_id, src_idx);
+    let child = crate::cap::slot::SlotId::new(cspace_id, new_idx);
+    crate::cap::DERIVATION_LOCK.write_lock();
+    // SAFETY: DERIVATION_LOCK held; parent/child are valid SlotIds.
+    unsafe {
+        crate::cap::derivation::link_child(parent, child);
+    }
+    crate::cap::DERIVATION_LOCK.write_unlock();
+
+    Ok(u64::from(new_idx))
+}
+
+/// `SYS_CAP_DERIVE_TOKEN` (48): derive a capability with a token attached.
+///
+/// arg0 = source slot index (caller's `CSpace`).
+/// arg1 = rights mask (must be a subset of source rights).
+/// arg2 = token value (must be non-zero; source must have token == 0).
+///
+/// Creates a new slot with the attenuated rights and the specified token.
+/// The token is immutable once set — deriving from a tokened cap inherits
+/// the token (via `SYS_CAP_DERIVE`), but setting a new token on an already-
+/// tokened cap returns `InvalidArgument`.
+///
+/// Returns the new slot index.
+#[cfg(not(test))]
+pub fn sys_cap_derive_token(tf: &mut TrapFrame) -> Result<u64, SyscallError>
+{
+    use crate::cap::slot::Rights;
+
+    let src_idx = tf.arg(0) as u32;
+    let rights_mask = Rights(tf.arg(1) as u32);
+    let token_value = tf.arg(2);
+
+    if token_value == 0
+    {
+        return Err(SyscallError::InvalidArgument);
+    }
+
+    // SAFETY: syscall entry ensures current_tcb() returns active thread's TCB.
+    let tcb = unsafe { current_tcb() };
+    if tcb.is_null()
+    {
+        return Err(SyscallError::InvalidCapability);
+    }
+    // SAFETY: tcb validated non-null above.
+    let caller_cspace = unsafe { (*tcb).cspace };
+    if caller_cspace.is_null()
+    {
+        return Err(SyscallError::InvalidCapability);
+    }
+    // SAFETY: caller_cspace validated non-null above.
+    let cspace_id = unsafe { (*caller_cspace).id() };
+
+    // Resolve source slot.
+    let (src_tag, src_rights, src_object, src_token) = {
+        // SAFETY: caller_cspace validated non-null above.
+        let cs = unsafe { &*caller_cspace };
+        let slot = cs.slot(src_idx).ok_or(SyscallError::InvalidCapability)?;
+        if slot.tag == crate::cap::slot::CapTag::Null
+        {
+            return Err(SyscallError::InvalidCapability);
+        }
+        (
+            slot.tag,
+            slot.rights,
+            slot.object.ok_or(SyscallError::InvalidCapability)?,
+            slot.token,
+        )
+    };
+
+    // Cannot re-token a capability that already has a token.
+    if src_token != 0
+    {
+        return Err(SyscallError::InvalidArgument);
+    }
+
+    let effective_rights = rights_mask & src_rights;
+
+    // Increment refcount, then insert into caller's CSpace.
+    // SAFETY: src_object validated above as valid NonNull from live slot.
+    unsafe {
+        (*src_object.as_ptr()).inc_ref();
+    }
+
+    // SAFETY: caller_cspace validated non-null above.
+    let new_idx = unsafe { (*caller_cspace).insert_cap(src_tag, effective_rights, src_object) }
+        .map_err(|e| {
+            // SAFETY: src_object validated above; we just incremented refcount.
+            unsafe {
+                (*src_object.as_ptr()).dec_ref();
+            }
+            match e
+            {
+                crate::cap::cspace::CapError::WxViolation => SyscallError::WxViolation,
+                _ => SyscallError::OutOfMemory,
+            }
+        })?;
+
+    // Set the token on the new slot.
+    // SAFETY: caller_cspace validated; new_idx just allocated.
+    if let Some(new_slot) = unsafe { (*caller_cspace).slot_mut(new_idx) }
+    {
+        new_slot.token = token_value;
+    }
 
     // Wire derivation link.
     let parent = crate::cap::slot::SlotId::new(cspace_id, src_idx);
@@ -814,7 +942,7 @@ pub fn sys_cap_move(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     let dest_cspace_id = unsafe { (*dest_cs_ptr).id() };
 
     // Read source slot contents.
-    let (src_tag, src_rights, src_object) = {
+    let (src_tag, src_rights, src_object, src_token) = {
         // SAFETY: caller_cspace validated non-null above.
         let cs = unsafe { &*caller_cspace };
         let slot = cs.slot(src_idx).ok_or(SyscallError::InvalidCapability)?;
@@ -826,6 +954,7 @@ pub fn sys_cap_move(tf: &mut TrapFrame) -> Result<u64, SyscallError>
             slot.tag,
             slot.rights,
             slot.object.ok_or(SyscallError::InvalidCapability)?,
+            slot.token,
         )
     };
 
@@ -910,6 +1039,7 @@ pub fn sys_cap_move(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     // SAFETY: dest_cs_ptr validated; DERIVATION_LOCK held.
     if let Some(dst_slot) = unsafe { (*dest_cs_ptr).slot_mut(dest_idx) }
     {
+        dst_slot.token = src_token;
         dst_slot.deriv_parent = src_parent;
         dst_slot.deriv_first_child = src_first_child;
         dst_slot.deriv_prev_sibling = src_prev;
@@ -1057,7 +1187,7 @@ pub fn sys_cap_insert(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     let src_cspace_id = unsafe { (*caller_cspace).id() };
 
     // Read source slot.
-    let (src_tag, src_rights, src_object) = {
+    let (src_tag, src_rights, src_object, src_token) = {
         // SAFETY: caller_cspace validated non-null above.
         let cs = unsafe { &*caller_cspace };
         let slot = cs.slot(src_idx).ok_or(SyscallError::InvalidCapability)?;
@@ -1069,6 +1199,7 @@ pub fn sys_cap_insert(tf: &mut TrapFrame) -> Result<u64, SyscallError>
             slot.tag,
             slot.rights,
             slot.object.ok_or(SyscallError::InvalidCapability)?,
+            slot.token,
         )
     };
 
@@ -1116,6 +1247,16 @@ pub fn sys_cap_insert(tf: &mut TrapFrame) -> Result<u64, SyscallError>
             _ => SyscallError::OutOfMemory,
         }
     })?;
+
+    // Inherit token from source.
+    if src_token != 0
+    {
+        // SAFETY: dest_cs_ptr validated; dest_slot_idx just inserted.
+        if let Some(new_slot) = unsafe { (*dest_cs_ptr).slot_mut(dest_slot_idx) }
+        {
+            new_slot.token = src_token;
+        }
+    }
 
     // Wire derivation link.
     let parent = crate::cap::slot::SlotId::new(src_cspace_id, src_idx);

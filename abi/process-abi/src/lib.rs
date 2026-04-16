@@ -142,8 +142,8 @@ pub struct ProcessInfo
     /// `CSpace` slot of an IPC endpoint back to the creating service.
     ///
     /// For processes created by procmgr directly, this is an endpoint to
-    /// procmgr. Zero if no parent endpoint is provided.
-    pub parent_endpoint_cap: u32,
+    /// procmgr. Zero if no creator endpoint is provided.
+    pub creator_endpoint_cap: u32,
 
     // ── Initial capabilities ─────────────────────────────────────────
     /// First `CSpace` slot containing service-specific initial capabilities.
@@ -191,8 +191,8 @@ pub struct StartupInfo<'a>
     /// Virtual address of the IPC buffer page.
     pub ipc_buffer: *mut u8,
 
-    /// `CSpace` slot of the parent endpoint. Zero if none.
-    pub parent_endpoint: u32,
+    /// `CSpace` slot of the creator endpoint. Zero if none.
+    pub creator_endpoint: u32,
 
     /// Startup message bytes. Empty slice if none.
     pub startup_message: &'a [u8],

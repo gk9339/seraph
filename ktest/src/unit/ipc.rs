@@ -35,6 +35,7 @@ static mut CHILD_STACK: ChildStack = ChildStack::ZERO;
 static mut RECV_BLOCKS_STACK: ChildStack = ChildStack::ZERO;
 static mut DATA_WORDS_STACK: ChildStack = ChildStack::ZERO;
 static mut CAP_XFER_STACK: ChildStack = ChildStack::ZERO;
+static mut TOKEN_STACK: ChildStack = ChildStack::ZERO;
 
 // ── SYS_IPC_CALL / SYS_IPC_RECV / SYS_IPC_REPLY ─────────────────────────────
 
@@ -339,6 +340,115 @@ pub fn call_with_cap_transfer(ctx: &TestContext) -> TestResult
     Ok(())
 }
 
+// ── Token delivery via IPC ───────────────────────────────────────────────────
+
+/// `ipc_recv` delivers the token from the sender's endpoint cap.
+///
+/// The child calls via a tokened endpoint cap (token=0x1234). The server
+/// receives and verifies the token value in the third return register.
+pub fn recv_delivers_token(ctx: &TestContext) -> TestResult
+{
+    let ep =
+        cap_create_endpoint().map_err(|_| "cap_create_endpoint for recv_delivers_token failed")?;
+    let done =
+        cap_create_signal().map_err(|_| "cap_create_signal for recv_delivers_token failed")?;
+
+    // Derive a tokened send+grant cap.
+    let tokened_ep = syscall::cap_derive_token(ep, RIGHTS_SEND_GRANT, 0x1234)
+        .map_err(|_| "cap_derive_token for recv_delivers_token failed")?;
+
+    let child_cs =
+        cap_create_cspace(16).map_err(|_| "cap_create_cspace for recv_delivers_token failed")?;
+    let child_ep = cap_copy(tokened_ep, child_cs, syscall::RIGHTS_ALL)
+        .map_err(|_| "cap_copy tokened ep for recv_delivers_token failed")?;
+    let child_done = cap_copy(done, child_cs, 1 << 7)
+        .map_err(|_| "cap_copy done for recv_delivers_token failed")?;
+    let child_arg = u64::from(child_ep) | (u64::from(child_done) << 16);
+
+    let th = cap_create_thread(ctx.aspace_cap, child_cs)
+        .map_err(|_| "cap_create_thread for recv_delivers_token failed")?;
+
+    let stack_top = ChildStack::top(core::ptr::addr_of!(TOKEN_STACK));
+    thread_configure(
+        th,
+        token_caller_entry as *const () as u64,
+        stack_top,
+        child_arg,
+    )
+    .map_err(|_| "thread_configure for recv_delivers_token failed")?;
+    thread_start(th).map_err(|_| "thread_start for recv_delivers_token failed")?;
+
+    // Server: receive and check token.
+    let (label, token) = ipc_recv(ep).map_err(|_| "ipc_recv for recv_delivers_token failed")?;
+
+    if label != 0xD00D
+    {
+        return Err("recv_delivers_token: wrong label (expected 0xD00D)");
+    }
+    if token != 0x1234
+    {
+        return Err("recv_delivers_token: wrong token (expected 0x1234)");
+    }
+
+    // Reply so child can finish.
+    ipc_reply(0, 0, &[]).map_err(|_| "ipc_reply for recv_delivers_token failed")?;
+
+    signal_wait(done).map_err(|_| "signal_wait for recv_delivers_token failed")?;
+
+    cap_delete(th).ok();
+    cap_delete(tokened_ep).ok();
+    cap_delete(ep).ok();
+    cap_delete(done).ok();
+    cap_delete(child_cs).ok();
+    Ok(())
+}
+
+/// `ipc_recv` returns token=0 when the sender uses an untokened cap.
+pub fn recv_untokened_returns_zero(ctx: &TestContext) -> TestResult
+{
+    let ep = cap_create_endpoint().map_err(|_| "cap_create_endpoint for recv_untokened failed")?;
+    let done = cap_create_signal().map_err(|_| "cap_create_signal for recv_untokened failed")?;
+
+    // Give child an untokened send+grant cap (regular derive, no token).
+    let child_cs =
+        cap_create_cspace(16).map_err(|_| "cap_create_cspace for recv_untokened failed")?;
+    let child_ep = cap_copy(ep, child_cs, RIGHTS_SEND_GRANT)
+        .map_err(|_| "cap_copy ep for recv_untokened failed")?;
+    let child_done =
+        cap_copy(done, child_cs, 1 << 7).map_err(|_| "cap_copy done for recv_untokened failed")?;
+    let child_arg = u64::from(child_ep) | (u64::from(child_done) << 16);
+
+    let th = cap_create_thread(ctx.aspace_cap, child_cs)
+        .map_err(|_| "cap_create_thread for recv_untokened failed")?;
+
+    // Reuse the caller_entry (sends 0xCAFE, expects reply 0xBEEF).
+    let stack_top = ChildStack::top(core::ptr::addr_of!(CHILD_STACK));
+    thread_configure(th, caller_entry as *const () as u64, stack_top, child_arg)
+        .map_err(|_| "thread_configure for recv_untokened failed")?;
+    thread_start(th).map_err(|_| "thread_start for recv_untokened failed")?;
+
+    let (label, token) = ipc_recv(ep).map_err(|_| "ipc_recv for recv_untokened failed")?;
+
+    if label != 0xCAFE
+    {
+        return Err("recv_untokened: wrong label");
+    }
+    if token != 0
+    {
+        return Err("recv_untokened: token should be 0 for untokened cap");
+    }
+
+    ipc_reply(0xBEEF, 0, &[]).map_err(|_| "ipc_reply for recv_untokened failed")?;
+
+    signal_wait(done).map_err(|_| "signal_wait for recv_untokened failed")?;
+
+    cap_delete(th).ok();
+    cap_delete(ep).ok();
+    cap_delete(done).ok();
+    cap_delete(child_cs).ok();
+    Ok(())
+}
+
 // ── Child thread entry ────────────────────────────────────────────────────────
 
 /// Child: calls the endpoint with label 0xCAFE, waits for reply, then signals.
@@ -456,6 +566,22 @@ fn cap_xfer_caller_entry(arg: u64) -> !
 
     // Call with 1 cap to transfer.
     match ipc_call(ep_slot, 0xCAFE, 0, &[sig])
+    {
+        Ok(_) => signal_send(done_slot, 0xDEAD).ok(),
+        Err(_) => signal_send(done_slot, 0xBAD).ok(),
+    };
+    thread_exit()
+}
+
+/// Child for `recv_delivers_token`: calls endpoint with label 0xD00D.
+///
+/// `arg`: bits[15:0] = `ep_slot`, bits[31:16] = `done_slot`.
+fn token_caller_entry(arg: u64) -> !
+{
+    let ep_slot = (arg & 0xFFFF) as u32;
+    let done_slot = ((arg >> 16) & 0xFFFF) as u32;
+
+    match ipc_call(ep_slot, 0xD00D, 0, &[])
     {
         Ok(_) => signal_send(done_slot, 0xDEAD).ok(),
         Err(_) => signal_send(done_slot, 0xBAD).ok(),

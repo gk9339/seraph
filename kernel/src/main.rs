@@ -371,30 +371,65 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
             (aspace_slot, seg_base, seg_count as u32)
         };
 
-        // ── Populate InitInfo page ───────────────────────────────────────────
-        // Allocate a physical frame, fill in InitInfo + CapDescriptor array,
-        // then map read-only into init's address space at INIT_INFO_VADDR.
-        let info_page_phys = allocator
-            .alloc(0) // 2^0 = 1 page
-            .unwrap_or_else(|| fatal("Phase 9: out of memory for InitInfo page"));
-
+        // ── Populate InitInfo region ─────────────────────────────────────────
+        // Allocate enough physical pages for InitInfo + CapDescriptor array +
+        // command line, fill them via the direct map, then map read-only into
+        // init's address space starting at INIT_INFO_VADDR.
         let info_page_virt = {
             use init_protocol::{InitInfo, INIT_INFO_VADDR, INIT_PROTOCOL_VERSION};
 
-            let info_page_virt = mm::paging::phys_to_virt(info_page_phys) as *mut u8;
-
-            // Zero the page.
-            // SAFETY: info_page_virt is valid for PAGE_SIZE bytes; just allocated.
-            unsafe { core::ptr::write_bytes(info_page_virt, 0, mm::PAGE_SIZE) };
-
             let descriptors_offset = core::mem::size_of::<InitInfo>() as u32;
+            let desc_count = cspace_layout.descriptors.len();
+            let desc_byte_len = desc_count * core::mem::size_of::<init_protocol::CapDescriptor>();
+            let cmdline_start = descriptors_offset as usize + desc_byte_len;
+            let total_bytes = cmdline_start + cmdline_len;
+            let info_pages = total_bytes.div_ceil(mm::PAGE_SIZE).max(1);
 
-            // Compute where the command line goes: after the CapDescriptor array.
-            let desc_byte_len_pre = cspace_layout.descriptors.len()
-                * core::mem::size_of::<init_protocol::CapDescriptor>();
-            let cmdline_start = descriptors_offset as usize + desc_byte_len_pre;
-            // Truncate if the cmdline doesn't fit in the remaining page space.
-            let cmdline_copy_len = cmdline_len.min(mm::PAGE_SIZE.saturating_sub(cmdline_start));
+            // Allocate and map each page.
+            let flags = mm::paging::PageFlags {
+                readable: true,
+                writable: false,
+                executable: false,
+                uncacheable: false,
+            };
+            /// Resolve a byte offset within the `InitInfo` region to a writable
+            /// direct-map pointer, handling page boundaries.
+            #[allow(clippy::items_after_statements)]
+            fn info_ptr(page_ptrs: &[*mut u8], offset: usize) -> *mut u8
+            {
+                let page_idx = offset / mm::PAGE_SIZE;
+                let page_off = offset % mm::PAGE_SIZE;
+                // SAFETY: page_ptrs[page_idx] is a valid direct-map pointer.
+                unsafe { page_ptrs[page_idx].add(page_off) }
+            }
+
+            // Track per-page direct-map pointers so we can write across
+            // page boundaries without requiring physically contiguous memory.
+            #[allow(clippy::items_after_statements)]
+            const MAX_INFO_PAGES: usize = 4;
+            if info_pages > MAX_INFO_PAGES
+            {
+                fatal("Phase 9: InitInfo region too large");
+            }
+            let mut page_ptrs: [*mut u8; MAX_INFO_PAGES] = [core::ptr::null_mut(); MAX_INFO_PAGES];
+
+            for pg in 0..info_pages
+            {
+                let phys = allocator
+                    .alloc(0)
+                    .unwrap_or_else(|| fatal("Phase 9: out of memory for InitInfo"));
+                let virt = mm::paging::phys_to_virt(phys) as *mut u8;
+                // SAFETY: just allocated; valid for PAGE_SIZE bytes.
+                unsafe { core::ptr::write_bytes(virt, 0, mm::PAGE_SIZE) };
+                let map_va = INIT_INFO_VADDR + (pg as u64) * mm::PAGE_SIZE as u64;
+                // SAFETY: init_as_ptr valid; phys just allocated; map_va page-aligned.
+                unsafe { (*init_as_ptr).map_page(map_va, phys, flags) }
+                    .unwrap_or_else(|()| fatal("Phase 9: failed to map InitInfo page"));
+                page_ptrs[pg] = virt;
+            }
+            let info_base = page_ptrs[0];
+
+            let cmdline_copy_len = cmdline_len;
             let cmdline_off = if cmdline_copy_len > 0
             {
                 cmdline_start as u32
@@ -406,7 +441,7 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
 
             let info = InitInfo {
                 version: INIT_PROTOCOL_VERSION,
-                cap_descriptor_count: cspace_layout.descriptors.len() as u32,
+                cap_descriptor_count: desc_count as u32,
                 aspace_cap: init_aspace_cap_slot,
                 sched_control_cap: cspace_layout.sched_control_slot,
                 memory_frame_base: cspace_layout.memory_frame_base,
@@ -425,70 +460,55 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
                 cspace_cap: 0, // patched below after CSpace cap is minted
             };
 
-            // Write InitInfo header.
-            // SAFETY: info_page_virt is page-aligned (4096-byte), satisfying InitInfo's
-            // 4-byte alignment requirement; page was just zeroed and is fully writable.
-            // cast_ptr_alignment: page alignment (4096) exceeds struct alignment (4).
+            // Write InitInfo header (always fits in first page).
+            // SAFETY: info_base is page-aligned; InitInfo fits in one page.
             #[allow(clippy::cast_ptr_alignment)]
             unsafe {
-                core::ptr::write(info_page_virt.cast::<InitInfo>(), info);
+                core::ptr::write(info_base.cast::<InitInfo>(), info);
             }
 
-            // Write CapDescriptor array after the header.
-            // SAFETY: descriptors_offset < PAGE_SIZE (checked below); info_page_virt
-            // is valid for PAGE_SIZE bytes.
-            let desc_ptr = unsafe { info_page_virt.add(descriptors_offset as usize) };
-            let desc_count = cspace_layout.descriptors.len();
-            let desc_byte_len = desc_count * core::mem::size_of::<init_protocol::CapDescriptor>();
-
-            // Verify the descriptors fit within the page.
-            if descriptors_offset as usize + desc_byte_len > mm::PAGE_SIZE
+            // Write CapDescriptor array — may span page boundaries.
+            let desc_src = cspace_layout.descriptors.as_ptr().cast::<u8>();
+            let mut written = 0usize;
+            while written < desc_byte_len
             {
-                fatal("Phase 9: InitInfo + descriptors exceed one page");
-            }
-
-            // SAFETY: desc_ptr within the allocated page; descriptors slice is valid.
-            unsafe {
-                core::ptr::copy_nonoverlapping(
-                    cspace_layout.descriptors.as_ptr().cast::<u8>(),
-                    desc_ptr,
-                    desc_byte_len,
-                );
+                let offset = descriptors_offset as usize + written;
+                let chunk = (mm::PAGE_SIZE - offset % mm::PAGE_SIZE).min(desc_byte_len - written);
+                // SAFETY: offset is within the mapped region; desc_src is valid.
+                unsafe {
+                    let dst = info_ptr(&page_ptrs, offset);
+                    core::ptr::copy_nonoverlapping(desc_src.add(written), dst, chunk);
+                }
+                written += chunk;
             }
 
             // Copy kernel command line after the CapDescriptor array.
             if cmdline_copy_len > 0 && cmdline_phys != 0
             {
                 let cmdline_src = mm::paging::phys_to_virt(cmdline_phys) as *const u8;
-                // SAFETY: cmdline_start is within the page (bounds-checked above).
-                let cmdline_dst = unsafe { info_page_virt.add(cmdline_start) };
-                // SAFETY: cmdline_src points to a bootloader-allocated page accessible
-                // via the direct physical map; cmdline_dst is within the InitInfo page;
-                // cmdline_copy_len was bounds-checked above.
-                unsafe {
-                    core::ptr::copy_nonoverlapping(cmdline_src, cmdline_dst, cmdline_copy_len);
+                let mut written = 0usize;
+                while written < cmdline_copy_len
+                {
+                    let offset = cmdline_start + written;
+                    let chunk =
+                        (mm::PAGE_SIZE - offset % mm::PAGE_SIZE).min(cmdline_copy_len - written);
+                    // SAFETY: offset within mapped region; cmdline_src is valid.
+                    unsafe {
+                        let dst = info_ptr(&page_ptrs, offset);
+                        core::ptr::copy_nonoverlapping(cmdline_src.add(written), dst, chunk);
+                    }
+                    written += chunk;
                 }
             }
 
-            // Map the info page read-only into init's address space.
-            let flags = mm::paging::PageFlags {
-                readable: true,
-                writable: false,
-                executable: false,
-                uncacheable: false,
-            };
-            // SAFETY: init_as_ptr valid; info_page_phys just allocated; INIT_INFO_VADDR
-            // is page-aligned and within the user address range.
-            unsafe { (*init_as_ptr).map_page(INIT_INFO_VADDR, info_page_phys, flags) }
-                .unwrap_or_else(|()| fatal("Phase 9: failed to map InitInfo page"));
-
             kprintln!(
-                "init: info page at {:#x} ({} cap descriptors)",
+                "init: info at {:#x} ({} cap descriptors, {} pages)",
                 INIT_INFO_VADDR,
                 desc_count,
+                info_pages,
             );
 
-            info_page_virt
+            info_base
         };
 
         // Map init's user stack (INIT_STACK_PAGES pages below INIT_STACK_TOP).

@@ -127,6 +127,8 @@ pub const SYS_MMIO_SPLIT: u64 = 45;
 pub const SYS_THREAD_SLEEP: u64 = 46;
 /// Bind a death notification `EventQueue` to a thread.
 pub const SYS_THREAD_BIND_NOTIFICATION: u64 = 47;
+/// Capability: derive with an attached token value.
+pub const SYS_CAP_DERIVE_TOKEN: u64 = 48;
 
 // ── Error codes ───────────────────────────────────────────────────────────────
 
@@ -220,15 +222,56 @@ pub const MSG_REGS_DATA_MAX: usize = 6;
 // ── Mapping protection bits ──────────────────────────────────────────────────
 
 /// Mapping protection: writable. Bit 1, matching the kernel `Rights::WRITE` layout.
-pub const PROT_WRITE: u64 = 0x2;
+pub const MAP_WRITABLE: u64 = 0x2;
 
 /// Mapping protection: executable. Bit 2, matching the kernel `Rights::EXECUTE` layout.
-pub const PROT_EXEC: u64 = 0x4;
+pub const MAP_EXECUTABLE: u64 = 0x4;
 
 /// Mapping protection: read-only (no WRITE, no EXECUTE).
 ///
 /// Passed as `prot_bits` to `SYS_MEM_MAP`; equivalent to 0 but more explicit.
-pub const PROT_READ: u64 = 0;
+pub const MAP_READONLY: u64 = 0;
+
+// ── Capability rights masks ─────────────────────────────────────────────────
+//
+// `u64` masks for `cap_derive` / `cap_copy` / `cap_insert` rights parameters.
+// Bit positions match the kernel `Rights` type (`kernel/src/cap/slot.rs`).
+
+/// All rights — pass through whatever the source cap has. Equivalent to `!0u64`.
+pub const RIGHTS_ALL: u64 = !0u64;
+
+/// Send-only IPC endpoint: may call but not receive or grant caps.
+pub const RIGHTS_SEND: u64 = 1 << 4;
+
+/// Send + grant: may call and include capabilities in messages.
+pub const RIGHTS_SEND_GRANT: u64 = (1 << 4) | (1 << 6);
+
+/// Frame: map read-only.
+pub const RIGHTS_MAP_READ: u64 = 1 << 0;
+
+/// Frame: map read-write.
+pub const RIGHTS_MAP_RW: u64 = (1 << 0) | (1 << 1);
+
+/// Frame: map read-execute.
+pub const RIGHTS_MAP_RX: u64 = (1 << 0) | (1 << 2);
+
+/// Thread: full control (start, stop, configure, observe).
+pub const RIGHTS_THREAD: u64 = (1 << 11) | (1 << 12);
+
+/// `CSpace`: full management (insert, delete, derive, revoke).
+pub const RIGHTS_CSPACE: u64 = (1 << 13) | (1 << 14) | (1 << 15) | (1 << 16);
+
+// ── Exit reason constants ─────────────────────────────────────────────────────
+//
+// Values passed via death notification when a thread exits or faults.
+
+/// Clean voluntary exit via `SYS_THREAD_EXIT`.
+pub const EXIT_VOLUNTARY: u64 = 0;
+
+/// Base value for fault-induced exits. The kernel adds the architecture-specific
+/// fault vector/cause to this base: `EXIT_FAULT_BASE + vector` (x86-64) or
+/// `EXIT_FAULT_BASE + cause` (RISC-V).
+pub const EXIT_FAULT_BASE: u64 = 0x1000;
 
 // ── System info ───────────────────────────────────────────────────────────────
 

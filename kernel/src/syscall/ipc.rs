@@ -336,6 +336,7 @@ pub fn sys_ipc_call(tf: &mut TrapFrame) -> Result<u64, SyscallError>
 
     // SAFETY: cspace_ptr validated above.
     let slot = unsafe { lookup_cap(cspace_ptr, ep_idx, CapTag::Endpoint, required_rights) }?;
+    let caller_token = slot.token;
 
     // Extract EndpointState pointer from the slot's object.
     // SAFETY: slot.object is a NonNull<KernelObjectHeader> at offset 0 of
@@ -349,6 +350,7 @@ pub fn sys_ipc_call(tf: &mut TrapFrame) -> Result<u64, SyscallError>
     };
 
     let mut msg = Message::new(label);
+    msg.token = caller_token;
     msg.data_count = data_count;
     if data_count > 0
     {
@@ -517,7 +519,7 @@ pub fn sys_ipc_recv(tf: &mut TrapFrame) -> Result<u64, SyscallError>
                 write_ipc_buf(server_buf, msg.data_count, &msg.data);
             }
         }
-        tf.set_ipc_return(0, msg.label);
+        tf.set_ipc_return_with_token(0, msg.label, msg.token);
         return Ok(0);
     }
     // else: No caller; server is now Blocked on recv queue. Yield.
@@ -571,7 +573,7 @@ pub fn sys_ipc_recv(tf: &mut TrapFrame) -> Result<u64, SyscallError>
             write_ipc_buf(server_buf, msg.data_count, &msg.data);
         }
     }
-    tf.set_ipc_return(0, msg.label);
+    tf.set_ipc_return_with_token(0, msg.label, msg.token);
     Ok(0)
 }
 

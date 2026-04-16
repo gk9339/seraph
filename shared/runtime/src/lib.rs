@@ -68,7 +68,7 @@ pub extern "C" fn _start(_info_ptr: u64) -> !
     let startup = StartupInfo {
         initial_caps: cap_descs,
         ipc_buffer: info.ipc_buffer_vaddr as *mut u8,
-        parent_endpoint: info.parent_endpoint_cap,
+        creator_endpoint: info.creator_endpoint_cap,
         startup_message: startup_msg,
         self_thread: info.self_thread_cap,
         self_aspace: info.self_aspace_cap,

@@ -23,18 +23,21 @@
 use syscall_abi::{
     MSG_CAP_SLOTS_MAX, MSG_DATA_WORDS_MAX, SYS_ASPACE_QUERY, SYS_CAP_COPY, SYS_CAP_CREATE_ASPACE,
     SYS_CAP_CREATE_CSPACE, SYS_CAP_CREATE_ENDPOINT, SYS_CAP_CREATE_EVENT_Q, SYS_CAP_CREATE_SIGNAL,
-    SYS_CAP_CREATE_THREAD, SYS_CAP_CREATE_WAIT_SET, SYS_CAP_DELETE, SYS_CAP_DERIVE, SYS_CAP_INSERT,
-    SYS_CAP_MOVE, SYS_CAP_REVOKE, SYS_DMA_GRANT, SYS_EVENT_POST, SYS_EVENT_RECV, SYS_FRAME_SPLIT,
-    SYS_IOPORT_BIND, SYS_IPC_BUFFER_SET, SYS_IPC_CALL, SYS_IPC_RECV, SYS_IPC_REPLY, SYS_IRQ_ACK,
-    SYS_IRQ_REGISTER, SYS_MEM_MAP, SYS_MEM_PROTECT, SYS_MEM_UNMAP, SYS_MMIO_MAP, SYS_MMIO_SPLIT,
-    SYS_SBI_CALL, SYS_SIGNAL_SEND, SYS_SIGNAL_WAIT, SYS_SYSTEM_INFO, SYS_THREAD_BIND_NOTIFICATION,
-    SYS_THREAD_CONFIGURE, SYS_THREAD_EXIT, SYS_THREAD_READ_REGS, SYS_THREAD_SET_AFFINITY,
-    SYS_THREAD_SET_PRIORITY, SYS_THREAD_SLEEP, SYS_THREAD_START, SYS_THREAD_STOP,
-    SYS_THREAD_WRITE_REGS, SYS_THREAD_YIELD, SYS_WAIT_SET_ADD, SYS_WAIT_SET_REMOVE,
-    SYS_WAIT_SET_WAIT,
+    SYS_CAP_CREATE_THREAD, SYS_CAP_CREATE_WAIT_SET, SYS_CAP_DELETE, SYS_CAP_DERIVE,
+    SYS_CAP_DERIVE_TOKEN, SYS_CAP_INSERT, SYS_CAP_MOVE, SYS_CAP_REVOKE, SYS_DMA_GRANT,
+    SYS_EVENT_POST, SYS_EVENT_RECV, SYS_FRAME_SPLIT, SYS_IOPORT_BIND, SYS_IPC_BUFFER_SET,
+    SYS_IPC_CALL, SYS_IPC_RECV, SYS_IPC_REPLY, SYS_IRQ_ACK, SYS_IRQ_REGISTER, SYS_MEM_MAP,
+    SYS_MEM_PROTECT, SYS_MEM_UNMAP, SYS_MMIO_MAP, SYS_MMIO_SPLIT, SYS_SBI_CALL, SYS_SIGNAL_SEND,
+    SYS_SIGNAL_WAIT, SYS_SYSTEM_INFO, SYS_THREAD_BIND_NOTIFICATION, SYS_THREAD_CONFIGURE,
+    SYS_THREAD_EXIT, SYS_THREAD_READ_REGS, SYS_THREAD_SET_AFFINITY, SYS_THREAD_SET_PRIORITY,
+    SYS_THREAD_SLEEP, SYS_THREAD_START, SYS_THREAD_STOP, SYS_THREAD_WRITE_REGS, SYS_THREAD_YIELD,
+    SYS_WAIT_SET_ADD, SYS_WAIT_SET_REMOVE, SYS_WAIT_SET_WAIT,
 };
 
-pub use syscall_abi::{PROT_EXEC, PROT_READ, PROT_WRITE};
+pub use syscall_abi::{
+    MAP_EXECUTABLE, MAP_READONLY, MAP_WRITABLE, RIGHTS_ALL, RIGHTS_CSPACE, RIGHTS_MAP_READ,
+    RIGHTS_MAP_RW, RIGHTS_MAP_RX, RIGHTS_SEND, RIGHTS_SEND_GRANT, RIGHTS_THREAD,
+};
 
 // ── Raw syscall entry ─────────────────────────────────────────────────────────
 
@@ -305,6 +308,65 @@ unsafe fn syscall5_ret2(nr: u64, a0: u64, a1: u64, a2: u64, a3: u64, a4: u64) ->
     (ret, secondary)
 }
 
+/// Issue a syscall with 1 argument. Returns (primary, secondary, tertiary).
+///
+/// Used by `ipc_recv` to retrieve the token alongside label.
+#[cfg(target_arch = "x86_64")]
+// inline_always: syscall wrapper contains inline asm; must inline to call site.
+// cast_possible_wrap: u64 syscall number reinterpreted as i64 register value; bit pattern preserved.
+#[allow(clippy::inline_always, clippy::cast_possible_wrap)]
+#[inline(always)]
+unsafe fn syscall1_ret3(nr: u64, a0: u64) -> (i64, u64, u64)
+{
+    let ret: i64;
+    let secondary: u64;
+    let tertiary: u64;
+    let nr = nr as i64;
+    // SAFETY: inline asm issues syscall instruction per x86-64 ABI; syscall number in rax,
+    // arg in rdi; clobbers rcx/r11; reads secondary return from rdx (lateout),
+    // tertiary return from rsi (lateout). rsi is not used as input (only 1 arg).
+    unsafe {
+        core::arch::asm!(
+            "syscall",
+            inout("rax") nr => ret,
+            in("rdi") a0,
+            out("rcx") _,
+            out("r11") _,
+            lateout("rdx") secondary,
+            lateout("rsi") tertiary,
+            options(nostack),
+        );
+    }
+    (ret, secondary, tertiary)
+}
+
+/// Issue a syscall with 1 argument. Returns (primary, secondary, tertiary).
+#[cfg(target_arch = "riscv64")]
+// inline_always: syscall wrapper contains inline asm; must inline to call site.
+// cast_possible_wrap: u64 arg reinterpreted as i64 register value; bit pattern preserved.
+#[allow(clippy::inline_always, clippy::cast_possible_wrap)]
+#[inline(always)]
+unsafe fn syscall1_ret3(nr: u64, a0: u64) -> (i64, u64, u64)
+{
+    let ret: i64;
+    let secondary: u64;
+    let tertiary: u64;
+    let a0 = a0 as i64;
+    // SAFETY: inline asm issues ecall instruction per RISC-V ABI; syscall number in a7,
+    // arg in a0; reads secondary from a1 (lateout), tertiary from a2 (lateout).
+    unsafe {
+        core::arch::asm!(
+            "ecall",
+            inout("a0") a0 => ret,
+            lateout("a1") secondary,
+            lateout("a2") tertiary,
+            in("a7") nr,
+            options(nostack),
+        );
+    }
+    (ret, secondary, tertiary)
+}
+
 /// Issue a syscall with 6 arguments. Returns the primary return value.
 #[cfg(target_arch = "x86_64")]
 // inline_always: syscall wrapper contains inline asm; must inline to call site.
@@ -543,25 +605,28 @@ pub fn ipc_call(
 
 /// Receive a call on an endpoint cap.
 ///
-/// Blocks until a caller sends. Returns `(label, data_count)`.
+/// Blocks until a caller sends. Returns `(label, token)`.
 /// Data words are written to the registered IPC buffer.
+/// The `token` is the value attached to the sender's endpoint capability
+/// via `cap_derive_token`. Zero if the sender used an untokened cap.
 ///
 /// # Errors
 /// Returns a negative `i64` error code if the endpoint cap is invalid or
 /// the receive is interrupted.
 #[inline]
-pub fn ipc_recv(ep: u32) -> Result<(u64, usize), i64>
+pub fn ipc_recv(ep: u32) -> Result<(u64, u64), i64>
 {
-    // SAFETY: syscall5_ret2 issues raw syscall instruction; ep is endpoint cap index as u64;
-    // kernel validates cap and writes to IPC buffer; returns label in secondary register.
-    let (ret, secondary) = unsafe { syscall5_ret2(SYS_IPC_RECV, u64::from(ep), 0, 0, 0, 0) };
+    // SAFETY: syscall1_ret3 issues raw syscall instruction; ep is endpoint cap index as u64;
+    // kernel validates cap and writes to IPC buffer; returns label in secondary register,
+    // token in tertiary register.
+    let (ret, secondary, tertiary) = unsafe { syscall1_ret3(SYS_IPC_RECV, u64::from(ep)) };
     if ret < 0
     {
         Err(ret)
     }
     else
     {
-        Ok((secondary, 0))
+        Ok((secondary, tertiary))
     }
 }
 
@@ -1007,8 +1072,8 @@ pub fn thread_start(thread_cap: u32) -> Result<(), i64>
 /// - `src_slot`: slot index in the caller's `CSpace`.
 /// - `dest_cspace_cap`: cap index of the destination `CSpace`.
 /// - `rights_mask`: bitmask of rights to grant. The effective rights are the
-///   intersection of this mask and the source cap's rights — pass `!0u64` to
-///   copy with the same rights as the source.
+///   intersection of this mask and the source cap's rights — pass `RIGHTS_ALL`
+///   to copy with the same rights as the source.
 ///
 /// Returns the slot index in the destination `CSpace`.
 ///
@@ -1059,6 +1124,43 @@ pub fn cap_derive(src_slot: u32, rights_mask: u64) -> Result<u32, i64>
     // SAFETY: syscall2 issues raw syscall instruction; src_slot is cap index as u64, rights_mask
     // is bitmask; kernel validates cap, creates attenuated derivative, returns new slot.
     let ret = unsafe { syscall2(SYS_CAP_DERIVE, u64::from(src_slot), rights_mask) };
+    if ret < 0
+    {
+        Err(ret)
+    }
+    else
+    {
+        Ok(ret as u32)
+    }
+}
+
+/// Derive a capability with a token attached (`SYS_CAP_DERIVE_TOKEN`).
+///
+/// Creates a new slot in the caller's `CSpace` with attenuated rights and the
+/// specified `token` value. The token is delivered to the receiver on `ipc_recv`
+/// when the capability is used for IPC.
+///
+/// `token` must be non-zero. The source capability must have `token == 0`
+/// (no re-tokening).
+///
+/// # Errors
+/// Returns a negative `i64` error code if the source cap is invalid, the token
+/// is zero, the source already has a token, or the `CSpace` is full.
+// cast_possible_truncation, cast_sign_loss: ret is a non-negative CSpace slot index
+// guaranteed to fit in u32 (max CSpace size is 16384).
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+pub fn cap_derive_token(src_slot: u32, rights_mask: u64, token: u64) -> Result<u32, i64>
+{
+    // SAFETY: syscall3 issues raw syscall instruction; src_slot is cap index, rights_mask
+    // is bitmask, token is the token value; kernel validates and creates tokened derivative.
+    let ret = unsafe {
+        syscall3(
+            SYS_CAP_DERIVE_TOKEN,
+            u64::from(src_slot),
+            rights_mask,
+            token,
+        )
+    };
     if ret < 0
     {
         Err(ret)

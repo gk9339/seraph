@@ -35,16 +35,10 @@ pub const INIT_PROTOCOL_VERSION: u32 = 4;
 
 // ── Address space constants ──────────────────────────────────────────────────
 
-/// Virtual address where the kernel maps the read-only [`InitInfo`] page.
+/// Virtual address where the kernel maps the read-only [`InitInfo`] region.
 ///
-/// Placed below the stack and its guard page. The layout is:
-///
-/// ```text
-/// INIT_INFO_VADDR          → InitInfo (4 KiB, read-only)
-/// INIT_INFO_VADDR + 0x1000 → guard page (unmapped)
-/// INIT_STACK_TOP - N*4KiB  → stack pages (read-write, N = INIT_STACK_PAGES)
-/// INIT_STACK_TOP           → top of stack
-/// ```
+/// The region spans one or more contiguous pages (as many as needed for the
+/// header, [`CapDescriptor`] array, and command line). Placed below the stack.
 pub const INIT_INFO_VADDR: u64 = 0x7FFF_FFFF_8000;
 
 /// Virtual address of the top of init's user stack.
@@ -60,7 +54,7 @@ pub const INIT_STACK_PAGES: usize = 4;
 
 /// Kernel-to-init handover structure.
 ///
-/// Placed at [`INIT_INFO_VADDR`] (one 4 KiB page, read-only). The fixed-size
+/// Placed at [`INIT_INFO_VADDR`] (one or more pages, read-only). The fixed-size
 /// header is followed by a variable-length [`CapDescriptor`] array; the array
 /// starts at byte offset [`InitInfo::cap_descriptors_offset`] from the start
 /// of this struct.

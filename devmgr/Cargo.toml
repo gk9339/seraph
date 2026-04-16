@@ -12,6 +12,7 @@ test = false
 [dependencies]
 process-abi = { workspace = true }
 runtime = { path = "../shared/runtime" }
+ipc = { path = "../shared/ipc" }
 syscall = { path = "../shared/syscall" }
 syscall-abi = { path = "../abi/syscall" }
 virtio-core = { path = "../drivers/virtio/core" }

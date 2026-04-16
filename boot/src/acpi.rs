@@ -48,6 +48,7 @@ const MADT_TYPE_LAPIC: u8 = 0; // x86-64: Processor Local APIC, length 8
 const MADT_TYPE_IOAPIC: u8 = 1;
 const MADT_TYPE_ISO: u8 = 2;
 const MADT_TYPE_RINTC: u8 = 0x18; // RISC-V INTC (MADT type 24), length 36
+const MADT_TYPE_PLIC: u8 = 0x1B; // RISC-V PLIC (MADT type 27)
 
 // MCFG: entries start at offset 44 (SDT_HDR_LEN + 8 reserved bytes).
 const MCFG_ENTRIES_OFF: usize = SDT_HDR_LEN + 8;
@@ -505,6 +506,9 @@ fn parse_madt_topology(table: &[u8], bsp_id: u32, mut cpu_ids: [u32; 64]) -> (u3
 /// - Local APIC `MmioRange` (base from MADT header, size=4096)
 /// - I/O APIC `MmioRanges` (one per type-1 entry)
 /// - IRQ source overrides as `IrqLine` entries (one per type-2 entry)
+// too_many_lines: sequential parsing of MADT entry types (IOAPIC, ISO, PLIC)
+// that share accumulator state; splitting would obscure the linear table walk.
+#[allow(clippy::too_many_lines)]
 fn parse_madt(table: &[u8], _table_addr: u64, count: &mut usize, out: &mut [PlatformResource])
 {
     macro_rules! push {
@@ -581,6 +585,49 @@ fn parse_madt(table: &[u8], _table_addr: u64, count: &mut usize, out: &mut [Plat
                     size: 0,
                     id: gsi,
                 });
+            }
+            MADT_TYPE_PLIC if entry_len >= 24 =>
+            {
+                // Type 0x1B (RISC-V PLIC), RISC-V ACPI:
+                //   off+2: version(u8)  off+3: id(u8)
+                //   off+8: base_address(u64)  off+16: size(u32)
+                //   off+24: max_irq_count(u32)  ...
+                let plic_base = read_u64(table, off + 8);
+                let max_sources = if entry_len >= 28
+                {
+                    read_u32(table, off + 24)
+                }
+                else
+                {
+                    // Conservative default if field not present.
+                    64
+                };
+                // Record PLIC MMIO region.
+                let plic_size = read_u32(table, off + 16);
+                if plic_base != 0 && plic_size > 0
+                {
+                    push!(PlatformResource {
+                        resource_type: ResourceType::MmioRange,
+                        flags: 0,
+                        base: plic_base,
+                        size: u64::from(plic_size),
+                        id: 0,
+                    });
+                }
+                // Create IrqLine resources for PLIC sources. Source 0 is
+                // reserved. Capped at 36 sources (1-35) to fit within the
+                // ProcessInfo page cap descriptor limit (~165 descriptors).
+                let plic_max = max_sources.min(36);
+                for src in 1u32..plic_max
+                {
+                    push!(PlatformResource {
+                        resource_type: ResourceType::IrqLine,
+                        flags: 0,
+                        base: 0,
+                        size: 0,
+                        id: u64::from(src),
+                    });
+                }
             }
             _ =>
             {} // Skip unknown MADT entry types.

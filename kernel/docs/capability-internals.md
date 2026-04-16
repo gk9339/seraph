@@ -99,6 +99,10 @@ pub struct CapabilitySlot
     /// Rights bitmask for this slot. Interpretation is tag-dependent.
     rights: Rights,
 
+    /// Caller-identifying token (0 = untokened). Set via SYS_CAP_DERIVE_TOKEN.
+    /// Immutable once set; inherited by derivation and copy.
+    token: u64,
+
     /// Pointer to the kernel object this capability refers to.
     /// Null when tag == CapTag::Null.
     object: Option<NonNull<KernelObject>>,
@@ -110,6 +114,9 @@ pub struct CapabilitySlot
     deriv_prev_sibling: Option<SlotId>,
 }
 ```
+
+The slot is 56 bytes (`#[repr(C)]`). 64 slots per CSpace page = 3584 bytes, fitting
+in a 4096-byte slab bin.
 
 `SlotId` is a global identifier combining a CSpace ID and a slot index:
 `(CSpaceId, usize)`. This allows derivation tree traversal across CSpace boundaries

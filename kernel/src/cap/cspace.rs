@@ -35,7 +35,7 @@ use super::slot::{CSpaceId, CapTag, CapabilitySlot, Rights};
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-/// Slots per `CSpace` page (64 × 48 B = 3072 B, fits in a 4096-byte slab bin).
+/// Slots per `CSpace` page (64 × 56 B = 3584 B, fits in a 4096-byte slab bin).
 pub const L2_SIZE: usize = 64;
 
 /// Directory entries per `CSpace` (max 256 × 64 = 16384 slots).
@@ -260,6 +260,7 @@ impl CSpace
         let slot = self.slot_mut(index).ok_or(CapError::InvalidIndex)?;
         slot.tag = tag;
         slot.rights = rights;
+        slot.token = 0;
         slot.object = Some(object);
         slot.deriv_parent = None;
         slot.deriv_first_child = None;
@@ -380,6 +381,7 @@ impl CSpace
         let slot = self.slot_mut(index).ok_or(CapError::InvalidIndex)?;
         slot.tag = tag;
         slot.rights = rights;
+        slot.token = 0;
         slot.object = Some(object);
         slot.deriv_parent = None;
         slot.deriv_first_child = None;

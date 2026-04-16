@@ -145,6 +145,14 @@ impl TrapFrame
         self.rdx = label;
     }
 
+    /// Write IPC return values with token: primary in rax, label in rdx, token in rsi.
+    pub fn set_ipc_return_with_token(&mut self, primary: u64, label: u64, token: u64)
+    {
+        self.rax = primary;
+        self.rdx = label;
+        self.rsi = token;
+    }
+
     /// Initialise the frame for first entry to user mode.
     ///
     /// Sets the user entry point (`rip`), user stack (`rsp`), segment

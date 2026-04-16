@@ -166,7 +166,14 @@ pub unsafe fn init_ap(_period_us: u64) {}
 /// which may preempt the current thread.
 pub fn handle_tick()
 {
-    TICK_COUNT.fetch_add(1, Ordering::Relaxed);
+    // Only hart 0 increments the global tick counter. All harts receive timer
+    // interrupts, but TICK_COUNT must advance at the single-hart interrupt rate
+    // so that sleep deadline math (ms * ticks_per_second / 1000) produces
+    // correct wall-clock durations.
+    if crate::arch::current::cpu::current_cpu() == 0
+    {
+        TICK_COUNT.fetch_add(1, Ordering::Relaxed);
+    }
     let period = TIMER_PERIOD_TICKS.load(Ordering::Relaxed);
     // Rearm timer before calling schedule() so the next tick is not missed.
     #[cfg(not(test))]

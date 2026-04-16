@@ -20,6 +20,7 @@ members = [
     "shared/font",
     "shared/runtime",
     "shared/syscall",
+    "shared/ipc",
     "base/crasher",
     "xtask",
 ]

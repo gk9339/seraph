@@ -119,7 +119,7 @@ pub fn run(ctx: &TestContext) -> TestResult
             TEST_VA,
             0,
             1,
-            syscall::PROT_WRITE,
+            syscall::MAP_WRITABLE,
         )
         .map_err(|_| "integration::tlb_coherency: mem_map failed")?;
 

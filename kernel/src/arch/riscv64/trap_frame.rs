@@ -121,6 +121,14 @@ impl TrapFrame
         self.a1 = label;
     }
 
+    /// Write IPC return values with token: primary in a0, label in a1, token in a2.
+    pub fn set_ipc_return_with_token(&mut self, primary: u64, label: u64, token: u64)
+    {
+        self.a0 = primary;
+        self.a1 = label;
+        self.a2 = token;
+    }
+
     /// Initialise the frame for first entry to user mode.
     ///
     /// Sets the supervisor exception PC (`sepc`, the user entry point) and

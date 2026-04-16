@@ -69,8 +69,8 @@ pub struct ProcessInfo {
     /// For processes created by procmgr directly, this is an endpoint to
     /// procmgr. For processes created on behalf of another service (e.g.
     /// devmgr requesting a driver), the endpoint MAY point to the
-    /// requesting service instead. Zero if no parent endpoint is provided.
-    pub parent_endpoint_cap: u32,
+    /// requesting service instead. Zero if no creator endpoint is provided.
+    pub creator_endpoint_cap: u32,
 
     // ── Initial capabilities ────────────────────────────────────────
 
@@ -127,7 +127,7 @@ Slots 0 through `initial_caps_base - 1` have fixed assignments:
 | `self_thread_cap` | Thread capability (Control) |
 | `self_aspace_cap` | AddressSpace capability |
 | `self_cspace_cap` | CSpace capability |
-| `parent_endpoint_cap` | Endpoint to parent/creating service (if nonzero) |
+| `creator_endpoint_cap` | Endpoint to creating service (if nonzero) |
 
 Slots from `initial_caps_base` onward are service-specific and described by the
 `CapDescriptor` array.
@@ -149,7 +149,7 @@ pub struct StartupInfo<'a> {
     pub ipc_buffer: *mut u8,
 
     /// CSpace slot of the parent endpoint. Zero if none.
-    pub parent_endpoint: u32,
+    pub creator_endpoint: u32,
 
     /// Startup message bytes. Empty slice if none.
     pub startup_message: &'a [u8],

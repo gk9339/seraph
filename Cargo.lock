@@ -3,6 +3,17 @@
 version = 4
 
 [[package]]
+name = "allocsmoke"
+version = "0.1.0"
+dependencies = [
+ "ipc",
+ "process-abi",
+ "runtime",
+ "syscall",
+ "syscall-abi",
+]
+
+[[package]]
 name = "android_system_properties"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -531,6 +542,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
+name = "registry"
+version = "0.1.0"
+
+[[package]]
 name = "runtime"
 version = "0.1.0"
 dependencies = [
@@ -538,6 +553,7 @@ dependencies = [
  "process-abi",
  "syscall",
  "syscall-abi",
+ "va_layout",
 ]
 
 [[package]]
@@ -618,6 +634,7 @@ version = "0.1.0"
 dependencies = [
  "ipc",
  "process-abi",
+ "registry",
  "runtime",
  "syscall",
  "syscall-abi",
@@ -673,6 +690,10 @@ dependencies = [
  "js-sys",
  "wasm-bindgen",
 ]
+
+[[package]]
+name = "va_layout"
+version = "0.1.0"
 
 [[package]]
 name = "vfsd"

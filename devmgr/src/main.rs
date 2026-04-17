@@ -31,11 +31,19 @@ const PAGE_SIZE: u64 = 0x1000;
 /// VA base for mapping ECAM (x86-64) or `VirtIO` MMIO regions (RISC-V).
 const MMIO_MAP_VA: u64 = 0x0000_0001_0000_0000; // 4 GiB
 
-// too_many_lines: main performs sequential device discovery and driver spawning
-// that must share mutable state (caps, devices, MMIO windows); splitting would
-// require passing large structs through multiple layers.
-#[no_mangle]
+// clippy::too_many_lines: devmgr main sequences eleven discrete hardware
+// and software stages — register IPC buffer, acquire caps, map ECAM,
+// enumerate PCI, derive IRQ caps, spawn virtio-blk with BAR/IRQ caps
+// injected into a suspended child, register with svcmgr, and enter the
+// registry service loop. Each stage consumes the mutable state produced
+// by the previous (caps mutates, `devices` is populated, then queried by
+// spawn_virtio_blk, then queried again by the registry loop). Factoring
+// these into standalone phase functions requires a DevmgrRuntime struct
+// holding every in-flight reference, which in this single-use orchestrator
+// is pure type-level overhead; the phase comments in-line keep the flow
+// visible without the indirection.
 #[allow(clippy::too_many_lines)]
+#[no_mangle]
 extern "Rust" fn main(startup: &StartupInfo) -> !
 {
     if syscall::ipc_buffer_set(startup.ipc_buffer as u64).is_err()
@@ -102,13 +110,16 @@ extern "Rust" fn main(startup: &StartupInfo) -> !
     let mut device_info = [virtio_core::VirtioPciStartupInfo::default(); pci::MAX_DEVICES];
     let mut device_info_count: usize = 0;
 
+    let mut catalog = DeviceCatalog {
+        entries: &mut device_info,
+        count: &mut device_info_count,
+    };
     let blk_driver_spawned = spawn_virtio_blk(
         &devices[..dev_count],
         &mut caps,
         blk_ep,
         ipc_buf,
-        &mut device_info,
-        &mut device_info_count,
+        &mut catalog,
     );
 
     // ── Device registry IPC loop ─────────────────────────────────────────
@@ -175,18 +186,24 @@ extern "Rust" fn main(startup: &StartupInfo) -> !
     }
 }
 
+/// Growing registry of spawned-device startup-info entries, populated as
+/// drivers are spawned. The matching count is mirrored here so both values
+/// travel together.
+pub struct DeviceCatalog<'a>
+{
+    pub entries: &'a mut [virtio_core::VirtioPciStartupInfo],
+    pub count: &'a mut usize,
+}
+
 /// Find and spawn a `VirtIO` block device driver from the discovered devices.
 ///
 /// Returns `true` if a driver was successfully spawned.
-// too_many_arguments: device spawning requires caps, endpoint, info table, and IPC buffer.
-#[allow(clippy::too_many_arguments)]
 fn spawn_virtio_blk(
     devices: &[pci::PciDevice],
     caps: &mut caps::DevmgrCaps,
     blk_ep: u32,
     ipc_buf: *mut u64,
-    device_info: &mut [virtio_core::VirtioPciStartupInfo],
-    device_info_count: &mut usize,
+    catalog: &mut DeviceCatalog,
 ) -> bool
 {
     for pci_dev in devices
@@ -209,32 +226,36 @@ fn spawn_virtio_blk(
         }
 
         // Store device info for QUERY_DEVICE_INFO. Tokens are 1-based.
-        let dev_idx = *device_info_count;
-        if dev_idx < device_info.len()
+        let dev_idx = *catalog.count;
+        if dev_idx < catalog.entries.len()
         {
-            device_info[dev_idx] = pci_dev.virtio_info;
-            *device_info_count += 1;
+            catalog.entries[dev_idx] = pci_dev.virtio_info;
+            *catalog.count += 1;
         }
         let device_token = (dev_idx as u64) + 1;
 
         let bar_info = find_virtio_bar_cap(pci_dev, caps);
-        let (irq_cap, irq_id) = find_irq_cap(pci_dev, caps);
+        let (irq_cap, _irq_id) = find_irq_cap(pci_dev, caps);
 
         let module_cap = caps.driver_module_slots[0];
 
-        spawn::spawn_driver(
-            caps.procmgr_ep,
-            caps.self_bootstrap_ep,
+        let config = spawn::DriverSpawnConfig {
+            procmgr_ep: caps.procmgr_ep,
+            bootstrap_ep: caps.self_bootstrap_ep,
             module_cap,
-            &bar_info.0[..bar_info.2],
-            &bar_info.1[..bar_info.2],
-            &bar_info.3[..bar_info.2],
+            bars: spawn::BarSpec {
+                caps: &bar_info.0[..bar_info.2],
+                bases: &bar_info.1[..bar_info.2],
+                sizes: &bar_info.3[..bar_info.2],
+            },
             irq_cap,
-            irq_id,
-            caps.log_ep,
-            blk_ep,
-            caps.registry_ep,
+            log_ep: caps.log_ep,
+            service_ep: blk_ep,
+            registry_ep: caps.registry_ep,
             device_token,
+        };
+        spawn::spawn_driver(
+            &config,
             // SAFETY: ipc_buf is the registered page.
             unsafe { IpcBuf::from_raw(ipc_buf) },
         );

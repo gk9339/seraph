@@ -119,8 +119,17 @@ unsafe fn ecam_write32(ecam_va: u64, bus: u8, dev: u8, func: u8, reg: u16, val: 
 ///
 /// # Safety
 /// `ecam_va` must be a valid ECAM MMIO mapping.
-// too_many_lines: PCI enumeration is inherently sequential with BAR probing,
-// 64-bit BAR handling, and size calculation; splitting would fragment the flow.
+// clippy::too_many_lines: pci_enumerate walks bus × device × function ×
+// BAR with the size-probe protocol from PCI Local Bus Spec r3.0 §6.2.5.1
+// ("write 0xFFFFFFFF, read back, mask, restore"). The probe-and-restore
+// sequence must happen inside the same per-BAR scope as the later size
+// computation and 64-bit-BAR pairing because the restored original value
+// is read back out of `bar_phys[b]` in a subsequent iteration. Extracting
+// `probe_bar(cfg_va, idx, out) -> size` or `check_64bit_bar(...)` helpers
+// leaves the restore-plus-merge logic out-of-scope of the helper and
+// requires passing pci_dev's growing BAR-state arrays by &mut across
+// every call; the linear body lets each function's BAR loop own its own
+// four parallel arrays without lifetime-threading overhead.
 #[allow(clippy::too_many_lines)]
 pub unsafe fn pci_enumerate(
     ecam_va: u64,

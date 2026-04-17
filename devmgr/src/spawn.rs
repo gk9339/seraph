@@ -14,6 +14,32 @@ use ipc::{procmgr_labels, IpcBuf};
 /// Monotonic counter for driver-child bootstrap tokens.
 static NEXT_BOOTSTRAP_TOKEN: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(1);
 
+/// Per-device BAR capability set delivered to a driver. `bases` and `sizes`
+/// parallel `caps` and are retained for future multi-BAR drivers; only the
+/// first BAR is consumed by the current block driver path.
+pub struct BarSpec<'a>
+{
+    pub caps: &'a [u32],
+    pub bases: &'a [u64],
+    pub sizes: &'a [u64],
+}
+
+/// Endpoints and identifiers needed to spawn a driver process and hand it
+/// the per-device capability set. Grouped into one struct because every
+/// driver spawn needs the full set.
+pub struct DriverSpawnConfig<'a>
+{
+    pub procmgr_ep: u32,
+    pub bootstrap_ep: u32,
+    pub module_cap: u32,
+    pub bars: BarSpec<'a>,
+    pub irq_cap: Option<u32>,
+    pub log_ep: u32,
+    pub service_ep: u32,
+    pub registry_ep: u32,
+    pub device_token: u64,
+}
+
 /// Spawn a driver process with per-device capabilities.
 ///
 /// Creates the process via procmgr, starts it, and serves its bootstrap over
@@ -24,40 +50,37 @@ static NEXT_BOOTSTRAP_TOKEN: core::sync::atomic::AtomicU64 = core::sync::atomic:
 /// Layout matches `drivers/virtio/blk/src/main.rs::bootstrap_caps`:
 ///   Round 1 (4 caps): BAR MMIO, IRQ, driver service endpoint, log endpoint.
 ///   Round 2 (2 caps): procmgr endpoint, devmgr query endpoint.
-// too_many_arguments: driver spawning requires per-device BAR caps, IRQ,
-// procmgr endpoint, and registry endpoint.
-#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
-pub fn spawn_driver(
-    procmgr_ep: u32,
-    bootstrap_ep: u32,
-    module_cap: u32,
-    bar_caps: &[u32],
-    bar_bases: &[u64],
-    bar_sizes: &[u64],
-    irq_cap: Option<u32>,
-    _irq_id: u32,
-    log_ep: u32,
-    service_ep: u32,
-    registry_ep: u32,
-    device_token: u64,
-    ipc: IpcBuf,
-)
+// clippy::too_many_lines: driver spawn is a single transaction — derive six
+// per-child caps, install them into the suspended child, and serve two
+// bootstrap rounds against one shared `ipc` buffer. Each derive owns a slot
+// that must be released cooperatively on partial failure; extracting helpers
+// requires passing the same `DriverSpawnConfig` to each. The linear
+// presentation matches the bootstrap protocol one-to-one.
+#[allow(clippy::too_many_lines)]
+pub fn spawn_driver(config: &DriverSpawnConfig, ipc: IpcBuf)
 {
-    let _ = bar_bases;
-    let _ = bar_sizes;
+    let _ = config.bars.bases;
+    let _ = config.bars.sizes;
 
-    let Some(bar_cap) = bar_caps.first().copied()
+    let Some(bar_cap) = config.bars.caps.first().copied()
     else
     {
         runtime::log!("devmgr: driver spawn: no BAR cap");
         return;
     };
-    let Some(irq_slot) = irq_cap
+    let Some(irq_slot) = config.irq_cap
     else
     {
         runtime::log!("devmgr: driver spawn: no IRQ cap");
         return;
     };
+    let procmgr_ep = config.procmgr_ep;
+    let bootstrap_ep = config.bootstrap_ep;
+    let module_cap = config.module_cap;
+    let log_ep = config.log_ep;
+    let service_ep = config.service_ep;
+    let registry_ep = config.registry_ep;
+    let device_token = config.device_token;
 
     // Allocate a bootstrap token for the child.
     let child_token = NEXT_BOOTSTRAP_TOKEN.fetch_add(1, core::sync::atomic::Ordering::Relaxed);

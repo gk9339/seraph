@@ -3,14 +3,16 @@
 
 // shared/mmio/src/arch/mod.rs
 
-//! Per-architecture selection for MMIO ordering primitives.
-
-#[cfg(target_arch = "riscv64")]
-mod riscv64;
-#[cfg(target_arch = "riscv64")]
-pub use riscv64::{dma_to_mmio_barrier, mmio_to_dma_barrier, mmio_to_mmio_barrier};
+//! Architecture dispatch module.
+//!
+//! This is the only file in this crate permitted to contain
+//! `#[cfg(target_arch)]` guards. All other modules access architecture-specific
+//! functionality through the `arch::current` re-export.
 
 #[cfg(target_arch = "x86_64")]
-mod x86_64;
-#[cfg(target_arch = "x86_64")]
-pub use x86_64::{dma_to_mmio_barrier, mmio_to_dma_barrier, mmio_to_mmio_barrier};
+#[path = "x86_64/mod.rs"]
+pub mod current;
+
+#[cfg(target_arch = "riscv64")]
+#[path = "riscv64/mod.rs"]
+pub mod current;

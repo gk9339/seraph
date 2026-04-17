@@ -22,7 +22,10 @@ members = [
     "shared/runtime",
     "shared/syscall",
     "shared/ipc",
+    "shared/registry",
+    "shared/va_layout",
     "base/crasher",
+    "base/allocsmoke",
     "xtask",
 ]
 

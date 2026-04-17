@@ -261,7 +261,7 @@ fn create_process_from_bytes(
 {
     let pages_before = pool.allocated_pages;
 
-    let ehdr = elf::validate(module_bytes, loader::arch::EXPECTED_ELF_MACHINE).ok()?;
+    let ehdr = elf::validate(module_bytes, crate::arch::current::EXPECTED_ELF_MACHINE).ok()?;
     let entry = elf::entry_point(ehdr);
 
     let child_aspace = syscall::cap_create_aspace().ok()?;
@@ -428,24 +428,32 @@ fn vfs_close(file_cap: u32, _ipc_buf: *mut u64)
 
 // ── VFS-based ELF loading ──────────────────────────────────────────────────
 
+/// Everything `load_elf_page_streaming` needs beyond the per-page arguments:
+/// the VFS file handle, IPC buffer, parent/child address spaces, and the
+/// shared frame pool. The borrow on `pool` is mutable for alloc/free; the
+/// rest is by value.
+pub struct ElfLoadCtx<'a>
+{
+    pub file_cap: u32,
+    pub ipc_buf: *mut u64,
+    pub self_aspace: u32,
+    pub child_aspace: u32,
+    pub pool: &'a mut FramePool,
+}
+
 /// Load one ELF segment page by streaming file data from VFS.
-#[allow(clippy::too_many_arguments)]
 fn load_elf_page_streaming(
     page_vaddr: u64,
     seg: &elf::LoadSegment,
-    file_cap: u32,
-    ipc_buf: *mut u64,
     prot: u64,
-    pool: &mut FramePool,
-    self_aspace: u32,
-    child_aspace: u32,
+    ctx: &mut ElfLoadCtx,
 ) -> Option<()>
 {
-    let frame_cap = pool.alloc_page()?;
+    let frame_cap = ctx.pool.alloc_page()?;
 
     syscall::mem_map(
         frame_cap,
-        self_aspace,
+        ctx.self_aspace,
         TEMP_FRAME_VA,
         0,
         1,
@@ -455,12 +463,12 @@ fn load_elf_page_streaming(
     // SAFETY: TEMP_FRAME_VA mapped writable, one page.
     unsafe { core::ptr::write_bytes(TEMP_FRAME_VA as *mut u8, 0, PAGE_SIZE as usize) };
 
-    stream_segment_to_frame(page_vaddr, seg, file_cap, ipc_buf);
+    stream_segment_to_frame(page_vaddr, seg, ctx.file_cap, ctx.ipc_buf);
 
-    let _ = syscall::mem_unmap(self_aspace, TEMP_FRAME_VA, 1);
+    let _ = syscall::mem_unmap(ctx.self_aspace, TEMP_FRAME_VA, 1);
 
     let derived = loader::derive_frame_for_prot(frame_cap, prot)?;
-    syscall::mem_map(derived, child_aspace, page_vaddr, 0, 1, 0).ok()?;
+    syscall::mem_map(derived, ctx.child_aspace, page_vaddr, 0, 1, 0).ok()?;
 
     Some(())
 }
@@ -517,24 +525,28 @@ fn stream_segment_to_frame(
 ///
 /// Reads only the ELF header page, then loads each segment page-by-page
 /// directly from vfsd into target frames. No intermediate file buffer.
-// similar_names: child_aspace/child_cspace are intentionally parallel.
-// too_many_lines: sequential VFS-based loading requires header read, segment
-// iteration, and cleanup in one scope to manage the header frame lifetime.
+// clippy::too_many_lines: VFS-based process creation is one transaction that
+// owns the lifetime of the ELF-header scratch frame, the child's kernel
+// objects, and the per-page streaming loop. Splitting scatters the
+// error/cleanup paths that must unwind in a fixed order against a single
+// `FramePool` borrow, and introduces helpers that each need the full context
+// struct anyway. The sub-phases are already factored through named helpers
+// (vfs_open/stat/read/close, load_elf_page_streaming, populate_child_info,
+// map_child_stack_and_ipc, finalize_creation); what remains is the linear
+// orchestration.
 #[allow(clippy::similar_names, clippy::too_many_lines)]
-// too_many_arguments: VFS loading needs all these dependencies; a context struct
-// would add complexity without reducing call sites.
-#[allow(clippy::too_many_arguments)]
 pub fn create_process_from_vfs(
-    vfsd_ep: u32,
+    ctx: &crate::ProcmgrCtx,
     path: &[u8],
     pool: &mut FramePool,
-    self_aspace: u32,
     table: &mut ProcessTable,
     ipc_buf: *mut u64,
-    self_endpoint: u32,
     creator_endpoint: u32,
 ) -> Result<CreateResult, u64>
 {
+    let vfsd_ep = ctx.vfsd_ep;
+    let self_aspace = ctx.self_aspace;
+    let self_endpoint = ctx.self_endpoint;
     let file_cap = vfs_open(vfsd_ep, ipc_buf, path).ok_or(procmgr_errors::FILE_NOT_FOUND)?;
     let file_size = vfs_stat(file_cap, ipc_buf).ok_or(procmgr_errors::IO_ERROR)?;
 
@@ -592,7 +604,7 @@ pub fn create_process_from_vfs(
     // SAFETY: TEMP_VFS_VA is mapped and contains `offset` bytes of file data.
     let header_data =
         unsafe { core::slice::from_raw_parts(TEMP_VFS_VA as *const u8, offset as usize) };
-    let ehdr = elf::validate(header_data, loader::arch::EXPECTED_ELF_MACHINE)
+    let ehdr = elf::validate(header_data, crate::arch::current::EXPECTED_ELF_MACHINE)
         .map_err(|_| procmgr_errors::INVALID_ELF)?;
     let entry = elf::entry_point(ehdr);
 
@@ -621,17 +633,15 @@ pub fn create_process_from_vfs(
         for page_idx in 0..num_pages
         {
             let page_vaddr = first_page + (page_idx as u64) * PAGE_SIZE;
-            load_elf_page_streaming(
-                page_vaddr,
-                &seg,
+            let mut load_ctx = ElfLoadCtx {
                 file_cap,
                 ipc_buf,
-                prot,
-                pool,
                 self_aspace,
                 child_aspace,
-            )
-            .ok_or(procmgr_errors::INVALID_ELF)?;
+                pool,
+            };
+            load_elf_page_streaming(page_vaddr, &seg, prot, &mut load_ctx)
+                .ok_or(procmgr_errors::INVALID_ELF)?;
         }
     }
 

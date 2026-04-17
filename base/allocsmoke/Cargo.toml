@@ -1,0 +1,20 @@
+[package]
+name = "allocsmoke"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "allocsmoke"
+path = "src/main.rs"
+test = false
+
+[dependencies]
+process-abi = { path = "../../abi/process-abi" }
+ipc = { path = "../../shared/ipc" }
+runtime = { path = "../../shared/runtime" }
+syscall = { path = "../../shared/syscall" }
+syscall-abi = { path = "../../abi/syscall" }
+
+[lints]
+workspace = true

@@ -68,4 +68,4 @@
 
 mod arch;
 
-pub use arch::{dma_to_mmio_barrier, mmio_to_dma_barrier, mmio_to_mmio_barrier};
+pub use arch::current::{dma_to_mmio_barrier, mmio_to_dma_barrier, mmio_to_mmio_barrier};

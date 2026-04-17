@@ -18,8 +18,10 @@ use crate::util::step;
 
 const SECTOR_SIZE: u64 = 512;
 
-/// Both partitions are 64 MiB.
-const PARTITION_SIZE: u64 = 64 * 1024 * 1024;
+/// Both partitions are 128 MiB. Debug binaries have grown (allocsmoke added
+/// alloc-crate codegen, bringing total ESP contents close to the old 64 MiB
+/// limit); release builds remain comfortable well under half of this.
+const PARTITION_SIZE: u64 = 128 * 1024 * 1024;
 
 /// First partition starts at LBA 2048 (1 MiB alignment, standard GPT practice).
 const ESP_START_LBA: u64 = 2048;

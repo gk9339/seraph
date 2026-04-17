@@ -1,0 +1,16 @@
+[package]
+name = "va_layout"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# no_std: centralised userspace VA constants. Every hardcoded VA in
+# userspace lives here, with compile-time non-overlap assertions.
+[lib]
+test = false
+doctest = false
+
+[dependencies]
+
+[lints]
+workspace = true

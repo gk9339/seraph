@@ -186,7 +186,18 @@ pub extern "C" fn _start(info_ptr: u64) -> !
     run(info_ptr)
 }
 
-// too_many_lines: bootstrap orchestration is inherently sequential.
+// clippy::too_many_lines: init's top-level run() orchestrates the three
+// boot phases — bootstrap (map IPC buffer, create endpoints, bring up
+// procmgr, devmgr, vfsd), mount root plus config-driven mounts, then
+// svcmgr handover. Each phase dozens of let-bindings that hold in-flight
+// caps (endpoint_cap, log_ep, devmgr_registry_ep, vfsd_service_ep, ipc,
+// etc.) that later phases consume. Splitting means either threading all
+// those caps through 6+ helper arguments (just trades too_many_lines for
+// too_many_arguments) or building a mutable BootCtx whose lifetime equals
+// run()'s own, which adds a type for no behavioural gain. The body is
+// already factored through service::create_*_with_caps /
+// service::phase3_svcmgr_handover for the subsystem-specific work; what
+// remains is the fixed orchestration sequence.
 #[allow(clippy::too_many_lines)]
 fn run(info_ptr: u64) -> !
 {
@@ -202,7 +213,7 @@ fn run(info_ptr: u64) -> !
     }
 
     // Set up serial output.
-    arch::serial_init(info, info.thread_cap);
+    arch::current::serial_init(info, info.thread_cap);
     logging::log("init: starting");
 
     let mut alloc = FrameAlloc::new(info);
@@ -344,9 +355,11 @@ fn run(info_ptr: u64) -> !
             info,
             endpoint_cap,
             init_bootstrap_ep,
-            log_ep,
-            devmgr_registry_ep,
-            vfsd_service_ep,
+            &service::VfsdSpawnCaps {
+                log_ep,
+                registry_ep: devmgr_registry_ep,
+                vfsd_service_ep,
+            },
             ipc,
         );
     }

@@ -19,12 +19,17 @@
 
 extern crate runtime;
 
+mod arch;
 mod restart;
 mod service;
 
 use ipc::{svcmgr_labels, IpcBuf};
 use process_abi::StartupInfo;
-use service::{bootstrap_caps, ServiceEntry, MAX_SERVICES};
+use service::{bootstrap_caps, ServiceEntry, MAX_BUNDLE_CAPS, MAX_SERVICES};
+
+/// Global discovery registry size. Enough for a handful of top-level named
+/// endpoints (vfsd, logd, procmgr, …) plus slack.
+const REGISTRY_CAPACITY: usize = 8;
 
 // ── Registration handling ──────────────────────────────────────────────────
 
@@ -33,7 +38,6 @@ use service::{bootstrap_caps, ServiceEntry, MAX_SERVICES};
 /// Reads name, policy, criticality from data words. Reads `thread_cap`,
 /// `module_cap`, `log_ep` from transferred caps. Creates an event queue, binds
 /// it to the thread, adds to the wait set.
-#[allow(clippy::too_many_lines)]
 fn handle_register(
     ipc_buf: *mut u64,
     label: u64,
@@ -59,7 +63,16 @@ fn handle_register(
 
     let name = read_name_from_ipc(ipc_buf, name_len);
 
-    // Read transferred caps: cap[0]=thread, cap[1]=module, cap[2]=log_ep (optional).
+    // Optional bundle-cap name, tail-packed after the service name words.
+    let name_words = name_len.div_ceil(8);
+    let bundle_name_len_word = 2 + name_words;
+    let bundle_name_len = ipc.read_word(bundle_name_len_word) as usize;
+
+    // Read transferred caps. Layout:
+    //   cap[0] = thread
+    //   cap[1] = module
+    //   cap[2] = log_ep (optional)
+    //   cap[3] = optional bundle cap (named by the tail-word `bundle_name_len`)
     // SAFETY: ipc_buf is the registered IPC buffer, page-aligned.
     let (cap_count, recv_caps) = unsafe { syscall::read_recv_caps(ipc_buf.cast::<u64>()) };
 
@@ -90,6 +103,12 @@ fn handle_register(
         thread_cap,
         module_cap,
         log_ep_cap,
+        bundle: [registry::Entry {
+            name: [0; registry::NAME_MAX],
+            name_len: 0,
+            cap: 0,
+        }; MAX_BUNDLE_CAPS],
+        bundle_count: 0,
         restart_policy,
         criticality,
         event_queue_cap: eq_cap,
@@ -97,11 +116,57 @@ fn handle_register(
         active: true,
         bootstrap_token: 0,
     };
+
+    // If a bundle cap was sent alongside, stash it in the first bundle slot.
+    if cap_count >= 4
+        && recv_caps[3] != 0
+        && bundle_name_len > 0
+        && bundle_name_len <= registry::NAME_MAX
+    {
+        let bundle_name =
+            read_tail_name_from_ipc(ipc_buf, bundle_name_len_word + 1, bundle_name_len);
+        let entry = &mut services[idx].bundle[0];
+        entry.name[..bundle_name_len].copy_from_slice(&bundle_name[..bundle_name_len]);
+        entry.name_len = bundle_name_len as u8;
+        entry.cap = recv_caps[3];
+        services[idx].bundle_count = 1;
+    }
+
     *service_count += 1;
 
-    runtime::log!("svcmgr: registered service: {}", services[idx].name_str());
+    runtime::log!(
+        "svcmgr: registered service: {} (bundle caps={})",
+        services[idx].name_str(),
+        u64::from(services[idx].bundle_count)
+    );
 
     ipc::svcmgr_errors::SUCCESS
+}
+
+/// Read a short name packed into IPC data words starting at `first_word`.
+fn read_tail_name_from_ipc(
+    ipc_buf: *mut u64,
+    first_word: usize,
+    name_len: usize,
+) -> [u8; registry::NAME_MAX]
+{
+    // SAFETY: ipc_buf is the registered IPC buffer page.
+    let ipc = unsafe { ipc::IpcBuf::from_raw(ipc_buf) };
+    let mut out = [0u8; registry::NAME_MAX];
+    let words = name_len.div_ceil(8);
+    for w in 0..words
+    {
+        let word = ipc.read_word(first_word + w);
+        for b in 0..8
+        {
+            let idx = w * 8 + b;
+            if idx < name_len && idx < registry::NAME_MAX
+            {
+                out[idx] = (word >> (b * 8)) as u8;
+            }
+        }
+    }
+    out
 }
 
 /// Read a service name from IPC buffer data words starting at offset 2.
@@ -161,23 +226,12 @@ pub fn halt_loop() -> !
 {
     loop
     {
-        #[cfg(target_arch = "x86_64")]
-        // SAFETY: hlt halts CPU until next interrupt.
-        unsafe {
-            core::arch::asm!("hlt", options(nomem, nostack));
-        }
-
-        #[cfg(target_arch = "riscv64")]
-        // SAFETY: wfi waits for interrupt.
-        unsafe {
-            core::arch::asm!("wfi", options(nomem, nostack));
-        }
+        arch::current::halt();
     }
 }
 
 // ── Entry point ────────────────────────────────────────────────────────────
 
-#[allow(clippy::too_many_lines)]
 #[no_mangle]
 extern "Rust" fn main(startup: &StartupInfo) -> !
 {
@@ -228,35 +282,44 @@ extern "Rust" fn main(startup: &StartupInfo) -> !
         halt_loop();
     }
 
-    let mut services = [const { ServiceEntry::empty() }; MAX_SERVICES];
-    let mut service_count: usize = 0;
-    let mut handover_complete = false;
+    let mut state = SvcmgrState {
+        services: [const { ServiceEntry::empty() }; MAX_SERVICES],
+        service_count: 0,
+        handover_complete: false,
+        registry: registry::Registry::new(),
+    };
 
     runtime::log!("svcmgr: waiting for registrations");
 
-    event_loop(
-        &caps,
-        ws_cap,
-        ipc,
-        ipc_buf,
-        &mut services,
-        &mut service_count,
-        &mut handover_complete,
-    );
+    event_loop(&caps, ws_cap, ipc, ipc_buf, &mut state);
+}
+
+/// Monitored service table, global discovery registry, and handover flag.
+/// Held across the event loop for the lifetime of the process.
+pub struct SvcmgrState
+{
+    pub services: [ServiceEntry; MAX_SERVICES],
+    pub service_count: usize,
+    pub handover_complete: bool,
+    pub registry: registry::Registry<REGISTRY_CAPACITY>,
 }
 
 /// Main event loop: dispatches IPC registrations and death notifications.
-#[allow(clippy::too_many_arguments)]
 fn event_loop(
     caps: &service::SvcmgrCaps,
     ws_cap: u32,
     ipc: IpcBuf,
     ipc_buf: *mut u64,
-    services: &mut [ServiceEntry; MAX_SERVICES],
-    service_count: &mut usize,
-    handover_complete: &mut bool,
+    state: &mut SvcmgrState,
 ) -> !
 {
+    let restart_ctx = restart::RestartCtx {
+        procmgr_ep: caps.procmgr_ep,
+        bootstrap_ep: caps.bootstrap_ep,
+        ipc,
+        ws_cap,
+    };
+
     loop
     {
         let Ok(token) = syscall::wait_set_wait(ws_cap)
@@ -268,31 +331,18 @@ fn event_loop(
 
         if token == 0
         {
-            dispatch_ipc(
-                caps.service_ep,
-                ipc_buf,
-                services,
-                service_count,
-                ws_cap,
-                handover_complete,
-            );
+            dispatch_ipc(caps.service_ep, ipc_buf, state, ws_cap);
         }
         else
         {
-            dispatch_death(token, services, *service_count, caps, ws_cap, ipc);
+            dispatch_death(token, state, &restart_ctx);
         }
     }
 }
 
-/// Handle an IPC message on the service endpoint (registration or handover).
-fn dispatch_ipc(
-    service_ep: u32,
-    ipc_buf: *mut u64,
-    services: &mut [ServiceEntry; MAX_SERVICES],
-    service_count: &mut usize,
-    ws_cap: u32,
-    handover_complete: &mut bool,
-)
+/// Handle an IPC message on the service endpoint (registration, handover,
+/// or discovery-registry publish/query).
+fn dispatch_ipc(service_ep: u32, ipc_buf: *mut u64, state: &mut SvcmgrState, ws_cap: u32)
 {
     let Ok((label, _data_count)) = syscall::ipc_recv(service_ep)
     else
@@ -305,17 +355,32 @@ fn dispatch_ipc(
     {
         svcmgr_labels::REGISTER_SERVICE =>
         {
-            let result = handle_register(ipc_buf, label, services, service_count, ws_cap);
+            let result = handle_register(
+                ipc_buf,
+                label,
+                &mut state.services,
+                &mut state.service_count,
+                ws_cap,
+            );
             let _ = syscall::ipc_reply(result, 0, &[]);
         }
         svcmgr_labels::HANDOVER_COMPLETE =>
         {
-            *handover_complete = true;
+            state.handover_complete = true;
             let _ = syscall::ipc_reply(ipc::svcmgr_errors::SUCCESS, 0, &[]);
             runtime::log!(
                 "svcmgr: handover complete, monitoring services: {:#018x}",
-                *service_count as u64
+                state.service_count as u64
             );
+        }
+        svcmgr_labels::PUBLISH_ENDPOINT =>
+        {
+            let result = handle_publish_endpoint(ipc_buf, label, &mut state.registry);
+            let _ = syscall::ipc_reply(result, 0, &[]);
+        }
+        svcmgr_labels::QUERY_ENDPOINT =>
+        {
+            handle_query_endpoint(ipc_buf, label, &state.registry);
         }
         _ =>
         {
@@ -324,49 +389,93 @@ fn dispatch_ipc(
     }
 }
 
-/// Handle a death notification from a monitored service.
-fn dispatch_death(
-    token: u64,
-    services: &mut [ServiceEntry; MAX_SERVICES],
-    service_count: usize,
-    caps: &service::SvcmgrCaps,
-    ws_cap: u32,
-    ipc: IpcBuf,
+/// Handle `PUBLISH_ENDPOINT`: add a `name → cap` mapping to the discovery
+/// registry. The name is packed into data words 0.. per
+/// [`read_tail_name_from_ipc`]; the cap arrives as the first received cap.
+fn handle_publish_endpoint(
+    ipc_buf: *mut u64,
+    label: u64,
+    registry: &mut registry::Registry<REGISTRY_CAPACITY>,
+) -> u64
+{
+    let name_len = ((label >> 16) & 0xFFFF) as usize;
+    if name_len == 0 || name_len > registry::NAME_MAX
+    {
+        return ipc::svcmgr_errors::INVALID_NAME;
+    }
+    // SAFETY: ipc_buf is the registered IPC buffer page.
+    let (cap_count, recv_caps) = unsafe { syscall::read_recv_caps(ipc_buf.cast::<u64>()) };
+    if cap_count < 1 || recv_caps[0] == 0
+    {
+        return ipc::svcmgr_errors::INSUFFICIENT_CAPS;
+    }
+    let name = read_tail_name_from_ipc(ipc_buf, 0, name_len);
+    if registry.publish(&name[..name_len], recv_caps[0]).is_err()
+    {
+        return ipc::svcmgr_errors::REGISTER_REJECTED;
+    }
+    ipc::svcmgr_errors::SUCCESS
+}
+
+/// Handle `QUERY_ENDPOINT`: look up a name in the discovery registry and
+/// reply with a derived SEND cap if found.
+fn handle_query_endpoint(
+    ipc_buf: *mut u64,
+    label: u64,
+    registry: &registry::Registry<REGISTRY_CAPACITY>,
 )
 {
+    let name_len = ((label >> 16) & 0xFFFF) as usize;
+    if name_len == 0 || name_len > registry::NAME_MAX
+    {
+        let _ = syscall::ipc_reply(ipc::svcmgr_errors::INVALID_NAME, 0, &[]);
+        return;
+    }
+    let name = read_tail_name_from_ipc(ipc_buf, 0, name_len);
+    let Some(cap) = registry.lookup(&name[..name_len])
+    else
+    {
+        let _ = syscall::ipc_reply(ipc::svcmgr_errors::UNKNOWN_NAME, 0, &[]);
+        return;
+    };
+    let Ok(derived) = syscall::cap_derive(cap, syscall::RIGHTS_SEND)
+    else
+    {
+        let _ = syscall::ipc_reply(ipc::svcmgr_errors::INSUFFICIENT_CAPS, 0, &[]);
+        return;
+    };
+    let _ = syscall::ipc_reply(ipc::svcmgr_errors::SUCCESS, 0, &[derived]);
+}
+
+/// Handle a death notification from a monitored service.
+fn dispatch_death(token: u64, state: &mut SvcmgrState, ctx: &restart::RestartCtx)
+{
     let idx = (token - 1) as usize;
-    if idx >= service_count
+    if idx >= state.service_count
     {
         runtime::log!("svcmgr: invalid death notification token");
         return;
     }
 
-    let Ok(exit_reason) = syscall::event_recv(services[idx].event_queue_cap)
+    let Ok(exit_reason) = syscall::event_recv(state.services[idx].event_queue_cap)
     else
     {
         runtime::log!("svcmgr: event_recv failed");
         return;
     };
 
-    if !services[idx].active
+    if !state.services[idx].active
     {
         return;
     }
 
-    restart::handle_death(
-        &mut services[idx],
-        exit_reason,
-        caps.procmgr_ep,
-        caps.bootstrap_ep,
-        ipc,
-        ws_cap,
-    );
+    restart::handle_death(&mut state.services[idx], exit_reason, ctx);
 
     // Re-add event queue to wait set with same token (if still active).
-    if services[idx].active
-        && syscall::wait_set_add(ws_cap, services[idx].event_queue_cap, token).is_err()
+    if state.services[idx].active
+        && syscall::wait_set_add(ctx.ws_cap, state.services[idx].event_queue_cap, token).is_err()
     {
         runtime::log!("svcmgr: failed to re-add event queue to wait set after restart");
-        services[idx].active = false;
+        state.services[idx].active = false;
     }
 }

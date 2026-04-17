@@ -39,11 +39,13 @@ static NEXT_TOKEN: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64
 
 // ── Bootstrap ──────────────────────────────────────────────────────────────
 //
-// vfsd → fatfs bootstrap plan (one round, 3 caps, 1 data word):
-//   caps[0]: block device (SEND)
+// vfsd → fatfs bootstrap plan (one round, 3 caps, 0 data words):
+//   caps[0]: block device (SEND) — partition-scoped tokened cap on virtio-blk.
+//            vfsd registers the partition bound with virtio-blk before
+//            delivering this cap; fatfs reads by partition-relative LBA and
+//            virtio-blk enforces the bound per-token.
 //   caps[1]: log endpoint (SEND; 0 if logging unavailable)
 //   caps[2]: fatfs service endpoint (RIGHTS_ALL — receive + derive tokens)
-//   data[0]: partition base LBA
 //
 // After bootstrap, vfsd probes fatfs with an empty `FS_MOUNT` so the driver
 // can validate the BPB and report mount success/failure before vfsd replies
@@ -67,7 +69,7 @@ extern "Rust" fn main(startup: &StartupInfo) -> !
     let ipc = unsafe { IpcBuf::from_bytes(startup.ipc_buffer) };
     let ipc_buf = ipc.as_ptr();
 
-    let Some((caps, partition_offset)) = bootstrap_caps(startup, ipc)
+    let Some(caps) = bootstrap_caps(startup, ipc)
     else
     {
         syscall::thread_exit();
@@ -81,7 +83,6 @@ extern "Rust" fn main(startup: &StartupInfo) -> !
     runtime::log!("fatfs: starting");
 
     let mut state = FatState::new();
-    state.partition_offset = partition_offset;
 
     let mut files = [
         OpenFile::empty(),
@@ -98,8 +99,8 @@ extern "Rust" fn main(startup: &StartupInfo) -> !
 }
 
 /// Issue a single bootstrap round against the creator endpoint and assemble
-/// [`FatCaps`] + the partition base LBA.
-fn bootstrap_caps(startup: &StartupInfo, ipc: IpcBuf) -> Option<(FatCaps, u64)>
+/// [`FatCaps`].
+fn bootstrap_caps(startup: &StartupInfo, ipc: IpcBuf) -> Option<FatCaps>
 {
     if startup.creator_endpoint == 0
     {
@@ -110,15 +111,11 @@ fn bootstrap_caps(startup: &StartupInfo, ipc: IpcBuf) -> Option<(FatCaps, u64)>
     {
         return None;
     }
-    let lba = ipc.read_word(0);
-    Some((
-        FatCaps {
-            block_dev: round.caps[0],
-            log_sink: round.caps[1],
-            service: round.caps[2],
-        },
-        lba,
-    ))
+    Some(FatCaps {
+        block_dev: round.caps[0],
+        log_sink: round.caps[1],
+        service: round.caps[2],
+    })
 }
 
 /// Validate the BPB by reading sector 0 through the block cap. Updates
@@ -126,13 +123,7 @@ fn bootstrap_caps(startup: &StartupInfo, ipc: IpcBuf) -> Option<(FatCaps, u64)>
 fn validate_bpb(caps: &FatCaps, state: &mut FatState, ipc_buf: *mut u64) -> u64
 {
     let mut sector_buf = [0u8; SECTOR_SIZE];
-    if !fat::read_sector(
-        caps.block_dev,
-        0,
-        &mut sector_buf,
-        ipc_buf,
-        state.partition_offset,
-    )
+    if !fat::read_sector(caps.block_dev, 0, &mut sector_buf, ipc_buf)
     {
         return ipc::fs_errors::IO_ERROR;
     }
@@ -304,10 +295,12 @@ fn handle_read(
     let file = &files[idx];
     let mut out = [0u8; SECTOR_SIZE];
     let bytes_read = read_file_data(
-        file.start_cluster,
-        file.file_size,
-        offset,
-        max_len,
+        &fat::FileRead {
+            start_cluster: file.start_cluster,
+            file_size: file.file_size,
+            offset,
+            max_len,
+        },
         state,
         block_dev,
         ipc_buf,

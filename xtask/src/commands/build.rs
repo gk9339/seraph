@@ -31,6 +31,7 @@ const MODULES: &[&str] = &[
     "virtio-blk",
     "fatfs",
     "crasher",
+    "allocsmoke",
 ];
 
 /// Entry point for `cargo xtask build`.
@@ -88,7 +89,7 @@ fn build_boot(ctx: &BuildContext, args: &BuildArgs) -> Result<()>
         "boot",
         "--target",
         boot_triple,
-        "-Zbuild-std=core,compiler_builtins",
+        "-Zbuild-std=core,alloc,compiler_builtins",
         "-Zbuild-std-features=compiler-builtins-mem",
     ];
     if args.release
@@ -229,7 +230,7 @@ fn build_init(ctx: &BuildContext, args: &BuildArgs) -> Result<()>
         "init",
         "--target",
         triple,
-        "-Zbuild-std=core,compiler_builtins",
+        "-Zbuild-std=core,alloc,compiler_builtins",
         "-Zbuild-std-features=compiler-builtins-mem",
     ];
     if args.release
@@ -274,7 +275,7 @@ fn build_ktest(ctx: &BuildContext, args: &BuildArgs) -> Result<()>
         "ktest",
         "--target",
         triple,
-        "-Zbuild-std=core,compiler_builtins",
+        "-Zbuild-std=core,alloc,compiler_builtins",
         "-Zbuild-std-features=compiler-builtins-mem",
     ];
     if args.release
@@ -329,7 +330,7 @@ fn build_module(ctx: &BuildContext, args: &BuildArgs, name: &str) -> Result<()>
         name,
         "--target",
         triple,
-        "-Zbuild-std=core,compiler_builtins",
+        "-Zbuild-std=core,alloc,compiler_builtins",
         "-Zbuild-std-features=compiler-builtins-mem",
     ];
     if args.release
@@ -405,7 +406,7 @@ fn build_rootfs_binary(ctx: &BuildContext, args: &BuildArgs, name: &str) -> Resu
         name,
         "--target",
         triple,
-        "-Zbuild-std=core,compiler_builtins",
+        "-Zbuild-std=core,alloc,compiler_builtins",
         "-Zbuild-std-features=compiler-builtins-mem",
     ];
     if args.release

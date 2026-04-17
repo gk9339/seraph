@@ -36,9 +36,6 @@ pub struct FatState
     pub root_cluster: u32,
     /// First sector of the data region.
     pub data_start_sector: u32,
-    /// LBA offset of the partition on the raw disk.
-    /// Added to all sector numbers before issuing block reads.
-    pub partition_offset: u64,
     /// Cached FAT sector number (avoids re-reads for sequential access).
     pub cached_fat_sector: u32,
     /// Cached FAT sector data.
@@ -60,7 +57,6 @@ impl FatState
             fat_size: 0,
             root_cluster: 2,
             data_start_sector: 0,
-            partition_offset: 0,
             cached_fat_sector: u32::MAX,
             cached_fat_data: [0; SECTOR_SIZE],
         }
@@ -80,9 +76,13 @@ impl FatState
 }
 
 /// Parse the BIOS Parameter Block from sector 0.
+// clippy::too_many_lines: parse_bpb is a linear decoder for a fixed binary
+// layout (FAT16/FAT32 BPB — Microsoft FAT32 File System Specification §3.1).
+// Each field extraction has no independent meaning; there is no natural
+// split into phases. The validation checks at the end depend on every
+// field being in scope. Factoring into per-field helpers would replicate
+// boilerplate without improving comprehension.
 #[allow(clippy::too_many_lines)]
-// Justification: linear field extraction from a fixed binary format; splitting
-// would scatter related validation without improving clarity.
 pub fn parse_bpb(sector_data: &[u8; SECTOR_SIZE], state: &mut FatState) -> bool
 {
     // Validate boot signature.

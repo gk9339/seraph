@@ -155,8 +155,13 @@ pub fn send_mount(vfsd_ep: u32, ipc_buf: *mut u64, uuid: &[u8; 16], path: &[u8])
 ///
 /// Sends `OPEN` to vfsd for namespace resolution, receives a per-file
 /// capability, then performs `READ` and `CLOSE` directly on the file cap.
-// too_many_lines: sequential OPEN/READ/CLOSE protocol requires inlined
-// IPC calls; splitting would obscure the protocol sequence.
+// clippy::too_many_lines: vfs_read_file implements a fixed three-step VFS
+// protocol — OPEN, READ (loop), CLOSE — that must run in one scope because
+// the per-file capability returned by OPEN is the argument to READ and CLOSE.
+// Splitting scatters the IPC-buffer packing/unpacking for the same ipc_buf
+// across three helpers that each need the file_cap, the ipc_buf, and the
+// reply-label branch handling; the linear presentation keeps the protocol
+// sequence readable.
 #[allow(clippy::too_many_lines)]
 pub fn vfs_read_file(vfsd_ep: u32, ipc_buf: *mut u64, path: &[u8], buf: &mut [u8; 512]) -> usize
 {

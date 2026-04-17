@@ -8,3 +8,6 @@
 
 # Rust Analyzer workspace cache
 /.rust-analyzer/
+
+# Claude Code scheduled-tasks session lock
+.claude/scheduled_tasks.lock

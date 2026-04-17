@@ -27,9 +27,16 @@ mod mount;
 mod worker;
 
 use gpt::MAX_GPT_PARTS;
-use ipc::{procmgr_labels, IpcBuf};
+use ipc::{blk_labels, procmgr_labels, IpcBuf};
 use mount::{MountEntry, MAX_MOUNTS};
 use process_abi::StartupInfo;
+
+/// Monotonic counter for per-partition block endpoint tokens.
+///
+/// Each tokened cap derived from the whole-disk block endpoint gets a fresh
+/// non-zero token; virtio-blk's partition table keys on this value. Token 0
+/// is reserved for the un-tokened (whole-disk) endpoint held by vfsd.
+static NEXT_PARTITION_TOKEN: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(1);
 
 // ── Data structures ────────────────────────────────────────────────────────
 
@@ -257,7 +264,20 @@ extern "Rust" fn main(startup: &StartupInfo) -> !
     }
 
     runtime::log!("vfsd: entering service loop");
-    service_loop(caps.service_ep, ipc_buf, &caps, blk_ep, &gpt_parts);
+    let runtime = VfsdRuntime {
+        caps: &caps,
+        blk_ep,
+        gpt_parts: &gpt_parts,
+    };
+    service_loop(ipc_buf, &runtime);
+}
+
+/// Live references the service loop and its handlers need on every request.
+pub struct VfsdRuntime<'a>
+{
+    pub caps: &'a VfsdCaps,
+    pub blk_ep: u32,
+    pub gpt_parts: &'a [gpt::GptEntry; MAX_GPT_PARTS],
 }
 
 // ── Service loop ───────────────────────────────────────────────────────────
@@ -268,20 +288,13 @@ extern "Rust" fn main(startup: &StartupInfo) -> !
 /// capability to client) and `MOUNT` requests. Clients perform file operations
 /// (read/close/stat/readdir) directly on the per-file capability returned by
 /// `OPEN`, without further vfsd involvement.
-#[allow(clippy::too_many_arguments)]
-fn service_loop(
-    service_ep: u32,
-    ipc_buf: *mut u64,
-    caps: &VfsdCaps,
-    blk_ep: u32,
-    gpt_parts: &[gpt::GptEntry; MAX_GPT_PARTS],
-) -> !
+fn service_loop(ipc_buf: *mut u64, rt: &VfsdRuntime) -> !
 {
     let mut mounts = mount::new_mount_table();
 
     loop
     {
-        let Ok((label, _token)) = syscall::ipc_recv(service_ep)
+        let Ok((label, _token)) = syscall::ipc_recv(rt.caps.service_ep)
         else
         {
             runtime::log!("vfsd: ipc_recv failed, retrying");
@@ -295,7 +308,7 @@ fn service_loop(
             ipc::vfsd_labels::OPEN => handle_open(label, ipc_buf, &mounts),
             ipc::vfsd_labels::MOUNT =>
             {
-                handle_mount_request(ipc_buf, caps, blk_ep, gpt_parts, &mut mounts);
+                handle_mount_request(ipc_buf, rt, &mut mounts);
             }
             _ =>
             {
@@ -316,14 +329,7 @@ fn service_loop(
 ///
 /// Looks up the UUID in the GPT table, spawns a fatfs driver with the
 /// partition's LBA offset, and registers a mount entry at the given path.
-#[allow(clippy::too_many_arguments)]
-fn handle_mount_request(
-    ipc_buf: *mut u64,
-    caps: &VfsdCaps,
-    blk_ep: u32,
-    gpt_parts: &[gpt::GptEntry; MAX_GPT_PARTS],
-    mounts: &mut [MountEntry; MAX_MOUNTS],
-)
+fn handle_mount_request(ipc_buf: *mut u64, rt: &VfsdRuntime, mounts: &mut [MountEntry; MAX_MOUNTS])
 {
     // SAFETY: ipc_buf is the registered IPC buffer page for vfsd.
     let ipc = unsafe { ipc::IpcBuf::from_raw(ipc_buf) };
@@ -358,26 +364,42 @@ fn handle_mount_request(
     }
 
     // Look up UUID in GPT partition table.
-    let partition_lba = gpt::lookup_partition_by_uuid(&uuid, gpt_parts);
-    if partition_lba == 0
+    let Some((partition_lba, partition_len)) = gpt::lookup_partition_by_uuid(&uuid, rt.gpt_parts)
+    else
     {
         runtime::log!("vfsd: MOUNT: partition UUID not found");
         let _ = syscall::ipc_reply(ipc::vfsd_errors::NO_MOUNT, 0, &[]);
         return;
-    }
-    runtime::log!("vfsd: MOUNT: partition LBA={:#018x}", partition_lba);
+    };
+    runtime::log!(
+        "vfsd: MOUNT: partition LBA={:#018x} length={:#018x}",
+        partition_lba,
+        partition_len
+    );
 
     // Spawn fatfs driver for this partition.
-    if caps.fatfs_module_cap == 0
+    if rt.caps.fatfs_module_cap == 0
     {
         runtime::log!("vfsd: MOUNT: no fatfs module cap");
         let _ = syscall::ipc_reply(ipc::vfsd_errors::NO_FS_MODULE, 0, &[]);
         return;
     }
 
+    // Derive a partition-scoped tokened SEND cap on the whole-disk block
+    // endpoint, and register its bound with virtio-blk. fatfs will only
+    // ever see this tokened cap; virtio-blk enforces bounds per token.
+    let Some(partition_ep) =
+        derive_and_register_partition(rt, partition_lba, partition_len, ipc_buf)
+    else
+    {
+        runtime::log!("vfsd: MOUNT: partition cap registration failed");
+        let _ = syscall::ipc_reply(ipc::vfsd_errors::SPAWN_FAILED, 0, &[]);
+        return;
+    };
+
     // SAFETY: ipc_buf wraps the registered IPC page.
     let ipc_wrap = unsafe { IpcBuf::from_raw(ipc_buf) };
-    let Some(driver_ep) = driver::spawn_fatfs_driver(caps, blk_ep, partition_lba, ipc_wrap)
+    let Some(driver_ep) = driver::spawn_fatfs_driver(rt.caps, partition_ep, ipc_wrap)
     else
     {
         runtime::log!("vfsd: MOUNT: failed to spawn fatfs");
@@ -470,4 +492,37 @@ fn idle_loop() -> !
     {
         let _ = syscall::thread_yield();
     }
+}
+
+/// Derive a per-partition tokened SEND cap on the whole-disk block endpoint
+/// and register the partition bound with virtio-blk. Returns the tokened cap
+/// slot on success.
+fn derive_and_register_partition(
+    rt: &VfsdRuntime,
+    base_lba: u64,
+    length_lba: u64,
+    ipc_buf: *mut u64,
+) -> Option<u32>
+{
+    let token = NEXT_PARTITION_TOKEN.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+    let partition_ep = syscall::cap_derive_token(rt.blk_ep, syscall::RIGHTS_SEND, token).ok()?;
+
+    // REGISTER_PARTITION on the un-tokened (whole-disk) endpoint.
+    // SAFETY: ipc_buf is the registered IPC buffer.
+    let ipc = unsafe { ipc::IpcBuf::from_raw(ipc_buf) };
+    ipc.write_word(0, token);
+    ipc.write_word(1, base_lba);
+    ipc.write_word(2, length_lba);
+    let Ok((reply, _)) = syscall::ipc_call(rt.blk_ep, blk_labels::REGISTER_PARTITION, 3, &[])
+    else
+    {
+        runtime::log!("vfsd: REGISTER_PARTITION ipc_call failed");
+        return None;
+    };
+    if reply != ipc::blk_errors::SUCCESS
+    {
+        runtime::log!("vfsd: REGISTER_PARTITION rejected (code={})", reply);
+        return None;
+    }
+    Some(partition_ep)
 }

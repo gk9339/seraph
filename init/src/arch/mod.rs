@@ -3,14 +3,16 @@
 
 // init/src/arch/mod.rs
 
-//! Architecture-specific constants and serial output.
+//! Architecture dispatch module.
+//!
+//! This is the only file in init permitted to contain `#[cfg(target_arch)]`
+//! guards. All other modules access architecture-specific functionality through
+//! the `arch::current` re-export.
 
 #[cfg(target_arch = "x86_64")]
-mod x86_64;
-#[cfg(target_arch = "x86_64")]
-pub use x86_64::{serial_init, serial_write_byte, EXPECTED_ELF_MACHINE};
+#[path = "x86_64/mod.rs"]
+pub mod current;
 
 #[cfg(target_arch = "riscv64")]
-mod riscv64;
-#[cfg(target_arch = "riscv64")]
-pub use riscv64::{serial_init, serial_write_byte, EXPECTED_ELF_MACHINE};
+#[path = "riscv64/mod.rs"]
+pub mod current;

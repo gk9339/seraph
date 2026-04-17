@@ -14,19 +14,20 @@ use crate::bpb::{FatState, FatType, SECTOR_SIZE};
 
 /// Read a single 512-byte sector from the block device into `buf`.
 ///
-/// `sector` is partition-relative. The partition offset is added before
-/// issuing the block read to translate to an absolute disk LBA.
+/// `sector` is partition-relative. The block-device capability is
+/// partition-scoped by virtio-blk's per-token bound — vfsd registered the
+/// partition at mount time. Absolute-LBA translation happens driver-side;
+/// fatfs cannot read outside the partition regardless of the value it passes.
 pub fn read_sector(
     block_dev: u32,
     sector: u64,
     buf: &mut [u8; SECTOR_SIZE],
     ipc_buf: *mut u64,
-    partition_offset: u64,
 ) -> bool
 {
     // SAFETY: ipc_buf is the registered IPC buffer page.
     let ipc = unsafe { ipc::IpcBuf::from_raw(ipc_buf) };
-    ipc.write_word(0, sector + partition_offset);
+    ipc.write_word(0, sector);
 
     let Ok((reply_label, _data_count)) =
         syscall::ipc_call(block_dev, blk_labels::READ_BLOCK, 1, &[])
@@ -56,6 +57,14 @@ pub fn read_sector(
 ///
 /// Returns `Some(next)` for a valid next cluster, `None` for end-of-chain
 /// or bad cluster.
+// clippy::too_many_lines: next_cluster resolves the on-disk FAT entry for
+// a cluster under FAT16 or FAT32. Both variants share the sector-lookup,
+// cache-check, and sector-load logic; they differ only in the entry-width
+// arithmetic and the end-of-chain sentinel. Extracting two parallel
+// helpers duplicates the cache path; extracting a "load FAT sector"
+// helper that returns `&[u8]` would then require every caller to repeat
+// the entry-width branch. The branches are short and sit right where the
+// shared state is constructed.
 #[allow(clippy::too_many_lines)]
 // Justification: FAT16/FAT32 branches share structure but differ in entry
 // widths and end-of-chain markers; extracting sub-functions would obscure
@@ -96,7 +105,6 @@ pub fn next_cluster(
             u64::from(fat_sector),
             &mut state.cached_fat_data,
             ipc_buf,
-            state.partition_offset,
         )
         {
             return None;
@@ -145,40 +153,45 @@ pub fn next_cluster(
     Some(val)
 }
 
+/// Byte-range location within a file, used by `read_file_data`.
+pub struct FileRead
+{
+    pub start_cluster: u32,
+    pub file_size: u32,
+    pub offset: u64,
+    pub max_len: u64,
+}
+
 /// Read up to 512 bytes from a file at a given byte offset.
 ///
 /// Walks the cluster chain to find the correct cluster, reads the
 /// relevant sector, and extracts the requested bytes.
 ///
 /// Returns the number of bytes read (written to `out`).
-#[allow(clippy::too_many_arguments)]
 pub fn read_file_data(
-    start_cluster: u32,
-    file_size: u32,
-    offset: u64,
-    max_len: u64,
+    req: &FileRead,
     state: &mut FatState,
     block_dev: u32,
     ipc_buf: *mut u64,
     out: &mut [u8; SECTOR_SIZE],
 ) -> usize
 {
-    if offset >= u64::from(file_size)
+    if req.offset >= u64::from(req.file_size)
     {
         return 0; // Past EOF.
     }
 
-    let remaining = u64::from(file_size) - offset;
-    let to_read = max_len.min(remaining).min(SECTOR_SIZE as u64) as usize;
+    let remaining = u64::from(req.file_size) - req.offset;
+    let to_read = req.max_len.min(remaining).min(SECTOR_SIZE as u64) as usize;
 
     let cluster_size = state.cluster_size();
-    let cluster_idx = offset / u64::from(cluster_size);
-    let offset_in_cluster = (offset % u64::from(cluster_size)) as u32;
+    let cluster_idx = req.offset / u64::from(cluster_size);
+    let offset_in_cluster = (req.offset % u64::from(cluster_size)) as u32;
     let sector_in_cluster = offset_in_cluster / u32::from(state.bytes_per_sector);
     let offset_in_sector = (offset_in_cluster % u32::from(state.bytes_per_sector)) as usize;
 
     // Walk the cluster chain to the target cluster.
-    let mut cluster = start_cluster;
+    let mut cluster = req.start_cluster;
     for _ in 0..cluster_idx
     {
         cluster = match next_cluster(state, cluster, block_dev, ipc_buf)
@@ -190,13 +203,7 @@ pub fn read_file_data(
 
     let sector = state.cluster_to_sector(cluster) + sector_in_cluster;
     let mut sector_buf = [0u8; SECTOR_SIZE];
-    if !read_sector(
-        block_dev,
-        u64::from(sector),
-        &mut sector_buf,
-        ipc_buf,
-        state.partition_offset,
-    )
+    if !read_sector(block_dev, u64::from(sector), &mut sector_buf, ipc_buf)
     {
         return 0;
     }

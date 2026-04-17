@@ -123,7 +123,13 @@ fn collect_hw_caps(init_descs: &[CapDescriptor]) -> HwCaps
 /// Create devmgr via procmgr and serve its bootstrap (hardware caps).
 ///
 /// The bootstrap layout mirrors `devmgr/src/caps.rs::bootstrap_caps`.
-#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+// clippy::too_many_lines: delivery of devmgr's initial cap set is a
+// transaction — derive each cap, package it with the collected hardware
+// descriptors, then serve two bootstrap rounds. All the per-cap derive
+// sites must unwind cooperatively on failure; splitting requires threading
+// the partial-state rollback through multiple helpers with no gain in
+// clarity over the inline, linear presentation.
+#[allow(clippy::too_many_lines)]
 pub fn create_devmgr_with_caps(
     info: &InitInfo,
     procmgr_ep: u32,
@@ -321,15 +327,21 @@ pub fn create_devmgr_with_caps(
 
 // ── vfsd creation ────────────────────────────────────────────────────────────
 
+/// Endpoint set passed to vfsd via its bootstrap round.
+#[allow(clippy::struct_field_names)]
+pub struct VfsdSpawnCaps
+{
+    pub log_ep: u32,
+    pub registry_ep: u32,
+    pub vfsd_service_ep: u32,
+}
+
 /// Create vfsd via procmgr and serve its bootstrap.
-#[allow(clippy::too_many_arguments)]
 pub fn create_vfsd_with_caps(
     info: &InitInfo,
     procmgr_ep: u32,
     bootstrap_ep: u32,
-    log_ep: u32,
-    registry_ep: u32,
-    vfsd_service_ep: u32,
+    spawn: &VfsdSpawnCaps,
     ipc: IpcBuf,
 )
 {
@@ -368,17 +380,17 @@ pub fn create_vfsd_with_caps(
     }
     let process_handle = reply_caps[0];
 
-    let Ok(log_copy) = syscall::cap_derive(log_ep, syscall::RIGHTS_SEND)
+    let Ok(log_copy) = syscall::cap_derive(spawn.log_ep, syscall::RIGHTS_SEND)
     else
     {
         return;
     };
-    let Ok(service_copy) = syscall::cap_derive(vfsd_service_ep, syscall::RIGHTS_ALL)
+    let Ok(service_copy) = syscall::cap_derive(spawn.vfsd_service_ep, syscall::RIGHTS_ALL)
     else
     {
         return;
     };
-    let Ok(registry_copy) = syscall::cap_derive(registry_ep, syscall::RIGHTS_SEND)
+    let Ok(registry_copy) = syscall::cap_derive(spawn.registry_ep, syscall::RIGHTS_SEND)
     else
     {
         return;
@@ -454,7 +466,6 @@ pub fn send_vfsd_endpoint_to_procmgr(procmgr_ep: u32, vfsd_ep: u32)
 /// Create svcmgr from VFS (`/bin/svcmgr`) via `CREATE_FROM_VFS`.
 ///
 /// Returns `(process_handle, child_token)` on success.
-#[allow(clippy::too_many_arguments)]
 pub fn create_svcmgr_from_vfs(procmgr_ep: u32, bootstrap_ep: u32, ipc: IpcBuf)
     -> Option<(u32, u64)>
 {
@@ -488,16 +499,22 @@ pub fn create_svcmgr_from_vfs(procmgr_ep: u32, bootstrap_ep: u32, ipc: IpcBuf)
     Some((reply_caps[0], child_token))
 }
 
+/// Endpoint set handed to svcmgr in its bootstrap round.
+#[allow(clippy::struct_field_names)]
+pub struct SvcmgrHandoverCaps
+{
+    pub log_ep: u32,
+    pub svcmgr_service_ep: u32,
+    pub svcmgr_bootstrap_ep: u32,
+}
+
 /// Start svcmgr, then serve its bootstrap.
-#[allow(clippy::too_many_arguments)]
 pub fn setup_and_start_svcmgr(
     procmgr_ep: u32,
     bootstrap_ep: u32,
     process_handle: u32,
     child_token: u64,
-    log_ep: u32,
-    svcmgr_service_ep: u32,
-    svcmgr_bootstrap_ep: u32,
+    handover: &SvcmgrHandoverCaps,
     ipc: IpcBuf,
 )
 {
@@ -510,12 +527,12 @@ pub fn setup_and_start_svcmgr(
         return;
     }
 
-    let Ok(log_copy) = syscall::cap_derive(log_ep, syscall::RIGHTS_SEND)
+    let Ok(log_copy) = syscall::cap_derive(handover.log_ep, syscall::RIGHTS_SEND)
     else
     {
         return;
     };
-    let Ok(service_copy) = syscall::cap_derive(svcmgr_service_ep, syscall::RIGHTS_ALL)
+    let Ok(service_copy) = syscall::cap_derive(handover.svcmgr_service_ep, syscall::RIGHTS_ALL)
     else
     {
         return;
@@ -525,7 +542,7 @@ pub fn setup_and_start_svcmgr(
     {
         return;
     };
-    let Ok(boot_copy) = syscall::cap_derive(svcmgr_bootstrap_ep, syscall::RIGHTS_ALL)
+    let Ok(boot_copy) = syscall::cap_derive(handover.svcmgr_bootstrap_ep, syscall::RIGHTS_ALL)
     else
     {
         return;
@@ -595,12 +612,92 @@ pub fn create_crasher_suspended(
     Some((process_handle, thread_cap, crasher_frame_cap, child_token))
 }
 
-/// Start crasher and serve its bootstrap (`log_ep` only).
+/// Create allocsmoke from its boot module (suspended), start it, and serve
+/// its bootstrap with `[log_ep, procmgr_ep]`. allocsmoke exits cleanly on
+/// completion and is not registered with svcmgr.
+pub fn create_and_run_allocsmoke(
+    info: &InitInfo,
+    procmgr_ep: u32,
+    bootstrap_ep: u32,
+    log_ep: u32,
+    ipc: IpcBuf,
+)
+{
+    if info.module_frame_count < 7
+    {
+        return;
+    }
+    let module_frame = info.module_frame_base + 6;
+    let Ok(frame_for_procmgr) = syscall::cap_derive(module_frame, syscall::RIGHTS_ALL)
+    else
+    {
+        return;
+    };
+
+    let Some((tokened_creator, child_token)) = derive_tokened_creator(bootstrap_ep)
+    else
+    {
+        return;
+    };
+
+    let Ok((reply_label, _)) = syscall::ipc_call(
+        procmgr_ep,
+        procmgr_labels::CREATE_PROCESS,
+        0,
+        &[frame_for_procmgr, tokened_creator],
+    )
+    else
+    {
+        return;
+    };
+    if reply_label != 0
+    {
+        return;
+    }
+
+    // SAFETY: ipc wraps the registered IPC buffer.
+    let (cap_count, reply_caps) = unsafe { syscall::read_recv_caps(ipc.as_ptr()) };
+    if cap_count < 1
+    {
+        return;
+    }
+    let process_handle = reply_caps[0];
+
+    let log_copy = syscall::cap_derive(log_ep, syscall::RIGHTS_SEND).unwrap_or(0);
+    let procmgr_copy = syscall::cap_derive(procmgr_ep, syscall::RIGHTS_SEND_GRANT).unwrap_or(0);
+
+    if !start_process(
+        process_handle,
+        "init: phase 3: allocsmoke started",
+        "init: phase 3: allocsmoke START_PROCESS failed",
+    )
+    {
+        return;
+    }
+
+    let _ = serve(
+        bootstrap_ep,
+        child_token,
+        ipc,
+        true,
+        &[log_copy, procmgr_copy],
+        &[],
+        "init: phase 3: allocsmoke bootstrap failed",
+    );
+}
+
+/// Start crasher and serve its bootstrap with `[log_ep, svcmgr_ep]`.
+///
+/// `svcmgr_service_ep` is the same cap that svcmgr will re-inject from the
+/// restart bundle under the name `"svcmgr"`. Providing it on first boot as
+/// well keeps the cap layout identical across first-boot and restart paths,
+/// so crasher sees the same `cap_count` and entry in both.
 pub fn start_and_bootstrap_crasher(
     process_handle: u32,
     child_token: u64,
     bootstrap_ep: u32,
     log_ep: u32,
+    svcmgr_service_ep: u32,
     ipc: IpcBuf,
 ) -> bool
 {
@@ -621,67 +718,121 @@ pub fn start_and_bootstrap_crasher(
     {
         0
     };
+    let svcmgr_copy = if svcmgr_service_ep != 0
+    {
+        syscall::cap_derive(svcmgr_service_ep, syscall::RIGHTS_SEND).unwrap_or(0)
+    }
+    else
+    {
+        0
+    };
 
     serve(
         bootstrap_ep,
         child_token,
         ipc,
         true,
-        &[log_copy],
+        &[log_copy, svcmgr_copy],
         &[],
         "init: phase 3: crasher bootstrap failed",
     )
 }
 
-/// Register a service with svcmgr via `REGISTER_SERVICE`.
-#[allow(clippy::too_many_arguments)]
-pub fn register_service(
-    svcmgr_ep: u32,
-    ipc: IpcBuf,
-    name: &[u8],
-    restart_policy: u8,
-    criticality: u8,
-    thread_cap: u32,
-    module_cap: u32,
-    log_ep: u32,
-)
+/// One service's registration data, passed to `register_service`.
+pub struct ServiceRegistration<'a>
 {
-    ipc.write_word(0, u64::from(restart_policy));
-    ipc.write_word(1, u64::from(criticality));
+    pub name: &'a [u8],
+    pub restart_policy: u8,
+    pub criticality: u8,
+    pub thread_cap: u32,
+    pub module_cap: u32,
+    pub log_ep: u32,
+    /// Optional extra named cap for svcmgr's restart bundle. If both
+    /// `bundle_name` is non-empty and `bundle_cap != 0`, the cap will be
+    /// re-injected into every restart of this service under the given name.
+    pub bundle_name: &'a [u8],
+    pub bundle_cap: u32,
+}
 
-    let name_words = name.len().div_ceil(8);
+/// Register a service with svcmgr via `REGISTER_SERVICE`.
+pub fn register_service(svcmgr_ep: u32, ipc: IpcBuf, reg: &ServiceRegistration)
+{
+    ipc.write_word(0, u64::from(reg.restart_policy));
+    ipc.write_word(1, u64::from(reg.criticality));
+
+    let name_words = reg.name.len().div_ceil(8);
     for w in 0..name_words
     {
         let mut word: u64 = 0;
         for b in 0..8
         {
             let idx = w * 8 + b;
-            if idx < name.len()
+            if idx < reg.name.len()
             {
-                word |= u64::from(name[idx]) << (b * 8);
+                word |= u64::from(reg.name[idx]) << (b * 8);
             }
         }
         ipc.write_word(2 + w, word);
     }
 
-    let data_count = 2 + name_words;
-    let label = svcmgr_labels::REGISTER_SERVICE | ((name.len() as u64) << 16);
+    // Bundle-name tail: [bundle_name_len, bundle_name_words...] packed after
+    // the service name. Zero if no bundle cap is being sent.
+    let bundle_name_len_word = 2 + name_words;
+    let include_bundle = reg.module_cap != 0
+        && reg.log_ep != 0
+        && reg.bundle_cap != 0
+        && !reg.bundle_name.is_empty()
+        && reg.bundle_name.len() <= 16;
+    let bundle_name_len = if include_bundle
+    {
+        reg.bundle_name.len()
+    }
+    else
+    {
+        0
+    };
+    ipc.write_word(bundle_name_len_word, bundle_name_len as u64);
+    let bundle_name_words = bundle_name_len.div_ceil(8);
+    for w in 0..bundle_name_words
+    {
+        let mut word: u64 = 0;
+        for b in 0..8
+        {
+            let idx = w * 8 + b;
+            if idx < bundle_name_len
+            {
+                word |= u64::from(reg.bundle_name[idx]) << (b * 8);
+            }
+        }
+        ipc.write_word(bundle_name_len_word + 1 + w, word);
+    }
 
-    let mut caps = [0u32; 3];
+    let data_count = bundle_name_len_word + 1 + bundle_name_words;
+    let label = svcmgr_labels::REGISTER_SERVICE | ((reg.name.len() as u64) << 16);
+
+    let mut caps = [0u32; 4];
     let mut cap_count = 0;
-    if thread_cap != 0
+    if reg.thread_cap != 0
     {
-        caps[cap_count] = thread_cap;
+        caps[cap_count] = reg.thread_cap;
         cap_count += 1;
     }
-    if module_cap != 0
+    if reg.module_cap != 0
     {
-        caps[cap_count] = module_cap;
+        caps[cap_count] = reg.module_cap;
         cap_count += 1;
     }
-    if log_ep != 0 && module_cap != 0
+    if reg.log_ep != 0 && reg.module_cap != 0
     {
-        if let Ok(derived) = syscall::cap_derive(log_ep, syscall::RIGHTS_SEND)
+        if let Ok(derived) = syscall::cap_derive(reg.log_ep, syscall::RIGHTS_SEND)
+        {
+            caps[cap_count] = derived;
+            cap_count += 1;
+        }
+    }
+    if include_bundle
+    {
+        if let Ok(derived) = syscall::cap_derive(reg.bundle_cap, syscall::RIGHTS_SEND)
         {
             caps[cap_count] = derived;
             cap_count += 1;
@@ -699,7 +850,13 @@ pub fn register_service(
 // ── Phase 3 orchestration ───────────────────────────────────────────────────
 
 /// Phase 3: create svcmgr from VFS, register services, start crasher, handover.
-#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+// clippy::too_many_lines: svcmgr handover is a single transaction that owns
+// the in-flight tokens for svcmgr and crasher processes; the partial-state
+// unwind on any failure (svcmgr creation fails, crasher creation fails,
+// registration fails, HANDOVER_COMPLETE fails) must see every token in
+// scope. Factoring into helpers requires threading every token through each,
+// which regresses readability.
+#[allow(clippy::too_many_lines)]
 pub fn phase3_svcmgr_handover(
     info: &InitInfo,
     procmgr_ep: u32,
@@ -734,14 +891,17 @@ pub fn phase3_svcmgr_handover(
         idle_loop();
     };
 
+    let handover = SvcmgrHandoverCaps {
+        log_ep,
+        svcmgr_service_ep,
+        svcmgr_bootstrap_ep,
+    };
     setup_and_start_svcmgr(
         procmgr_ep,
         bootstrap_ep,
         svcmgr_handle,
         svcmgr_token,
-        log_ep,
-        svcmgr_service_ep,
-        svcmgr_bootstrap_ep,
+        &handover,
         ipc,
     );
 
@@ -754,16 +914,30 @@ pub fn phase3_svcmgr_handover(
         register_service(
             svcmgr_service_ep,
             ipc,
-            b"crasher",
-            0, // POLICY_ALWAYS
-            1, // CRITICALITY_NORMAL
-            crasher_thread,
-            crasher_module,
-            log_ep,
+            &ServiceRegistration {
+                name: b"crasher",
+                restart_policy: 0, // POLICY_ALWAYS
+                criticality: 1,    // CRITICALITY_NORMAL
+                thread_cap: crasher_thread,
+                module_cap: crasher_module,
+                log_ep,
+                bundle_name: b"svcmgr",
+                bundle_cap: svcmgr_service_ep,
+            },
         );
 
-        start_and_bootstrap_crasher(crasher_handle, crasher_token, bootstrap_ep, log_ep, ipc);
+        start_and_bootstrap_crasher(
+            crasher_handle,
+            crasher_token,
+            bootstrap_ep,
+            log_ep,
+            svcmgr_service_ep,
+            ipc,
+        );
     }
+
+    // Spawn allocsmoke (run-once test; no svcmgr registration).
+    create_and_run_allocsmoke(info, procmgr_ep, bootstrap_ep, log_ep, ipc);
 
     match syscall::ipc_call(svcmgr_service_ep, svcmgr_labels::HANDOVER_COMPLETE, 0, &[])
     {

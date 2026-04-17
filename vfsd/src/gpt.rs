@@ -14,11 +14,12 @@ pub const MAX_GPT_PARTS: usize = 8;
 /// Sector size for block I/O.
 const SECTOR_SIZE: usize = 512;
 
-/// A discovered GPT partition (UUID + starting LBA).
+/// A discovered GPT partition (UUID + LBA range).
 pub struct GptEntry
 {
     pub uuid: [u8; 16],
     pub first_lba: u64,
+    pub length_lba: u64,
     pub active: bool,
 }
 
@@ -29,6 +30,7 @@ impl GptEntry
         Self {
             uuid: [0; 16],
             first_lba: 0,
+            length_lba: 0,
             active: false,
         }
     }
@@ -94,43 +96,54 @@ pub enum GptError
     InvalidEntrySize,
 }
 
-/// Parse the GPT and populate a partition table with UUID and LBA for
-/// each non-empty partition. Returns the number of entries found, or an
-/// error if the header cannot be read or validated.
-// too_many_lines: sequential GPT header validation, sector iteration, and
-// partition extraction that must share mutable state.
-#[allow(clippy::too_many_lines)]
-pub fn parse_gpt(
-    blk_ep: u32,
-    ipc_buf: *mut u64,
-    parts: &mut [GptEntry; MAX_GPT_PARTS],
-) -> Result<usize, GptError>
+/// Validated GPT header fields needed for partition-table iteration.
+struct GptHeader
+{
+    part_entry_lba: u64,
+    num_parts: u32,
+    entry_size: u32,
+}
+
+/// Read the GPT header at LBA 1, validate its signature, and extract the
+/// fields needed to walk the partition array.
+fn read_and_validate_header(blk_ep: u32, ipc_buf: *mut u64) -> Result<GptHeader, GptError>
 {
     let mut sector = [0u8; SECTOR_SIZE];
-
-    // Read GPT header at LBA 1.
     if !read_block_sector(blk_ep, 1, &mut sector, ipc_buf)
     {
         return Err(GptError::IoError);
     }
-
-    // Validate signature "EFI PART".
     if &sector[0..8] != b"EFI PART"
     {
         return Err(GptError::InvalidSignature);
     }
-
     let part_entry_lba = u64::from_le_bytes(sector[72..80].try_into().unwrap_or([0; 8]));
     let num_parts = u32::from_le_bytes(sector[80..84].try_into().unwrap_or([0; 4]));
     let entry_size = u32::from_le_bytes(sector[84..88].try_into().unwrap_or([0; 4]));
-
     if entry_size == 0 || entry_size > 512
     {
         return Err(GptError::InvalidEntrySize);
     }
+    Ok(GptHeader {
+        part_entry_lba,
+        num_parts,
+        entry_size,
+    })
+}
 
-    let entries_per_sector = SECTOR_SIZE as u32 / entry_size;
-    let sectors_needed = num_parts.div_ceil(entries_per_sector);
+/// Walk the partition entries starting at `header.part_entry_lba` and push
+/// non-empty entries into `parts`. Stops when `MAX_GPT_PARTS` are collected
+/// or when all `num_parts` entries have been checked.
+fn iter_entries(
+    blk_ep: u32,
+    ipc_buf: *mut u64,
+    header: &GptHeader,
+    parts: &mut [GptEntry; MAX_GPT_PARTS],
+) -> usize
+{
+    let mut sector = [0u8; SECTOR_SIZE];
+    let entries_per_sector = SECTOR_SIZE as u32 / header.entry_size;
+    let sectors_needed = header.num_parts.div_ceil(entries_per_sector);
     let mut found: usize = 0;
     let mut entries_checked: u32 = 0;
 
@@ -140,55 +153,82 @@ pub fn parse_gpt(
         {
             break;
         }
-        if !read_block_sector(blk_ep, part_entry_lba + u64::from(s), &mut sector, ipc_buf)
+        if !read_block_sector(
+            blk_ep,
+            header.part_entry_lba + u64::from(s),
+            &mut sector,
+            ipc_buf,
+        )
         {
             break;
         }
 
         for e in 0..entries_per_sector
         {
-            if entries_checked >= num_parts || found >= MAX_GPT_PARTS
+            if entries_checked >= header.num_parts || found >= MAX_GPT_PARTS
             {
                 break;
             }
-            let off = (e * entry_size) as usize;
+            let off = (e * header.entry_size) as usize;
             let first_lba =
                 u64::from_le_bytes(sector[off + 32..off + 40].try_into().unwrap_or([0; 8]));
-
-            // Skip empty entries.
-            if first_lba == 0
+            let last_lba =
+                u64::from_le_bytes(sector[off + 40..off + 48].try_into().unwrap_or([0; 8]));
+            if first_lba == 0 || last_lba < first_lba
             {
                 entries_checked += 1;
                 continue;
             }
-
-            // Store unique partition UUID (bytes 16..32) and LBA.
             let mut uuid = [0u8; 16];
             uuid.copy_from_slice(&sector[off + 16..off + 32]);
+            let length_lba = last_lba - first_lba + 1;
             parts[found] = GptEntry {
                 uuid,
                 first_lba,
+                length_lba,
                 active: true,
             };
-            runtime::log!("vfsd: GPT: partition at LBA {:#018x}", first_lba);
+            runtime::log!(
+                "vfsd: GPT: partition at LBA {:#018x} length {:#018x}",
+                first_lba,
+                length_lba
+            );
             found += 1;
             entries_checked += 1;
         }
     }
+    found
+}
 
+/// Parse the GPT and populate a partition table with UUID and LBA for
+/// each non-empty partition. Returns the number of entries found, or an
+/// error if the header cannot be read or validated.
+pub fn parse_gpt(
+    blk_ep: u32,
+    ipc_buf: *mut u64,
+    parts: &mut [GptEntry; MAX_GPT_PARTS],
+) -> Result<usize, GptError>
+{
+    let header = read_and_validate_header(blk_ep, ipc_buf)?;
+    let found = iter_entries(blk_ep, ipc_buf, &header, parts);
     runtime::log!("vfsd: GPT: partitions found: {}", found);
     Ok(found)
 }
 
-/// Look up a partition UUID in the GPT table. Returns the LBA offset or 0.
-pub fn lookup_partition_by_uuid(uuid: &[u8; 16], parts: &[GptEntry; MAX_GPT_PARTS]) -> u64
+/// Look up a partition UUID in the GPT table.
+///
+/// Returns `Some((first_lba, length_lba))` for an active match, `None` otherwise.
+pub fn lookup_partition_by_uuid(
+    uuid: &[u8; 16],
+    parts: &[GptEntry; MAX_GPT_PARTS],
+) -> Option<(u64, u64)>
 {
     for p in parts
     {
         if p.active && p.uuid == *uuid
         {
-            return p.first_lba;
+            return Some((p.first_lba, p.length_lba));
         }
     }
-    0
+    None
 }

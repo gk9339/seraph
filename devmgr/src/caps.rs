@@ -94,18 +94,10 @@ impl DevmgrCaps
 //   First module cap is always the virtio-blk module (module index 3 today);
 //   additional modules may follow in later releases.
 
-/// Pull devmgr's initial cap set from init via multi-round bootstrap.
-#[allow(clippy::too_many_lines)]
-pub fn bootstrap_caps(startup: &StartupInfo, ipc: IpcBuf) -> Option<DevmgrCaps>
+/// Round 1: receive endpoint caps and ECAM region. Fails if the caller
+/// provided fewer than four caps.
+fn bootstrap_round_endpoints(creator: u32, ipc: IpcBuf, caps: &mut DevmgrCaps) -> Option<()>
 {
-    let mut caps = DevmgrCaps::new(startup);
-    let creator = startup.creator_endpoint;
-    if creator == 0
-    {
-        return None;
-    }
-
-    // Round 1: endpoints + ECAM.
     let round1 = ipc::bootstrap::request_round(creator, ipc).ok()?;
     if round1.cap_count < 4
     {
@@ -117,8 +109,13 @@ pub fn bootstrap_caps(startup: &StartupInfo, ipc: IpcBuf) -> Option<DevmgrCaps>
     caps.ecam_slot = round1.caps[3];
     caps.ecam_base = ipc.read_word(0);
     caps.ecam_size = ipc.read_word(1);
+    Some(())
+}
 
-    // Round 2: PCI MMIO windows.
+/// Round 2: receive up to two PCI MMIO windows. Returns whether the caller
+/// marked this round as the terminal one.
+fn bootstrap_round_mmio_windows(creator: u32, ipc: IpcBuf, caps: &mut DevmgrCaps) -> Option<bool>
+{
     let round2 = ipc::bootstrap::request_round(creator, ipc).ok()?;
     let win_count = ipc.read_word(0) as usize;
     for i in 0..win_count.min(round2.cap_count).min(2)
@@ -130,18 +127,25 @@ pub fn bootstrap_caps(startup: &StartupInfo, ipc: IpcBuf) -> Option<DevmgrCaps>
         };
         caps.pci_mmio_window_count += 1;
     }
+    Some(round2.done)
+}
 
-    // IRQ rounds: loop until one of them is marked done=true.
-    let mut irq_done = round2.done;
-    while !irq_done
+/// Subsequent rounds: IRQ cap batches (kind=0) interleaved with driver
+/// module cap batches (kind=1). Loops until a round is marked terminal.
+fn bootstrap_rounds_irq_and_modules(
+    creator: u32,
+    ipc: IpcBuf,
+    caps: &mut DevmgrCaps,
+    mut done: bool,
+) -> Option<()>
+{
+    while !done
     {
         let round = ipc::bootstrap::request_round(creator, ipc).ok()?;
-        // First word in this round is round-kind tag: 0 = IRQ round, 1 = module round.
         let kind = ipc.read_word(0);
-        irq_done = round.done;
+        done = round.done;
         if kind == 0
         {
-            // IRQ caps: data[1..cap_count+1] = irq_id for each cap.
             for i in 0..round.cap_count.min(4)
             {
                 if caps.irq_count < caps.irq_slots.len()
@@ -154,7 +158,6 @@ pub fn bootstrap_caps(startup: &StartupInfo, ipc: IpcBuf) -> Option<DevmgrCaps>
         }
         else
         {
-            // Module caps, no per-cap data.
             for i in 0..round.cap_count.min(4)
             {
                 if caps.driver_module_count < caps.driver_module_slots.len()
@@ -164,13 +167,24 @@ pub fn bootstrap_caps(startup: &StartupInfo, ipc: IpcBuf) -> Option<DevmgrCaps>
                 }
             }
         }
-        if irq_done
-        {
-            break;
-        }
+    }
+    Some(())
+}
+
+/// Pull devmgr's initial cap set from init via multi-round bootstrap.
+pub fn bootstrap_caps(startup: &StartupInfo, ipc: IpcBuf) -> Option<DevmgrCaps>
+{
+    let mut caps = DevmgrCaps::new(startup);
+    let creator = startup.creator_endpoint;
+    if creator == 0
+    {
+        return None;
     }
 
-    // devmgr creates its own bootstrap endpoint for serving drivers.
+    bootstrap_round_endpoints(creator, ipc, &mut caps)?;
+    let done_after_mmio = bootstrap_round_mmio_windows(creator, ipc, &mut caps)?;
+    bootstrap_rounds_irq_and_modules(creator, ipc, &mut caps, done_after_mmio)?;
+
     caps.self_bootstrap_ep = syscall::cap_create_endpoint().ok()?;
 
     Some(caps)

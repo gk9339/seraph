@@ -331,7 +331,6 @@ fn find_in_directory(
                 u64::from(base_sector + s),
                 &mut sector_buf,
                 ipc_buf,
-                state.partition_offset,
             )
             {
                 return None;
@@ -366,7 +365,6 @@ fn find_in_fat16_root(
             u64::from(root_start + s),
             &mut sector_buf,
             ipc_buf,
-            state.partition_offset,
         )
         {
             return None;
@@ -427,9 +425,17 @@ fn scan_sector_for_name(
 ///
 /// Skips deleted, LFN, and end-of-directory markers; counts only valid 8.3
 /// entries. Used by readdir to enumerate directory contents by position.
+// clippy::too_many_lines: read_dir_entry_at_index folds two iteration
+// shapes — FAT16 fixed root directory (contiguous sectors) and FAT32
+// clustered directory (cluster-chain walk) — into one procedure because
+// they share the "scan 32-byte entries, skip LFN/deleted/end markers,
+// count valid 8.3 entries, return the Nth" post-processing loop. The
+// only per-variant difference is how sectors are located; the entry
+// decode/skip/count logic is identical and runs on the same sector
+// buffer. Splitting would require duplicating that post-processing loop
+// or passing the shared buffer + counters across a helper boundary,
+// neither of which clarifies the code.
 #[allow(clippy::too_many_lines)]
-// Justification: FAT16 fixed-root and FAT32 clustered paths share logic but
-// differ in iteration structure; merging would require awkward abstractions.
 pub fn read_dir_entry_at_index(
     dir_cluster: u32,
     index: u64,
@@ -456,7 +462,6 @@ pub fn read_dir_entry_at_index(
                 u64::from(root_start + s),
                 &mut sector_buf,
                 ipc_buf,
-                state.partition_offset,
             )
             {
                 return None;
@@ -493,7 +498,6 @@ pub fn read_dir_entry_at_index(
                 u64::from(base_sector + s),
                 &mut sector_buf,
                 ipc_buf,
-                state.partition_offset,
             )
             {
                 return None;

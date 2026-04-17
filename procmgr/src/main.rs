@@ -23,6 +23,7 @@
 
 extern crate runtime;
 
+mod arch;
 mod frames;
 mod loader;
 mod process;
@@ -75,7 +76,11 @@ extern "Rust" fn main(startup: &StartupInfo) -> !
 
     let mut pool = FramePool::new(frame_base, frame_count);
     let mut table = process::ProcessTable::new();
-    let mut vfsd_ep: u32 = 0;
+    let mut ctx = ProcmgrCtx {
+        self_aspace,
+        self_endpoint: service_ep,
+        vfsd_ep: 0,
+    };
 
     loop
     {
@@ -89,7 +94,13 @@ extern "Rust" fn main(startup: &StartupInfo) -> !
         {
             procmgr_labels::CREATE_PROCESS =>
             {
-                handle_create(ipc_buf, &mut pool, self_aspace, &mut table, service_ep);
+                handle_create(
+                    ipc_buf,
+                    &mut pool,
+                    ctx.self_aspace,
+                    &mut table,
+                    ctx.self_endpoint,
+                );
             }
 
             procmgr_labels::START_PROCESS =>
@@ -115,15 +126,7 @@ extern "Rust" fn main(startup: &StartupInfo) -> !
 
             procmgr_labels::CREATE_FROM_VFS =>
             {
-                handle_create_from_vfs(
-                    label,
-                    ipc_buf,
-                    vfsd_ep,
-                    &mut pool,
-                    self_aspace,
-                    &mut table,
-                    service_ep,
-                );
+                handle_create_from_vfs(label, ipc_buf, &ctx, &mut pool, &mut table);
             }
 
             procmgr_labels::SET_VFSD_EP =>
@@ -133,7 +136,7 @@ extern "Rust" fn main(startup: &StartupInfo) -> !
 
                 if cap_count > 0
                 {
-                    vfsd_ep = caps[0];
+                    ctx.vfsd_ep = caps[0];
                     let _ = syscall::ipc_reply(procmgr_errors::SUCCESS, 0, &[]);
                 }
                 else
@@ -242,21 +245,29 @@ fn handle_request_frames(ipc_buf: *mut u64, pool: &mut FramePool)
     }
 }
 
+/// Long-lived procmgr state used by all request handlers.
+///
+/// `vfsd_ep` starts zero and is populated by `SET_VFSD_EP` once init has
+/// handed over; the other fields are fixed for the lifetime of the process.
+pub struct ProcmgrCtx
+{
+    pub self_aspace: u32,
+    pub self_endpoint: u32,
+    pub vfsd_ep: u32,
+}
+
 /// Handle `CREATE_FROM_VFS` — create a process from a VFS path.
 ///
 /// Expects `caps = [creator_endpoint]` (module is loaded from VFS, not passed in).
-#[allow(clippy::too_many_arguments)]
 fn handle_create_from_vfs(
     label: u64,
     ipc_buf: *mut u64,
-    vfsd_ep: u32,
+    ctx: &ProcmgrCtx,
     pool: &mut FramePool,
-    self_aspace: u32,
     table: &mut process::ProcessTable,
-    self_endpoint: u32,
 )
 {
-    if vfsd_ep == 0
+    if ctx.vfsd_ep == 0
     {
         let _ = syscall::ipc_reply(procmgr_errors::NO_VFSD_ENDPOINT, 0, &[]);
         return;
@@ -279,13 +290,11 @@ fn handle_create_from_vfs(
     let effective_len = ipc::read_path_from_ipc(ipc_ref, path_len, &mut path_buf);
 
     match process::create_process_from_vfs(
-        vfsd_ep,
+        ctx,
         &path_buf[..effective_len],
         pool,
-        self_aspace,
         table,
         ipc_buf,
-        self_endpoint,
         creator_ep,
     )
     {

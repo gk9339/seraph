@@ -125,7 +125,7 @@ fn load_elf(
     init_aspace: u32,
 ) -> Option<u64>
 {
-    let ehdr = elf::validate(module_bytes, arch::EXPECTED_ELF_MACHINE).ok()?;
+    let ehdr = elf::validate(module_bytes, arch::current::EXPECTED_ELF_MACHINE).ok()?;
     let entry = elf::entry_point(ehdr);
 
     for seg_result in elf::load_segments(ehdr, module_bytes)

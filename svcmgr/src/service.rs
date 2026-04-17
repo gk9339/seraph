@@ -15,6 +15,13 @@ use process_abi::StartupInfo;
 /// Maximum number of monitored services.
 pub const MAX_SERVICES: usize = 16;
 
+/// Maximum number of extra named caps stored per service for restart.
+///
+/// Constrained by the 4-cap IPC message limit: a single `REGISTER_SERVICE`
+/// delivers `thread + module + log + 1 extra`. Larger bundles would need
+/// multi-round registration; defer until a concrete consumer appears.
+pub const MAX_BUNDLE_CAPS: usize = 1;
+
 /// Maximum restart attempts before marking degraded.
 pub const MAX_RESTARTS: u32 = 5;
 
@@ -45,6 +52,12 @@ pub struct ServiceEntry
     pub module_cap: u32,
     /// Capability slot for the service's log endpoint.
     pub log_ep_cap: u32,
+    /// Extra named restart-bundle caps beyond `thread/module/log`. Each
+    /// entry is re-derived and re-delivered over the bootstrap protocol
+    /// after a restart so the child comes back with its full cap set.
+    pub bundle: [registry::Entry; MAX_BUNDLE_CAPS],
+    /// Number of valid entries at the front of `bundle`.
+    pub bundle_count: u8,
     /// Restart policy (`POLICY_ALWAYS`, `POLICY_ON_FAILURE`, etc.).
     pub restart_policy: u8,
     /// Criticality level (`CRITICALITY_FATAL`, `CRITICALITY_NORMAL`).
@@ -71,6 +84,12 @@ impl ServiceEntry
             thread_cap: 0,
             module_cap: 0,
             log_ep_cap: 0,
+            bundle: [registry::Entry {
+                name: [0; registry::NAME_MAX],
+                name_len: 0,
+                cap: 0,
+            }; MAX_BUNDLE_CAPS],
+            bundle_count: 0,
             restart_policy: 0,
             criticality: 0,
             event_queue_cap: 0,

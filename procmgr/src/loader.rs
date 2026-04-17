@@ -20,15 +20,6 @@ pub const TEMP_FRAME_VA: u64 = 0x0000_0000_9000_0000;
 /// Temp VA for mapping VFS buffer frames during ELF loading.
 pub const TEMP_VFS_VA: u64 = 0x0000_0000_A000_0000;
 
-pub mod arch
-{
-    #[cfg(target_arch = "x86_64")]
-    pub const EXPECTED_ELF_MACHINE: u16 = elf::EM_X86_64;
-
-    #[cfg(target_arch = "riscv64")]
-    pub const EXPECTED_ELF_MACHINE: u16 = elf::EM_RISCV;
-}
-
 /// Map a module frame read-only, probing for the exact mappable page count.
 ///
 /// Starts from 128 pages and decrements until the mapping succeeds.

@@ -44,6 +44,17 @@ pub mod svcmgr_labels
     pub const REGISTER_SERVICE: u64 = 1;
     /// Signal that init handover is complete.
     pub const HANDOVER_COMPLETE: u64 = 2;
+    /// Publish a named endpoint into the discovery registry.
+    ///
+    /// Data words: `[name_len, name_words...]`. One cap attached = the
+    /// endpoint the name resolves to.
+    pub const PUBLISH_ENDPOINT: u64 = 3;
+    /// Look up a named endpoint; reply transfers the cap if known.
+    ///
+    /// Label's high 16 bits carry `name_len` (see `shared/ipc` `read_path`
+    /// pattern); data words carry the name. Reply attaches the cap on
+    /// success, or returns `svcmgr_errors::UNKNOWN_NAME` on miss.
+    pub const QUERY_ENDPOINT: u64 = 4;
 }
 
 /// IPC labels for the VFS daemon (`vfsd`).
@@ -97,6 +108,11 @@ pub mod blk_labels
 {
     /// Read a single sector (512 bytes).
     pub const READ_BLOCK: u64 = 1;
+    /// Register a partition range for a tokened endpoint.
+    ///
+    /// Data words: `[token, base_lba, length_lba]`. Callable only over the
+    /// un-tokened (whole-disk) endpoint; tokened callers are rejected.
+    pub const REGISTER_PARTITION: u64 = 2;
 }
 
 // ── Bootstrap protocol ──────────────────────────────────────────────────────
@@ -215,6 +231,10 @@ pub mod svcmgr_errors
     pub const INSUFFICIENT_CAPS: u64 = 3;
     /// `EventQueue` binding failed for death notification.
     pub const EVENT_QUEUE_FAILED: u64 = 4;
+    /// Discovery registry lookup: name is not published.
+    pub const UNKNOWN_NAME: u64 = 5;
+    /// Discovery registry publish: table full or duplicate name.
+    pub const REGISTER_REJECTED: u64 = 6;
     /// Unknown opcode on svcmgr endpoint.
     pub const UNKNOWN_OPCODE: u64 = 0xFFFF;
 }
@@ -227,6 +247,10 @@ pub mod blk_errors
     /// Values 1 (IOERR), 2 (UNSUPP) per `VirtIO` 1.2 §5.2.6.
     pub const DEVICE_STATUS_IOERR: u64 = 1;
     pub const DEVICE_STATUS_UNSUPP: u64 = 2;
+    /// Read LBA is outside the bounds registered for the caller's token.
+    pub const OUT_OF_BOUNDS: u64 = 3;
+    /// Partition registration rejected (no authority, table full, or bad args).
+    pub const REGISTER_REJECTED: u64 = 4;
     /// Unknown opcode on block endpoint.
     pub const UNKNOWN_OPCODE: u64 = 0xFF;
 }

@@ -7,9 +7,12 @@
 //!
 //! Detects whether a crashed service should be restarted based on its restart
 //! policy and criticality, then creates a new process instance via procmgr,
-//! serves its bootstrap (log endpoint only for now — the current set of
-//! restart-eligible services are single-cap crasher-class processes), and
-//! rebinds death notification.
+//! serves its bootstrap, and rebinds death notification.
+//!
+//! Bootstrap delivery re-injects the full cap set the service was registered
+//! with: `log_ep` plus any extra named caps in the restart bundle. This is
+//! F4.3's resolution — restarted services come back with the same cap set
+//! they had at registration, not a reduced subset.
 
 use crate::halt_loop;
 use crate::service::{
@@ -21,20 +24,22 @@ use ipc::{procmgr_labels, IpcBuf};
 /// Monotonic counter for restart-child bootstrap tokens.
 static NEXT_BOOTSTRAP_TOKEN: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(1);
 
+/// Endpoints and IPC state needed by restart paths. Holds nothing per-service,
+/// so the same instance is reused across all death events.
+pub struct RestartCtx
+{
+    pub procmgr_ep: u32,
+    pub bootstrap_ep: u32,
+    pub ipc: IpcBuf,
+    pub ws_cap: u32,
+}
+
 /// Handle a service death detected via event queue notification.
 ///
 /// Checks criticality and restart policy, then attempts to restart the service
 /// if appropriate. Marks the service inactive if restart is not attempted or
 /// fails.
-#[allow(clippy::too_many_arguments)]
-pub fn handle_death(
-    svc: &mut ServiceEntry,
-    exit_reason: u64,
-    procmgr_ep: u32,
-    bootstrap_ep: u32,
-    ipc: IpcBuf,
-    ws_cap: u32,
-)
+pub fn handle_death(svc: &mut ServiceEntry, exit_reason: u64, ctx: &RestartCtx)
 {
     runtime::log!("svcmgr: service died: {}", svc.name_str());
     runtime::log!("svcmgr:   exit_reason={:#018x}", exit_reason);
@@ -63,7 +68,7 @@ pub fn handle_death(
         u64::from(svc.restart_count + 1)
     );
 
-    if !restart_process(svc, procmgr_ep, bootstrap_ep, ipc, ws_cap)
+    if !restart_process(svc, ctx)
     {
         svc.active = false;
         return;
@@ -107,16 +112,9 @@ fn should_restart(svc: &ServiceEntry, exit_reason: u64) -> bool
 
 /// Create a new process via procmgr, serve bootstrap (log endpoint), start it,
 /// and rebind death notification. Returns `true` on success.
-fn restart_process(
-    svc: &mut ServiceEntry,
-    procmgr_ep: u32,
-    bootstrap_ep: u32,
-    ipc: IpcBuf,
-    ws_cap: u32,
-) -> bool
+fn restart_process(svc: &mut ServiceEntry, ctx: &RestartCtx) -> bool
 {
-    let Some((process_handle, new_thread_cap, child_token)) =
-        create_process(svc, procmgr_ep, bootstrap_ep, ipc)
+    let Some((process_handle, new_thread_cap, child_token)) = create_process(svc, ctx)
     else
     {
         return false;
@@ -128,26 +126,57 @@ fn restart_process(
         return false;
     }
 
-    // Serve crasher's single-round bootstrap: one cap (log_ep), done=true.
-    let log_cap = if svc.log_ep_cap != 0
+    // Assemble the full restart cap set: [log_ep, bundle_caps...]. Each is
+    // freshly derived from the stored authoritative cap so the restarted
+    // child owns its own copies. Bundle order is positional — children that
+    // registered with bundle caps must expect them in the same order on
+    // restart as at first boot.
+    let mut restart_caps: [u32; syscall_abi::MSG_CAP_SLOTS_MAX] =
+        [0; syscall_abi::MSG_CAP_SLOTS_MAX];
+    let mut cap_count = 0usize;
+
+    if svc.log_ep_cap != 0
     {
-        if let Ok(c) = syscall::cap_derive(svc.log_ep_cap, syscall::RIGHTS_SEND)
-        {
-            c
-        }
+        let Ok(c) = syscall::cap_derive(svc.log_ep_cap, syscall::RIGHTS_SEND)
         else
         {
             runtime::log!("svcmgr: cannot derive log cap for restart");
             return false;
-        }
+        };
+        restart_caps[cap_count] = c;
+        cap_count += 1;
     }
-    else
-    {
-        0
-    };
 
-    let caps_slice: &[u32] = if log_cap != 0 { &[log_cap] } else { &[] };
-    if ipc::bootstrap::serve_round(bootstrap_ep, child_token, ipc, true, caps_slice, &[]).is_err()
+    for i in 0..(svc.bundle_count as usize)
+    {
+        if cap_count >= syscall_abi::MSG_CAP_SLOTS_MAX
+        {
+            break;
+        }
+        let entry = &svc.bundle[i];
+        if entry.cap == 0
+        {
+            continue;
+        }
+        let Ok(c) = syscall::cap_derive(entry.cap, syscall::RIGHTS_SEND)
+        else
+        {
+            runtime::log!("svcmgr: cannot derive bundle cap for restart");
+            return false;
+        };
+        restart_caps[cap_count] = c;
+        cap_count += 1;
+    }
+
+    if ipc::bootstrap::serve_round(
+        ctx.bootstrap_ep,
+        child_token,
+        ctx.ipc,
+        true,
+        &restart_caps[..cap_count],
+        &[],
+    )
+    .is_err()
     {
         runtime::log!("svcmgr: bootstrap serve failed");
         return false;
@@ -155,16 +184,11 @@ fn restart_process(
 
     svc.bootstrap_token = child_token;
 
-    rebind_death_notification(svc, ws_cap, new_thread_cap)
+    rebind_death_notification(svc, ctx.ws_cap, new_thread_cap)
 }
 
 /// Send `CREATE_PROCESS` to procmgr. Returns `(process_handle, thread, child_token)`.
-fn create_process(
-    svc: &ServiceEntry,
-    procmgr_ep: u32,
-    bootstrap_ep: u32,
-    ipc: IpcBuf,
-) -> Option<(u32, u32, u64)>
+fn create_process(svc: &ServiceEntry, ctx: &RestartCtx) -> Option<(u32, u32, u64)>
 {
     let module_copy = syscall::cap_derive(svc.module_cap, syscall::RIGHTS_ALL).ok()?;
 
@@ -174,10 +198,10 @@ fn create_process(
     // Derive a tokened send cap on our bootstrap endpoint. The child uses this
     // as its creator_endpoint; the token lets us identify them on recv.
     let tokened_creator =
-        syscall::cap_derive_token(bootstrap_ep, syscall::RIGHTS_SEND, child_token).ok()?;
+        syscall::cap_derive_token(ctx.bootstrap_ep, syscall::RIGHTS_SEND, child_token).ok()?;
 
     let (reply_label, _) = syscall::ipc_call(
-        procmgr_ep,
+        ctx.procmgr_ep,
         procmgr_labels::CREATE_PROCESS,
         0,
         &[module_copy, tokened_creator],
@@ -190,7 +214,7 @@ fn create_process(
     }
 
     // SAFETY: ipc buffer wraps the registered IPC page.
-    let (cap_count, reply_caps) = unsafe { syscall::read_recv_caps(ipc.as_ptr()) };
+    let (cap_count, reply_caps) = unsafe { syscall::read_recv_caps(ctx.ipc.as_ptr()) };
     if cap_count < 2
     {
         runtime::log!("svcmgr: restart reply missing caps");

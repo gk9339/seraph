@@ -14,6 +14,11 @@
 //!
 //! This routes fatfs through the generic bootstrap protocol without
 //! clobbering the main thread's reply target (= init) while servicing MOUNT.
+//!
+//! The `partition_ep` passed in is a tokened SEND cap on virtio-blk's service
+//! endpoint, already registered with virtio-blk against a specific LBA range.
+//! fatfs is never handed the whole-disk cap and cannot escape the partition
+//! regardless of what sector number it computes.
 
 use ipc::{fs_labels, procmgr_labels, IpcBuf};
 
@@ -25,13 +30,11 @@ static NEXT_BOOTSTRAP_TOKEN: core::sync::atomic::AtomicU64 = core::sync::atomic:
 /// Spawn the fatfs driver via procmgr, deliver its cap set over the bootstrap
 /// protocol, and probe it with `FS_MOUNT` to confirm BPB validation.
 ///
+/// `partition_ep` is a tokened SEND cap on virtio-blk's service endpoint,
+/// already bound in virtio-blk's partition table to the partition's LBA range.
+///
 /// Returns the driver's IPC endpoint (send cap) on success.
-pub fn spawn_fatfs_driver(
-    caps: &VfsdCaps,
-    blk_ep: u32,
-    partition_lba: u64,
-    ipc: IpcBuf,
-) -> Option<u32>
+pub fn spawn_fatfs_driver(caps: &VfsdCaps, partition_ep: u32, ipc: IpcBuf) -> Option<u32>
 {
     if caps.bootstrap_ep == 0 || caps.done_sig == 0
     {
@@ -47,8 +50,8 @@ pub fn spawn_fatfs_driver(
     let driver_ep_for_child = syscall::cap_derive(driver_ep, syscall::RIGHTS_ALL).ok()?;
     let driver_send = syscall::cap_derive(driver_ep, syscall::RIGHTS_SEND_GRANT).ok()?;
 
-    // Derive the caps delivered to fatfs via bootstrap.
-    let blk_copy = syscall::cap_derive(blk_ep, syscall::RIGHTS_SEND).ok()?;
+    // partition_ep is already a tokened SEND cap; hand it to the child as-is.
+    // A fresh derive would discard the token, so this is moved into the plan.
     let log_copy = if caps.log_ep != 0
     {
         syscall::cap_derive(caps.log_ep, syscall::RIGHTS_SEND).unwrap_or(0)
@@ -62,13 +65,7 @@ pub fn spawn_fatfs_driver(
     let token = NEXT_BOOTSTRAP_TOKEN.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
     let tokened_creator =
         syscall::cap_derive_token(caps.bootstrap_ep, syscall::RIGHTS_SEND, token).ok()?;
-    worker::publish_plan(
-        token,
-        blk_copy,
-        log_copy,
-        driver_ep_for_child,
-        partition_lba,
-    );
+    worker::publish_plan(token, partition_ep, log_copy, driver_ep_for_child);
 
     // Phase 1: CREATE_PROCESS with [module, tokened bootstrap cap].
     let (reply_label, _) = syscall::ipc_call(

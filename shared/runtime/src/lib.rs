@@ -21,6 +21,9 @@
 
 #![no_std]
 
+extern crate alloc;
+
+pub mod heap;
 pub mod log;
 
 use process_abi::{

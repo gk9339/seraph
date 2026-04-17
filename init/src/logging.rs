@@ -87,12 +87,12 @@ pub(crate) fn serial_log(s: &str)
     {
         if b == b'\n'
         {
-            arch::serial_write_byte(b'\r');
+            arch::current::serial_write_byte(b'\r');
         }
-        arch::serial_write_byte(b);
+        arch::current::serial_write_byte(b);
     }
-    arch::serial_write_byte(b'\r');
-    arch::serial_write_byte(b'\n');
+    arch::current::serial_write_byte(b'\r');
+    arch::current::serial_write_byte(b'\n');
 }
 
 // ── IPC-based logging ────────────────────────────────────────────────────────
@@ -323,12 +323,12 @@ fn log_receive_loop(log_ep: u32, ipc_buf_raw: *mut u64) -> !
                 {
                     if b == b'\n'
                     {
-                        arch::serial_write_byte(b'\r');
+                        arch::current::serial_write_byte(b'\r');
                     }
-                    arch::serial_write_byte(b);
+                    arch::current::serial_write_byte(b);
                 }
-                arch::serial_write_byte(b'\r');
-                arch::serial_write_byte(b'\n');
+                arch::current::serial_write_byte(b'\r');
+                arch::current::serial_write_byte(b'\n');
                 assembled_len = 0;
             }
         }

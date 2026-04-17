@@ -24,8 +24,9 @@ pub fn read_sector(
     partition_offset: u64,
 ) -> bool
 {
-    // SAFETY: IPC buffer is valid.
-    unsafe { core::ptr::write_volatile(ipc_buf, sector + partition_offset) };
+    // SAFETY: ipc_buf is the registered IPC buffer page.
+    let ipc = unsafe { ipc::IpcBuf::from_raw(ipc_buf) };
+    ipc.write_word(0, sector + partition_offset);
 
     let Ok((reply_label, _data_count)) =
         syscall::ipc_call(block_dev, blk_labels::READ_BLOCK, 1, &[])
@@ -42,8 +43,7 @@ pub fn read_sector(
     // the same IPC buffer and would overwrite the reply data.
     for i in 0..64
     {
-        // SAFETY: IPC buffer is valid; i < 64 (512 bytes total).
-        let word = unsafe { core::ptr::read_volatile(ipc_buf.add(i)) };
+        let word = ipc.read_word(i);
         let base = i * 8;
         let bytes = word.to_le_bytes();
         buf[base..base + 8].copy_from_slice(&bytes);

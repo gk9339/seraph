@@ -10,8 +10,8 @@ test = false
 doctest = false
 
 [dependencies]
-process-abi = { path = "../../abi/process-abi" }
 syscall = { path = "../syscall" }
+syscall-abi = { path = "../../abi/syscall" }
 
 [lints]
 workspace = true

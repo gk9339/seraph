@@ -19,8 +19,8 @@ extern crate runtime;
 
 mod io;
 
-use ipc::{blk_labels, procmgr_labels, LOG_ENDPOINT_SENTINEL, SERVICE_ENDPOINT_SENTINEL};
-use process_abi::{CapType, StartupInfo};
+use ipc::{blk_labels, devmgr_labels, procmgr_labels, IpcBuf};
+use process_abi::StartupInfo;
 use virtio_core::pci::PciTransport;
 use virtio_core::virtqueue::{self, SplitVirtqueue};
 use virtio_core::{
@@ -45,7 +45,16 @@ const DATA_MAP_VA: u64 = 0x0000_0001_0010_0000;
 /// Queue size we request (must be <= device max).
 const QUEUE_SIZE: u16 = 128;
 
-// ── Driver caps from startup info ──────────────────────────────────────────
+// ── Driver caps from bootstrap protocol ────────────────────────────────────
+//
+// devmgr → virtio-blk bootstrap plan (one round, 4 caps):
+//   caps[0]: BAR MMIO region
+//   caps[1]: IRQ line
+//   caps[2]: service endpoint (virtio-blk receives on this)
+//   caps[3]: log endpoint
+// Round 2 (2 caps):
+//   caps[0]: procmgr endpoint (for REQUEST_FRAMES)
+//   caps[1]: devmgr query endpoint (tokened per-device — for QUERY_DEVICE_INFO)
 
 struct DriverCaps
 {
@@ -54,51 +63,61 @@ struct DriverCaps
     procmgr_ep: u32,
     log_ep: u32,
     service_ep: u32,
+    devmgr_ep: u32,
     self_aspace: u32,
 }
 
-fn classify_startup_caps(startup: &StartupInfo) -> DriverCaps
+fn bootstrap_caps(startup: &StartupInfo, ipc: IpcBuf) -> Option<DriverCaps>
 {
-    let mut caps = DriverCaps {
-        bar_mmio_slot: 0,
-        irq_slot: 0,
-        procmgr_ep: 0,
-        log_ep: 0,
-        service_ep: 0,
-        self_aspace: startup.self_aspace,
-    };
-
-    for d in startup.initial_caps
+    let creator = startup.creator_endpoint;
+    if creator == 0
     {
-        match d.cap_type
-        {
-            CapType::MmioRegion if caps.bar_mmio_slot == 0 =>
-            {
-                caps.bar_mmio_slot = d.slot;
-            }
-            CapType::Interrupt =>
-            {
-                caps.irq_slot = d.slot;
-            }
-            CapType::Frame if d.aux0 == LOG_ENDPOINT_SENTINEL =>
-            {
-                caps.log_ep = d.slot;
-            }
-            CapType::Frame if d.aux0 == SERVICE_ENDPOINT_SENTINEL =>
-            {
-                caps.service_ep = d.slot;
-            }
-            // Sentinel: procmgr endpoint (Frame with aux0=0, aux1=0).
-            CapType::Frame if d.aux0 == 0 && d.aux1 == 0 =>
-            {
-                caps.procmgr_ep = d.slot;
-            }
-            _ =>
-            {}
-        }
+        return None;
     }
 
-    caps
+    let round1 = ipc::bootstrap::request_round(creator, ipc).ok()?;
+    if round1.cap_count < 4 || round1.done
+    {
+        return None;
+    }
+
+    let round2 = ipc::bootstrap::request_round(creator, ipc).ok()?;
+    if round2.cap_count < 2 || !round2.done
+    {
+        return None;
+    }
+
+    Some(DriverCaps {
+        bar_mmio_slot: round1.caps[0],
+        irq_slot: round1.caps[1],
+        service_ep: round1.caps[2],
+        log_ep: round1.caps[3],
+        procmgr_ep: round2.caps[0],
+        devmgr_ep: round2.caps[1],
+        self_aspace: startup.self_aspace,
+    })
+}
+
+// ── Device info query via devmgr IPC ──────────────────────────────────────
+
+/// Query devmgr for `VirtIO` PCI capability locations via IPC.
+///
+/// The driver's devmgr endpoint is tokened — the token identifies the device.
+fn query_device_info(devmgr_ep: u32, ipc_buf: *mut u64) -> VirtioPciStartupInfo
+{
+    let Ok((label, _)) = syscall::ipc_call(devmgr_ep, devmgr_labels::QUERY_DEVICE_INFO, 0, &[])
+    else
+    {
+        runtime::log!("virtio-blk: QUERY_DEVICE_INFO ipc_call failed");
+        syscall::thread_exit();
+    };
+    if label != 0
+    {
+        runtime::log!("virtio-blk: QUERY_DEVICE_INFO returned error");
+        syscall::thread_exit();
+    }
+    // SAFETY: ipc_buf is the registered IPC buffer; devmgr wrote IPC_WORD_COUNT words.
+    unsafe { VirtioPciStartupInfo::read_from_ipc(ipc_buf.cast_const()) }
 }
 
 // ── Frame allocation via procmgr IPC ───────────────────────────────────────
@@ -107,8 +126,8 @@ fn classify_startup_caps(startup: &StartupInfo) -> DriverCaps
 /// on success.
 fn request_frames(procmgr_ep: u32, page_count: u64, ipc_buf: *mut u64) -> Option<u32>
 {
-    // SAFETY: ipc_buf is the registered IPC buffer.
-    unsafe { core::ptr::write_volatile(ipc_buf, page_count) };
+    // SAFETY: ipc_buf is the registered IPC buffer page.
+    unsafe { ipc::IpcBuf::from_raw(ipc_buf) }.write_word(0, page_count);
 
     let Ok((label, _)) = syscall::ipc_call(procmgr_ep, procmgr_labels::REQUEST_FRAMES, 1, &[])
     else
@@ -123,7 +142,7 @@ fn request_frames(procmgr_ep: u32, page_count: u64, ipc_buf: *mut u64) -> Option
     // SAFETY: ipc_buf is registered IPC buffer.
     #[allow(clippy::cast_ptr_alignment)]
     let (cap_count, cap_slots) = unsafe { syscall::read_recv_caps(ipc_buf) };
-    if cap_count == 0
+    if (cap_count as u64) < page_count
     {
         return None;
     }
@@ -333,7 +352,7 @@ fn service_loop(
             }
             _ =>
             {
-                let _ = syscall::ipc_reply(0xFF, 0, &[]);
+                let _ = syscall::ipc_reply(ipc::blk_errors::UNKNOWN_OPCODE, 0, &[]);
             }
         }
     }
@@ -352,8 +371,8 @@ fn handle_read_block(
     ipc_buf: *mut u64,
 )
 {
-    // SAFETY: IPC buffer is valid; kernel wrote request data.
-    let sector = unsafe { core::ptr::read_volatile(ipc_buf) };
+    // SAFETY: ipc_buf is the registered IPC buffer page.
+    let sector = unsafe { ipc::IpcBuf::from_raw(ipc_buf) }.read_word(0);
 
     if !io::submit_and_wait(
         layout,
@@ -373,7 +392,7 @@ fn handle_read_block(
 
     // SAFETY: ipc_buf is the registered IPC buffer with at least 64 writable words.
     unsafe { layout.copy_sector_to_ipc(ipc_buf) };
-    let _ = syscall::ipc_reply(0, 64, &[]);
+    let _ = syscall::ipc_reply(ipc::blk_errors::SUCCESS, 64, &[]);
 }
 
 // ── Entry point ────────────────────────────────────────────────────────────
@@ -386,18 +405,21 @@ extern "Rust" fn main(startup: &StartupInfo) -> !
     {
         syscall::thread_exit();
     }
-    // cast_ptr_alignment: IPC buffer is page-aligned (4096-byte), satisfying u64 alignment.
-    #[allow(clippy::cast_ptr_alignment)]
-    let ipc_buf = startup.ipc_buffer.cast::<u64>();
+    // SAFETY: IPC buffer is registered and page-aligned.
+    let ipc = unsafe { IpcBuf::from_bytes(startup.ipc_buffer) };
+    let ipc_buf = ipc.as_ptr();
 
-    // Parse startup caps.
-    let caps = classify_startup_caps(startup);
+    // Bootstrap caps from devmgr.
+    let Some(caps) = bootstrap_caps(startup, ipc)
+    else
+    {
+        syscall::thread_exit();
+    };
 
     // Initialise IPC logging.
     if caps.log_ep != 0
     {
-        // SAFETY: single-threaded; called once before any log calls.
-        unsafe { runtime::log::log_init(caps.log_ep, startup.ipc_buffer) };
+        runtime::log::log_init(caps.log_ep, startup.ipc_buffer);
     }
 
     runtime::log!("virtio-blk: starting");
@@ -412,13 +434,13 @@ extern "Rust" fn main(startup: &StartupInfo) -> !
         syscall::thread_exit();
     }
 
-    // Parse VirtIO PCI startup info from startup message.
-    let Some(pci_info) = VirtioPciStartupInfo::from_bytes(startup.startup_message)
-    else
+    // Query devmgr for VirtIO PCI capability locations via IPC.
+    if caps.devmgr_ep == 0
     {
-        runtime::log!("virtio-blk: no VirtIO PCI startup info");
+        runtime::log!("virtio-blk: no devmgr query endpoint");
         syscall::thread_exit();
-    };
+    }
+    let pci_info = query_device_info(caps.devmgr_ep, ipc_buf);
 
     // Map BAR MMIO.
     if syscall::mmio_map(caps.self_aspace, caps.bar_mmio_slot, BAR_MAP_VA, 0).is_err()

@@ -5,37 +5,17 @@
 
 //! Shared IPC helpers for Seraph userspace services.
 //!
-//! Provides common patterns used across multiple services: sentinel constants
-//! for capability identification, IPC buffer path packing/unpacking, capability
-//! injection into child `CSpaces`, and `ProcessInfo` descriptor writing.
+//! Provides common patterns used across multiple services: the bootstrap
+//! protocol (children receive their initial cap set via IPC from their
+//! creator), the [`IpcBuf`] accessor, typed error-code constants, label
+//! modules, and the path codec used across VFS/FS interfaces.
 
 #![no_std]
 // cast_possible_truncation: userspace targets 64-bit only; u64/usize conversions
 // are lossless. u32 casts on capability slot indices are bounded by CSpace capacity.
 #![allow(clippy::cast_possible_truncation)]
 
-use process_abi::{CapDescriptor, CapType, ProcessInfo};
-
-// ── Sentinel constants ──────────────────────────────────────────────────────
-//
-// These values are placed in `CapDescriptor.aux0` to identify well-known
-// endpoint capabilities during startup cap classification. Each service
-// iterates its initial caps and matches `aux0` against these sentinels.
-
-/// Log endpoint (IPC logging sink).
-pub const LOG_ENDPOINT_SENTINEL: u64 = 0xFFFF_FFFF_FFFF_FFFF;
-
-/// Service protocol endpoint (the service's own receive endpoint).
-pub const SERVICE_ENDPOINT_SENTINEL: u64 = 0xFFFF_FFFF_FFFF_FFFE;
-
-/// Device registry endpoint (devmgr query interface).
-pub const REGISTRY_ENDPOINT_SENTINEL: u64 = 0xFFFF_FFFF_FFFF_FFFD;
-
-/// Block device endpoint (virtio-blk service interface).
-pub const BLOCK_ENDPOINT_SENTINEL: u64 = 0xFFFF_FFFF_FFFF_FFFC;
-
-/// Process manager endpoint (procmgr create/start interface).
-pub const PROCMGR_ENDPOINT_SENTINEL: u64 = 0xFFFF_FFFF_FFFF_FFFB;
+use syscall_abi::MSG_DATA_WORDS_MAX;
 
 // ── IPC label constants ─────────────────────────────────────────────────────
 //
@@ -107,6 +87,9 @@ pub mod devmgr_labels
 {
     /// Query for a block device endpoint.
     pub const QUERY_BLOCK_DEVICE: u64 = 1;
+    /// Query device configuration (`VirtIO` cap locations, etc.).
+    /// The caller's token identifies the device.
+    pub const QUERY_DEVICE_INFO: u64 = 2;
 }
 
 /// IPC labels for block device drivers.
@@ -114,6 +97,236 @@ pub mod blk_labels
 {
     /// Read a single sector (512 bytes).
     pub const READ_BLOCK: u64 = 1;
+}
+
+// ── Bootstrap protocol ──────────────────────────────────────────────────────
+//
+// Children receive their initial cap set via IPC on their `creator_endpoint`
+// cap (the only cap installed at process creation beyond the self-caps). The
+// child issues `BOOTSTRAP_REQUEST` in a loop; the creator replies with up to
+// `MSG_CAP_SLOTS_MAX = 4` caps plus arbitrary payload words per round. The
+// reply label's low byte indicates whether more rounds are expected (`MORE`)
+// or the bootstrap is complete (`DONE`).
+//
+// The payload format (which data words mean what, which cap slot goes where)
+// is defined per (creator, child-type) pair in each child's crate. No shared
+// cap-role enum; no per-service sentinels.
+
+pub mod bootstrap;
+
+/// Bootstrap-protocol error reply codes (creator → child).
+pub mod bootstrap_errors
+{
+    /// Creator has no bootstrap plan for the sending child's token.
+    pub const NO_CHILD: u64 = 2;
+    /// Creator's bootstrap plan for this child is already drained.
+    pub const EXHAUSTED: u64 = 3;
+    /// Protocol misuse (unexpected label, malformed request).
+    pub const INVALID: u64 = 4;
+}
+
+// ── Typed error codes per service ───────────────────────────────────────────
+//
+// Named constants replace bare numeric reply labels at every `ipc_reply` site.
+// `SUCCESS == 0` is an invariant across all services; callers still read
+// `label != 0` as a coarse success/failure check.
+
+/// Error replies from procmgr.
+pub mod procmgr_errors
+{
+    pub const SUCCESS: u64 = 0;
+    /// ELF image validation failed.
+    pub const INVALID_ELF: u64 = 1;
+    /// Out of memory during process creation.
+    pub const OUT_OF_MEMORY: u64 = 2;
+    /// Process handle token not found in process table.
+    pub const INVALID_TOKEN: u64 = 4;
+    /// Attempt to start a process that was already started.
+    pub const ALREADY_STARTED: u64 = 5;
+    /// Out of memory while fulfilling a frame request.
+    pub const REQUEST_FRAMES_OOM: u64 = 6;
+    /// Invalid argument to an IPC request.
+    pub const INVALID_ARGUMENT: u64 = 7;
+    /// `CREATE_FROM_VFS` without a registered vfsd endpoint.
+    pub const NO_VFSD_ENDPOINT: u64 = 8;
+    /// File not found via vfsd.
+    pub const FILE_NOT_FOUND: u64 = 9;
+    /// I/O error reading file from vfsd (during `CREATE_FROM_VFS`).
+    pub const IO_ERROR: u64 = 10;
+    /// Unknown opcode on procmgr endpoint.
+    pub const UNKNOWN_OPCODE: u64 = 0xFFFF;
+}
+
+/// Error replies from vfsd.
+pub mod vfsd_errors
+{
+    pub const SUCCESS: u64 = 0;
+    /// File / path not found, or mount-path invalid.
+    pub const NOT_FOUND: u64 = 1;
+    /// No mount covers the requested path / partition not found.
+    pub const NO_MOUNT: u64 = 2;
+    /// Filesystem driver module capability unavailable.
+    pub const NO_FS_MODULE: u64 = 3;
+    /// Failed to spawn filesystem driver.
+    pub const SPAWN_FAILED: u64 = 4;
+    /// I/O error or mount failed at the driver.
+    pub const IO_ERROR: u64 = 5;
+    /// Mount table full.
+    pub const TABLE_FULL: u64 = 6;
+    /// Unknown opcode on vfsd endpoint.
+    pub const UNKNOWN_OPCODE: u64 = 0xFF;
+}
+
+/// Error replies from filesystem drivers (FAT, …).
+pub mod fs_errors
+{
+    pub const SUCCESS: u64 = 0;
+    /// File not found, or filesystem failed to validate on mount.
+    pub const NOT_FOUND: u64 = 1;
+    /// I/O error, or out of memory.
+    pub const IO_ERROR: u64 = 2;
+    /// Out of file-handle slots.
+    pub const TOO_MANY_OPEN: u64 = 3;
+    /// File token is invalid or expired.
+    pub const INVALID_TOKEN: u64 = 4;
+    /// Unknown opcode on fs-driver endpoint.
+    pub const UNKNOWN_OPCODE: u64 = 0xFF;
+}
+
+/// Error replies from devmgr.
+pub mod devmgr_errors
+{
+    pub const SUCCESS: u64 = 0;
+    /// Cap derivation failed, or invalid device index.
+    pub const INVALID_REQUEST: u64 = 1;
+    /// Unknown opcode on devmgr endpoint.
+    pub const UNKNOWN_OPCODE: u64 = 0xFF;
+}
+
+/// Error replies from svcmgr.
+pub mod svcmgr_errors
+{
+    pub const SUCCESS: u64 = 0;
+    /// Service table is full.
+    pub const TABLE_FULL: u64 = 1;
+    /// Invalid service name (too long / malformed).
+    pub const INVALID_NAME: u64 = 2;
+    /// Registration reply missing required caps.
+    pub const INSUFFICIENT_CAPS: u64 = 3;
+    /// `EventQueue` binding failed for death notification.
+    pub const EVENT_QUEUE_FAILED: u64 = 4;
+    /// Unknown opcode on svcmgr endpoint.
+    pub const UNKNOWN_OPCODE: u64 = 0xFFFF;
+}
+
+/// Error replies from block device drivers.
+pub mod blk_errors
+{
+    pub const SUCCESS: u64 = 0;
+    /// Device returned an error status byte (value is the `VirtIO` status byte).
+    /// Values 1 (IOERR), 2 (UNSUPP) per `VirtIO` 1.2 §5.2.6.
+    pub const DEVICE_STATUS_IOERR: u64 = 1;
+    pub const DEVICE_STATUS_UNSUPP: u64 = 2;
+    /// Unknown opcode on block endpoint.
+    pub const UNKNOWN_OPCODE: u64 = 0xFF;
+}
+
+// ── IpcBuf ──────────────────────────────────────────────────────────────────
+
+/// Typed wrapper around a registered IPC buffer page.
+///
+/// Page-aligned (4 KiB), u64-aligned, mapped for the holding thread's
+/// lifetime. Encapsulates the volatile read/write invariants required for
+/// kernel-shared memory: the kernel may read or write the IPC buffer at any
+/// IPC syscall boundary, so all accesses are volatile.
+///
+/// `Copy` and bit-identical to `*mut u64`; passing by value is zero-overhead.
+/// Bounds on data-word accesses are enforced in debug builds.
+#[derive(Clone, Copy)]
+pub struct IpcBuf(*mut u64);
+
+impl IpcBuf
+{
+    /// Wrap a raw pointer to the registered IPC buffer.
+    ///
+    /// # Safety
+    ///
+    /// `ptr` must point to a 4 KiB-aligned, registered IPC buffer page
+    /// mapped into the calling thread's address space. The page must
+    /// remain mapped for the lifetime of every access through the
+    /// returned `IpcBuf`.
+    #[must_use]
+    pub const unsafe fn from_raw(ptr: *mut u64) -> Self
+    {
+        Self(ptr)
+    }
+
+    /// Wrap a `*mut u8` pointing at the IPC buffer (common case in
+    /// startup code where `StartupInfo::ipc_buffer` is a `*mut u8`).
+    ///
+    /// # Safety
+    ///
+    /// Same requirements as [`Self::from_raw`]. Additionally, `ptr` must be
+    /// 8-byte aligned — guaranteed when it is page-aligned.
+    #[must_use]
+    pub unsafe fn from_bytes(ptr: *mut u8) -> Self
+    {
+        // cast_ptr_alignment: IPC buffer is page-aligned (4 KiB), satisfying u64 alignment.
+        #[allow(clippy::cast_ptr_alignment)]
+        Self(ptr.cast::<u64>())
+    }
+
+    /// Read data word `idx`.
+    #[must_use]
+    pub fn read_word(self, idx: usize) -> u64
+    {
+        debug_assert!(idx < MSG_DATA_WORDS_MAX);
+        // SAFETY: IPC buffer is page-aligned (u64-aligned), mapped for the
+        // holding thread's lifetime (invariant of `from_raw`). `idx` is bounded
+        // by `MSG_DATA_WORDS_MAX` in debug; volatile required for kernel-shared memory.
+        unsafe { core::ptr::read_volatile(self.0.add(idx)) }
+    }
+
+    /// Write data word `idx`.
+    pub fn write_word(self, idx: usize, val: u64)
+    {
+        debug_assert!(idx < MSG_DATA_WORDS_MAX);
+        // SAFETY: same invariants as `read_word`.
+        unsafe { core::ptr::write_volatile(self.0.add(idx), val) };
+    }
+
+    /// Read a contiguous range of data words into `dst`.
+    ///
+    /// Reads `dst.len()` words starting at `start`. Panics (in debug) if the
+    /// range would exceed `MSG_DATA_WORDS_MAX`.
+    pub fn read_words(self, start: usize, dst: &mut [u64])
+    {
+        debug_assert!(start + dst.len() <= MSG_DATA_WORDS_MAX);
+        for (i, slot) in dst.iter_mut().enumerate()
+        {
+            *slot = self.read_word(start + i);
+        }
+    }
+
+    /// Write a contiguous range of data words from `src`.
+    ///
+    /// Writes `src.len()` words starting at `start`. Panics (in debug) if the
+    /// range would exceed `MSG_DATA_WORDS_MAX`.
+    pub fn write_words(self, start: usize, src: &[u64])
+    {
+        debug_assert!(start + src.len() <= MSG_DATA_WORDS_MAX);
+        for (i, &val) in src.iter().enumerate()
+        {
+            self.write_word(start + i, val);
+        }
+    }
+
+    /// Escape hatch for syscall wrappers that accept raw pointers.
+    #[must_use]
+    pub fn as_ptr(self) -> *mut u64
+    {
+        self.0
+    }
 }
 
 // ── Path codec ──────────────────────────────────────────────────────────────
@@ -126,22 +339,17 @@ const MAX_PATH_WORDS: usize = 6;
 
 /// Read path bytes from IPC buffer data words.
 ///
-/// Unpacks `path_len` bytes from little-endian u64 words starting at `ipc_buf`.
+/// Unpacks `path_len` bytes from little-endian u64 words in `ipc`.
 /// Writes into `buf`; returns the number of bytes written (capped at `buf.len()`
-/// and `path_len`).
-///
-/// # Safety
-///
-/// `ipc_buf` must point to a valid IPC buffer region with at least
-/// `path_len.div_ceil(8)` readable words.
-pub unsafe fn read_path_from_ipc(ipc_buf: *const u64, path_len: usize, buf: &mut [u8]) -> usize
+/// and `path_len`). Callers typically discard the return value when `path_len`
+/// is known in advance.
+pub fn read_path_from_ipc(ipc: IpcBuf, path_len: usize, buf: &mut [u8]) -> usize
 {
     let effective_len = path_len.min(buf.len()).min(MAX_PATH_LEN);
     let word_count = effective_len.div_ceil(8).min(MAX_PATH_WORDS);
     for i in 0..word_count
     {
-        // SAFETY: caller guarantees ipc_buf has enough readable words.
-        let word = unsafe { core::ptr::read_volatile(ipc_buf.add(i)) };
+        let word = ipc.read_word(i);
         let base = i * 8;
         for j in 0..8
         {
@@ -156,14 +364,12 @@ pub unsafe fn read_path_from_ipc(ipc_buf: *const u64, path_len: usize, buf: &mut
 
 /// Write path bytes into IPC buffer data words.
 ///
-/// Packs `path` bytes into little-endian u64 words starting at `ipc_buf`.
-/// Returns the number of words written.
-///
-/// # Safety
-///
-/// `ipc_buf` must point to a valid IPC buffer region with at least
-/// `path.len().div_ceil(8)` writable words.
-pub unsafe fn write_path_to_ipc(ipc_buf: *mut u64, path: &[u8]) -> usize
+/// Packs `path` bytes into little-endian u64 words in `ipc`. Returns the
+/// number of words written (callers use this for the `data_count` argument
+/// to `ipc_call`; some callers compute it from path length directly and may
+/// discard the return).
+#[must_use]
+pub fn write_path_to_ipc(ipc: IpcBuf, path: &[u8]) -> usize
 {
     let effective_len = path.len().min(MAX_PATH_LEN);
     let word_count = effective_len.div_ceil(8).min(MAX_PATH_WORDS);
@@ -178,135 +384,7 @@ pub unsafe fn write_path_to_ipc(ipc_buf: *mut u64, path: &[u8]) -> usize
                 word |= u64::from(path[base + j]) << (j * 8);
             }
         }
-        // SAFETY: caller guarantees ipc_buf has enough writable words.
-        unsafe { core::ptr::write_volatile(ipc_buf.add(i), word) };
+        ipc.write_word(i, word);
     }
     word_count
-}
-
-// ── Cap injection ───────────────────────────────────────────────────────────
-
-/// Tracks state while injecting capabilities into a child `CSpace`.
-///
-/// Groups the descriptor buffer, count, and first-slot sentinel that every cap
-/// injection site needs. Pass to [`inject_cap`] instead of separate out-params.
-pub struct CapInjector<'a>
-{
-    /// Descriptor buffer to append to.
-    pub descs: &'a mut [CapDescriptor],
-    /// Number of descriptors written so far.
-    pub count: usize,
-    /// Slot index of the first injected cap (`u32::MAX` = none yet).
-    pub first_slot: u32,
-}
-
-impl<'a> CapInjector<'a>
-{
-    /// Create a new injector over the given descriptor buffer.
-    pub fn new(descs: &'a mut [CapDescriptor]) -> Self
-    {
-        Self {
-            descs,
-            count: 0,
-            first_slot: u32::MAX,
-        }
-    }
-}
-
-/// Derive and copy a capability into a child `CSpace`, recording a descriptor.
-///
-/// Derives an intermediary from `src_slot` with the given `rights`, copies it
-/// into `child_cspace`, and appends a [`CapDescriptor`] to the injector. Updates
-/// the injector's count and first-slot on the first successful injection.
-///
-/// Returns the child slot index on success, or `None` if derivation or copy
-/// fails.
-pub fn inject_cap(
-    src_slot: u32,
-    rights: u64,
-    cap_type: CapType,
-    aux0: u64,
-    aux1: u64,
-    child_cspace: u32,
-    inj: &mut CapInjector<'_>,
-) -> Option<u32>
-{
-    let intermediary = syscall::cap_derive(src_slot, rights).ok()?;
-    let child_slot = syscall::cap_copy(intermediary, child_cspace, rights).ok()?;
-
-    if inj.first_slot == u32::MAX
-    {
-        inj.first_slot = child_slot;
-    }
-    if inj.count < inj.descs.len()
-    {
-        inj.descs[inj.count] = CapDescriptor {
-            slot: child_slot,
-            cap_type,
-            pad: [0; 3],
-            aux0,
-            aux1,
-        };
-        inj.count += 1;
-    }
-    Some(child_slot)
-}
-
-// ── ProcessInfo descriptor writer ───────────────────────────────────────────
-
-/// Page size constant (4 KiB).
-const PAGE_SIZE: usize = 0x1000;
-
-/// Write capability descriptors into a mapped `ProcessInfo` page.
-///
-/// Sets `initial_caps_base`, `initial_caps_count`, `cap_descriptor_count`,
-/// and `cap_descriptors_offset` on the `ProcessInfo` header, then writes the
-/// descriptor entries after the header (8-byte aligned).
-///
-/// `pi_va` must be a virtual address where the `ProcessInfo` page is mapped
-/// writable. Only writes as many descriptors as fit within the page.
-///
-/// # Safety
-///
-/// `pi_va` must point to a writable, page-aligned mapping of a `ProcessInfo`
-/// page. The page must remain mapped for the duration of this call.
-pub unsafe fn write_cap_descriptors(
-    pi_va: u64,
-    desc_buf: &[CapDescriptor],
-    desc_count: usize,
-    first_slot: u32,
-)
-{
-    // SAFETY: pi_va is mapped writable by the caller.
-    // cast_ptr_alignment: pi_va is page-aligned (4096-byte).
-    #[allow(clippy::cast_ptr_alignment)]
-    let pi = unsafe { &mut *(pi_va as *mut ProcessInfo) };
-
-    pi.initial_caps_base = first_slot;
-
-    let descs_offset = core::mem::size_of::<ProcessInfo>() as u32;
-    // Align to 8 bytes (CapDescriptor contains u64 fields).
-    let descs_offset_aligned = (descs_offset + 7) & !7;
-    pi.cap_descriptors_offset = descs_offset_aligned;
-
-    let desc_size = core::mem::size_of::<CapDescriptor>();
-    let mut written: usize = 0;
-    for (i, desc) in desc_buf.iter().enumerate().take(desc_count)
-    {
-        let byte_offset = descs_offset_aligned as usize + i * desc_size;
-        if byte_offset + desc_size > PAGE_SIZE
-        {
-            break;
-        }
-        // SAFETY: byte_offset is within the mapped page; descs_offset_aligned is
-        // 8-byte aligned and CapDescriptor is 24 bytes (multiple of 8).
-        #[allow(clippy::cast_ptr_alignment)]
-        unsafe {
-            let ptr = (pi_va as *mut u8).add(byte_offset).cast::<CapDescriptor>();
-            core::ptr::write(ptr, *desc);
-        }
-        written += 1;
-    }
-    pi.initial_caps_count = written as u32;
-    pi.cap_descriptor_count = written as u32;
 }

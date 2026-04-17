@@ -46,11 +46,32 @@ const PLIC_PRIORITY_BASE: u64 = 0x0000;
 ///
 /// PLIC context = `hart_id * 2 + 1` (S-mode context for each hart).
 /// Enable base = PLIC base + 0x2000 + context * 0x80.
+///
+/// Used only for per-hart cleanup at boot. Runtime device-IRQ routing is
+/// pinned to the BSP (see [`BSP_S_CTX_ENABLE_BASE`]) so that enable/mask
+/// pairs on the same source always target the same context, and only that
+/// one hart takes the trap when the IRQ fires.
 fn plic_enable_base() -> u64
 {
     let ctx = u64::from(super::cpu::current_cpu()) * 2 + 1;
     0x2000 + ctx * 0x80
 }
+
+/// Compute the PLIC S-mode enable-bits base for the given hart.
+///
+/// Context numbering on QEMU `virt`: M-mode = `hart*2`, S-mode = `hart*2+1`.
+/// Enable base = 0x2000 + context * 0x80.
+const fn plic_enable_base_for(hart: u32) -> u64
+{
+    0x2000 + (hart as u64 * 2 + 1) * 0x80
+}
+
+/// PLIC S-mode enable-bits base for hart 0 (the BSP).
+///
+/// All device IRQs are routed to the BSP's S-mode context — a single known
+/// hart — so that only one hart takes the trap and there is no thundering-
+/// herd claim race between multiple harts for the same source.
+const BSP_S_CTX_ENABLE_BASE: u64 = plic_enable_base_for(0);
 
 /// Compute the PLIC threshold register offset for the current hart's S-mode context.
 fn plic_threshold_offset() -> u64
@@ -82,8 +103,13 @@ unsafe fn plic_write(offset: u64, val: u32)
 {
     let vaddr = DIRECT_MAP_BASE + PLIC_BASE_PHYS + offset;
     // SAFETY: PLIC_BASE_PHYS mapped via direct map; offset within PLIC MMIO range;
-    // volatile write ensures ordering and prevents compiler reordering.
+    // volatile write ensures the access is not elided or reordered by the
+    // compiler.
     unsafe { core::ptr::write_volatile(vaddr as *mut u32, val) };
+    // RVWMO allows I/O-region writes to be reordered; a sequence of per-hart
+    // enable-bit writes must be observed by the PLIC in program order, so we
+    // emit an MMIO→MMIO fence after every store.
+    mmio::mmio_to_mmio_barrier();
 }
 
 // ── Trap vector ───────────────────────────────────────────────────────────────
@@ -427,6 +453,13 @@ extern "C" fn trap_dispatch(frame: &mut TrapFrame)
                 // dispatch_external -> dispatch_device_irq calls acknowledge(irq),
                 // which writes the PLIC claim/complete register. Do NOT write it
                 // again here.
+                //
+                // `plic_enable` enables the source on every hart's S-mode
+                // context, so multiple harts may take this trap concurrently.
+                // PLIC claim is atomic: only the first hart reads a non-zero
+                // IRQ id; concurrent readers see 0 and fall through without
+                // dispatching. This is the standard PLIC thundering-herd
+                // behaviour and is safe.
                 let irq = plic_read(plic_claim_complete_offset());
                 if irq != 0
                 {
@@ -561,7 +594,27 @@ extern "C" fn trap_dispatch(frame: &mut TrapFrame)
     }
 }
 
-/// Enable PLIC source `source` for the current hart's S-mode context.
+/// Enable PLIC `source` on the BSP's S-mode context.
+///
+/// Device IRQs are routed to a single hart (the BSP). Routing to one hart
+/// avoids the PLIC thundering-herd: with N harts all enabled for the same
+/// source, each trap fires on all N, N-1 of them lose the claim race
+/// (`plic_claim` returns 0), and at QEMU SMP `cpus>1` the BQL contention
+/// this causes between vCPU threads can leave the IRQ undelivered and the
+/// driver's signal waiter blocked indefinitely. Pinning to a single context
+/// makes IRQ delivery deterministic. This matches the `x86_64` side, which
+/// programs every IOAPIC redirection entry for destination LAPIC ID 0 (see
+/// `arch/x86_64/ioapic.rs::route`).
+///
+/// TODO: per-IRQ affinity. When the system grows multiple high-rate IRQ
+/// sources (additional block devices, a NIC, more than one virtio queue
+/// with per-queue MSI), concentrating all trap dispatch on hart 0 becomes
+/// a bottleneck. Replace this with a per-source hart selector — either
+/// round-robin at registration, user-supplied affinity, or a dynamic
+/// rebalancer. The downstream `dispatch_device_irq` path is already
+/// hart-agnostic (`acknowledge` uses `current_cpu`), so only the enable-bit
+/// placement here needs to change. Same TODO applies to
+/// `arch/x86_64/ioapic.rs::route`.
 #[cfg(not(test))]
 pub fn plic_enable(source: u32)
 {
@@ -571,13 +624,17 @@ pub fn plic_enable(source: u32)
     }
     let word_idx = source / 32;
     let bit_idx = source % 32;
-    let offset = plic_enable_base() + (u64::from(word_idx) * 4);
+    let offset = BSP_S_CTX_ENABLE_BASE + (u64::from(word_idx) * 4);
     let current = plic_read(offset);
     // SAFETY: direct map active; PLIC MMIO is accessible.
     unsafe { plic_write(offset, current | (1 << bit_idx)) };
 }
 
-/// Disable PLIC source `source` for the current hart's S-mode context.
+/// Disable PLIC `source` on the BSP's S-mode context.
+///
+/// Paired with [`plic_enable`]; both operate on the BSP only so that
+/// mask/unmask is always symmetric against the one hart that actually
+/// takes the trap.
 #[cfg(not(test))]
 pub fn plic_disable(source: u32)
 {
@@ -587,7 +644,7 @@ pub fn plic_disable(source: u32)
     }
     let word_idx = source / 32;
     let bit_idx = source % 32;
-    let offset = plic_enable_base() + (u64::from(word_idx) * 4);
+    let offset = BSP_S_CTX_ENABLE_BASE + (u64::from(word_idx) * 4);
     let current = plic_read(offset);
     // SAFETY: direct map active; PLIC MMIO is accessible.
     unsafe { plic_write(offset, current & !(1 << bit_idx)) };
@@ -734,9 +791,8 @@ pub unsafe fn init()
         {
             plic_write(PLIC_PRIORITY_BASE + (u64::from(src) * 4), 1);
         }
-        // BSP context 1: enable base = 0x2000 + 1*0x80 = 0x2080
-        let bsp_enable_base: u64 = 0x2080;
         let enable_words = PLIC_NUM_SOURCES.div_ceil(32);
+        let bsp_enable_base = plic_enable_base_for(0);
         for w in 0..enable_words
         {
             plic_write(bsp_enable_base + u64::from(w) * 4, 0);

@@ -1,16 +1,15 @@
 [package]
-name = "virtio-core"
+name = "mmio"
 version = "0.1.0"
 edition = "2021"
 publish = false
 
+# no_std: arch-specific MMIO ordering primitives for drivers and kernel.
 [lib]
 test = false
 doctest = false
 
 [dependencies]
-ipc = { path = "../../../shared/ipc" }
-mmio = { path = "../../../shared/mmio" }
 
 [lints]
 workspace = true

@@ -18,6 +18,7 @@ members = [
     "abi/syscall",
     "shared/elf",
     "shared/font",
+    "shared/mmio",
     "shared/runtime",
     "shared/syscall",
     "shared/ipc",
@@ -43,6 +44,7 @@ init-protocol = { path = "abi/init-protocol" }
 process-abi = { path = "abi/process-abi" }
 runtime = { path = "shared/runtime" }
 font = { path = "shared/font" }
+mmio = { path = "shared/mmio" }
 syscall = { path = "abi/syscall", package = "syscall-abi" }
 syscall-abi = { path = "abi/syscall" }
 virtio-core = { path = "drivers/virtio/core" }

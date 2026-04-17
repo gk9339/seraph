@@ -11,6 +11,7 @@ test = false
 
 [dependencies]
 process-abi = { path = "../../abi/process-abi" }
+ipc = { path = "../../shared/ipc" }
 runtime = { path = "../../shared/runtime" }
 syscall = { path = "../../shared/syscall" }
 

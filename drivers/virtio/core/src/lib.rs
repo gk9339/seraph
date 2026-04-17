@@ -104,6 +104,84 @@ impl VirtioPciStartupInfo
         }
         Some(())
     }
+
+    /// Number of IPC data words needed to hold the serialised form (7 words).
+    pub const IPC_WORD_COUNT: usize = 7;
+
+    /// Write into IPC buffer data words.
+    ///
+    /// Layout: 2 words per cap location (bar|offset in lo, length in hi),
+    /// except the last cap shares its hi word with `notify_off_multiplier`.
+    ///
+    /// # Safety
+    ///
+    /// `ipc_buf` must point to a valid IPC buffer with at least
+    /// [`Self::IPC_WORD_COUNT`] writable words.
+    #[allow(clippy::cast_possible_truncation)]
+    pub unsafe fn write_to_ipc(&self, ipc_buf: *mut u64)
+    {
+        // SAFETY: caller guarantees ipc_buf points at a registered IPC buffer page.
+        let ipc = unsafe { ipc::IpcBuf::from_raw(ipc_buf) };
+        let caps = [
+            &self.common_cfg,
+            &self.notify_cfg,
+            &self.isr_cfg,
+            &self.device_cfg,
+        ];
+        for (i, cap) in caps.iter().enumerate()
+        {
+            let lo = u64::from(cap.bar) | (u64::from(cap.offset) << 32);
+            ipc.write_word(i * 2, lo);
+            if i < 3
+            {
+                ipc.write_word(i * 2 + 1, u64::from(cap.length));
+            }
+        }
+        // Word 6: device_cfg.length | (notify_off_multiplier << 32).
+        let last =
+            u64::from(self.device_cfg.length) | (u64::from(self.notify_off_multiplier) << 32);
+        ipc.write_word(6, last);
+    }
+
+    /// Read from IPC buffer data words.
+    ///
+    /// # Safety
+    ///
+    /// `ipc_buf` must point to a valid IPC buffer with at least
+    /// [`Self::IPC_WORD_COUNT`] readable words.
+    #[must_use]
+    #[allow(clippy::cast_possible_truncation)]
+    pub unsafe fn read_from_ipc(ipc_buf: *const u64) -> Self
+    {
+        // SAFETY: caller guarantees ipc_buf points at a registered IPC buffer page.
+        // IpcBuf takes *mut but only reads here; the underlying page is writable.
+        let ipc = unsafe { ipc::IpcBuf::from_raw(ipc_buf.cast_mut()) };
+        let mut info = Self::default();
+
+        let caps = [
+            &mut info.common_cfg,
+            &mut info.notify_cfg,
+            &mut info.isr_cfg,
+            &mut info.device_cfg,
+        ];
+        for (i, cap) in caps.into_iter().enumerate()
+        {
+            let lo = ipc.read_word(i * 2);
+            cap.bar = lo as u8;
+            cap.offset = (lo >> 32) as u32;
+            if i < 3
+            {
+                let hi = ipc.read_word(i * 2 + 1);
+                cap.length = hi as u32;
+            }
+        }
+        // Word 6: device_cfg.length | (notify_off_multiplier << 32).
+        let last = ipc.read_word(6);
+        info.device_cfg.length = last as u32;
+        info.notify_off_multiplier = (last >> 32) as u32;
+
+        info
+    }
 }
 
 // ── VirtIO PCI capability types (VirtIO 1.2 §4.1.4) ────────────────────────

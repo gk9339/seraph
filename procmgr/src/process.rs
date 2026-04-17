@@ -11,8 +11,9 @@
 
 use crate::frames::{FramePool, PAGE_SIZE};
 use crate::loader::{self, TEMP_FRAME_VA, TEMP_MODULE_VA, TEMP_VFS_VA};
+use ipc::procmgr_errors;
 use process_abi::{
-    ProcessInfo, PROCESS_ABI_VERSION, PROCESS_INFO_VADDR, PROCESS_STACK_PAGES, PROCESS_STACK_TOP,
+    PROCESS_ABI_VERSION, PROCESS_INFO_VADDR, PROCESS_STACK_PAGES, PROCESS_STACK_TOP,
 };
 
 /// IPC buffer VA for child processes.
@@ -86,10 +87,6 @@ pub struct CreateResult
 {
     /// Tokened endpoint cap for the caller to use with `START_PROCESS`.
     pub process_handle: u32,
-    /// Derived `CSpace` cap to transfer to caller (full rights).
-    pub cspace_for_caller: u32,
-    /// Derived `ProcessInfo` frame cap to transfer to caller (MAP|WRITE).
-    pub pi_frame_for_caller: u32,
     /// Derived Thread cap to transfer to caller (CONTROL right).
     pub thread_for_caller: u32,
 }
@@ -98,8 +95,9 @@ pub struct CreateResult
 
 /// Populate a `ProcessInfo` page for a child process and map it read-only.
 ///
-/// Returns the frame cap for the `ProcessInfo` page (retained for patching
-/// during `START_PROCESS`).
+/// Installs the creator endpoint cap (if any) into the child `CSpace` and
+/// records its slot in the child's `ProcessInfo`. The cap identifies the
+/// creator so the child can issue bootstrap requests on it.
 // similar_names: child_aspace/child_cspace are intentionally parallel.
 #[allow(clippy::similar_names)]
 fn populate_child_info(
@@ -108,6 +106,7 @@ fn populate_child_info(
     child_aspace: u32,
     child_cspace: u32,
     child_thread: u32,
+    creator_endpoint: u32,
 ) -> Option<u32>
 {
     let pi_frame = pool.alloc_page()?;
@@ -130,22 +129,28 @@ fn populate_child_info(
     let child_cspace_in_child =
         syscall::cap_copy(child_cspace, child_cspace, syscall::RIGHTS_CSPACE).ok()?;
 
+    let creator_ep_in_child = if creator_endpoint != 0
+    {
+        // Preserve source rights: try ALL first (for services where
+        // creator_endpoint doubles as a recv endpoint, e.g. fatfs service ep);
+        // fall back to SEND for tokened send caps used by the bootstrap protocol.
+        syscall::cap_copy(creator_endpoint, child_cspace, syscall::RIGHTS_ALL)
+            .or_else(|_| syscall::cap_copy(creator_endpoint, child_cspace, syscall::RIGHTS_SEND))
+            .ok()?
+    }
+    else
+    {
+        0
+    };
+
     // SAFETY: TEMP_FRAME_VA is page-aligned and mapped writable.
-    #[allow(clippy::cast_ptr_alignment)]
-    let pi = unsafe { &mut *(TEMP_FRAME_VA as *mut ProcessInfo) };
+    let pi = unsafe { process_abi::process_info_mut(TEMP_FRAME_VA) };
     pi.version = PROCESS_ABI_VERSION;
     pi.self_thread_cap = child_thread_in_child;
     pi.self_aspace_cap = child_aspace_in_child;
     pi.self_cspace_cap = child_cspace_in_child;
     pi.ipc_buffer_vaddr = CHILD_IPC_BUF_VA;
-    pi.creator_endpoint_cap = 0;
-    pi.initial_caps_base = 0;
-    pi.initial_caps_count = 0;
-    pi.cap_descriptor_count = 0;
-    pi.cap_descriptors_offset = core::mem::size_of::<ProcessInfo>() as u32;
-    pi.startup_message_offset = 0;
-    pi.startup_message_len = 0;
-    pi._pad = 0;
+    pi.creator_endpoint_cap = creator_ep_in_child;
 
     let _ = syscall::mem_unmap(self_aspace, TEMP_FRAME_VA, 1);
 
@@ -221,8 +226,6 @@ fn finalize_creation(
     // process on subsequent START_PROCESS / REQUEST_FRAMES calls.
     let process_handle =
         syscall::cap_derive_token(self_endpoint, syscall::RIGHTS_SEND_GRANT, token).ok()?;
-    let cspace_for_caller = syscall::cap_derive(child_cspace, syscall::RIGHTS_CSPACE).ok()?;
-    let pi_frame_for_caller = syscall::cap_derive(pi_frame_cap, syscall::RIGHTS_MAP_RW).ok()?;
     let thread_for_caller = syscall::cap_derive(child_thread, syscall::RIGHTS_THREAD).ok()?;
 
     table.insert(ProcessEntry {
@@ -238,8 +241,6 @@ fn finalize_creation(
 
     Some(CreateResult {
         process_handle,
-        cspace_for_caller,
-        pi_frame_for_caller,
         thread_for_caller,
     })
 }
@@ -248,13 +249,14 @@ fn finalize_creation(
 
 /// Create a process from an in-memory ELF byte slice (suspended).
 // similar_names: aspace/cspace are intentionally parallel kernel object names.
-#[allow(clippy::similar_names)]
+#[allow(clippy::similar_names, clippy::too_many_arguments)]
 fn create_process_from_bytes(
     module_bytes: &[u8],
     pool: &mut FramePool,
     self_aspace: u32,
     table: &mut ProcessTable,
     self_endpoint: u32,
+    creator_endpoint: u32,
 ) -> Option<CreateResult>
 {
     let pages_before = pool.allocated_pages;
@@ -295,8 +297,14 @@ fn create_process_from_bytes(
         }
     }
 
-    let pi_frame_cap =
-        populate_child_info(pool, self_aspace, child_aspace, child_cspace, child_thread)?;
+    let pi_frame_cap = populate_child_info(
+        pool,
+        self_aspace,
+        child_aspace,
+        child_cspace,
+        child_thread,
+        creator_endpoint,
+    )?;
     map_child_stack_and_ipc(pool, child_aspace)?;
 
     finalize_creation(
@@ -321,6 +329,7 @@ pub fn create_process(
     self_aspace: u32,
     table: &mut ProcessTable,
     self_endpoint: u32,
+    creator_endpoint: u32,
 ) -> Option<CreateResult>
 {
     let module_pages = loader::map_module(module_frame_cap, self_aspace)?;
@@ -330,7 +339,14 @@ pub fn create_process(
     let module_bytes =
         unsafe { core::slice::from_raw_parts(TEMP_MODULE_VA as *const u8, module_size as usize) };
 
-    let result = create_process_from_bytes(module_bytes, pool, self_aspace, table, self_endpoint);
+    let result = create_process_from_bytes(
+        module_bytes,
+        pool,
+        self_aspace,
+        table,
+        self_endpoint,
+        creator_endpoint,
+    );
 
     let _ = syscall::mem_unmap(self_aspace, TEMP_MODULE_VA, module_pages);
 
@@ -344,7 +360,8 @@ fn vfs_open(vfsd_ep: u32, ipc_buf: *mut u64, path: &[u8]) -> Option<u32>
 {
     let label = ipc::vfsd_labels::OPEN | ((path.len() as u64) << 16);
     // SAFETY: ipc_buf is the registered IPC buffer page.
-    let word_count = unsafe { ipc::write_path_to_ipc(ipc_buf, path) };
+    let ipc_ref = unsafe { ipc::IpcBuf::from_raw(ipc_buf) };
+    let word_count = ipc::write_path_to_ipc(ipc_ref, path);
 
     let Ok((reply_label, _)) = syscall::ipc_call(vfsd_ep, label, word_count, &[])
     else
@@ -369,10 +386,9 @@ fn vfs_open(vfsd_ep: u32, ipc_buf: *mut u64, path: &[u8]) -> Option<u32>
 fn vfs_read(file_cap: u32, ipc_buf: *mut u64, offset: u64, max_len: u64) -> Option<usize>
 {
     // SAFETY: ipc_buf is the registered IPC buffer page.
-    unsafe {
-        core::ptr::write_volatile(ipc_buf, offset);
-        core::ptr::write_volatile(ipc_buf.add(1), max_len);
-    }
+    let ipc = unsafe { ipc::IpcBuf::from_raw(ipc_buf) };
+    ipc.write_word(0, offset);
+    ipc.write_word(1, max_len);
 
     let Ok((reply_label, _)) = syscall::ipc_call(file_cap, ipc::fs_labels::FS_READ, 2, &[])
     else
@@ -383,8 +399,7 @@ fn vfs_read(file_cap: u32, ipc_buf: *mut u64, offset: u64, max_len: u64) -> Opti
     {
         return None;
     }
-    // SAFETY: ipc_buf contains reply data[0] = bytes_read.
-    Some(unsafe { core::ptr::read_volatile(ipc_buf) } as usize)
+    Some(ipc.read_word(0) as usize)
 }
 
 /// Stat an open file via its per-file capability.
@@ -399,8 +414,9 @@ fn vfs_stat(file_cap: u32, ipc_buf: *mut u64) -> Option<u64>
     {
         return None;
     }
-    // SAFETY: ipc_buf contains reply data[0] = file_size.
-    Some(unsafe { core::ptr::read_volatile(ipc_buf) })
+    // SAFETY: ipc_buf is the registered IPC buffer page.
+    let ipc = unsafe { ipc::IpcBuf::from_raw(ipc_buf) };
+    Some(ipc.read_word(0))
 }
 
 /// Close an open file via its per-file capability and delete the cap.
@@ -516,21 +532,22 @@ pub fn create_process_from_vfs(
     table: &mut ProcessTable,
     ipc_buf: *mut u64,
     self_endpoint: u32,
+    creator_endpoint: u32,
 ) -> Result<CreateResult, u64>
 {
-    let file_cap = vfs_open(vfsd_ep, ipc_buf, path).ok_or(9u64)?; // FileNotFound
-    let file_size = vfs_stat(file_cap, ipc_buf).ok_or(10u64)?; // IoError
+    let file_cap = vfs_open(vfsd_ep, ipc_buf, path).ok_or(procmgr_errors::FILE_NOT_FOUND)?;
+    let file_size = vfs_stat(file_cap, ipc_buf).ok_or(procmgr_errors::IO_ERROR)?;
 
     if file_size == 0
     {
         vfs_close(file_cap, ipc_buf);
-        return Err(1); // InvalidElf
+        return Err(procmgr_errors::INVALID_ELF);
     }
 
     // Allocate one frame for the ELF header page.
     let hdr_frame = pool.alloc_page().ok_or_else(|| {
         vfs_close(file_cap, ipc_buf);
-        2u64
+        procmgr_errors::OUT_OF_MEMORY
     })?;
     syscall::mem_map(
         hdr_frame,
@@ -542,7 +559,7 @@ pub fn create_process_from_vfs(
     )
     .map_err(|_| {
         vfs_close(file_cap, ipc_buf);
-        2u64
+        procmgr_errors::OUT_OF_MEMORY
     })?;
     // SAFETY: TEMP_VFS_VA mapped writable, one page.
     unsafe { core::ptr::write_bytes(TEMP_VFS_VA as *mut u8, 0, PAGE_SIZE as usize) };
@@ -553,7 +570,8 @@ pub fn create_process_from_vfs(
     while offset < hdr_size
     {
         let chunk = VFS_CHUNK_SIZE.min(hdr_size - offset);
-        let bytes_read = vfs_read(file_cap, ipc_buf, offset, chunk).ok_or(10u64)?;
+        let bytes_read =
+            vfs_read(file_cap, ipc_buf, offset, chunk).ok_or(procmgr_errors::IO_ERROR)?;
         if bytes_read == 0
         {
             break;
@@ -574,19 +592,22 @@ pub fn create_process_from_vfs(
     // SAFETY: TEMP_VFS_VA is mapped and contains `offset` bytes of file data.
     let header_data =
         unsafe { core::slice::from_raw_parts(TEMP_VFS_VA as *const u8, offset as usize) };
-    let ehdr = elf::validate(header_data, loader::arch::EXPECTED_ELF_MACHINE).map_err(|_| 1u64)?;
+    let ehdr = elf::validate(header_data, loader::arch::EXPECTED_ELF_MACHINE)
+        .map_err(|_| procmgr_errors::INVALID_ELF)?;
     let entry = elf::entry_point(ehdr);
 
     let pages_before = pool.allocated_pages;
 
-    let child_aspace = syscall::cap_create_aspace().map_err(|_| 2u64)?;
-    let child_cspace = syscall::cap_create_cspace(256).map_err(|_| 2u64)?;
-    let child_thread = syscall::cap_create_thread(child_aspace, child_cspace).map_err(|_| 2u64)?;
+    let child_aspace = syscall::cap_create_aspace().map_err(|_| procmgr_errors::OUT_OF_MEMORY)?;
+    let child_cspace =
+        syscall::cap_create_cspace(256).map_err(|_| procmgr_errors::OUT_OF_MEMORY)?;
+    let child_thread = syscall::cap_create_thread(child_aspace, child_cspace)
+        .map_err(|_| procmgr_errors::OUT_OF_MEMORY)?;
 
     // Stream each LOAD segment page-by-page from VFS.
     for seg_result in elf::load_segments_metadata(ehdr, header_data, file_size)
     {
-        let seg = seg_result.map_err(|_| 1u64)?;
+        let seg = seg_result.map_err(|_| procmgr_errors::INVALID_ELF)?;
         if seg.memsz == 0
         {
             continue;
@@ -610,7 +631,7 @@ pub fn create_process_from_vfs(
                 self_aspace,
                 child_aspace,
             )
-            .ok_or(1u64)?;
+            .ok_or(procmgr_errors::INVALID_ELF)?;
         }
     }
 
@@ -619,10 +640,16 @@ pub fn create_process_from_vfs(
     pool.free_page(hdr_frame);
     vfs_close(file_cap, ipc_buf);
 
-    let pi_frame_cap =
-        populate_child_info(pool, self_aspace, child_aspace, child_cspace, child_thread)
-            .ok_or(1u64)?;
-    map_child_stack_and_ipc(pool, child_aspace).ok_or(1u64)?;
+    let pi_frame_cap = populate_child_info(
+        pool,
+        self_aspace,
+        child_aspace,
+        child_cspace,
+        child_thread,
+        creator_endpoint,
+    )
+    .ok_or(procmgr_errors::OUT_OF_MEMORY)?;
+    map_child_stack_and_ipc(pool, child_aspace).ok_or(procmgr_errors::OUT_OF_MEMORY)?;
 
     finalize_creation(
         pool,
@@ -635,7 +662,7 @@ pub fn create_process_from_vfs(
         table,
         self_endpoint,
     )
-    .ok_or(1u64)
+    .ok_or(procmgr_errors::OUT_OF_MEMORY)
 }
 
 // ── Process start ───────────────────────────────────────────────────────────
@@ -645,11 +672,13 @@ pub fn create_process_from_vfs(
 /// Calls `thread_configure` and `thread_start` on the process's thread.
 pub fn start_process(token: u64, table: &mut ProcessTable) -> Result<(), u64>
 {
-    let entry = table.find_mut_by_token(token).ok_or(4u64)?; // InvalidToken
+    let entry = table
+        .find_mut_by_token(token)
+        .ok_or(procmgr_errors::INVALID_TOKEN)?;
 
     if entry.started
     {
-        return Err(5); // AlreadyStarted
+        return Err(procmgr_errors::ALREADY_STARTED);
     }
 
     syscall::thread_configure(

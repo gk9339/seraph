@@ -242,6 +242,20 @@ impl SplitVirtqueue
     /// Returns `Some((head_desc_idx, bytes_written))` if a new used entry
     /// is present, `None` otherwise.
     #[allow(clippy::cast_possible_truncation)]
+    #[must_use]
+    pub fn debug_avail_idx(&self) -> u64
+    {
+        // SAFETY: avail_va is valid.
+        u64::from(unsafe { core::ptr::read_volatile(core::ptr::addr_of!((*self.avail_va).idx)) })
+    }
+
+    #[must_use]
+    pub fn debug_used_idx(&self) -> u64
+    {
+        // SAFETY: used_va is valid.
+        u64::from(unsafe { core::ptr::read_volatile(core::ptr::addr_of!((*self.used_va).idx)) })
+    }
+
     pub fn poll_used(&mut self) -> Option<(u16, u32)>
     {
         // Memory barrier: ensure we read the latest used index.
@@ -269,6 +283,7 @@ impl SplitVirtqueue
         self.last_used_idx = self.last_used_idx.wrapping_add(1);
 
         // Free all descriptors in the completed chain.
+        #[allow(clippy::cast_possible_truncation)]
         let head = elem.id as u16;
         self.free_chain(head);
 

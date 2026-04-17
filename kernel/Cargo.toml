@@ -8,6 +8,7 @@ publish = false
 boot-protocol = { workspace = true }
 init-protocol = { workspace = true }
 font = { workspace = true }
+mmio = { workspace = true }
 syscall = { workspace = true }
 
 [[bin]]

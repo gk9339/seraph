@@ -79,6 +79,7 @@ impl PciTransport
     {
         // SAFETY: common cfg region is mapped and offset 0x14 is within bounds.
         unsafe { core::ptr::write_volatile(self.common_addr(0x14) as *mut u8, status) }
+        mmio::mmio_to_mmio_barrier();
     }
 
     /// Select a virtqueue for subsequent queue register operations.
@@ -152,8 +153,18 @@ impl PciTransport
     // ── Notification (`VirtIO` 1.2 §4.1.4.4) ───────────────────────────
 
     /// Notify the device that new buffers are available in `queue_idx`.
+    ///
+    /// Issues a DMA→MMIO ordering barrier before the notify write so that
+    /// the device observes prior descriptor/avail-ring/idx updates before
+    /// servicing the notification. Without this barrier the device model
+    /// may read a stale `avail.idx` and find an empty ring; observed as
+    /// intermittent hangs at `cpus>1` on RISC-V, where the required ordering
+    /// is not implicit and raw `write_volatile` is the `writel_relaxed`
+    /// analogue.
     pub fn notify(&self, queue_idx: u16, queue_notify_off: u16)
     {
+        mmio::dma_to_mmio_barrier();
+
         let offset = u64::from(self.notify_off)
             + u64::from(queue_notify_off) * u64::from(self.notify_off_multiplier);
         let addr = (self.bar_va + offset) as *mut u16;
@@ -164,6 +175,7 @@ impl PciTransport
         unsafe {
             core::ptr::write_volatile(addr, queue_idx);
         }
+        mmio::mmio_to_mmio_barrier();
     }
 
     // ── ISR status (`VirtIO` 1.2 §4.1.4.5) ─────────────────────────────
@@ -269,6 +281,7 @@ impl PciTransport
         unsafe {
             core::ptr::write_volatile(addr as *mut u16, val);
         }
+        mmio::mmio_to_mmio_barrier();
     }
 
     fn read_common_u32(&self, offset: u32) -> u32
@@ -291,5 +304,6 @@ impl PciTransport
         unsafe {
             core::ptr::write_volatile(addr as *mut u32, val);
         }
+        mmio::mmio_to_mmio_barrier();
     }
 }

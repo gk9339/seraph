@@ -24,10 +24,12 @@ extern crate runtime;
 mod driver;
 mod gpt;
 mod mount;
+mod worker;
 
 use gpt::MAX_GPT_PARTS;
+use ipc::{procmgr_labels, IpcBuf};
 use mount::{MountEntry, MAX_MOUNTS};
-use process_abi::{CapType, StartupInfo};
+use process_abi::StartupInfo;
 
 // ── Data structures ────────────────────────────────────────────────────────
 
@@ -39,51 +41,132 @@ pub struct VfsdCaps
     pub service_ep: u32,
     pub fatfs_module_cap: u32,
     pub self_aspace: u32,
+    pub self_cspace: u32,
+    pub bootstrap_ep: u32,
+    pub done_sig: u32,
 }
 
-// ── Cap classification ─────────────────────────────────────────────────────
+// ── Bootstrap ──────────────────────────────────────────────────────────────
+//
+// init → vfsd bootstrap plan (one round, 4 caps, 0 data words):
+//   caps[0]: log endpoint
+//   caps[1]: service endpoint (vfsd receives on this)
+//   caps[2]: devmgr registry endpoint
+//   caps[3]: procmgr service endpoint
+// Round 2 (1 cap, 0 data words):
+//   caps[0]: fatfs module frame cap
 
-fn classify_caps(startup: &StartupInfo) -> VfsdCaps
+fn bootstrap_caps(startup: &StartupInfo, ipc: IpcBuf) -> Option<VfsdCaps>
 {
-    let mut caps = VfsdCaps {
-        log_ep: 0,
-        procmgr_ep: 0,
-        registry_ep: 0,
-        service_ep: 0,
-        fatfs_module_cap: 0,
-        self_aspace: startup.self_aspace,
-    };
-
-    for d in startup.initial_caps
+    if startup.creator_endpoint == 0
     {
-        if d.cap_type == CapType::Frame
-        {
-            if d.aux0 == ipc::LOG_ENDPOINT_SENTINEL
-            {
-                caps.log_ep = d.slot;
-            }
-            else if d.aux0 == ipc::SERVICE_ENDPOINT_SENTINEL
-            {
-                caps.service_ep = d.slot;
-            }
-            else if d.aux0 == ipc::REGISTRY_ENDPOINT_SENTINEL
-            {
-                caps.registry_ep = d.slot;
-            }
-            else if d.aux0 == 0 && d.aux1 == 0
-            {
-                // procmgr endpoint sentinel.
-                caps.procmgr_ep = d.slot;
-            }
-            else if d.aux0 == 4
-            {
-                // fatfs module frame (module index 4).
-                caps.fatfs_module_cap = d.slot;
-            }
-        }
+        return None;
+    }
+    let round1 = ipc::bootstrap::request_round(startup.creator_endpoint, ipc).ok()?;
+    if round1.cap_count < 4 || round1.done
+    {
+        return None;
+    }
+    let round2 = ipc::bootstrap::request_round(startup.creator_endpoint, ipc).ok()?;
+    if round2.cap_count < 1 || !round2.done
+    {
+        return None;
     }
 
-    caps
+    Some(VfsdCaps {
+        log_ep: round1.caps[0],
+        service_ep: round1.caps[1],
+        registry_ep: round1.caps[2],
+        procmgr_ep: round1.caps[3],
+        fatfs_module_cap: round2.caps[0],
+        self_aspace: startup.self_aspace,
+        self_cspace: startup.self_cspace,
+        bootstrap_ep: 0,
+        done_sig: 0,
+    })
+}
+
+// ── Worker thread setup ────────────────────────────────────────────────────
+
+/// Request a single-page frame from procmgr and return the cap slot.
+fn request_page(procmgr_ep: u32, ipc: IpcBuf) -> Option<u32>
+{
+    ipc.write_word(0, 1);
+    let Ok((label, _)) = syscall::ipc_call(procmgr_ep, procmgr_labels::REQUEST_FRAMES, 1, &[])
+    else
+    {
+        return None;
+    };
+    if label != 0
+    {
+        return None;
+    }
+    // SAFETY: ipc wraps the registered IPC buffer; kernel just wrote cap metadata.
+    let (cap_count, slots) = unsafe { syscall::read_recv_caps(ipc.as_ptr()) };
+    if cap_count == 0
+    {
+        return None;
+    }
+    Some(slots[0])
+}
+
+/// Allocate pages for the worker, map stack + IPC buffer, create the bootstrap
+/// endpoint and done signal, and start the worker thread. Returns
+/// `(bootstrap_ep, done_sig)` on success.
+fn spawn_worker(caps: &VfsdCaps, ipc: IpcBuf) -> Option<(u32, u32)>
+{
+    // Allocate and map the worker's stack pages.
+    for i in 0..worker::STACK_PAGES
+    {
+        let frame = request_page(caps.procmgr_ep, ipc)?;
+        let rw = syscall::cap_derive(frame, syscall::RIGHTS_MAP_RW).ok()?;
+        syscall::mem_map(
+            rw,
+            caps.self_aspace,
+            worker::STACK_BASE + i * 4096,
+            0,
+            1,
+            syscall::MAP_WRITABLE,
+        )
+        .ok()?;
+    }
+
+    // Allocate and map the worker's IPC buffer.
+    let ipc_frame = request_page(caps.procmgr_ep, ipc)?;
+    let ipc_rw = syscall::cap_derive(ipc_frame, syscall::RIGHTS_MAP_RW).ok()?;
+    syscall::mem_map(
+        ipc_rw,
+        caps.self_aspace,
+        worker::IPC_BUF_VA,
+        0,
+        1,
+        syscall::MAP_WRITABLE,
+    )
+    .ok()?;
+    // Zero the IPC buffer.
+    // SAFETY: IPC_BUF_VA mapped writable, one page.
+    unsafe {
+        core::ptr::write_bytes(worker::IPC_BUF_VA as *mut u8, 0, 4096);
+    }
+
+    let bootstrap_ep = syscall::cap_create_endpoint().ok()?;
+    let done_sig = syscall::cap_create_signal().ok()?;
+
+    worker::BOOTSTRAP_EP.store(bootstrap_ep, core::sync::atomic::Ordering::Release);
+    worker::DONE_SIG.store(done_sig, core::sync::atomic::Ordering::Release);
+
+    let thread_cap = syscall::cap_create_thread(caps.self_aspace, caps.self_cspace).ok()?;
+
+    syscall::thread_configure(
+        thread_cap,
+        worker::entry as *const () as u64,
+        worker::STACK_TOP,
+        0,
+    )
+    .ok()?;
+    syscall::thread_start(thread_cap).ok()?;
+
+    Some((bootstrap_ep, done_sig))
 }
 
 // ── Entry point ────────────────────────────────────────────────────────────
@@ -93,26 +176,39 @@ extern "Rust" fn main(startup: &StartupInfo) -> !
 {
     let _ = syscall::ipc_buffer_set(startup.ipc_buffer as u64);
 
-    let caps = classify_caps(startup);
+    // SAFETY: IPC buffer is registered and page-aligned.
+    let ipc = unsafe { IpcBuf::from_bytes(startup.ipc_buffer) };
+    let ipc_buf = ipc.as_ptr();
+
+    let Some(mut caps) = bootstrap_caps(startup, ipc)
+    else
+    {
+        syscall::thread_exit();
+    };
 
     // Initialise IPC logging.
     if caps.log_ep != 0
     {
-        // SAFETY: single-threaded; called once before any log calls.
-        unsafe { runtime::log::log_init(caps.log_ep, startup.ipc_buffer) };
+        runtime::log::log_init(caps.log_ep, startup.ipc_buffer);
     }
 
     runtime::log!("vfsd: starting");
-
-    // SAFETY: IPC buffer is page-aligned.
-    #[allow(clippy::cast_ptr_alignment)]
-    let ipc_buf = startup.ipc_buffer.cast::<u64>();
 
     if caps.service_ep == 0 || caps.registry_ep == 0
     {
         runtime::log!("vfsd: missing required endpoints");
         idle_loop();
     }
+
+    // Spawn the bootstrap worker thread before any MOUNT can arrive.
+    let Some((bootstrap_ep, done_sig)) = spawn_worker(&caps, ipc)
+    else
+    {
+        runtime::log!("vfsd: FATAL: worker thread setup failed");
+        idle_loop();
+    };
+    caps.bootstrap_ep = bootstrap_ep;
+    caps.done_sig = done_sig;
 
     // Query devmgr for the block device endpoint.
     runtime::log!("vfsd: querying devmgr for block device");
@@ -146,7 +242,19 @@ extern "Rust" fn main(startup: &StartupInfo) -> !
 
     // Parse GPT partition table — stored for UUID lookups on MOUNT requests.
     let mut gpt_parts = gpt::new_gpt_table();
-    let _gpt_count = gpt::parse_gpt(blk_ep, ipc_buf, &mut gpt_parts);
+    match gpt::parse_gpt(blk_ep, ipc_buf, &mut gpt_parts)
+    {
+        Ok(count) => runtime::log!("vfsd: GPT parsed, {} partitions", count),
+        Err(gpt::GptError::IoError) => runtime::log!("vfsd: GPT parse failed: I/O error"),
+        Err(gpt::GptError::InvalidSignature) =>
+        {
+            runtime::log!("vfsd: GPT parse failed: invalid signature");
+        }
+        Err(gpt::GptError::InvalidEntrySize) =>
+        {
+            runtime::log!("vfsd: GPT parse failed: invalid entry size");
+        }
+    }
 
     runtime::log!("vfsd: entering service loop");
     service_loop(caps.service_ep, ipc_buf, &caps, blk_ep, &gpt_parts);
@@ -191,7 +299,7 @@ fn service_loop(
             }
             _ =>
             {
-                let _ = syscall::ipc_reply(0xFF, 0, &[]);
+                let _ = syscall::ipc_reply(ipc::vfsd_errors::UNKNOWN_OPCODE, 0, &[]);
             }
         }
     }
@@ -217,20 +325,19 @@ fn handle_mount_request(
     mounts: &mut [MountEntry; MAX_MOUNTS],
 )
 {
-    // SAFETY: IPC buffer is valid and word-aligned.
-    let w0 = unsafe { core::ptr::read_volatile(ipc_buf) };
-    // SAFETY: see above.
-    let w1 = unsafe { core::ptr::read_volatile(ipc_buf.add(1)) };
+    // SAFETY: ipc_buf is the registered IPC buffer page for vfsd.
+    let ipc = unsafe { ipc::IpcBuf::from_raw(ipc_buf) };
+    let w0 = ipc.read_word(0);
+    let w1 = ipc.read_word(1);
     let mut uuid = [0u8; 16];
     uuid[..8].copy_from_slice(&w0.to_le_bytes());
     uuid[8..].copy_from_slice(&w1.to_le_bytes());
 
-    // SAFETY: IPC buffer is valid.
-    let path_len = unsafe { core::ptr::read_volatile(ipc_buf.add(2)) } as usize;
+    let path_len = ipc.read_word(2) as usize;
     if path_len == 0 || path_len > 64
     {
         runtime::log!("vfsd: MOUNT: invalid path length");
-        let _ = syscall::ipc_reply(1, 0, &[]);
+        let _ = syscall::ipc_reply(ipc::vfsd_errors::NOT_FOUND, 0, &[]);
         return;
     }
 
@@ -238,8 +345,7 @@ fn handle_mount_request(
     let word_count = path_len.div_ceil(8).min(8);
     for i in 0..word_count
     {
-        // SAFETY: IPC buffer is valid.
-        let word = unsafe { core::ptr::read_volatile(ipc_buf.add(3 + i)) };
+        let word = ipc.read_word(3 + i);
         let base = i * 8;
         let bytes = word.to_le_bytes();
         for j in 0..8
@@ -256,7 +362,7 @@ fn handle_mount_request(
     if partition_lba == 0
     {
         runtime::log!("vfsd: MOUNT: partition UUID not found");
-        let _ = syscall::ipc_reply(2, 0, &[]);
+        let _ = syscall::ipc_reply(ipc::vfsd_errors::NO_MOUNT, 0, &[]);
         return;
     }
     runtime::log!("vfsd: MOUNT: partition LBA={:#018x}", partition_lba);
@@ -265,42 +371,30 @@ fn handle_mount_request(
     if caps.fatfs_module_cap == 0
     {
         runtime::log!("vfsd: MOUNT: no fatfs module cap");
-        let _ = syscall::ipc_reply(3, 0, &[]);
+        let _ = syscall::ipc_reply(ipc::vfsd_errors::NO_FS_MODULE, 0, &[]);
         return;
     }
 
-    let Some(driver_ep) = driver::spawn_fatfs_driver(caps, blk_ep, ipc_buf)
+    // SAFETY: ipc_buf wraps the registered IPC page.
+    let ipc_wrap = unsafe { IpcBuf::from_raw(ipc_buf) };
+    let Some(driver_ep) = driver::spawn_fatfs_driver(caps, blk_ep, partition_lba, ipc_wrap)
     else
     {
         runtime::log!("vfsd: MOUNT: failed to spawn fatfs");
-        let _ = syscall::ipc_reply(4, 0, &[]);
+        let _ = syscall::ipc_reply(ipc::vfsd_errors::SPAWN_FAILED, 0, &[]);
         return;
     };
-
-    // Send FS_MOUNT to the fatfs driver with the partition LBA offset.
-    // SAFETY: IPC buffer is valid.
-    unsafe { core::ptr::write_volatile(ipc_buf, partition_lba) };
-    if let Ok((0, _)) = syscall::ipc_call(driver_ep, ipc::fs_labels::FS_MOUNT, 1, &[])
-    {
-        runtime::log!("vfsd: MOUNT: fatfs mounted successfully");
-    }
-    else
-    {
-        runtime::log!("vfsd: MOUNT: fatfs FS_MOUNT failed");
-        let _ = syscall::ipc_reply(5, 0, &[]);
-        return;
-    }
 
     // Register mount entry.
     if mount::register_mount(mounts, &path_buf, path_len, driver_ep)
     {
+        let _ = syscall::ipc_reply(ipc::vfsd_errors::SUCCESS, 0, &[]);
         runtime::log!("vfsd: MOUNT: registered");
-        let _ = syscall::ipc_reply(0, 0, &[]);
     }
     else
     {
+        let _ = syscall::ipc_reply(ipc::vfsd_errors::TABLE_FULL, 0, &[]);
         runtime::log!("vfsd: MOUNT: mount table full");
-        let _ = syscall::ipc_reply(6, 0, &[]);
     }
 }
 
@@ -316,19 +410,20 @@ fn handle_open(label: u64, ipc_buf: *mut u64, mounts: &[MountEntry; MAX_MOUNTS])
     let path_len = ((label >> 16) & 0xFFFF) as usize;
     if path_len == 0 || path_len > ipc::MAX_PATH_LEN
     {
-        let _ = syscall::ipc_reply(1, 0, &[]); // NotFound
+        let _ = syscall::ipc_reply(ipc::vfsd_errors::NOT_FOUND, 0, &[]);
         return;
     }
 
     let mut path_buf = [0u8; ipc::MAX_PATH_LEN];
-    // SAFETY: ipc_buf is valid and has path data words.
-    unsafe { ipc::read_path_from_ipc(ipc_buf, path_len, &mut path_buf) };
+    // SAFETY: ipc_buf is the registered IPC buffer page.
+    let ipc_ref = unsafe { ipc::IpcBuf::from_raw(ipc_buf) };
+    let _ = ipc::read_path_from_ipc(ipc_ref, path_len, &mut path_buf);
     let path = &path_buf[..path_len];
 
     let Some((mount_idx, driver_path)) = mount::resolve_mount(path, mounts)
     else
     {
-        let _ = syscall::ipc_reply(2, 0, &[]); // NoMount
+        let _ = syscall::ipc_reply(ipc::vfsd_errors::NO_MOUNT, 0, &[]);
         return;
     };
 
@@ -336,15 +431,14 @@ fn handle_open(label: u64, ipc_buf: *mut u64, mounts: &[MountEntry; MAX_MOUNTS])
 
     // Forward FS_OPEN to driver with the driver-relative path.
     let fwd_path_len = driver_path.len();
-    // SAFETY: ipc_buf is valid.
-    unsafe { ipc::write_path_to_ipc(ipc_buf, driver_path) };
+    let _ = ipc::write_path_to_ipc(ipc_ref, driver_path);
 
     let fwd_label = ipc::fs_labels::FS_OPEN | ((fwd_path_len as u64) << 16);
     let data_words = fwd_path_len.div_ceil(8).min(6);
     let Ok((drv_reply, _)) = syscall::ipc_call(driver_ep, fwd_label, data_words, &[])
     else
     {
-        let _ = syscall::ipc_reply(5, 0, &[]); // IoError
+        let _ = syscall::ipc_reply(ipc::vfsd_errors::IO_ERROR, 0, &[]);
         return;
     };
 
@@ -362,12 +456,12 @@ fn handle_open(label: u64, ipc_buf: *mut u64, mounts: &[MountEntry; MAX_MOUNTS])
     if cap_count == 0
     {
         runtime::log!("vfsd: OPEN: driver returned no file cap");
-        let _ = syscall::ipc_reply(5, 0, &[]); // IoError
+        let _ = syscall::ipc_reply(ipc::vfsd_errors::IO_ERROR, 0, &[]);
         return;
     }
 
     // Relay the file cap to the client.
-    let _ = syscall::ipc_reply(0, 0, &[reply_caps[0]]);
+    let _ = syscall::ipc_reply(ipc::vfsd_errors::SUCCESS, 0, &[reply_caps[0]]);
 }
 
 fn idle_loop() -> !

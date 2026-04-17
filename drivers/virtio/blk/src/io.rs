@@ -80,6 +80,9 @@ impl IoLayout
             (*self.header_va()).reserved = 0;
             (*self.header_va()).sector = sector;
         }
+        // VirtIO 1.2 spec §5.2.6.1: device writes status 0 (ok), 1 (ioerr),
+        // or 2 (unsupp). 0xFF is outside this range and serves as a "not yet
+        // completed" sentinel. A spec-conformant device never writes 0xFF.
         // SAFETY: status_va is within the mapped data page.
         unsafe { core::ptr::write_volatile(self.status_va() as *mut u8, 0xFF) };
     }
@@ -103,17 +106,20 @@ impl IoLayout
     /// words.
     pub unsafe fn copy_sector_to_ipc(&self, ipc_buf: *mut u64)
     {
+        // SAFETY: caller guarantees ipc_buf points at a registered IPC buffer page.
+        let ipc = unsafe { ipc::IpcBuf::from_raw(ipc_buf) };
         let buf_va = self.data_buf_va();
         for i in 0..64u64
         {
-            // SAFETY: buf_va + i*8 is within the mapped page;
-            // ipc_buf + i is within the IPC buffer page.
+            // SAFETY: buf_va + i*8 is within the mapped data page.
             let word = unsafe { core::ptr::read_volatile((buf_va + i * 8) as *const u64) };
-            // SAFETY: ipc_buf + i is within the IPC buffer (caller guarantees 64 words).
-            unsafe { core::ptr::write_volatile(ipc_buf.add(i as usize), word) };
+            ipc.write_word(i as usize, word);
         }
     }
 }
+
+/// Maximum `signal_wait` iterations before treating the request as timed out.
+const MAX_WAIT_ATTEMPTS: usize = 1000;
 
 /// Submit a read request and wait for completion via IRQ signal.
 ///
@@ -138,13 +144,47 @@ pub fn submit_and_wait(
     {
         return false;
     };
+
+    // VirtIO 1.2 §2.9.3 "Driver Notifications": a full memory barrier is
+    // required between the avail-ring idx update (DMA memory) and the
+    // notification MMIO write, so the device observes the new avail index
+    // before servicing the notify. Without this the device can observe
+    // notify first, find avail.idx unchanged, and not raise completion
+    // IRQ. Release ordering before the idx write is already enforced inside
+    // `add_chain`; this SeqCst fence pairs writes to DMA memory with the
+    // subsequent MMIO write.
+    core::sync::atomic::fence(core::sync::atomic::Ordering::SeqCst);
     transport.notify(0, queue_notify_off);
 
-    // Wait for the device to complete the request via IRQ.
-    // Loop handles stale signals: if signal_wait returns but poll_used finds
-    // nothing (spurious or stale interrupt), re-wait for the real completion.
-    loop
+    // Wait for completion. VirtIO-PCI INTx delivery on QEMU virt (RISC-V
+    // PLIC) is occasionally not observed by any hart even though the device
+    // processes the request — we have confirmed via instrumentation that
+    // completion happens but the PLIC-delivered external interrupt never
+    // fires. To stay robust without pure polling, each wait iteration does
+    // a short poll burst first (catching device-faster-than-schedule cases
+    // and IRQ-lost cases both), and only blocks on the signal afterwards.
+    for _ in 0..MAX_WAIT_ATTEMPTS
     {
+        // Poll burst before blocking. VirtIO devices typically complete in
+        // microseconds; spinning for a few thousand cycles is still cheap
+        // and catches the fast path without a scheduling round trip. On
+        // RISC-V QEMU virt we also occasionally see IRQs that are delivered
+        // to the PLIC but never picked up by the kernel (suspected TCG/PLIC
+        // behaviour with concurrent claim from multiple harts); this burst
+        // makes the driver tolerant of those lost IRQs.
+        for _ in 0..100_000u32
+        {
+            core::sync::atomic::fence(core::sync::atomic::Ordering::Acquire);
+            if vq.poll_used().is_some()
+            {
+                let _ = transport.read_isr();
+                let _ = syscall::irq_ack(irq_cap);
+                return layout.read_status() == 0;
+            }
+            core::hint::spin_loop();
+        }
+
+        // No completion yet — block until the IRQ fires, then re-check.
         let _ = syscall::signal_wait(irq_signal);
 
         // Read ISR to clear level-triggered interrupt at the device before
@@ -156,9 +196,10 @@ pub fn submit_and_wait(
 
         if vq.poll_used().is_some()
         {
-            break;
+            return layout.read_status() == 0;
         }
     }
 
-    layout.read_status() == 0
+    // Device did not complete within bound — treat as I/O error.
+    false
 }

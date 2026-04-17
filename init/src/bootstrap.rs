@@ -6,14 +6,18 @@
 //! Procmgr bootstrap — raw ELF loading and process creation.
 //!
 //! Creates procmgr directly via kernel syscalls (no IPC) since procmgr is the
-//! first process and no process manager exists yet. All subsequent services are
-//! created through procmgr IPC.
+//! first process and no process manager exists yet. Installs procmgr's
+//! `creator_endpoint_cap` to point at init's bootstrap endpoint (tokened
+//! per-child) so procmgr receives its memory-pool bounds via the bootstrap
+//! protocol at startup.
+//!
+//! All subsequent services are created through procmgr IPC.
 
 use crate::logging::log;
-use crate::{arch, descriptors, FrameAlloc, PAGE_SIZE, TEMP_MAP_BASE};
+use crate::{arch, FrameAlloc, PAGE_SIZE, TEMP_MAP_BASE};
 use init_protocol::InitInfo;
 use process_abi::{
-    ProcessInfo, PROCESS_ABI_VERSION, PROCESS_INFO_VADDR, PROCESS_STACK_PAGES, PROCESS_STACK_TOP,
+    PROCESS_ABI_VERSION, PROCESS_INFO_VADDR, PROCESS_STACK_PAGES, PROCESS_STACK_TOP,
 };
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -113,11 +117,6 @@ fn load_elf_page(
 
 /// Load an ELF image into a target address space.
 ///
-/// `module_bytes` is the raw ELF data (already mapped into init's address space).
-/// `target_aspace` is the cap for the target address space.
-/// `alloc` provides fresh frames.
-/// `init_aspace` is init's own address space cap (for temp mappings).
-///
 /// Returns the entry point virtual address.
 fn load_elf(
     module_bytes: &[u8],
@@ -182,15 +181,10 @@ struct ProcmgrCaps
     aspace: u32,
     cspace: u32,
     thread: u32,
-    endpoint_slot: u32,
-    initial_caps_base: u32,
-    initial_caps_count: u32,
+    creator_endpoint_slot: u32,
 }
 
-/// Populate procmgr's `ProcessInfo` page, map it read-only into procmgr.
-///
-/// Returns the frame cap for the `ProcessInfo` page.
-// similar_names: pm_aspace_in_pm / pm_cspace_in_pm are intentionally parallel.
+/// Populate procmgr's `ProcessInfo` page and map it read-only into procmgr.
 #[allow(clippy::similar_names)]
 fn populate_procmgr_info(
     alloc: &mut FrameAlloc,
@@ -201,8 +195,7 @@ fn populate_procmgr_info(
     let pi_frame = alloc.alloc_zero_page(init_aspace, TEMP_MAP_BASE)?;
 
     // SAFETY: TEMP_MAP_BASE is mapped writable and zeroed, one page.
-    #[allow(clippy::cast_ptr_alignment)]
-    let pi = unsafe { &mut *(TEMP_MAP_BASE as *mut ProcessInfo) };
+    let pi = unsafe { process_abi::process_info_mut(TEMP_MAP_BASE) };
 
     let pm_thread_in_pm =
         syscall::cap_copy(caps.thread, caps.cspace, syscall::RIGHTS_THREAD).ok()?;
@@ -215,14 +208,7 @@ fn populate_procmgr_info(
     pi.self_aspace_cap = pm_aspace_in_pm;
     pi.self_cspace_cap = pm_cspace_in_pm;
     pi.ipc_buffer_vaddr = PROCMGR_IPC_BUF_VA;
-    pi.creator_endpoint_cap = caps.endpoint_slot;
-    pi.initial_caps_base = caps.initial_caps_base;
-    pi.initial_caps_count = caps.initial_caps_count;
-    pi.cap_descriptor_count = 0;
-    pi.cap_descriptors_offset = core::mem::size_of::<ProcessInfo>() as u32;
-    pi.startup_message_offset = 0;
-    pi.startup_message_len = 0;
-    pi._pad = 0;
+    pi.creator_endpoint_cap = caps.creator_endpoint_slot;
 
     let _ = syscall::mem_unmap(init_aspace, TEMP_MAP_BASE, 1);
 
@@ -258,18 +244,45 @@ fn map_stack_and_ipc(alloc: &mut FrameAlloc, target_aspace: u32, ipc_buf_va: u64
     Some(())
 }
 
+/// Result of bootstrapping procmgr.
+pub struct ProcmgrBootstrap
+{
+    /// Send cap to procmgr's service endpoint (init uses for `CREATE_PROCESS`).
+    pub service_ep: u32,
+    /// Procmgr's bootstrap token on init's bootstrap endpoint.
+    pub bootstrap_token: u64,
+    /// Memory pool base slot in procmgr's `CSpace`.
+    pub memory_frame_base: u32,
+    /// Memory pool count.
+    pub memory_frame_count: u32,
+}
+
+/// Monotonic counter for init-side bootstrap tokens.
+pub static NEXT_BOOTSTRAP_TOKEN: core::sync::atomic::AtomicU64 =
+    core::sync::atomic::AtomicU64::new(1);
+
 /// Create and start procmgr from its boot module ELF image.
 ///
-/// Returns the endpoint cap for sending IPC to procmgr.
-// similar_names: pm_aspace/pm_cspace are intentionally parallel kernel object names.
+/// `init_bootstrap_ep` is init's bootstrap endpoint; a tokened send cap is
+/// derived from it and installed as procmgr's `creator_endpoint_cap`.
+///
+/// `pm_service_ep` is procmgr's own service endpoint (created by init, copied
+/// into procmgr's `CSpace` so procmgr can `ipc_recv` on it).
+///
+/// Returns the [`ProcmgrBootstrap`] record so the caller can issue bootstrap
+/// rounds and subsequent `CREATE_PROCESS` calls.
 #[allow(clippy::similar_names)]
-pub fn bootstrap_procmgr(info: &InitInfo, alloc: &mut FrameAlloc) -> Option<u32>
+pub fn bootstrap_procmgr(
+    info: &InitInfo,
+    alloc: &mut FrameAlloc,
+    init_bootstrap_ep: u32,
+    pm_service_ep: u32,
+) -> Option<ProcmgrBootstrap>
 {
     let init_aspace = info.aspace_cap;
 
     let module_frame_cap = info.module_frame_base; // Module 0 = procmgr
-
-    let module_size = descriptors(info)
+    let module_size = crate::descriptors(info)
         .iter()
         .find(|d| d.slot == module_frame_cap)
         .map(|d| d.aux1)?;
@@ -302,14 +315,16 @@ pub fn bootstrap_procmgr(info: &InitInfo, alloc: &mut FrameAlloc) -> Option<u32>
 
     log("init: loaded procmgr ELF");
 
-    let endpoint_cap = syscall::cap_create_endpoint().ok()?;
-    let pm_ep_slot = syscall::cap_copy(endpoint_cap, pm_cspace, syscall::RIGHTS_ALL).ok()?;
+    // Derive tokened creator endpoint for procmgr.
+    let procmgr_token = NEXT_BOOTSTRAP_TOKEN.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+    let tokened_creator =
+        syscall::cap_derive_token(init_bootstrap_ep, syscall::RIGHTS_SEND, procmgr_token).ok()?;
+    let pm_creator_slot =
+        syscall::cap_copy(tokened_creator, pm_cspace, syscall::RIGHTS_SEND).ok()?;
 
-    // Delegate all remaining memory frame caps to procmgr (derive-twice
-    // pattern: derive intermediary in init's CSpace, copy intermediary into
-    // procmgr's CSpace). Init retains root + intermediary for revocation.
-    let pm_initial_caps_base = pm_ep_slot + 1;
-    let mut pm_initial_count: u32 = 0;
+    // Delegate all remaining memory frame caps to procmgr.
+    let pm_frame_base = pm_creator_slot + 1;
+    let mut pm_frame_count: u32 = 0;
     let frames_to_give = info.memory_frame_count.saturating_sub(alloc.next_idx);
     for i in 0..frames_to_give
     {
@@ -318,7 +333,7 @@ pub fn bootstrap_procmgr(info: &InitInfo, alloc: &mut FrameAlloc) -> Option<u32>
         {
             if syscall::cap_copy(intermediary, pm_cspace, syscall::RIGHTS_ALL).is_ok()
             {
-                pm_initial_count += 1;
+                pm_frame_count += 1;
             }
         }
     }
@@ -328,9 +343,7 @@ pub fn bootstrap_procmgr(info: &InitInfo, alloc: &mut FrameAlloc) -> Option<u32>
         aspace: pm_aspace,
         cspace: pm_cspace,
         thread: pm_thread,
-        endpoint_slot: pm_ep_slot,
-        initial_caps_base: pm_initial_caps_base,
-        initial_caps_count: pm_initial_count,
+        creator_endpoint_slot: pm_creator_slot,
     };
     populate_procmgr_info(alloc, init_aspace, &pm_caps)?;
 
@@ -341,5 +354,14 @@ pub fn bootstrap_procmgr(info: &InitInfo, alloc: &mut FrameAlloc) -> Option<u32>
 
     log("init: procmgr started");
 
-    Some(endpoint_cap)
+    // Derive a send cap to procmgr's service endpoint for init's own use.
+    let service_ep_for_init =
+        syscall::cap_derive(pm_service_ep, syscall::RIGHTS_SEND_GRANT).ok()?;
+
+    Some(ProcmgrBootstrap {
+        service_ep: service_ep_for_init,
+        bootstrap_token: procmgr_token,
+        memory_frame_base: pm_frame_base,
+        memory_frame_count: pm_frame_count,
+    })
 }

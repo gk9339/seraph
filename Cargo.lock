@@ -194,6 +194,7 @@ checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
 name = "crasher"
 version = "0.1.0"
 dependencies = [
+ "ipc",
  "process-abi",
  "runtime",
  "syscall",
@@ -378,16 +379,13 @@ dependencies = [
 [[package]]
 name = "init-protocol"
 version = "0.1.0"
-dependencies = [
- "process-abi",
-]
 
 [[package]]
 name = "ipc"
 version = "0.1.0"
 dependencies = [
- "process-abi",
  "syscall",
+ "syscall-abi",
 ]
 
 [[package]]
@@ -419,6 +417,7 @@ dependencies = [
  "boot-protocol",
  "font",
  "init-protocol",
+ "mmio",
  "syscall-abi",
 ]
 
@@ -455,6 +454,10 @@ name = "memchr"
 version = "2.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
+
+[[package]]
+name = "mmio"
+version = "0.1.0"
 
 [[package]]
 name = "num-traits"
@@ -531,6 +534,7 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 name = "runtime"
 version = "0.1.0"
 dependencies = [
+ "ipc",
  "process-abi",
  "syscall",
  "syscall-abi",
@@ -696,6 +700,10 @@ dependencies = [
 [[package]]
 name = "virtio-core"
 version = "0.1.0"
+dependencies = [
+ "ipc",
+ "mmio",
+]
 
 [[package]]
 name = "wasip2"

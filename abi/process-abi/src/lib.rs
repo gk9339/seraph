@@ -7,9 +7,14 @@
 //! and the created process.
 //!
 //! Defines [`ProcessInfo`] (the `#[repr(C)]` handover struct placed at a
-//! well-known virtual address before the new process runs), [`StartupInfo`]
-//! (the Rust-native type passed to `main()`), and the shared [`CapDescriptor`]
-//! and [`CapType`] types used by both this crate and `abi/init-protocol`.
+//! well-known virtual address before the new process runs) and [`StartupInfo`]
+//! (the Rust-native type passed to `main()`).
+//!
+//! The ABI delivers only the kernel-object caps (thread/aspace/cspace), the
+//! pre-mapped IPC buffer, and the creator endpoint cap. All service-specific
+//! capabilities (log, registry, device caps, etc.) are requested by the child
+//! at startup over IPC on the creator endpoint — see
+//! `shared/runtime/src/bootstrap.rs` and `shared/ipc/src/lib.rs::bootstrap`.
 
 #![no_std]
 
@@ -17,15 +22,12 @@
 
 /// Process ABI version. Incremented on any breaking change to the
 /// [`ProcessInfo`] layout or field semantics.
-pub const PROCESS_ABI_VERSION: u32 = 1;
+pub const PROCESS_ABI_VERSION: u32 = 2;
 
 // ── Address space constants ──────────────────────────────────────────────────
 
 /// Virtual address where procmgr maps the read-only [`ProcessInfo`] page in
 /// every new process's address space.
-///
-/// Analogous to `INIT_INFO_VADDR` in `abi/init-protocol`. Placed in the upper
-/// half of the user address range, below the stack.
 pub const PROCESS_INFO_VADDR: u64 = 0x0000_7FFF_FFFF_0000;
 
 /// Virtual address of the top of a normal process's user stack.
@@ -37,83 +39,17 @@ pub const PROCESS_STACK_TOP: u64 = 0x0000_7FFF_FFFF_E000;
 /// Number of 4 KiB pages in a normal process's user stack (16 KiB total).
 pub const PROCESS_STACK_PAGES: usize = 4;
 
-// ── CapDescriptor ────────────────────────────────────────────────────────────
-
-/// Describes a single capability in a process's `CSpace`.
-///
-/// Used in the variable-length descriptor array following both [`ProcessInfo`]
-/// and `InitInfo` (from `abi/init-protocol`). Each entry identifies the slot
-/// index, capability type, and type-specific metadata so the process can
-/// identify what each capability slot represents without probing.
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct CapDescriptor
-{
-    /// `CSpace` slot index.
-    pub slot: u32,
-
-    /// Capability type discriminant. See [`CapType`].
-    pub cap_type: CapType,
-
-    /// Padding for alignment; must be zero.
-    #[doc(hidden)]
-    pub pad: [u8; 3],
-
-    /// Type-specific primary metadata:
-    /// - `Frame`: physical base address
-    /// - `MmioRegion`: physical base address
-    /// - `Interrupt`: IRQ line number
-    /// - `IoPortRange`: I/O port base
-    /// - `SchedControl`: 0 (unused)
-    pub aux0: u64,
-
-    /// Type-specific secondary metadata:
-    /// - `Frame`: size in bytes
-    /// - `MmioRegion`: size in bytes
-    /// - `Interrupt`: flags
-    /// - `IoPortRange`: port count
-    /// - `SchedControl`: 0 (unused)
-    pub aux1: u64,
-}
-
-// ── CapType ──────────────────────────────────────────────────────────────────
-
-/// Capability type discriminant for [`CapDescriptor`].
-///
-/// Discriminant values match the kernel's `CapTag` enum for the types that
-/// appear in initial `CSpace` populations. Types that are never present at
-/// boot (Endpoint, Signal, Thread, etc.) are omitted.
-#[repr(u8)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum CapType
-{
-    /// Physical memory frame(s). Matches `CapTag::Frame = 1`.
-    Frame = 1,
-    /// Hardware interrupt line. Matches `CapTag::Interrupt = 6`.
-    Interrupt = 6,
-    /// Memory-mapped I/O region. Matches `CapTag::MmioRegion = 7`.
-    MmioRegion = 7,
-    /// x86-64 I/O port range. Matches `CapTag::IoPortRange = 11`.
-    IoPortRange = 11,
-    /// Scheduling control authority. Matches `CapTag::SchedControl = 12`.
-    SchedControl = 12,
-    /// SBI forwarding authority (RISC-V only). Matches `CapTag::SbiControl = 13`.
-    SbiControl = 13,
-    /// PCI ECAM configuration space region. Underlying cap is `MmioRegion`;
-    /// this discriminant lets userspace distinguish ECAM windows from other MMIO.
-    PciEcam = 14,
-}
-
 // ── ProcessInfo ──────────────────────────────────────────────────────────────
 
-/// Procmgr-to-process handover structure.
+/// Creator-to-process handover structure.
 ///
 /// Placed at [`PROCESS_INFO_VADDR`] (one 4 KiB page, read-only) before the
-/// new process begins execution. The fixed-size header is followed by a
-/// variable-length [`CapDescriptor`] array; the array starts at byte offset
-/// [`ProcessInfo::cap_descriptors_offset`] from the start of this struct.
+/// new process begins execution.
 ///
-/// All slot indices refer to the process's own `CSpace`.
+/// All slot indices refer to the process's own `CSpace`. Beyond the kernel-
+/// object self-caps and the creator endpoint, no service-specific capabilities
+/// are delivered through this page — the child requests them from its creator
+/// over IPC at startup (see `ipc::bootstrap`).
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct ProcessInfo
@@ -121,7 +57,6 @@ pub struct ProcessInfo
     /// Protocol version. Must equal [`PROCESS_ABI_VERSION`].
     pub version: u32,
 
-    // ── Process identity ─────────────────────────────────────────────
     /// `CSpace` slot of the process's own Thread capability (Control right).
     pub self_thread_cap: u32,
 
@@ -131,71 +66,34 @@ pub struct ProcessInfo
     /// `CSpace` slot of the process's own `CSpace` capability.
     pub self_cspace_cap: u32,
 
-    // ── IPC ──────────────────────────────────────────────────────────
     /// Virtual address of the pre-mapped IPC buffer page.
     ///
     /// Every thread requires a registered IPC buffer for extended message
-    /// payloads. procmgr maps this page and records it here; the process
+    /// payloads. The creator maps this page and records it here; the process
     /// calls `SYS_IPC_BUFFER_SET` with this address on startup.
     pub ipc_buffer_vaddr: u64,
 
-    /// `CSpace` slot of an IPC endpoint back to the creating service.
+    /// `CSpace` slot of a tokened IPC endpoint back to the creating service's
+    /// bootstrap handler.
     ///
-    /// For processes created by procmgr directly, this is an endpoint to
-    /// procmgr. Zero if no creator endpoint is provided.
+    /// The child calls `ipc::bootstrap::REQUEST` on this endpoint in a loop to
+    /// receive its service-specific capability set. Zero if no creator
+    /// endpoint is provided (child operates without bootstrap caps).
     pub creator_endpoint_cap: u32,
-
-    // ── Initial capabilities ─────────────────────────────────────────
-    /// First `CSpace` slot containing service-specific initial capabilities.
-    pub initial_caps_base: u32,
-
-    /// Number of initial capability slots.
-    pub initial_caps_count: u32,
-
-    /// Number of [`CapDescriptor`] entries following this struct.
-    pub cap_descriptor_count: u32,
-
-    /// Byte offset from the start of this struct to the first
-    /// [`CapDescriptor`] entry.
-    pub cap_descriptors_offset: u32,
-
-    // ── Startup message ──────────────────────────────────────────────
-    /// Byte offset from the start of this struct to the startup message.
-    /// Zero if no startup message is present.
-    pub startup_message_offset: u32,
-
-    /// Length of the startup message in bytes. Zero if absent.
-    pub startup_message_len: u32,
-
-    /// Padding to maintain 8-byte alignment for the trailing
-    /// [`CapDescriptor`] array.
-    // pub_underscore_fields: field is part of the `#[repr(C)]` ABI layout;
-    // must be public so producers (procmgr) can set it, but has no semantic
-    // meaning for consumers.
-    #[allow(clippy::pub_underscore_fields)]
-    pub _pad: u32,
 }
 
 // ── StartupInfo ──────────────────────────────────────────────────────────────
 
 /// Rust-native startup information passed to `main()`.
 ///
-/// Constructed by `_start()` from either [`ProcessInfo`] (normal processes)
-/// or `InitInfo` (init/ktest). References borrow from the handover page,
-/// which remains mapped read-only for the process's lifetime.
-pub struct StartupInfo<'a>
+/// Constructed by `_start()` from [`ProcessInfo`].
+pub struct StartupInfo
 {
-    /// Capability descriptors for initial capabilities.
-    pub initial_caps: &'a [CapDescriptor],
-
     /// Virtual address of the IPC buffer page.
     pub ipc_buffer: *mut u8,
 
     /// `CSpace` slot of the creator endpoint. Zero if none.
     pub creator_endpoint: u32,
-
-    /// Startup message bytes. Empty slice if none.
-    pub startup_message: &'a [u8],
 
     /// `CSpace` slot of own Thread capability.
     pub self_thread: u32,
@@ -209,57 +107,43 @@ pub struct StartupInfo<'a>
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-/// Return the [`CapDescriptor`] slice from a [`ProcessInfo`] page.
+/// Cast a page-aligned virtual address to a `ProcessInfo` reference.
+///
+/// Encapsulates the `u64 → *const ProcessInfo` cast with alignment validation,
+/// eliminating per-site `#[allow(clippy::cast_ptr_alignment)]` annotations.
 ///
 /// # Safety
 ///
-/// `info` must point into the read-only [`ProcessInfo`] page mapped at
-/// [`PROCESS_INFO_VADDR`]. The page must contain at least
-/// `info.cap_descriptors_offset + info.cap_descriptor_count * size_of::<CapDescriptor>()`
-/// valid bytes.
+/// `va` must point to a valid, mapped [`ProcessInfo`] page. The page must
+/// remain mapped for the lifetime of the returned reference.
 #[must_use]
-pub unsafe fn cap_descriptors(info: &ProcessInfo) -> &[CapDescriptor]
+pub unsafe fn process_info_ref(va: u64) -> &'static ProcessInfo
 {
-    if info.cap_descriptor_count == 0
-    {
-        return &[];
-    }
-    let base = core::ptr::from_ref::<ProcessInfo>(info).cast::<u8>();
-    // SAFETY: caller guarantees the ProcessInfo page contains valid
-    // CapDescriptor data at the specified offset and count.
-    // cast_ptr_alignment: the ProcessInfo page is page-aligned (4096-byte),
-    // and cap_descriptors_offset is set by procmgr to maintain CapDescriptor
-    // alignment (8-byte).
+    debug_assert!(va.is_multiple_of(4096), "ProcessInfo VA not page-aligned");
+    // SAFETY: caller guarantees va points to a valid, mapped ProcessInfo page.
+    // cast_ptr_alignment: va is page-aligned (4096-byte), exceeding
+    // ProcessInfo's alignment requirement.
     #[allow(clippy::cast_ptr_alignment)]
     unsafe {
-        let ptr = base
-            .add(info.cap_descriptors_offset as usize)
-            .cast::<CapDescriptor>();
-        core::slice::from_raw_parts(ptr, info.cap_descriptor_count as usize)
+        &*(va as *const ProcessInfo)
     }
 }
 
-/// Return the startup message bytes from a [`ProcessInfo`] page.
+/// Cast a page-aligned virtual address to a mutable `ProcessInfo` reference.
 ///
 /// # Safety
 ///
-/// `info` must point into the read-only [`ProcessInfo`] page mapped at
-/// [`PROCESS_INFO_VADDR`]. The page must contain at least
-/// `info.startup_message_offset + info.startup_message_len` valid bytes.
+/// `va` must point to a writable, page-aligned mapping of a [`ProcessInfo`]
+/// page. The page must remain mapped for the lifetime of the returned
+/// reference.
 #[must_use]
-pub unsafe fn startup_message(info: &ProcessInfo) -> &[u8]
+pub unsafe fn process_info_mut(va: u64) -> &'static mut ProcessInfo
 {
-    if info.startup_message_len == 0 || info.startup_message_offset == 0
-    {
-        return &[];
-    }
-    let base = core::ptr::from_ref::<ProcessInfo>(info).cast::<u8>();
-    // SAFETY: caller guarantees the ProcessInfo page contains valid startup
-    // message data at the specified offset and length.
+    debug_assert!(va.is_multiple_of(4096), "ProcessInfo VA not page-aligned");
+    // SAFETY: caller guarantees va points to a writable, mapped ProcessInfo
+    // page. cast_ptr_alignment: va is page-aligned (4096-byte).
+    #[allow(clippy::cast_ptr_alignment)]
     unsafe {
-        core::slice::from_raw_parts(
-            base.add(info.startup_message_offset as usize),
-            info.startup_message_len as usize,
-        )
+        &mut *(va as *mut ProcessInfo)
     }
 }

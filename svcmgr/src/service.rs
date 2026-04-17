@@ -3,13 +3,14 @@
 
 // svcmgr/src/service.rs
 
-//! Service table and capability classification for svcmgr.
+//! Service table and bootstrap cap acquisition for svcmgr.
 //!
 //! Defines the `ServiceEntry` struct used to track monitored services and the
-//! `SvcmgrCaps` struct for well-known capabilities discovered at startup.
+//! `SvcmgrCaps` struct for well-known capabilities acquired via the bootstrap
+//! protocol at startup.
 
-use ipc::{LOG_ENDPOINT_SENTINEL, PROCMGR_ENDPOINT_SENTINEL, SERVICE_ENDPOINT_SENTINEL};
-use process_abi::{CapType, StartupInfo};
+use ipc::IpcBuf;
+use process_abi::StartupInfo;
 
 /// Maximum number of monitored services.
 pub const MAX_SERVICES: usize = 16;
@@ -28,9 +29,6 @@ pub const CRITICALITY_FATAL: u8 = 0;
 
 /// Criticality: crash can be handled by restart policy.
 pub const CRITICALITY_NORMAL: u8 = 1;
-
-/// VA for mapping child `ProcessInfo` frames during cap injection on restart.
-pub const CHILD_PI_VA: u64 = 0x0000_0002_0000_0000; // 8 GiB
 
 // ── Service table ───────────────────────────────────────────────────────────
 
@@ -57,6 +55,9 @@ pub struct ServiceEntry
     pub restart_count: u32,
     /// Whether this service is currently active.
     pub active: bool,
+    /// Per-child token used on the svcmgr bootstrap endpoint for restart
+    /// bootstrap (`cap_derive_token(svcmgr_bootstrap_ep, SEND, token)`).
+    pub bootstrap_token: u64,
 }
 
 impl ServiceEntry
@@ -75,6 +76,7 @@ impl ServiceEntry
             event_queue_cap: 0,
             restart_count: 0,
             active: false,
+            bootstrap_token: 0,
         }
     }
 
@@ -85,49 +87,46 @@ impl ServiceEntry
     }
 }
 
-// ── Cap classification ─────────────────────────────────────────────────────
+// ── Bootstrap ───────────────────────────────────────────────────────────────
+//
+// init → svcmgr bootstrap plan (one round, 4 caps):
+//   caps[0]: log endpoint
+//   caps[1]: service endpoint (svcmgr receives on this for registrations)
+//   caps[2]: procmgr service endpoint (svcmgr uses this for restarts)
+//   caps[3]: svcmgr's own bootstrap endpoint (svcmgr receives on this when
+//            serving bootstrap requests from restarted children)
 
-/// Well-known capability slots discovered from the startup info.
+/// Well-known capability slots acquired from the bootstrap protocol.
+#[allow(clippy::struct_field_names)]
 pub struct SvcmgrCaps
 {
     /// Log endpoint capability slot.
     pub log_ep: u32,
     /// Service protocol endpoint capability slot.
     pub service_ep: u32,
-    /// Process manager endpoint capability slot.
+    /// Process manager service endpoint capability slot.
     pub procmgr_ep: u32,
-    /// Own address space capability slot.
-    pub self_aspace: u32,
+    /// svcmgr's own bootstrap endpoint (receives bootstrap requests from
+    /// restarted children).
+    pub bootstrap_ep: u32,
 }
 
-/// Classify startup capabilities by matching sentinel values in `aux0`.
-pub fn classify_caps(startup: &StartupInfo) -> SvcmgrCaps
+/// Acquire svcmgr's initial cap set from its creator (init) via bootstrap IPC.
+pub fn bootstrap_caps(startup: &StartupInfo, ipc: IpcBuf) -> Option<SvcmgrCaps>
 {
-    let mut caps = SvcmgrCaps {
-        log_ep: 0,
-        service_ep: 0,
-        procmgr_ep: 0,
-        self_aspace: startup.self_aspace,
-    };
-
-    for d in startup.initial_caps
+    if startup.creator_endpoint == 0
     {
-        if d.cap_type == CapType::Frame
-        {
-            if d.aux0 == LOG_ENDPOINT_SENTINEL
-            {
-                caps.log_ep = d.slot;
-            }
-            else if d.aux0 == SERVICE_ENDPOINT_SENTINEL
-            {
-                caps.service_ep = d.slot;
-            }
-            else if d.aux0 == PROCMGR_ENDPOINT_SENTINEL
-            {
-                caps.procmgr_ep = d.slot;
-            }
-        }
+        return None;
     }
-
-    caps
+    let round = ipc::bootstrap::request_round(startup.creator_endpoint, ipc).ok()?;
+    if round.cap_count < 4 || !round.done
+    {
+        return None;
+    }
+    Some(SvcmgrCaps {
+        log_ep: round.caps[0],
+        service_ep: round.caps[1],
+        procmgr_ep: round.caps[2],
+        bootstrap_ep: round.caps[3],
+    })
 }

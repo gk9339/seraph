@@ -26,54 +26,34 @@ mod dir;
 mod fat;
 mod file;
 
-use process_abi::{CapType, StartupInfo};
+use process_abi::StartupInfo;
 
 use bpb::{FatState, SECTOR_SIZE};
 use dir::{format_83_name, read_dir_entry_at_index, resolve_path};
 use fat::read_file_data;
 use file::{OpenFile, MAX_OPEN_FILES};
-use ipc::fs_labels;
+use ipc::{fs_labels, IpcBuf};
 
 /// Monotonic counter for token allocation. Starts at 1 (0 = untokened).
-static mut NEXT_TOKEN: u64 = 1;
+static NEXT_TOKEN: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(1);
 
-// ── Cap classification ─────────────────────────────────────────────────────
+// ── Bootstrap ──────────────────────────────────────────────────────────────
+//
+// vfsd → fatfs bootstrap plan (one round, 3 caps, 1 data word):
+//   caps[0]: block device (SEND)
+//   caps[1]: log endpoint (SEND; 0 if logging unavailable)
+//   caps[2]: fatfs service endpoint (RIGHTS_ALL — receive + derive tokens)
+//   data[0]: partition base LBA
+//
+// After bootstrap, vfsd probes fatfs with an empty `FS_MOUNT` so the driver
+// can validate the BPB and report mount success/failure before vfsd replies
+// to the upstream MOUNT caller.
 
 struct FatCaps
 {
     block_dev: u32,
     log_sink: u32,
     service: u32,
-}
-
-fn classify_caps(startup: &StartupInfo) -> FatCaps
-{
-    let mut caps = FatCaps {
-        block_dev: 0,
-        log_sink: 0,
-        service: 0,
-    };
-
-    for d in startup.initial_caps
-    {
-        if d.cap_type == CapType::Frame
-        {
-            if d.aux0 == ipc::LOG_ENDPOINT_SENTINEL
-            {
-                caps.log_sink = d.slot;
-            }
-            else if d.aux0 == ipc::SERVICE_ENDPOINT_SENTINEL
-            {
-                caps.service = d.slot;
-            }
-            else if d.aux0 == ipc::BLOCK_ENDPOINT_SENTINEL
-            {
-                caps.block_dev = d.slot;
-            }
-        }
-    }
-
-    caps
 }
 
 // ── Entry point ────────────────────────────────────────────────────────────
@@ -83,27 +63,26 @@ extern "Rust" fn main(startup: &StartupInfo) -> !
 {
     let _ = syscall::ipc_buffer_set(startup.ipc_buffer as u64);
 
-    let caps = classify_caps(startup);
+    // SAFETY: IPC buffer is registered and page-aligned.
+    let ipc = unsafe { IpcBuf::from_bytes(startup.ipc_buffer) };
+    let ipc_buf = ipc.as_ptr();
+
+    let Some((caps, partition_offset)) = bootstrap_caps(startup, ipc)
+    else
+    {
+        syscall::thread_exit();
+    };
 
     if caps.log_sink != 0
     {
-        // SAFETY: single-threaded; called once before any log calls.
-        unsafe { runtime::log::log_init(caps.log_sink, startup.ipc_buffer) };
+        runtime::log::log_init(caps.log_sink, startup.ipc_buffer);
     }
 
     runtime::log!("fatfs: starting");
 
-    // SAFETY: IPC buffer is page-aligned.
-    #[allow(clippy::cast_ptr_alignment)]
-    let ipc_buf = startup.ipc_buffer.cast::<u64>();
-
-    if caps.block_dev == 0 || caps.service == 0
-    {
-        runtime::log!("fatfs: missing required caps");
-        idle_loop();
-    }
-
     let mut state = FatState::new();
+    state.partition_offset = partition_offset;
+
     let mut files = [
         OpenFile::empty(),
         OpenFile::empty(),
@@ -116,6 +95,52 @@ extern "Rust" fn main(startup: &StartupInfo) -> !
     ];
 
     service_loop(&caps, &mut state, &mut files, ipc_buf);
+}
+
+/// Issue a single bootstrap round against the creator endpoint and assemble
+/// [`FatCaps`] + the partition base LBA.
+fn bootstrap_caps(startup: &StartupInfo, ipc: IpcBuf) -> Option<(FatCaps, u64)>
+{
+    if startup.creator_endpoint == 0
+    {
+        return None;
+    }
+    let round = ipc::bootstrap::request_round(startup.creator_endpoint, ipc).ok()?;
+    if round.cap_count < 3 || !round.done
+    {
+        return None;
+    }
+    let lba = ipc.read_word(0);
+    Some((
+        FatCaps {
+            block_dev: round.caps[0],
+            log_sink: round.caps[1],
+            service: round.caps[2],
+        },
+        lba,
+    ))
+}
+
+/// Validate the BPB by reading sector 0 through the block cap. Updates
+/// `state` in place; returns the IPC reply label to use.
+fn validate_bpb(caps: &FatCaps, state: &mut FatState, ipc_buf: *mut u64) -> u64
+{
+    let mut sector_buf = [0u8; SECTOR_SIZE];
+    if !fat::read_sector(
+        caps.block_dev,
+        0,
+        &mut sector_buf,
+        ipc_buf,
+        state.partition_offset,
+    )
+    {
+        return ipc::fs_errors::IO_ERROR;
+    }
+    if !bpb::parse_bpb(&sector_buf, state)
+    {
+        return ipc::fs_errors::NOT_FOUND;
+    }
+    ipc::fs_errors::SUCCESS
 }
 
 // ── Service loop ───────────────────────────────────────────────────────────
@@ -133,8 +158,6 @@ fn service_loop(
     ipc_buf: *mut u64,
 ) -> !
 {
-    let mut mounted = false;
-
     loop
     {
         let Ok((label, token)) = syscall::ipc_recv(caps.service)
@@ -152,25 +175,30 @@ fn service_loop(
             {
                 fs_labels::FS_MOUNT =>
                 {
-                    if mounted
+                    // First FS_MOUNT validates the BPB; subsequent calls are
+                    // idempotent. `fat_size == 0` is the pre-mount sentinel
+                    // (populated by parse_bpb on success).
+                    let reply = if state.fat_size == 0
                     {
-                        let _ = syscall::ipc_reply(0, 0, &[]);
-                        continue;
+                        validate_bpb(caps, state, ipc_buf)
                     }
-                    handle_mount(caps.block_dev, state, ipc_buf);
-                    mounted = true;
+                    else
+                    {
+                        ipc::fs_errors::SUCCESS
+                    };
+                    let _ = syscall::ipc_reply(reply, 0, &[]);
                 }
-                fs_labels::FS_OPEN if mounted =>
+                fs_labels::FS_OPEN =>
                 {
                     handle_open(label, state, files, caps, ipc_buf);
                 }
                 _ =>
                 {
-                    let _ = syscall::ipc_reply(0xFF, 0, &[]);
+                    let _ = syscall::ipc_reply(ipc::fs_errors::UNKNOWN_OPCODE, 0, &[]);
                 }
             }
         }
-        else if mounted
+        else
         {
             // Per-file request from client (tokened cap).
             match opcode
@@ -184,42 +212,14 @@ fn service_loop(
                 }
                 _ =>
                 {
-                    let _ = syscall::ipc_reply(0xFF, 0, &[]);
+                    let _ = syscall::ipc_reply(ipc::fs_errors::UNKNOWN_OPCODE, 0, &[]);
                 }
             }
-        }
-        else
-        {
-            let _ = syscall::ipc_reply(0xFF, 0, &[]);
         }
     }
 }
 
 // ── Operation handlers ─────────────────────────────────────────────────────
-
-fn handle_mount(block_dev: u32, state: &mut FatState, ipc_buf: *mut u64)
-{
-    // SAFETY: IPC buffer is valid.
-    let partition_offset = unsafe { core::ptr::read_volatile(ipc_buf) };
-    state.partition_offset = partition_offset;
-
-    let mut sector_buf = [0u8; SECTOR_SIZE];
-    if !fat::read_sector(block_dev, 0, &mut sector_buf, ipc_buf, partition_offset)
-    {
-        runtime::log!("fatfs: failed to read partition sector 0");
-        let _ = syscall::ipc_reply(2, 0, &[]); // IoError
-        return;
-    }
-
-    if !bpb::parse_bpb(&sector_buf, state)
-    {
-        let _ = syscall::ipc_reply(1, 0, &[]); // InvalidFilesystem
-        return;
-    }
-
-    runtime::log!("fatfs: filesystem mounted");
-    let _ = syscall::ipc_reply(0, 0, &[]);
-}
 
 /// Handle `FS_OPEN`: resolve path, allocate file slot, derive a tokened
 /// send cap from the service endpoint, and return it in the reply cap slot.
@@ -234,41 +234,37 @@ fn handle_open(
     let path_len = ((label >> 16) & 0xFFFF) as usize;
     if path_len == 0 || path_len > ipc::MAX_PATH_LEN
     {
-        let _ = syscall::ipc_reply(1, 0, &[]); // NotFound
+        let _ = syscall::ipc_reply(ipc::fs_errors::NOT_FOUND, 0, &[]);
         return;
     }
 
     let mut path_buf = [0u8; ipc::MAX_PATH_LEN];
-    // SAFETY: ipc_buf points to a valid IPC buffer with path data words.
-    unsafe { ipc::read_path_from_ipc(ipc_buf.cast_const(), path_len, &mut path_buf) };
+    // SAFETY: ipc_buf is the registered IPC buffer page.
+    let ipc_ref = unsafe { ipc::IpcBuf::from_raw(ipc_buf) };
+    let _ = ipc::read_path_from_ipc(ipc_ref, path_len, &mut path_buf);
     let path = &path_buf[..path_len];
 
     let Some(entry) = resolve_path(path, state, caps.block_dev, ipc_buf)
     else
     {
-        let _ = syscall::ipc_reply(1, 0, &[]); // NotFound
+        let _ = syscall::ipc_reply(ipc::fs_errors::NOT_FOUND, 0, &[]);
         return;
     };
 
     let Some(slot_idx) = file::alloc_slot(files)
     else
     {
-        let _ = syscall::ipc_reply(3, 0, &[]); // TooManyOpen
+        let _ = syscall::ipc_reply(ipc::fs_errors::TOO_MANY_OPEN, 0, &[]);
         return;
     };
 
-    // SAFETY: single-threaded; NEXT_TOKEN is only accessed in this function.
-    let token = unsafe {
-        let t = NEXT_TOKEN;
-        NEXT_TOKEN += 1;
-        t
-    };
+    let token = NEXT_TOKEN.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
 
     // Derive a tokened send cap from our service endpoint.
     let Ok(file_cap) = syscall::cap_derive_token(caps.service, syscall_abi::RIGHTS_SEND, token)
     else
     {
-        let _ = syscall::ipc_reply(2, 0, &[]); // OutOfMemory (cap derivation failed)
+        let _ = syscall::ipc_reply(ipc::fs_errors::IO_ERROR, 0, &[]);
         return;
     };
 
@@ -280,7 +276,7 @@ fn handle_open(
     };
 
     // Reply with the file cap — no data words needed.
-    let _ = syscall::ipc_reply(0, 0, &[file_cap]);
+    let _ = syscall::ipc_reply(ipc::fs_errors::SUCCESS, 0, &[file_cap]);
 }
 
 /// Handle `FS_READ`: token identifies the file. Data layout:
@@ -296,14 +292,14 @@ fn handle_read(
     let Some(idx) = file::find_by_token(files, token)
     else
     {
-        let _ = syscall::ipc_reply(4, 0, &[]); // InvalidToken
+        let _ = syscall::ipc_reply(ipc::fs_errors::INVALID_TOKEN, 0, &[]);
         return;
     };
 
-    // SAFETY: IPC buffer is valid and word-aligned.
-    let offset = unsafe { core::ptr::read_volatile(ipc_buf) };
-    // SAFETY: see above.
-    let max_len = unsafe { core::ptr::read_volatile(ipc_buf.add(1)) };
+    // SAFETY: ipc_buf is the registered IPC buffer page.
+    let ipc = unsafe { ipc::IpcBuf::from_raw(ipc_buf) };
+    let offset = ipc.read_word(0);
+    let max_len = ipc.read_word(1);
 
     let file = &files[idx];
     let mut out = [0u8; SECTOR_SIZE];
@@ -318,8 +314,7 @@ fn handle_read(
         &mut out,
     );
 
-    // SAFETY: IPC buffer is valid.
-    unsafe { core::ptr::write_volatile(ipc_buf, bytes_read as u64) };
+    ipc.write_word(0, bytes_read as u64);
 
     let word_count = bytes_read.div_ceil(8);
     for i in 0..word_count
@@ -333,11 +328,10 @@ fn handle_read(
                 word |= u64::from(out[base + j]) << (j * 8);
             }
         }
-        // SAFETY: ipc_buf + 1 + i is within the IPC buffer page.
-        unsafe { core::ptr::write_volatile(ipc_buf.add(1 + i), word) };
+        ipc.write_word(1 + i, word);
     }
 
-    let _ = syscall::ipc_reply(0, 1 + word_count, &[]);
+    let _ = syscall::ipc_reply(ipc::fs_errors::SUCCESS, 1 + word_count, &[]);
 }
 
 /// Handle `FS_CLOSE`: token identifies the file. No data words.
@@ -346,12 +340,12 @@ fn handle_close(token: u64, files: &mut [OpenFile; MAX_OPEN_FILES])
     let Some(idx) = file::find_by_token(files, token)
     else
     {
-        let _ = syscall::ipc_reply(4, 0, &[]); // InvalidToken
+        let _ = syscall::ipc_reply(ipc::fs_errors::INVALID_TOKEN, 0, &[]);
         return;
     };
 
     files[idx] = OpenFile::empty();
-    let _ = syscall::ipc_reply(0, 0, &[]);
+    let _ = syscall::ipc_reply(ipc::fs_errors::SUCCESS, 0, &[]);
 }
 
 /// Handle `FS_STAT`: token identifies the file. No data words in request.
@@ -360,19 +354,18 @@ fn handle_stat(token: u64, files: &[OpenFile; MAX_OPEN_FILES], ipc_buf: *mut u64
     let Some(idx) = file::find_by_token(files, token)
     else
     {
-        let _ = syscall::ipc_reply(4, 0, &[]); // InvalidToken
+        let _ = syscall::ipc_reply(ipc::fs_errors::INVALID_TOKEN, 0, &[]);
         return;
     };
 
     let file = &files[idx];
     let flags: u64 = u64::from(file.is_dir) | 2; // bit 0=dir, bit 1=read-only
 
-    // SAFETY: IPC buffer is valid.
-    unsafe {
-        core::ptr::write_volatile(ipc_buf, u64::from(file.file_size));
-        core::ptr::write_volatile(ipc_buf.add(1), flags);
-    }
-    let _ = syscall::ipc_reply(0, 2, &[]);
+    // SAFETY: ipc_buf is the registered IPC buffer page.
+    let ipc = unsafe { ipc::IpcBuf::from_raw(ipc_buf) };
+    ipc.write_word(0, u64::from(file.file_size));
+    ipc.write_word(1, flags);
+    let _ = syscall::ipc_reply(ipc::fs_errors::SUCCESS, 2, &[]);
 }
 
 /// Handle `FS_READDIR`: token identifies the directory. `data[0]` = `entry_idx`.
@@ -387,18 +380,20 @@ fn handle_readdir(
     let Some(idx) = file::find_by_token(files, token)
     else
     {
-        let _ = syscall::ipc_reply(4, 0, &[]); // InvalidToken
+        let _ = syscall::ipc_reply(ipc::fs_errors::INVALID_TOKEN, 0, &[]);
         return;
     };
 
     if !files[idx].is_dir
     {
-        let _ = syscall::ipc_reply(4, 0, &[]); // InvalidToken (not a directory)
+        // InvalidToken: not a directory.
+        let _ = syscall::ipc_reply(ipc::fs_errors::INVALID_TOKEN, 0, &[]);
         return;
     }
 
-    // SAFETY: IPC buffer is valid.
-    let entry_idx = unsafe { core::ptr::read_volatile(ipc_buf) };
+    // SAFETY: ipc_buf is the registered IPC buffer page.
+    let ipc = unsafe { ipc::IpcBuf::from_raw(ipc_buf) };
+    let entry_idx = ipc.read_word(0);
     let dir_cluster = files[idx].start_cluster;
 
     let Some(entry) = read_dir_entry_at_index(dir_cluster, entry_idx, state, block_dev, ipc_buf)
@@ -412,12 +407,9 @@ fn handle_readdir(
     let name_len = format_83_name(&entry.name, &mut name_buf);
     let flags: u64 = u64::from(entry.attr & 0x10 != 0);
 
-    // SAFETY: IPC buffer is valid.
-    unsafe {
-        core::ptr::write_volatile(ipc_buf, name_len as u64);
-        core::ptr::write_volatile(ipc_buf.add(1), u64::from(entry.size));
-        core::ptr::write_volatile(ipc_buf.add(2), flags);
-    }
+    ipc.write_word(0, name_len as u64);
+    ipc.write_word(1, u64::from(entry.size));
+    ipc.write_word(2, flags);
 
     let word_count = name_len.div_ceil(8);
     for i in 0..word_count
@@ -431,19 +423,8 @@ fn handle_readdir(
                 word |= u64::from(name_buf[base + j]) << (j * 8);
             }
         }
-        // SAFETY: ipc_buf + 3 + i is within the IPC buffer page.
-        unsafe { core::ptr::write_volatile(ipc_buf.add(3 + i), word) };
+        ipc.write_word(3 + i, word);
     }
 
-    let _ = syscall::ipc_reply(0, 3 + word_count, &[]);
-}
-
-// ── Helpers ────────────────────────────────────────────────────────────────
-
-fn idle_loop() -> !
-{
-    loop
-    {
-        let _ = syscall::thread_yield();
-    }
+    let _ = syscall::ipc_reply(ipc::fs_errors::SUCCESS, 3 + word_count, &[]);
 }

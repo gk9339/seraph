@@ -18,7 +18,7 @@
 
 use core::panic::PanicInfo;
 
-use init_protocol::{CapDescriptor, CapType, InitInfo, INIT_PROTOCOL_VERSION};
+use init_protocol::{CapDescriptor, CapType, InitInfo, INIT_INFO_MAX_PAGES, INIT_PROTOCOL_VERSION};
 
 mod arch;
 mod bootstrap;
@@ -42,15 +42,24 @@ const INIT_IPC_BUF_VA: u64 = 0x0000_0000_C000_0000; // 3 GiB
 
 pub(crate) fn descriptors(info: &InitInfo) -> &[CapDescriptor]
 {
+    let offset = info.cap_descriptors_offset as usize;
+    let count = info.cap_descriptor_count as usize;
+    let desc_size = core::mem::size_of::<CapDescriptor>();
+
+    // Descriptor region may span up to INIT_INFO_MAX_PAGES pages (kernel-enforced).
+    let max_bytes = INIT_INFO_MAX_PAGES * PAGE_SIZE as usize;
+    if count == 0 || offset + count * desc_size > max_bytes
+    {
+        return &[];
+    }
+
     let base = core::ptr::from_ref::<InitInfo>(info).cast::<u8>();
-    // SAFETY: InitInfo page is valid; cap_descriptors_offset and count are
-    // populated by the kernel in Phase 9.
+    // SAFETY: InitInfo page is valid; bounds checked above. cap_descriptors_offset
+    // is 8-byte aligned (set by kernel), satisfying CapDescriptor alignment.
     #[allow(clippy::cast_ptr_alignment)]
     unsafe {
-        let ptr = base
-            .add(info.cap_descriptors_offset as usize)
-            .cast::<CapDescriptor>();
-        core::slice::from_raw_parts(ptr, info.cap_descriptor_count as usize)
+        let ptr = base.add(offset).cast::<CapDescriptor>();
+        core::slice::from_raw_parts(ptr, count)
     }
 }
 
@@ -228,16 +237,65 @@ fn run(info_ptr: u64) -> !
     }
     logging::log("init: IPC buffer registered");
 
-    // ── Bootstrap procmgr ────────────────────────────────────────────────────
+    // ── Create endpoints ─────────────────────────────────────────────────────
 
-    let Some(endpoint_cap) = bootstrap::bootstrap_procmgr(info, &mut alloc)
+    let Ok(init_bootstrap_ep) = syscall::cap_create_endpoint()
+    else
+    {
+        logging::log("init: FATAL: cannot create init bootstrap endpoint");
+        syscall::thread_exit();
+    };
+    let Ok(procmgr_service_ep) = syscall::cap_create_endpoint()
+    else
+    {
+        logging::log("init: FATAL: cannot create procmgr service endpoint");
+        syscall::thread_exit();
+    };
+
+    // ── Bootstrap procmgr (raw ELF load + creator_endpoint install) ──────────
+
+    let Some(pm) =
+        bootstrap::bootstrap_procmgr(info, &mut alloc, init_bootstrap_ep, procmgr_service_ep)
     else
     {
         logging::log("init: FATAL: failed to bootstrap procmgr");
         syscall::thread_exit();
     };
 
-    // ── Create log endpoint ────────────────────────────────────────────────────
+    // SAFETY: INIT_IPC_BUF_VA is registered and page-aligned.
+    #[allow(clippy::cast_ptr_alignment)]
+    let ipc_buf = INIT_IPC_BUF_VA as *mut u64;
+    // SAFETY: same invariants as above.
+    let ipc = unsafe { ipc::IpcBuf::from_raw(ipc_buf) };
+
+    // Serve procmgr's bootstrap round: cap [pm_service_ep_copy], data [frame_base, frame_count].
+    let Ok(pm_service_cap_for_pm) = syscall::cap_derive(procmgr_service_ep, syscall::RIGHTS_ALL)
+    else
+    {
+        logging::log("init: FATAL: cannot derive procmgr service cap for bootstrap");
+        syscall::thread_exit();
+    };
+    let procmgr_boot_data = [
+        u64::from(pm.memory_frame_base),
+        u64::from(pm.memory_frame_count),
+    ];
+    if ipc::bootstrap::serve_round(
+        init_bootstrap_ep,
+        pm.bootstrap_token,
+        ipc,
+        true,
+        &[pm_service_cap_for_pm],
+        &procmgr_boot_data,
+    )
+    .is_err()
+    {
+        logging::log("init: FATAL: procmgr bootstrap serve failed");
+        syscall::thread_exit();
+    }
+
+    let endpoint_cap = pm.service_ep;
+
+    // ── Create remaining endpoints ───────────────────────────────────────────
 
     let Ok(log_ep) = syscall::cap_create_endpoint()
     else
@@ -247,34 +305,32 @@ fn run(info_ptr: u64) -> !
     };
     logging::log("init: log endpoint created");
 
-    // ── Create inter-service endpoints ──────────────────────────────────────────
-
     let Ok(devmgr_registry_ep) = syscall::cap_create_endpoint()
     else
     {
         logging::log("init: FATAL: cannot create devmgr registry endpoint");
         syscall::thread_exit();
     };
-    logging::log("init: devmgr registry endpoint created");
-
     let Ok(vfsd_service_ep) = syscall::cap_create_endpoint()
     else
     {
         logging::log("init: FATAL: cannot create vfsd service endpoint");
         syscall::thread_exit();
     };
-    logging::log("init: vfsd service endpoint created");
 
     // ── Request procmgr to create early services ──────────────────────────────
-
-    // SAFETY: INIT_IPC_BUF_VA is the registered IPC buffer, page-aligned.
-    #[allow(clippy::cast_ptr_alignment)]
-    let ipc_buf = INIT_IPC_BUF_VA as *mut u64;
 
     if info.module_frame_count >= 2
     {
         logging::log("init: requesting procmgr to create devmgr (with hw caps)");
-        service::create_devmgr_with_caps(info, endpoint_cap, log_ep, devmgr_registry_ep, ipc_buf);
+        service::create_devmgr_with_caps(
+            info,
+            endpoint_cap,
+            init_bootstrap_ep,
+            log_ep,
+            devmgr_registry_ep,
+            ipc,
+        );
     }
     else
     {
@@ -287,10 +343,11 @@ fn run(info_ptr: u64) -> !
         service::create_vfsd_with_caps(
             info,
             endpoint_cap,
+            init_bootstrap_ep,
             log_ep,
             devmgr_registry_ep,
             vfsd_service_ep,
-            ipc_buf,
+            ipc,
         );
     }
     else
@@ -302,12 +359,8 @@ fn run(info_ptr: u64) -> !
     let ioport_cap = find_cap_by_type(info, init_protocol::CapType::IoPortRange).unwrap_or(0);
     logging::spawn_log_thread(info, &mut alloc, log_ep, ioport_cap);
 
-    // Switch main thread from direct serial to IPC-based logging through the
-    // log thread. All subsequent log() calls go via IPC — clean, serialized.
     logging::set_ipc_logging(log_ep, ipc_buf);
     logging::log("init: log thread started");
-
-    // Phase 1 bootstrap complete — services are running, log thread active.
     logging::log("init: phase 1 bootstrap complete");
 
     // ── Phase 2: mount root filesystem ──────────────────────────────────────
@@ -331,8 +384,6 @@ fn run(info_ptr: u64) -> !
     }
     logging::log("init: phase 2: root mounted at /");
 
-    // ── Phase 2b: read /config/mounts.conf, mount additional filesystems ────
-
     logging::log("init: phase 2: reading /config/mounts.conf");
     let mut conf_buf = [0u8; 512];
     let conf_len = vfs::vfs_read_file(
@@ -352,7 +403,6 @@ fn run(info_ptr: u64) -> !
         logging::log("init: phase 2: no mounts.conf or empty");
     }
 
-    // End-to-end verification: read a file across the multi-mount namespace.
     logging::log("init: phase 2: verifying /esp/EFI/seraph/boot.conf");
     let mut verify_buf = [0u8; 512];
     let verify_len = vfs::vfs_read_file(
@@ -363,7 +413,6 @@ fn run(info_ptr: u64) -> !
     );
     if verify_len > 0
     {
-        // Print the first line of boot.conf as proof of end-to-end read.
         let first_nl = verify_buf[..verify_len]
             .iter()
             .position(|&b| b == b'\n')
@@ -382,7 +431,14 @@ fn run(info_ptr: u64) -> !
 
     // ── Phase 3: svcmgr, service registration, handover ────────────────────
 
-    service::phase3_svcmgr_handover(info, endpoint_cap, log_ep, vfsd_service_ep, ipc_buf);
+    service::phase3_svcmgr_handover(
+        info,
+        endpoint_cap,
+        init_bootstrap_ep,
+        log_ep,
+        vfsd_service_ep,
+        ipc,
+    );
 }
 
 /// Idle loop fallback when Phase 3 cannot proceed.

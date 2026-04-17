@@ -57,8 +57,9 @@ fn read_block_sector(
     ipc_buf: *mut u64,
 ) -> bool
 {
-    // SAFETY: IPC buffer is valid.
-    unsafe { core::ptr::write_volatile(ipc_buf, sector) };
+    // SAFETY: ipc_buf is the registered IPC buffer page.
+    let ipc = unsafe { ipc::IpcBuf::from_raw(ipc_buf) };
+    ipc.write_word(0, sector);
 
     let Ok((reply_label, _)) = syscall::ipc_call(blk_ep, ipc::blk_labels::READ_BLOCK, 1, &[])
     else
@@ -73,8 +74,7 @@ fn read_block_sector(
     // Copy sector data from IPC buffer BEFORE any log() calls.
     for i in 0..64
     {
-        // SAFETY: IPC buffer is valid; i < 64 (512 bytes total).
-        let word = unsafe { core::ptr::read_volatile(ipc_buf.add(i)) };
+        let word = ipc.read_word(i);
         let base = i * 8;
         let bytes = word.to_le_bytes();
         buf[base..base + 8].copy_from_slice(&bytes);
@@ -83,27 +83,41 @@ fn read_block_sector(
     true
 }
 
+/// GPT parsing error.
+pub enum GptError
+{
+    /// Block I/O read failed when reading the GPT header.
+    IoError,
+    /// GPT header signature is not "EFI PART".
+    InvalidSignature,
+    /// Partition entry size is zero or exceeds sector size.
+    InvalidEntrySize,
+}
+
 /// Parse the GPT and populate a partition table with UUID and LBA for
-/// each non-empty partition. Returns the number of entries found.
+/// each non-empty partition. Returns the number of entries found, or an
+/// error if the header cannot be read or validated.
 // too_many_lines: sequential GPT header validation, sector iteration, and
 // partition extraction that must share mutable state.
 #[allow(clippy::too_many_lines)]
-pub fn parse_gpt(blk_ep: u32, ipc_buf: *mut u64, parts: &mut [GptEntry; MAX_GPT_PARTS]) -> usize
+pub fn parse_gpt(
+    blk_ep: u32,
+    ipc_buf: *mut u64,
+    parts: &mut [GptEntry; MAX_GPT_PARTS],
+) -> Result<usize, GptError>
 {
     let mut sector = [0u8; SECTOR_SIZE];
 
     // Read GPT header at LBA 1.
     if !read_block_sector(blk_ep, 1, &mut sector, ipc_buf)
     {
-        runtime::log!("vfsd: GPT: failed to read header");
-        return 0;
+        return Err(GptError::IoError);
     }
 
     // Validate signature "EFI PART".
     if &sector[0..8] != b"EFI PART"
     {
-        runtime::log!("vfsd: GPT: invalid signature");
-        return 0;
+        return Err(GptError::InvalidSignature);
     }
 
     let part_entry_lba = u64::from_le_bytes(sector[72..80].try_into().unwrap_or([0; 8]));
@@ -112,8 +126,7 @@ pub fn parse_gpt(blk_ep: u32, ipc_buf: *mut u64, parts: &mut [GptEntry; MAX_GPT_
 
     if entry_size == 0 || entry_size > 512
     {
-        runtime::log!("vfsd: GPT: invalid entry size");
-        return 0;
+        return Err(GptError::InvalidEntrySize);
     }
 
     let entries_per_sector = SECTOR_SIZE as u32 / entry_size;
@@ -164,7 +177,7 @@ pub fn parse_gpt(blk_ep: u32, ipc_buf: *mut u64, parts: &mut [GptEntry; MAX_GPT_
     }
 
     runtime::log!("vfsd: GPT: partitions found: {}", found);
-    found
+    Ok(found)
 }
 
 /// Look up a partition UUID in the GPT table. Returns the LBA offset or 0.

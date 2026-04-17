@@ -50,6 +50,14 @@ pub const INIT_STACK_TOP: u64 = 0x7FFF_FFFF_E000;
 /// Number of 4 KiB pages in init's user stack (16 KiB total).
 pub const INIT_STACK_PAGES: usize = 4;
 
+/// Maximum number of 4 KiB pages the kernel may allocate for the
+/// [`InitInfo`] region (header + [`CapDescriptor`] array + command line).
+///
+/// The kernel enforces this ceiling when assembling the region; init uses it
+/// to bound descriptor-slice reads. Both sides must agree: changing this
+/// constant is a protocol change — bump [`INIT_PROTOCOL_VERSION`].
+pub const INIT_INFO_MAX_PAGES: usize = 4;
+
 // ── InitInfo ─────────────────────────────────────────────────────────────────
 
 /// Kernel-to-init handover structure.
@@ -139,11 +147,70 @@ pub struct InitInfo
     pub cspace_cap: u32,
 }
 
-// ── CapDescriptor / CapType (re-exported from process-abi) ───────────────────
+// ── CapDescriptor / CapType ──────────────────────────────────────────────────
 
-// Canonical definitions live in `abi/process-abi`. Re-exported here so
-// existing consumers (kernel, ktest) continue to compile unmodified.
-pub use process_abi::{CapDescriptor, CapType};
+/// Describes a single capability in init's root `CSpace`.
+///
+/// The kernel emits a variable-length array of these after the [`InitInfo`]
+/// header. Each entry identifies the slot index, capability type, and
+/// type-specific metadata so init can identify what each capability represents
+/// without probing.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct CapDescriptor
+{
+    /// `CSpace` slot index.
+    pub slot: u32,
+
+    /// Capability type discriminant. See [`CapType`].
+    pub cap_type: CapType,
+
+    /// Padding for alignment; must be zero.
+    #[doc(hidden)]
+    pub pad: [u8; 3],
+
+    /// Type-specific primary metadata:
+    /// - `Frame`: physical base address
+    /// - `MmioRegion`: physical base address
+    /// - `Interrupt`: IRQ line number
+    /// - `IoPortRange`: I/O port base
+    /// - `SchedControl`: 0 (unused)
+    pub aux0: u64,
+
+    /// Type-specific secondary metadata:
+    /// - `Frame`: size in bytes
+    /// - `MmioRegion`: size in bytes
+    /// - `Interrupt`: flags
+    /// - `IoPortRange`: port count
+    /// - `SchedControl`: 0 (unused)
+    pub aux1: u64,
+}
+
+/// Capability type discriminant for [`CapDescriptor`].
+///
+/// Discriminant values match the kernel's `CapTag` enum for the types that
+/// appear in init's initial `CSpace` population. Types that are never present
+/// at boot (Endpoint, Signal, Thread, etc.) are omitted.
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CapType
+{
+    /// Physical memory frame(s). Matches `CapTag::Frame = 1`.
+    Frame = 1,
+    /// Hardware interrupt line. Matches `CapTag::Interrupt = 6`.
+    Interrupt = 6,
+    /// Memory-mapped I/O region. Matches `CapTag::MmioRegion = 7`.
+    MmioRegion = 7,
+    /// x86-64 I/O port range. Matches `CapTag::IoPortRange = 11`.
+    IoPortRange = 11,
+    /// Scheduling control authority. Matches `CapTag::SchedControl = 12`.
+    SchedControl = 12,
+    /// SBI forwarding authority (RISC-V only). Matches `CapTag::SbiControl = 13`.
+    SbiControl = 13,
+    /// PCI ECAM configuration space region. Underlying cap is `MmioRegion`;
+    /// this discriminant lets userspace distinguish ECAM windows from other MMIO.
+    PciEcam = 14,
+}
 
 // ── Helpers ─────────────────────────────────────────────────────────────
 

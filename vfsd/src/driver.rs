@@ -3,40 +3,79 @@
 
 // vfsd/src/driver.rs
 
-//! Filesystem driver process spawning with capability injection.
+//! Filesystem driver process spawning.
 //!
-//! Creates fatfs driver processes via procmgr's two-phase protocol, injects
-//! block device, log, procmgr, and service endpoint capabilities, patches
-//! `ProcessInfo` with cap descriptors, and starts the process.
+//! Creates fatfs driver processes via procmgr's two-phase protocol. The child
+//! is spawned with a tokened SEND cap on vfsd's worker-owned bootstrap
+//! endpoint as its creator endpoint. Main publishes a plan keyed by that
+//! token, then blocks on `done_sig` while the worker thread delivers the
+//! bootstrap round. After the worker signals completion, main sends a
+//! zero-payload `FS_MOUNT` to the driver as a BPB-validation probe.
+//!
+//! This routes fatfs through the generic bootstrap protocol without
+//! clobbering the main thread's reply target (= init) while servicing MOUNT.
 
-use process_abi::{CapDescriptor, CapType};
+use ipc::{fs_labels, procmgr_labels, IpcBuf};
 
-use crate::VfsdCaps;
+use crate::{worker, VfsdCaps};
 
-/// VA for mapping child `ProcessInfo` frames during cap injection.
-const CHILD_PI_VA: u64 = 0x0000_0002_0000_0000; // 8 GiB
+/// Monotonic counter for fatfs-child bootstrap tokens.
+static NEXT_BOOTSTRAP_TOKEN: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(1);
 
-/// Maximum cap descriptors when spawning a filesystem driver.
-const MAX_DRIVER_DESCS: usize = 8;
-
-/// Spawn the fatfs driver via procmgr with block device and log endpoint caps.
+/// Spawn the fatfs driver via procmgr, deliver its cap set over the bootstrap
+/// protocol, and probe it with `FS_MOUNT` to confirm BPB validation.
 ///
 /// Returns the driver's IPC endpoint (send cap) on success.
-// too_many_lines: two-phase creation is inherently sequential — create, inject
-// caps, patch ProcessInfo, and start must happen in order with shared state.
-#[allow(clippy::too_many_lines)]
-pub fn spawn_fatfs_driver(caps: &VfsdCaps, blk_ep: u32, ipc_buf: *mut u64) -> Option<u32>
+pub fn spawn_fatfs_driver(
+    caps: &VfsdCaps,
+    blk_ep: u32,
+    partition_lba: u64,
+    ipc: IpcBuf,
+) -> Option<u32>
 {
-    // Derive a copy of the fatfs module cap for this spawn. The original
-    // is retained so additional fatfs instances can be created for other mounts.
+    if caps.bootstrap_ep == 0 || caps.done_sig == 0
+    {
+        runtime::log!("vfsd: spawn_fatfs: worker thread not initialised");
+        return None;
+    }
+
     let module_copy = syscall::cap_derive(caps.fatfs_module_cap, syscall::RIGHTS_ALL).ok()?;
 
-    // Phase 1: CREATE_PROCESS (suspended).
+    // Create fatfs's service endpoint. fatfs receives service calls on this;
+    // vfsd holds a SEND_GRANT copy for forwarding FS_OPEN.
+    let driver_ep = syscall::cap_create_endpoint().ok()?;
+    let driver_ep_for_child = syscall::cap_derive(driver_ep, syscall::RIGHTS_ALL).ok()?;
+    let driver_send = syscall::cap_derive(driver_ep, syscall::RIGHTS_SEND_GRANT).ok()?;
+
+    // Derive the caps delivered to fatfs via bootstrap.
+    let blk_copy = syscall::cap_derive(blk_ep, syscall::RIGHTS_SEND).ok()?;
+    let log_copy = if caps.log_ep != 0
+    {
+        syscall::cap_derive(caps.log_ep, syscall::RIGHTS_SEND).unwrap_or(0)
+    }
+    else
+    {
+        0
+    };
+
+    // Allocate a bootstrap token and publish the plan for the worker.
+    let token = NEXT_BOOTSTRAP_TOKEN.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+    let tokened_creator =
+        syscall::cap_derive_token(caps.bootstrap_ep, syscall::RIGHTS_SEND, token).ok()?;
+    worker::publish_plan(
+        token,
+        blk_copy,
+        log_copy,
+        driver_ep_for_child,
+        partition_lba,
+    );
+
+    // Phase 1: CREATE_PROCESS with [module, tokened bootstrap cap].
     let (reply_label, _) = syscall::ipc_call(
         caps.procmgr_ep,
-        ipc::procmgr_labels::CREATE_PROCESS,
+        procmgr_labels::CREATE_PROCESS,
         0,
-        &[module_copy],
+        &[module_copy, tokened_creator],
     )
     .ok()?;
     if reply_label != 0
@@ -45,156 +84,47 @@ pub fn spawn_fatfs_driver(caps: &VfsdCaps, blk_ep: u32, ipc_buf: *mut u64) -> Op
         return None;
     }
 
-    // SAFETY: ipc_buf is the registered IPC buffer.
-    #[allow(clippy::cast_ptr_alignment)]
-    let (cap_count, reply_caps) = unsafe { syscall::read_recv_caps(ipc_buf) };
-    if cap_count < 3
+    // SAFETY: ipc wraps the registered IPC buffer.
+    let (cap_count, reply_caps) = unsafe { syscall::read_recv_caps(ipc.as_ptr()) };
+    if cap_count < 2
     {
         runtime::log!("vfsd: fatfs CREATE_PROCESS reply missing caps");
         return None;
     }
     let process_handle = reply_caps[0];
-    let child_cspace = reply_caps[1];
-    let pi_frame = reply_caps[2];
 
-    // Create driver endpoint for vfsd-to-driver IPC.
-    let driver_ep = syscall::cap_create_endpoint().ok()?;
-
-    // Phase 2: Inject caps.
-    let mut descs = [CapDescriptor {
-        slot: 0,
-        cap_type: CapType::Frame,
-        pad: [0; 3],
-        aux0: 0,
-        aux1: 0,
-    }; MAX_DRIVER_DESCS];
-
-    let (desc_count, first_slot) =
-        inject_driver_caps(child_cspace, blk_ep, caps, driver_ep, &mut descs);
-
-    // Phase 3: Patch ProcessInfo.
-    patch_process_info(pi_frame, caps.self_aspace, &descs, desc_count, first_slot)?;
-
-    // Phase 4: START_PROCESS via tokened process handle.
-    start_process(process_handle)?;
-
-    Some(driver_ep)
-}
-
-/// Inject block, log, procmgr, and service endpoint caps into a child `CSpace`.
-///
-/// Returns `(desc_count, first_slot)`.
-fn inject_driver_caps(
-    child_cspace: u32,
-    blk_ep: u32,
-    caps: &VfsdCaps,
-    driver_ep: u32,
-    descs: &mut [CapDescriptor],
-) -> (usize, u32)
-{
-    let mut inj = ipc::CapInjector::new(descs);
-
-    // Inject block device endpoint (send cap).
-    ipc::inject_cap(
-        blk_ep,
-        syscall::RIGHTS_SEND,
-        CapType::Frame,
-        ipc::BLOCK_ENDPOINT_SENTINEL,
-        0,
-        child_cspace,
-        &mut inj,
-    );
-
-    // Inject log endpoint.
-    ipc::inject_cap(
-        caps.log_ep,
-        syscall::RIGHTS_SEND,
-        CapType::Frame,
-        ipc::LOG_ENDPOINT_SENTINEL,
-        0,
-        child_cspace,
-        &mut inj,
-    );
-
-    // Inject procmgr endpoint (for frame allocation).
-    ipc::inject_cap(
-        caps.procmgr_ep,
-        syscall::RIGHTS_SEND_GRANT,
-        CapType::Frame,
-        0,
-        0,
-        child_cspace,
-        &mut inj,
-    );
-
-    // Inject driver service endpoint (receive cap). This is a newly created
-    // endpoint — copy directly rather than derive.
-    if let Ok(child_slot) = syscall::cap_copy(driver_ep, child_cspace, syscall::RIGHTS_ALL)
-    {
-        if inj.first_slot == u32::MAX
-        {
-            inj.first_slot = child_slot;
-        }
-        if inj.count < inj.descs.len()
-        {
-            inj.descs[inj.count] = CapDescriptor {
-                slot: child_slot,
-                cap_type: CapType::Frame,
-                pad: [0; 3],
-                aux0: ipc::SERVICE_ENDPOINT_SENTINEL,
-                aux1: 0,
-            };
-            inj.count += 1;
-        }
-    }
-
-    let count = inj.count;
-    let first = inj.first_slot;
-    (count, first)
-}
-
-/// Map `ProcessInfo`, write cap descriptors, then unmap.
-fn patch_process_info(
-    pi_frame: u32,
-    self_aspace: u32,
-    descs: &[CapDescriptor],
-    desc_count: usize,
-    first_slot: u32,
-) -> Option<()>
-{
-    if syscall::mem_map(
-        pi_frame,
-        self_aspace,
-        CHILD_PI_VA,
-        0,
-        1,
-        syscall::MAP_WRITABLE,
+    // START_PROCESS — fatfs begins executing and issues its bootstrap request.
+    if !matches!(
+        syscall::ipc_call(process_handle, procmgr_labels::START_PROCESS, 0, &[]),
+        Ok((0, _))
     )
-    .is_err()
     {
-        runtime::log!("vfsd: cannot map fatfs ProcessInfo");
+        runtime::log!("vfsd: fatfs START_PROCESS failed");
         return None;
     }
 
-    // SAFETY: CHILD_PI_VA is mapped writable to the ProcessInfo page.
-    unsafe { ipc::write_cap_descriptors(CHILD_PI_VA, descs, desc_count, first_slot) };
-
-    let _ = syscall::mem_unmap(self_aspace, CHILD_PI_VA, 1);
-    Some(())
-}
-
-/// Start a previously created process via its tokened handle.
-fn start_process(process_handle: u32) -> Option<()>
-{
-    if let Ok((0, _)) =
-        syscall::ipc_call(process_handle, ipc::procmgr_labels::START_PROCESS, 0, &[])
-    {
-        runtime::log!("vfsd: fatfs driver started");
-        Some(())
-    }
+    // Wait for the worker to deliver the bootstrap round.
+    let Ok(bits) = syscall::signal_wait(caps.done_sig)
     else
     {
-        runtime::log!("vfsd: fatfs START_PROCESS failed");
-        None
+        runtime::log!("vfsd: fatfs bootstrap signal_wait failed");
+        return None;
+    };
+    if bits != 1
+    {
+        runtime::log!("vfsd: fatfs bootstrap delivery failed (bits={:#x})", bits);
+        return None;
     }
+
+    // Probe the driver with an empty FS_MOUNT: fatfs validates the BPB in its
+    // handler and replies with fs_errors::SUCCESS or an error label.
+    let (mount_reply, _) = syscall::ipc_call(driver_send, fs_labels::FS_MOUNT, 0, &[]).ok()?;
+    if mount_reply != 0
+    {
+        runtime::log!("vfsd: fatfs FS_MOUNT probe failed (label={})", mount_reply);
+        return None;
+    }
+
+    runtime::log!("vfsd: fatfs driver started");
+    Some(driver_send)
 }

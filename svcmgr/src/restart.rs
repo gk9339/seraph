@@ -7,29 +7,33 @@
 //!
 //! Detects whether a crashed service should be restarted based on its restart
 //! policy and criticality, then creates a new process instance via procmgr,
-//! injects capabilities, and rebinds death notification.
+//! serves its bootstrap (log endpoint only for now — the current set of
+//! restart-eligible services are single-cap crasher-class processes), and
+//! rebinds death notification.
 
 use crate::halt_loop;
 use crate::service::{
-    ServiceEntry, CHILD_PI_VA, CRITICALITY_FATAL, CRITICALITY_NORMAL, MAX_RESTARTS, POLICY_ALWAYS,
+    ServiceEntry, CRITICALITY_FATAL, CRITICALITY_NORMAL, MAX_RESTARTS, POLICY_ALWAYS,
     POLICY_ON_FAILURE,
 };
-use ipc::{inject_cap, procmgr_labels, write_cap_descriptors, CapInjector, LOG_ENDPOINT_SENTINEL};
-use process_abi::{CapDescriptor, CapType};
+use ipc::{procmgr_labels, IpcBuf};
+
+/// Monotonic counter for restart-child bootstrap tokens.
+static NEXT_BOOTSTRAP_TOKEN: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(1);
 
 /// Handle a service death detected via event queue notification.
 ///
 /// Checks criticality and restart policy, then attempts to restart the service
 /// if appropriate. Marks the service inactive if restart is not attempted or
 /// fails.
+#[allow(clippy::too_many_arguments)]
 pub fn handle_death(
     svc: &mut ServiceEntry,
     exit_reason: u64,
     procmgr_ep: u32,
-    self_aspace: u32,
-    log_ep: u32,
+    bootstrap_ep: u32,
+    ipc: IpcBuf,
     ws_cap: u32,
-    ipc_buf: *mut u64,
 )
 {
     runtime::log!("svcmgr: service died: {}", svc.name_str());
@@ -59,7 +63,7 @@ pub fn handle_death(
         u64::from(svc.restart_count + 1)
     );
 
-    if !restart_process(svc, procmgr_ep, self_aspace, log_ep, ws_cap, ipc_buf)
+    if !restart_process(svc, procmgr_ep, bootstrap_ep, ipc, ws_cap)
     {
         svc.active = false;
         return;
@@ -77,7 +81,7 @@ fn should_restart(svc: &ServiceEntry, exit_reason: u64) -> bool
     {
         POLICY_ALWAYS => true,
         POLICY_ON_FAILURE => exit_reason >= syscall_abi::EXIT_FAULT_BASE,
-        _ => false, // POLICY_NEVER or unknown
+        _ => false,
     };
 
     if !restart
@@ -101,100 +105,82 @@ fn should_restart(svc: &ServiceEntry, exit_reason: u64) -> bool
     true
 }
 
-/// Create a new process instance via procmgr, inject caps, start it, and
-/// rebind death notification. Returns `true` on success.
-#[allow(clippy::too_many_lines)]
+/// Create a new process via procmgr, serve bootstrap (log endpoint), start it,
+/// and rebind death notification. Returns `true` on success.
 fn restart_process(
     svc: &mut ServiceEntry,
     procmgr_ep: u32,
-    self_aspace: u32,
-    log_ep: u32,
+    bootstrap_ep: u32,
+    ipc: IpcBuf,
     ws_cap: u32,
-    ipc_buf: *mut u64,
 ) -> bool
 {
-    let Some((process_handle, child_cspace, pi_frame, new_thread_cap)) =
-        create_process(svc, procmgr_ep, ipc_buf)
+    let Some((process_handle, new_thread_cap, child_token)) =
+        create_process(svc, procmgr_ep, bootstrap_ep, ipc)
     else
     {
         return false;
     };
 
-    // Inject log endpoint into child CSpace.
-    let inject_log = if svc.log_ep_cap != 0
-    {
-        svc.log_ep_cap
-    }
-    else
-    {
-        log_ep
-    };
-
-    let mut desc_buf = [CapDescriptor {
-        slot: 0,
-        cap_type: CapType::Frame,
-        pad: [0; 3],
-        aux0: 0,
-        aux1: 0,
-    }; 4];
-    let mut inj = CapInjector::new(&mut desc_buf);
-
-    if inject_log != 0
-    {
-        inject_cap(
-            inject_log,
-            syscall::RIGHTS_SEND,
-            CapType::Frame,
-            LOG_ENDPOINT_SENTINEL,
-            0,
-            child_cspace,
-            &mut inj,
-        );
-    }
-
-    // Extract count and first_slot before immutable borrow of desc_buf.
-    let count = inj.count;
-    let first_slot = inj.first_slot;
-
-    // Write capability descriptors into the child's ProcessInfo page.
-    if count > 0
-        && !map_and_write_descriptors(
-            pi_frame,
-            self_aspace,
-            &inj.descs[..count],
-            count,
-            first_slot,
-        )
-    {
-        return false;
-    }
-
-    // Start the new process via the tokened process handle.
+    // Start the new process.
     if !start_process(process_handle)
     {
         return false;
     }
 
-    // Rebind death notification to the new thread.
+    // Serve crasher's single-round bootstrap: one cap (log_ep), done=true.
+    let log_cap = if svc.log_ep_cap != 0
+    {
+        if let Ok(c) = syscall::cap_derive(svc.log_ep_cap, syscall::RIGHTS_SEND)
+        {
+            c
+        }
+        else
+        {
+            runtime::log!("svcmgr: cannot derive log cap for restart");
+            return false;
+        }
+    }
+    else
+    {
+        0
+    };
+
+    let caps_slice: &[u32] = if log_cap != 0 { &[log_cap] } else { &[] };
+    if ipc::bootstrap::serve_round(bootstrap_ep, child_token, ipc, true, caps_slice, &[]).is_err()
+    {
+        runtime::log!("svcmgr: bootstrap serve failed");
+        return false;
+    }
+
+    svc.bootstrap_token = child_token;
+
     rebind_death_notification(svc, ws_cap, new_thread_cap)
 }
 
-/// Send `CREATE_PROCESS` to procmgr and extract reply caps.
-///
-/// Returns `(process_handle, child_cspace, pi_frame, new_thread_cap)` on success.
+/// Send `CREATE_PROCESS` to procmgr. Returns `(process_handle, thread, child_token)`.
 fn create_process(
     svc: &ServiceEntry,
     procmgr_ep: u32,
-    ipc_buf: *mut u64,
-) -> Option<(u32, u32, u32, u32)>
+    bootstrap_ep: u32,
+    ipc: IpcBuf,
+) -> Option<(u32, u32, u64)>
 {
     let module_copy = syscall::cap_derive(svc.module_cap, syscall::RIGHTS_ALL).ok()?;
+
+    // Allocate a fresh bootstrap token for this child.
+    let child_token = NEXT_BOOTSTRAP_TOKEN.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+
+    // Derive a tokened send cap on our bootstrap endpoint. The child uses this
+    // as its creator_endpoint; the token lets us identify them on recv.
+    let tokened_creator =
+        syscall::cap_derive_token(bootstrap_ep, syscall::RIGHTS_SEND, child_token).ok()?;
 
     let (reply_label, _) = syscall::ipc_call(
         procmgr_ep,
         procmgr_labels::CREATE_PROCESS,
         0,
-        &[module_copy],
+        &[module_copy, tokened_creator],
     )
     .ok()?;
     if reply_label != 0
@@ -203,46 +189,15 @@ fn create_process(
         return None;
     }
 
-    // SAFETY: ipc_buf is the registered IPC buffer, page-aligned.
-    let (cap_count, reply_caps) = unsafe { syscall::read_recv_caps(ipc_buf.cast::<u64>()) };
-    if cap_count < 4
+    // SAFETY: ipc buffer wraps the registered IPC page.
+    let (cap_count, reply_caps) = unsafe { syscall::read_recv_caps(ipc.as_ptr()) };
+    if cap_count < 2
     {
         runtime::log!("svcmgr: restart reply missing caps");
         return None;
     }
 
-    Some((reply_caps[0], reply_caps[1], reply_caps[2], reply_caps[3]))
-}
-
-/// Map the child `ProcessInfo` frame, write descriptors, and unmap.
-fn map_and_write_descriptors(
-    pi_frame: u32,
-    self_aspace: u32,
-    descs: &[CapDescriptor],
-    count: usize,
-    first_slot: u32,
-) -> bool
-{
-    if syscall::mem_map(
-        pi_frame,
-        self_aspace,
-        CHILD_PI_VA,
-        0,
-        1,
-        syscall::MAP_WRITABLE,
-    )
-    .is_err()
-    {
-        runtime::log!("svcmgr: cannot map child ProcessInfo");
-        return false;
-    }
-
-    // SAFETY: CHILD_PI_VA is mapped writable to the ProcessInfo page and is
-    // page-aligned (4096-byte). The page remains mapped for this call.
-    unsafe { write_cap_descriptors(CHILD_PI_VA, descs, count, first_slot) };
-
-    let _ = syscall::mem_unmap(self_aspace, CHILD_PI_VA, 1);
-    true
+    Some((reply_caps[0], reply_caps[1], child_token))
 }
 
 /// Send `START_PROCESS` via the tokened process handle.

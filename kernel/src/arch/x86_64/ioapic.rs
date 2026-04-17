@@ -156,6 +156,13 @@ pub unsafe fn init()
 /// The entry is programmed masked; call [`unmask`] when ready to receive.
 /// Uses edge-triggered, active-high, fixed delivery to LAPIC 0.
 ///
+/// TODO: per-IRQ affinity. Every GSI is currently pinned to the BSP LAPIC
+/// (destination field = 0). At the current scale this is fine — one block
+/// device, one IRQ — but with multiple high-rate sources the BSP becomes
+/// the trap bottleneck. Replace the hard-coded destination with a per-GSI
+/// selector (round-robin, user-supplied affinity, or a rebalancer). Mirror
+/// the matching change on RISC-V (`arch/riscv64/interrupts.rs::plic_enable`).
+///
 /// # Safety
 /// Must only be called after [`init`].
 #[cfg(not(test))]

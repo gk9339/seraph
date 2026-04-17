@@ -22,9 +22,9 @@ extern crate runtime;
 mod restart;
 mod service;
 
-use ipc::svcmgr_labels;
+use ipc::{svcmgr_labels, IpcBuf};
 use process_abi::StartupInfo;
-use service::{classify_caps, ServiceEntry, MAX_SERVICES};
+use service::{bootstrap_caps, ServiceEntry, MAX_SERVICES};
 
 // ── Registration handling ──────────────────────────────────────────────────
 
@@ -45,17 +45,17 @@ fn handle_register(
     let name_len = ((label >> 16) & 0xFFFF) as usize;
     if name_len == 0 || name_len > 32
     {
-        return 2; // InvalidName
+        return ipc::svcmgr_errors::INVALID_NAME;
     }
     if *service_count >= MAX_SERVICES
     {
-        return 1; // TableFull
+        return ipc::svcmgr_errors::TABLE_FULL;
     }
 
-    // SAFETY: ipc_buf is the registered IPC buffer; data words at offsets 0..N.
-    let restart_policy = unsafe { core::ptr::read_volatile(ipc_buf) } as u8;
-    // SAFETY: ipc_buf is the registered IPC buffer; offset 1 is within bounds.
-    let criticality = unsafe { core::ptr::read_volatile(ipc_buf.add(1)) } as u8;
+    // SAFETY: ipc_buf is the registered IPC buffer page.
+    let ipc = unsafe { ipc::IpcBuf::from_raw(ipc_buf) };
+    let restart_policy = ipc.read_word(0) as u8;
+    let criticality = ipc.read_word(1) as u8;
 
     let name = read_name_from_ipc(ipc_buf, name_len);
 
@@ -65,7 +65,7 @@ fn handle_register(
 
     if cap_count < 2
     {
-        return 3; // InsufficientCaps: need at least thread + module
+        return ipc::svcmgr_errors::INSUFFICIENT_CAPS;
     }
 
     let thread_cap = recv_caps[0];
@@ -74,13 +74,13 @@ fn handle_register(
 
     if thread_cap == 0 || module_cap == 0
     {
-        return 3;
+        return ipc::svcmgr_errors::INSUFFICIENT_CAPS;
     }
 
     let Some(eq_cap) = create_and_bind_event_queue(thread_cap, ws_cap, *service_count)
     else
     {
-        return 4;
+        return ipc::svcmgr_errors::EVENT_QUEUE_FAILED;
     };
 
     let idx = *service_count;
@@ -95,23 +95,25 @@ fn handle_register(
         event_queue_cap: eq_cap,
         restart_count: 0,
         active: true,
+        bootstrap_token: 0,
     };
     *service_count += 1;
 
     runtime::log!("svcmgr: registered service: {}", services[idx].name_str());
 
-    0 // success
+    ipc::svcmgr_errors::SUCCESS
 }
 
 /// Read a service name from IPC buffer data words starting at offset 2.
 fn read_name_from_ipc(ipc_buf: *mut u64, name_len: usize) -> [u8; 32]
 {
+    // SAFETY: ipc_buf is the registered IPC buffer page.
+    let ipc = unsafe { ipc::IpcBuf::from_raw(ipc_buf) };
     let mut name = [0u8; 32];
     let name_words = name_len.div_ceil(8);
     for w in 0..name_words
     {
-        // SAFETY: ipc_buf is valid; reading data word at offset 2+w.
-        let word = unsafe { core::ptr::read_volatile(ipc_buf.add(2 + w)) };
+        let word = ipc.read_word(2 + w);
         for b in 0..8
         {
             let idx = w * 8 + b;
@@ -185,15 +187,19 @@ extern "Rust" fn main(startup: &StartupInfo) -> !
         syscall::thread_exit();
     }
 
-    let caps = classify_caps(startup);
-    // cast_ptr_alignment: IPC buffer is page-aligned (4096-byte), satisfying u64 alignment.
-    #[allow(clippy::cast_ptr_alignment)]
-    let ipc_buf = startup.ipc_buffer.cast::<u64>();
+    // SAFETY: IPC buffer is registered and page-aligned.
+    let ipc = unsafe { IpcBuf::from_bytes(startup.ipc_buffer) };
+    let ipc_buf = ipc.as_ptr();
+
+    let Some(caps) = bootstrap_caps(startup, ipc)
+    else
+    {
+        syscall::thread_exit();
+    };
 
     if caps.log_ep != 0
     {
-        // SAFETY: single-threaded; called once before any log calls.
-        unsafe { runtime::log::log_init(caps.log_ep, startup.ipc_buffer) };
+        runtime::log::log_init(caps.log_ep, startup.ipc_buffer);
     }
 
     runtime::log!("svcmgr: started");
@@ -231,6 +237,7 @@ extern "Rust" fn main(startup: &StartupInfo) -> !
     event_loop(
         &caps,
         ws_cap,
+        ipc,
         ipc_buf,
         &mut services,
         &mut service_count,
@@ -239,9 +246,11 @@ extern "Rust" fn main(startup: &StartupInfo) -> !
 }
 
 /// Main event loop: dispatches IPC registrations and death notifications.
+#[allow(clippy::too_many_arguments)]
 fn event_loop(
     caps: &service::SvcmgrCaps,
     ws_cap: u32,
+    ipc: IpcBuf,
     ipc_buf: *mut u64,
     services: &mut [ServiceEntry; MAX_SERVICES],
     service_count: &mut usize,
@@ -270,7 +279,7 @@ fn event_loop(
         }
         else
         {
-            dispatch_death(token, services, *service_count, caps, ws_cap, ipc_buf);
+            dispatch_death(token, services, *service_count, caps, ws_cap, ipc);
         }
     }
 }
@@ -302,7 +311,7 @@ fn dispatch_ipc(
         svcmgr_labels::HANDOVER_COMPLETE =>
         {
             *handover_complete = true;
-            let _ = syscall::ipc_reply(0, 0, &[]);
+            let _ = syscall::ipc_reply(ipc::svcmgr_errors::SUCCESS, 0, &[]);
             runtime::log!(
                 "svcmgr: handover complete, monitoring services: {:#018x}",
                 *service_count as u64
@@ -310,7 +319,7 @@ fn dispatch_ipc(
         }
         _ =>
         {
-            let _ = syscall::ipc_reply(0xFFFF, 0, &[]);
+            let _ = syscall::ipc_reply(ipc::svcmgr_errors::UNKNOWN_OPCODE, 0, &[]);
         }
     }
 }
@@ -322,7 +331,7 @@ fn dispatch_death(
     service_count: usize,
     caps: &service::SvcmgrCaps,
     ws_cap: u32,
-    ipc_buf: *mut u64,
+    ipc: IpcBuf,
 )
 {
     let idx = (token - 1) as usize;
@@ -348,10 +357,9 @@ fn dispatch_death(
         &mut services[idx],
         exit_reason,
         caps.procmgr_ep,
-        caps.self_aspace,
-        caps.log_ep,
+        caps.bootstrap_ep,
+        ipc,
         ws_cap,
-        ipc_buf,
     );
 
     // Re-add event queue to wait set with same token (if still active).

@@ -23,7 +23,9 @@
 
 pub mod log;
 
-use process_abi::{ProcessInfo, StartupInfo, PROCESS_ABI_VERSION, PROCESS_INFO_VADDR};
+use process_abi::{
+    process_info_ref, ProcessInfo, StartupInfo, PROCESS_ABI_VERSION, PROCESS_INFO_VADDR,
+};
 
 extern "Rust" {
     /// The binary's entry point. Defined by each userspace binary.
@@ -46,10 +48,7 @@ pub extern "C" fn _start(_info_ptr: u64) -> !
     // SAFETY: procmgr maps a valid ProcessInfo page at PROCESS_INFO_VADDR
     // before starting the thread. The page is read-only and remains mapped
     // for the process's lifetime.
-    // cast_ptr_alignment: PROCESS_INFO_VADDR is page-aligned (4096-byte),
-    // satisfying ProcessInfo's alignment requirement.
-    #[allow(clippy::cast_ptr_alignment)]
-    let info: &ProcessInfo = unsafe { &*(PROCESS_INFO_VADDR as *const ProcessInfo) };
+    let info: &ProcessInfo = unsafe { process_info_ref(PROCESS_INFO_VADDR) };
 
     if info.version != PROCESS_ABI_VERSION
     {
@@ -57,19 +56,9 @@ pub extern "C" fn _start(_info_ptr: u64) -> !
         syscall::thread_exit();
     }
 
-    // SAFETY: ProcessInfo page is valid and contains the CapDescriptor array
-    // at the offset specified in the header. procmgr populated this before
-    // starting the thread.
-    let cap_descs = unsafe { process_abi::cap_descriptors(info) };
-    // SAFETY: same as above — startup message data is at the offset specified
-    // in the ProcessInfo header, within the same read-only page.
-    let startup_msg = unsafe { process_abi::startup_message(info) };
-
     let startup = StartupInfo {
-        initial_caps: cap_descs,
         ipc_buffer: info.ipc_buffer_vaddr as *mut u8,
         creator_endpoint: info.creator_endpoint_cap,
-        startup_message: startup_msg,
         self_thread: info.self_thread_cap,
         self_aspace: info.self_aspace_cap,
         self_cspace: info.self_cspace_cap,
@@ -82,11 +71,9 @@ pub extern "C" fn _start(_info_ptr: u64) -> !
 /// Panic handler for userspace processes using this runtime.
 ///
 /// Calls `sys_thread_exit()` — there is no recovery path for a panicking
-/// userspace process. A future version may log the panic message via IPC
-/// to logd before exiting.
+/// userspace process.
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> !
 {
-    // TODO: send panic message to logd via IPC before exiting.
     syscall::thread_exit();
 }

@@ -405,13 +405,12 @@ pub extern "C" fn kernel_entry(boot_info: *const BootInfo) -> !
 
             // Track per-page direct-map pointers so we can write across
             // page boundaries without requiring physically contiguous memory.
-            #[allow(clippy::items_after_statements)]
-            const MAX_INFO_PAGES: usize = 4;
-            if info_pages > MAX_INFO_PAGES
+            if info_pages > init_protocol::INIT_INFO_MAX_PAGES
             {
                 fatal("Phase 9: InitInfo region too large");
             }
-            let mut page_ptrs: [*mut u8; MAX_INFO_PAGES] = [core::ptr::null_mut(); MAX_INFO_PAGES];
+            let mut page_ptrs: [*mut u8; init_protocol::INIT_INFO_MAX_PAGES] =
+                [core::ptr::null_mut(); init_protocol::INIT_INFO_MAX_PAGES];
 
             for pg in 0..info_pages
             {

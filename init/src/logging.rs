@@ -103,6 +103,8 @@ pub(crate) fn serial_log(s: &str)
 /// data words = packed bytes, up to 48 bytes per chunk.
 fn ipc_log(log_ep: u32, ipc_buf: *mut u64, s: &str)
 {
+    // SAFETY: ipc_buf is MAIN_IPC_BUF, set from the registered IPC buffer page.
+    let ipc = unsafe { ipc::IpcBuf::from_raw(ipc_buf) };
     let bytes = s.as_bytes();
     let total_len = bytes.len();
     let mut offset = 0;
@@ -127,8 +129,7 @@ fn ipc_log(log_ep: u32, ipc_buf: *mut u64, s: &str)
                     word |= u64::from(bytes[idx]) << (j * 8);
                 }
             }
-            // SAFETY: IPC buffer is valid.
-            unsafe { core::ptr::write_volatile(ipc_buf.add(i), word) };
+            ipc.write_word(i, word);
         }
 
         let mut label = LOG_LABEL_BASE | ((total_len as u64) << 16);
@@ -274,8 +275,10 @@ extern "C" fn log_thread_entry(arg: u64) -> !
 /// Handles multi-chunk messages: chunks with the continuation flag set are
 /// accumulated into `assembled_buf`. When the final chunk arrives (no flag),
 /// the complete message is written to serial with CRLF.
-fn log_receive_loop(log_ep: u32, ipc_buf: *mut u64) -> !
+fn log_receive_loop(log_ep: u32, ipc_buf_raw: *mut u64) -> !
 {
+    // SAFETY: ipc_buf_raw is the log thread's registered IPC buffer page.
+    let ipc = unsafe { ipc::IpcBuf::from_raw(ipc_buf_raw) };
     let mut assembled_buf = [0u8; LOG_MAX_ASSEMBLED];
     let mut assembled_len: usize = 0;
 
@@ -299,8 +302,7 @@ fn log_receive_loop(log_ep: u32, ipc_buf: *mut u64) -> !
 
             for i in 0..word_count
             {
-                // SAFETY: IPC buffer is valid; i < MSG_DATA_WORDS_MAX.
-                let word = unsafe { core::ptr::read_volatile(ipc_buf.add(i)) };
+                let word = ipc.read_word(i);
                 let base = i * 8;
                 for j in 0..8
                 {

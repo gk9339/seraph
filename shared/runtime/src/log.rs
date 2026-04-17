@@ -20,7 +20,9 @@
 //! - Bit 32: continuation flag (1 = more chunks follow, 0 = final chunk)
 
 use core::fmt;
+use core::sync::atomic::{AtomicPtr, AtomicU32, Ordering};
 
+use ipc::IpcBuf;
 use syscall_abi::MSG_DATA_WORDS_MAX;
 
 /// Base label ID for log messages (bits 0-15).
@@ -32,33 +34,24 @@ pub const LOG_CONTINUATION: u64 = 1 << 32;
 /// Maximum bytes per IPC chunk.
 const CHUNK_SIZE: usize = MSG_DATA_WORDS_MAX * 8;
 
-static mut LOG_ENDPOINT: u32 = 0;
-static mut LOG_IPC_BUF: *mut u64 = core::ptr::null_mut();
+static LOG_ENDPOINT: AtomicU32 = AtomicU32::new(0);
+static LOG_IPC_BUF: AtomicPtr<u64> = AtomicPtr::new(core::ptr::null_mut());
 
 /// Set the log endpoint cap slot and IPC buffer pointer.
 ///
 /// Must be called once before any [`log`] calls. The `ipc_buf` must be the
 /// same pointer registered with [`syscall::ipc_buffer_set`].
-///
-/// # Safety
-///
-/// Must be called from a single thread before any concurrent log calls.
-pub unsafe fn log_init(endpoint_slot: u32, ipc_buf: *mut u8)
+pub fn log_init(endpoint_slot: u32, ipc_buf: *mut u8)
 {
-    // SAFETY: single-threaded init; caller guarantees exclusivity.
-    unsafe {
-        LOG_ENDPOINT = endpoint_slot;
-        // cast_ptr_alignment: IPC buffer is page-aligned (4096-byte), satisfying u64 alignment.
-        #[allow(clippy::cast_ptr_alignment)]
-        {
-            LOG_IPC_BUF = ipc_buf.cast::<u64>();
-        }
-    }
+    LOG_ENDPOINT.store(endpoint_slot, Ordering::Relaxed);
+    // cast_ptr_alignment: IPC buffer is page-aligned (4096-byte), satisfying u64 alignment.
+    #[allow(clippy::cast_ptr_alignment)]
+    LOG_IPC_BUF.store(ipc_buf.cast::<u64>(), Ordering::Relaxed);
 }
 
 /// Send raw bytes to the log endpoint, splitting across multiple IPC calls
 /// if the message exceeds [`CHUNK_SIZE`] bytes.
-fn send_bytes(ep: u32, buf: *mut u64, bytes: &[u8])
+fn send_bytes(ep: u32, ipc: IpcBuf, bytes: &[u8])
 {
     let total_len = bytes.len();
     if total_len == 0
@@ -95,8 +88,7 @@ fn send_bytes(ep: u32, buf: *mut u64, bytes: &[u8])
                     }
                 }
             }
-            // SAFETY: IPC buffer is valid; i < MSG_DATA_WORDS_MAX.
-            unsafe { core::ptr::write_volatile(buf.add(i), word) };
+            ipc.write_word(i, word);
         }
 
         let _ = syscall::ipc_call(ep, label, word_count, &[]);
@@ -109,13 +101,18 @@ fn send_bytes(ep: u32, buf: *mut u64, bytes: &[u8])
 /// If [`log_init`] has not been called (endpoint is 0), the call is a no-op.
 pub fn log(msg: &str)
 {
-    // SAFETY: reading statics set during single-threaded init.
-    let (ep, buf) = unsafe { (LOG_ENDPOINT, LOG_IPC_BUF) };
+    let (ep, buf) = (
+        LOG_ENDPOINT.load(Ordering::Relaxed),
+        LOG_IPC_BUF.load(Ordering::Relaxed),
+    );
     if ep == 0 || buf.is_null()
     {
         return;
     }
-    send_bytes(ep, buf, msg.as_bytes());
+    // SAFETY: LOG_IPC_BUF is set by log_init to the registered IPC buffer
+    // (u64-aligned page), and remains valid for the thread's lifetime.
+    let ipc = unsafe { IpcBuf::from_raw(buf) };
+    send_bytes(ep, ipc, msg.as_bytes());
 }
 
 /// Stack buffer for formatting a log message before sending it via IPC.
@@ -158,8 +155,10 @@ impl fmt::Write for LogBuffer
 /// (endpoint is 0), the call is a no-op.
 pub fn _log_fmt(args: fmt::Arguments)
 {
-    // SAFETY: reading statics set during single-threaded init.
-    let (ep, buf) = unsafe { (LOG_ENDPOINT, LOG_IPC_BUF) };
+    let (ep, buf) = (
+        LOG_ENDPOINT.load(Ordering::Relaxed),
+        LOG_IPC_BUF.load(Ordering::Relaxed),
+    );
     if ep == 0 || buf.is_null()
     {
         return;
@@ -167,7 +166,9 @@ pub fn _log_fmt(args: fmt::Arguments)
     let mut log_buf = LogBuffer::new();
     // Ignore formatting errors — best-effort logging; send whatever was written.
     let _ = fmt::write(&mut log_buf, args);
-    send_bytes(ep, buf, &log_buf.buf[..log_buf.pos]);
+    // SAFETY: LOG_IPC_BUF is set by log_init to the registered IPC buffer.
+    let ipc = unsafe { IpcBuf::from_raw(buf) };
+    send_bytes(ep, ipc, &log_buf.buf[..log_buf.pos]);
 }
 
 /// Send a log message with a hex value suffix.
@@ -175,8 +176,10 @@ pub fn _log_fmt(args: fmt::Arguments)
 /// Outputs `prefix` followed by the hex representation of `val`.
 pub fn log_hex(prefix: &str, val: u64)
 {
-    // SAFETY: reading statics set during single-threaded init.
-    let (ep, buf) = unsafe { (LOG_ENDPOINT, LOG_IPC_BUF) };
+    let (ep, buf) = (
+        LOG_ENDPOINT.load(Ordering::Relaxed),
+        LOG_IPC_BUF.load(Ordering::Relaxed),
+    );
     if ep == 0 || buf.is_null()
     {
         return;
@@ -217,7 +220,9 @@ pub fn log_hex(prefix: &str, val: u64)
         pos += 1;
     }
 
-    send_bytes(ep, buf, &msg_buf[..pos]);
+    // SAFETY: LOG_IPC_BUF is set by log_init to the registered IPC buffer.
+    let ipc = unsafe { IpcBuf::from_raw(buf) };
+    send_bytes(ep, ipc, &msg_buf[..pos]);
 }
 
 /// Send a formatted log message via IPC to the log endpoint.

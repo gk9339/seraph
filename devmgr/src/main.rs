@@ -23,6 +23,7 @@ mod caps;
 mod pci;
 mod spawn;
 
+use ipc::IpcBuf;
 use process_abi::StartupInfo;
 
 const PAGE_SIZE: u64 = 0x1000;
@@ -42,18 +43,21 @@ extern "Rust" fn main(startup: &StartupInfo) -> !
         syscall::thread_exit();
     }
 
-    let mut caps = caps::DevmgrCaps::new();
-    caps::classify_caps(startup, &mut caps);
+    // SAFETY: IPC buffer is registered and page-aligned.
+    let ipc = unsafe { IpcBuf::from_bytes(startup.ipc_buffer) };
+    let ipc_buf = ipc.as_ptr();
+
+    let Some(mut caps) = caps::bootstrap_caps(startup, ipc)
+    else
+    {
+        syscall::thread_exit();
+    };
 
     if caps.log_ep != 0
     {
         // SAFETY: single-threaded; called once before any log calls.
-        unsafe { runtime::log::log_init(caps.log_ep, startup.ipc_buffer) };
+        runtime::log::log_init(caps.log_ep, startup.ipc_buffer);
     }
-
-    // SAFETY: IPC buffer is page-aligned.
-    #[allow(clippy::cast_ptr_alignment)]
-    let ipc_buf = startup.ipc_buffer.cast::<u64>();
 
     // PCI device discovery.
     if caps.ecam_slot == 0
@@ -94,7 +98,18 @@ extern "Rust" fn main(startup: &StartupInfo) -> !
         runtime::log!("devmgr: failed to create block device endpoint");
     }
 
-    let blk_driver_spawned = spawn_virtio_blk(&devices[..dev_count], &mut caps, blk_ep, ipc_buf);
+    // Per-device info table: stores VirtIO config for QUERY_DEVICE_INFO.
+    let mut device_info = [virtio_core::VirtioPciStartupInfo::default(); pci::MAX_DEVICES];
+    let mut device_info_count: usize = 0;
+
+    let blk_driver_spawned = spawn_virtio_blk(
+        &devices[..dev_count],
+        &mut caps,
+        blk_ep,
+        ipc_buf,
+        &mut device_info,
+        &mut device_info_count,
+    );
 
     // ── Device registry IPC loop ─────────────────────────────────────────
 
@@ -107,7 +122,7 @@ extern "Rust" fn main(startup: &StartupInfo) -> !
     runtime::log!("devmgr: enumeration complete, entering registry loop");
     loop
     {
-        let Ok((label, _)) = syscall::ipc_recv(caps.registry_ep)
+        let Ok((label, token)) = syscall::ipc_recv(caps.registry_ep)
         else
         {
             continue;
@@ -121,21 +136,40 @@ extern "Rust" fn main(startup: &StartupInfo) -> !
                 {
                     if let Ok(derived) = syscall::cap_derive(blk_ep, syscall::RIGHTS_SEND)
                     {
-                        let _ = syscall::ipc_reply(0, 0, &[derived]);
+                        let _ = syscall::ipc_reply(ipc::devmgr_errors::SUCCESS, 0, &[derived]);
                     }
                     else
                     {
-                        let _ = syscall::ipc_reply(1, 0, &[]);
+                        let _ = syscall::ipc_reply(ipc::devmgr_errors::INVALID_REQUEST, 0, &[]);
                     }
                 }
                 else
                 {
-                    let _ = syscall::ipc_reply(1, 0, &[]);
+                    let _ = syscall::ipc_reply(ipc::devmgr_errors::INVALID_REQUEST, 0, &[]);
+                }
+            }
+            ipc::devmgr_labels::QUERY_DEVICE_INFO =>
+            {
+                // Token identifies the device (set during spawn_driver).
+                let dev_idx = token.wrapping_sub(1) as usize;
+                if dev_idx < device_info_count
+                {
+                    // SAFETY: ipc_buf is the registered IPC buffer.
+                    unsafe { device_info[dev_idx].write_to_ipc(ipc_buf) };
+                    let _ = syscall::ipc_reply(
+                        ipc::devmgr_errors::SUCCESS,
+                        virtio_core::VirtioPciStartupInfo::IPC_WORD_COUNT,
+                        &[],
+                    );
+                }
+                else
+                {
+                    let _ = syscall::ipc_reply(ipc::devmgr_errors::INVALID_REQUEST, 0, &[]);
                 }
             }
             _ =>
             {
-                let _ = syscall::ipc_reply(0xFF, 0, &[]);
+                let _ = syscall::ipc_reply(ipc::devmgr_errors::UNKNOWN_OPCODE, 0, &[]);
             }
         }
     }
@@ -144,11 +178,15 @@ extern "Rust" fn main(startup: &StartupInfo) -> !
 /// Find and spawn a `VirtIO` block device driver from the discovered devices.
 ///
 /// Returns `true` if a driver was successfully spawned.
+// too_many_arguments: device spawning requires caps, endpoint, info table, and IPC buffer.
+#[allow(clippy::too_many_arguments)]
 fn spawn_virtio_blk(
     devices: &[pci::PciDevice],
     caps: &mut caps::DevmgrCaps,
     blk_ep: u32,
     ipc_buf: *mut u64,
+    device_info: &mut [virtio_core::VirtioPciStartupInfo],
+    device_info_count: &mut usize,
 ) -> bool
 {
     for pci_dev in devices
@@ -170,6 +208,15 @@ fn spawn_virtio_blk(
             return false;
         }
 
+        // Store device info for QUERY_DEVICE_INFO. Tokens are 1-based.
+        let dev_idx = *device_info_count;
+        if dev_idx < device_info.len()
+        {
+            device_info[dev_idx] = pci_dev.virtio_info;
+            *device_info_count += 1;
+        }
+        let device_token = (dev_idx as u64) + 1;
+
         let bar_info = find_virtio_bar_cap(pci_dev, caps);
         let (irq_cap, irq_id) = find_irq_cap(pci_dev, caps);
 
@@ -177,8 +224,8 @@ fn spawn_virtio_blk(
 
         spawn::spawn_driver(
             caps.procmgr_ep,
+            caps.self_bootstrap_ep,
             module_cap,
-            caps.self_aspace,
             &bar_info.0[..bar_info.2],
             &bar_info.1[..bar_info.2],
             &bar_info.3[..bar_info.2],
@@ -186,8 +233,10 @@ fn spawn_virtio_blk(
             irq_id,
             caps.log_ep,
             blk_ep,
-            &pci_dev.virtio_info,
-            ipc_buf,
+            caps.registry_ep,
+            device_token,
+            // SAFETY: ipc_buf is the registered page.
+            unsafe { IpcBuf::from_raw(ipc_buf) },
         );
 
         return true; // Only spawn for the first virtio-blk device.
